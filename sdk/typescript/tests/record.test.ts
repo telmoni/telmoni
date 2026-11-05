@@ -3,7 +3,7 @@
  */
 
 import { SamplingDecision, type Sampler, type SamplingResult } from '@opentelemetry/sdk-trace-base';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { spanIdAt } from '../src/ids';
 import { QueueFullError, ShutdownError } from '../src/index';
@@ -188,10 +188,6 @@ function normalize(body: ExportBody): ExportBody {
   }
   return out;
 }
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('a recorded run', () => {
   it('is refused once the client is shut down, never taken as sent', async () => {
@@ -640,18 +636,6 @@ describe('a recorded run', () => {
       const parent = parents[span.name];
       expect(span.parentSpanId, span.name).toBe(parent === undefined ? undefined : idOf(parent));
     }
-  });
-
-  it('is dropped whole by the sample rate', async () => {
-    const h = harness({ sampleRate: 0.25 });
-    try {
-      vi.spyOn(Math, 'random').mockReturnValue(0.9);
-      h.telmoni.recordRun(theRecord());
-      expect(await h.telmoni.flush()).toBe(true);
-    } finally {
-      await h.telmoni.shutdown();
-    }
-    expect(h.transport.requests).toEqual([]);
   });
 
   const start = Date.parse('2026-10-12T09:00:00.000Z');

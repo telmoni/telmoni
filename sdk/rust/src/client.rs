@@ -8,7 +8,6 @@ use opentelemetry::trace::{Span as _, Tracer as _, TracerProvider as _};
 use opentelemetry::{Context, InstrumentationScope, KeyValue};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, SpanLimits, SpanProcessor as _};
-use uuid::Uuid;
 
 use crate::VERSION;
 use crate::config::Config;
@@ -30,8 +29,8 @@ use crate::warnings::{Sink, Warner, Warning};
 const WAIT: Duration = Duration::from_secs(30);
 
 /// What the client is built on, each part the real one unless given: the
-/// transport, the sleep between attempts, the warning sink, the random source
-/// behind the sample rate, and the batching. Tests inject theirs here.
+/// transport, the sleep between attempts, the warning sink and the batching.
+/// Tests inject theirs here.
 pub struct Hooks {
     /// Sends each export; reqwest's blocking client unless given.
     pub transport: Box<dyn Transport>,
@@ -40,9 +39,6 @@ pub struct Hooks {
     /// Takes each warning's line and what it describes; `tracing::warn!` under
     /// the target `telmoni`, with its fields, unless given.
     pub warn: Box<Sink>,
-    /// A number in `[0, 1)` drawn as a run starts or a record is sent: the
-    /// run is kept when it falls below the sample rate.
-    pub random: Box<dyn Fn() -> f64 + Send + Sync>,
     /// How spans are batched on their way out.
     pub batching: Batching,
 }
@@ -62,7 +58,6 @@ impl Default for Hooks {
                     "{text}"
                 );
             }),
-            random: Box::new(random_unit),
             batching: Batching::default(),
         }
     }
@@ -76,14 +71,6 @@ impl fmt::Debug for Hooks {
     }
 }
 
-/// A number in `[0, 1)` from 32 random bits of a fresh v4 UUID: its last four
-/// bytes, which carry neither its version nor its variant. That is the
-/// randomness the crate already has, and more than a sampling decision needs.
-fn random_unit() -> f64 {
-    let [.., a, b, c, d] = *Uuid::new_v4().as_bytes();
-    f64::from(u32::from_be_bytes([a, b, c, d])) / 4_294_967_296.0
-}
-
 /// What the client and its runs share.
 pub(crate) struct Inner {
     pub(crate) config: Config,
@@ -92,7 +79,6 @@ pub(crate) struct Inner {
     pub(crate) processor: Processor,
     exporter: Arc<Exporter>,
     pub(crate) warner: Arc<Warner>,
-    pub(crate) random: Box<dyn Fn() -> f64 + Send + Sync>,
     /// The project's own prices, which the guard counts a call by first.
     pub(crate) prices: OwnRates,
 }
@@ -172,7 +158,6 @@ impl Telmoni {
                 processor,
                 exporter,
                 warner,
-                random: hooks.random,
                 prices,
             }),
         }
@@ -200,10 +185,9 @@ impl Telmoni {
     ///
     /// # Errors
     ///
-    /// [`Error::EmptyAgent`] for a blank name; [`Error::SampleRate`] for a
-    /// rate, given here or configured, not above 0 and up to 1;
-    /// [`Error::MaxSteps`] for a `max_steps` of 0; [`Error::MaxSpend`] for a
-    /// `max_spend` not a finite number of US dollars above 0.
+    /// [`Error::EmptyAgent`] for a blank name; [`Error::MaxSteps`] for a
+    /// `max_steps` of 0; [`Error::MaxSpend`] for a `max_spend` not a finite
+    /// number of US dollars above 0.
     pub fn run(&self, agent: &str, options: RunOptions) -> Result<Run, Error> {
         runs::open(&self.inner, agent, options)
     }
@@ -249,8 +233,8 @@ impl Telmoni {
 
     /// Sends a run that has already ended, from its record, as the live calls
     /// would have sent it: for a job that keeps its own log, or a hook that
-    /// runs after the turn it reports. The same exporter, content rules and
-    /// sample rate apply.
+    /// runs after the turn it reports. The same exporter and content rules
+    /// apply.
     ///
     /// Its trace is its own, named by the run's id, whatever trace is
     /// current, and each span's id is derived from that id and the span's
@@ -303,11 +287,10 @@ impl Telmoni {
     /// [`Error::EmptyAgent`], [`Error::RunId`], [`Error::EmptyName`],
     /// [`Error::TooLong`], [`Error::RecordedTime`] or [`Error::EndBeforeStart`]
     /// for a record ingest would refuse, as each says; [`Error::TooDeep`] for
-    /// steps nested past 16 deep; [`Error::SampleRate`]
-    /// for a configured rate outside (0, 1]; [`Error::QueueFull`] when the
-    /// export queue has no room for the whole record; and [`Error::Shutdown`]
-    /// once the client is shut down. A record refused sends nothing, and is
-    /// taken: send a clone where it may be recorded again.
+    /// steps nested past 16 deep; [`Error::QueueFull`] when the export queue
+    /// has no room for the whole record; and [`Error::Shutdown`] once the
+    /// client is shut down. A record refused sends nothing, and is taken: send
+    /// a clone where it may be recorded again.
     pub fn record_run(&self, record: RunRecord) -> Result<(), Error> {
         records::send(&self.inner, record)
     }
@@ -337,7 +320,7 @@ impl Telmoni {
     /// `telmoni.agent`, beside whatever members the headers hold. The span
     /// is the current context's — what a handle's [`attach`](Run::attach) or
     /// `FutureExt::with_context` made current; [`Self::inject_from`] takes
-    /// one given. Outside a run, or for a run sampled out, it writes nothing.
+    /// one given. Outside a run it writes nothing.
     pub fn inject(&self, headers: &mut dyn Carrier) {
         self.inject_from(&Context::current(), headers);
     }

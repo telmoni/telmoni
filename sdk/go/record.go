@@ -154,12 +154,11 @@ var ErrShutdown = errors.New("telmoni: the client is shut down; the record was n
 
 // RecordRun sends a run that has ended as the live calls would have sent it:
 // for a job that keeps its own log, or a hook run after the turn it reports.
-// It goes through the same exporter, content rules and sample rate, in a
-// trace of its own named by the run's id, whatever span ctx carries. Each
-// span's id is derived from the run's id and the span's place in the record,
-// and the spans are queued whole once built, to travel in exports of their
-// own, so the same record sent again is the same bytes, whatever else is
-// sent meanwhile, and ingest answers it once.
+// It goes through the same exporter and content rules, in a trace of its own
+// named by the run's id, whatever span ctx carries. Each span's id derives
+// from the run's id and its place in the record, and the spans are queued
+// whole once built, in exports of their own, so the same record sent again is
+// the same bytes whatever else is sent meanwhile, and ingest answers it once.
 //
 // It returns an error, sending nothing, for a blank agent, a run id that is
 // not a UUID, text past ingest's caps, a time at or before the Unix epoch or
@@ -191,8 +190,7 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rate := c.config.SampleRate
-	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, rate, record.UserID, record.SessionID)
+	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, record.UserID, record.SessionID)
 	name, attrs := c.runOpening(record.Agent, inherited, record.Tags)
 	if record.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(record.InputMessages)))
@@ -200,13 +198,7 @@ func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
 	if record.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(record.OutputMessages)))
 	}
-	// Sampled out, no span is built: none of a record's ends after it, and
-	// the same record sent again draws again.
-	if rate < 1 && c.random() >= rate {
-		return nil
-	}
-	// After the draw, as Python and TypeScript warn, and before the hold: a
-	// logger that records a run would wait on it for good.
+	// Before the hold: a logger that records a run would wait on it for good.
 	c.warnUsage(record)
 	scores := c.recordScores(record)
 	// Before the hold too: a MarshalJSON of the caller's may record a run.

@@ -252,8 +252,8 @@ func TestOTELVariablesChangeNothingOfOurs(t *testing.T) {
 	if attributes["telmoni.tag.a"] != "b" || attributes["user.id"] != "c" {
 		t.Errorf("the run lost attributes: %v", attributes)
 	}
-	if len(attributes) != 8 {
-		t.Errorf("the run carries %d attributes, want all 8", len(attributes))
+	if len(attributes) != 7 {
+		t.Errorf("the run carries %d attributes, want all 7", len(attributes))
 	}
 	resource := h.transport.bodies(t)[0]["resourceSpans"].([]any)[0].(map[string]any)["resource"].(map[string]any)
 	keys := map[string]bool{}

@@ -4,15 +4,13 @@ import asyncio
 import contextvars
 import logging
 import re
-import threading
 from collections.abc import AsyncIterator, Generator, Iterator
-from unittest import mock
 
 import pytest
 from opentelemetry import trace
 
 from conftest import FakeTransport, attributes_of, infos_in
-from telmoni import Config, Run, Telmoni, WarningInfo, current_run
+from telmoni import Config, Telmoni, WarningInfo, current_run
 from telmoni.exporter import Answer
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -49,7 +47,6 @@ def test_a_run_is_a_span_with_the_contract_attributes(
         "telmoni.agent": "support-bot",
         "user.id": "user_1",
         "gen_ai.conversation.id": "conv_1",
-        "telmoni.sample_rate": 1.0,
         "telmoni.tag.env": "test",
         "telmoni.tag.team": "a",
     }
@@ -312,69 +309,8 @@ def test_nothing_is_sent_outside_a_run(
     assert infos_in(caplog) == [WarningInfo("input")]
 
 
-def test_the_sample_rate_drops_whole_runs_in_the_processor(
-    transport: FakeTransport,
-) -> None:
-    client = Telmoni(Config(api_key="k", sample_rate=0.25), transport=transport)
-    try:
-        with (
-            mock.patch("telmoni.runs.random.random", return_value=0.9),
-            client.run("bot"),
-            client.step("s"),
-        ):
-            pass
-        with (
-            mock.patch("telmoni.runs.random.random", return_value=0.1),
-            client.run("bot") as kept,
-        ):
-            pass
-        assert client.flush()
-    finally:
-        client.shutdown()
-    spans = transport.spans()
-    assert {attributes_of(s)["telmoni.run_id"] for s in spans} == {kept.run_id}
-    assert [s["name"] for s in spans] == ["invoke_agent bot"]
-    assert attributes_of(spans[0])["telmoni.sample_rate"] == 0.25
-
-
-def test_a_span_ending_after_its_sampled_out_run_is_dropped_too(
-    transport: FakeTransport,
-) -> None:
-    client = Telmoni(Config(api_key="k", sample_rate=0.25), transport=transport)
-    opened, released = threading.Event(), threading.Event()
-
-    def late(run: Run) -> None:
-        with run.step("late"):
-            opened.set()
-            released.wait(5)
-
-    try:
-        with (
-            mock.patch("telmoni.runs.random.random", return_value=0.9),
-            client.run("bot") as dropped,
-        ):
-            worker = threading.Thread(target=late, args=(dropped,))
-            worker.start()
-            assert opened.wait(5)
-        released.set()
-        worker.join(5)
-        with (
-            mock.patch("telmoni.runs.random.random", return_value=0.1),
-            client.run("bot") as kept,
-        ):
-            pass
-        assert client.flush()
-    finally:
-        client.shutdown()
-    spans = transport.spans()
-    assert {attributes_of(s)["telmoni.run_id"] for s in spans} == {kept.run_id}
-    assert current_run() is None, "the test leaves no run current"
-
-
-def test_a_run_needs_an_agent_and_a_valid_rate(telmoni: Telmoni) -> None:
+def test_a_run_needs_an_agent(telmoni: Telmoni) -> None:
     with pytest.raises(ValueError), telmoni.run(" "):
-        pass
-    with pytest.raises(ValueError), telmoni.run("bot", sample_rate=0):
         pass
 
 

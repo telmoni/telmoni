@@ -32,7 +32,6 @@ describe('a step', () => {
     expect(attributesOf(plan)).toEqual({
       'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
-      'telmoni.sample_rate': 1,
       'user.id': 'c',
       'gen_ai.conversation.id': 'v',
     });

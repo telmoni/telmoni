@@ -67,14 +67,8 @@ const KINDS = {
 // JavaScript has one number type, so the contract says which of ours are
 // doubles (1.0 is an integer here) and which are counts.
 const DOUBLES: ReadonlySet<string> = new Set([
-  contract.SAMPLE_RATE,
   contract.COST,
   contract.TIME_TO_FIRST_CHUNK,
-  contract.REQUEST_TEMPERATURE,
-  contract.REQUEST_TOP_P,
-  contract.REQUEST_TOP_K,
-  contract.REQUEST_FREQUENCY_PENALTY,
-  contract.REQUEST_PRESENCE_PENALTY,
   contract.EVALUATION_VALUE,
   contract.SCORE_RANGE_MIN,
   contract.SCORE_RANGE_MAX,
@@ -94,8 +88,6 @@ const INTEGERS: ReadonlySet<string> = new Set([
   contract.OUTPUT_TOKENS,
   contract.CACHE_READ_INPUT_TOKENS,
   contract.CACHE_WRITE_INPUT_TOKENS,
-  contract.REQUEST_MAX_TOKENS,
-  contract.REQUEST_SEED,
 ]);
 
 export type AnyValue =

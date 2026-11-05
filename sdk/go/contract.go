@@ -11,16 +11,11 @@ const (
 	distroName = "telemetry.distro.name"
 	distro     = "telmoni"
 
-	attrRunID      = "telmoni.run_id"
-	attrAgent      = "telmoni.agent"
-	attrUserID     = "user.id"
-	tagPrefix      = "telmoni.tag."
-	attrSampleRate = "telmoni.sample_rate"
-	attrCancelled  = "telmoni.cancelled"
-	// attrSampledOut is never sent: on every span of a run the sample rate
-	// kept out, from its start, so the processor drops each however late it
-	// ends.
-	attrSampledOut = "telmoni.sampled_out"
+	attrRunID     = "telmoni.run_id"
+	attrAgent     = "telmoni.agent"
+	attrUserID    = "user.id"
+	tagPrefix     = "telmoni.tag."
+	attrCancelled = "telmoni.cancelled"
 	// The deployment, on the resource: the configuration's Environment and
 	// Release.
 	attrEnvironment = "deployment.environment.name"
@@ -48,14 +43,7 @@ const (
 	// attrTimeToFirstChunk is in seconds, from the request to the first chunk.
 	attrTimeToFirstChunk = "gen_ai.response.time_to_first_chunk"
 
-	attrRequestTemperature      = "gen_ai.request.temperature"
-	attrRequestTopP             = "gen_ai.request.top_p"
-	attrRequestTopK             = "gen_ai.request.top_k"
-	attrRequestFrequencyPenalty = "gen_ai.request.frequency_penalty"
-	attrRequestPresencePenalty  = "gen_ai.request.presence_penalty"
-	attrRequestMaxTokens        = "gen_ai.request.max_tokens"
-	attrRequestSeed             = "gen_ai.request.seed"
-	attrRequestReasoningLevel   = "gen_ai.request.reasoning.level"
+	attrRequestReasoningLevel = "gen_ai.request.reasoning.level"
 
 	attrInputMessages      = "gen_ai.input.messages"
 	attrOutputMessages     = "gen_ai.output.messages"

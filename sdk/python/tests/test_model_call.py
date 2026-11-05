@@ -42,7 +42,6 @@ def test_a_model_call_carries_the_conventions_names(
     assert attributes_of(span) == {
         "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
-        "telmoni.sample_rate": 1.0,
         "gen_ai.conversation.id": "conv",
         "gen_ai.operation.name": "chat",
         "gen_ai.request.model": "gpt-4o-mini",
@@ -108,86 +107,47 @@ def test_a_token_count_goes_as_a_whole_number_from_0_and_another_is_left_off(
     assert all("must be a whole number from 0 within 64 bits" in w for w in warnings)
 
 
-def test_what_a_call_was_asked_with_goes_typed_and_its_first_token_in_seconds(
+def test_a_calls_time_to_first_token_goes_in_seconds(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with telmoni.run("bot") as run:
-        with run.model_call(
-            "m",
-            temperature=1,
-            top_p=0.9,
-            top_k=40,
-            max_tokens=256,
-            frequency_penalty=0.5,
-            presence_penalty=-0.5,
-            seed=-7,
-        ) as call:
+        with run.model_call("m") as call:
             call.answered(time_to_first_token=0.35)
         with telmoni.model_call("m") as call:
             call.answered()
     assert telmoni.flush()
-    asked, bare = (
+    timed, bare = (
         {a["key"]: a["value"] for a in span["attributes"]}
         for span in transport.spans()
         if span["name"] == "chat m"
     )
-    assert {k: v for k, v in asked.items() if k.startswith("gen_ai.request.")} == {
-        "gen_ai.request.model": {"stringValue": "m"},
-        "gen_ai.request.temperature": {"doubleValue": 1.0},
-        "gen_ai.request.top_p": {"doubleValue": 0.9},
-        "gen_ai.request.top_k": {"doubleValue": 40.0},
-        "gen_ai.request.max_tokens": {"intValue": "256"},
-        "gen_ai.request.frequency_penalty": {"doubleValue": 0.5},
-        "gen_ai.request.presence_penalty": {"doubleValue": -0.5},
-        "gen_ai.request.seed": {"intValue": "-7"},
-    }
-    assert asked["gen_ai.response.time_to_first_chunk"] == {"doubleValue": 0.35}
-    assert [k for k in bare if k.startswith("gen_ai.request.")] == [
-        "gen_ai.request.model"
-    ]
+    assert timed["gen_ai.response.time_to_first_chunk"] == {"doubleValue": 0.35}
     assert "gen_ai.response.time_to_first_chunk" not in bare
 
 
-def test_a_time_to_first_token_or_max_tokens_ingest_cannot_take_is_left_off(
+def test_a_time_to_first_token_ingest_cannot_take_is_left_off(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ingest refuses the call over a time to first token below 0 or not finite."""
     with telmoni.run("bot"):
-        with telmoni.model_call("m", max_tokens=float("nan")) as call:  # type: ignore[arg-type]
+        with telmoni.model_call("m") as call:
             call.answered(response_model="m-1", time_to_first_token=-0.1)
-        with telmoni.model_call("m", temperature="hot", top_p=float("inf")) as call:  # type: ignore[arg-type]
+        with telmoni.model_call("m") as call:
             call.answered(time_to_first_token=float("nan"))
     assert telmoni.flush()
     spans = calls(transport)
     assert len(spans) == 2, "each call still sent"
     first, second = (attributes_of(span) for span in spans)
     assert first["gen_ai.response.model"] == "m-1"
-    assert not {
-        "gen_ai.request.max_tokens",
-        "gen_ai.request.temperature",
-        "gen_ai.request.top_p",
-        "gen_ai.response.time_to_first_chunk",
-    } & (first.keys() | second.keys())
+    assert "gen_ai.response.time_to_first_chunk" not in {**first, **second}
     warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-    assert sorted(warnings) == [
-        (
-            "telmoni: gen_ai.request.max_tokens must be a whole number within 64 "
-            "bits; the call is sent without it"
-        ),
-        (
-            "telmoni: gen_ai.request.temperature must be a finite number; the call "
-            "is sent without it"
-        ),
-        (
-            "telmoni: gen_ai.request.top_p must be a finite number; the call is "
-            "sent without it"
-        ),
+    assert warnings == [
         (
             "telmoni: gen_ai.response.time_to_first_chunk must be a finite number of "
             "seconds from 0; the call is sent without it"
-        ),
+        )
     ]
-    assert infos_in(caplog) == [WarningInfo("input")] * 4
+    assert infos_in(caplog) == [WarningInfo("input")]
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ import { checkedPrice } from './guard.js';
 import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { readHeaders, writeHeaders } from './propagation.js';
-import { type Handle, Opener, Run, checkedRate, currentRun, split, within } from './runs.js';
+import { type Handle, Opener, Run, currentRun, split, within } from './runs.js';
 import { WHITE_SPACE, trimEnds } from './whitespace.js';
 import { RecordingSampler } from './sampler.js';
 import type {
@@ -157,7 +157,6 @@ function checkEndpoint(endpoint: string): void {
 function resolve(config: Config | undefined): ResolvedConfig {
   const endpoint = endpointOf(config?.endpoint);
   checkEndpoint(endpoint);
-  const sampleRate = checkedRate(config?.sampleRate ?? 1);
   const prices: unknown = config?.prices ?? [];
   if (!Array.isArray(prices)) throw new TypeError('prices must be an array of prices');
   const captureContent: unknown = config?.captureContent ?? false;
@@ -171,7 +170,6 @@ function resolve(config: Config | undefined): ResolvedConfig {
     organizationId: unsetIfBlank(config?.organizationId),
     captureContent,
     mask: config?.mask,
-    sampleRate,
     sampler: config?.sampler,
     environment: unsetIfBlank(config?.environment),
     release: unsetIfBlank(config?.release),
@@ -319,22 +317,17 @@ export class Telmoni {
   }
 
   /**
-   * Writes into `headers` what the next service continues the run from: the
-   * W3C `traceparent` of the span current inside the run, and the run's id,
-   * agent and sample rate as the W3C `baggage` members `telmoni.run_id`,
-   * `telmoni.agent` and `telmoni.sample_rate`, beside whatever members the headers hold. The span is
-   * `from`'s — a run, a step or a call — or, without one, the active
-   * context's, which an application running OpenTelemetry's context manager
-   * carries into callbacks. Outside a run, or for a run sampled out, it
-   * writes nothing.
+   * Writes what the next service continues the run from: the W3C `traceparent`
+   * of `from`'s span, or the active context's, and the run's id and agent as
+   * `baggage` members beside the headers' own. Outside a run it writes nothing.
    */
   inject(headers: HeaderCarrier, from?: Handle): void {
     const ctx = from?.context ?? context.active();
     const run = currentRun(ctx);
-    if (run === undefined || run.sampledOut) return;
+    if (run === undefined) return;
     const span = trace.getSpanContext(ctx);
     if (span === undefined || !isSpanContextValid(span)) return;
-    writeHeaders(headers, span, run.runId, run.agent, run.rate);
+    writeHeaders(headers, span, run.runId, run.agent);
   }
 
   /**
@@ -347,7 +340,7 @@ export class Telmoni {
   extract(headers: HeaderCarrier): Run | undefined {
     const read = readHeaders(headers);
     if (read === undefined) return undefined;
-    return this.#opener.continued(read.spanContext, read.runId, read.agent, read.sampleRate);
+    return this.#opener.continued(read.spanContext, read.runId, read.agent);
   }
 
   /**

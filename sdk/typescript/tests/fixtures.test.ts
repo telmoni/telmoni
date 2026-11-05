@@ -32,15 +32,6 @@ interface ModelCallSpec {
   provider: string;
   model: string;
   response_model: string;
-  request: {
-    temperature: number;
-    top_p: number;
-    top_k: number;
-    max_tokens: number;
-    frequency_penalty: number;
-    presence_penalty: number;
-    seed: number;
-  };
   time_to_first_token: number;
   usage: {
     input_tokens: number;
@@ -59,7 +50,6 @@ interface Scenario {
     user_id: string;
     session_id: string;
     tags: Record<string, string>;
-    sample_rate: number;
     inside: [
       { step: string; inside: [{ model_call: ModelCallSpec }] },
       { tool_call: { name: string; fails_with: string } },
@@ -142,7 +132,6 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
       userId: spec.user_id,
       sessionId: spec.session_id,
       tags: spec.tags,
-      sampleRate: spec.sample_rate,
     },
     async (run) => {
       const [stepSpec, toolSpec] = spec.inside;
@@ -152,13 +141,6 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
           call.model,
           {
             provider: call.provider,
-            temperature: call.request.temperature,
-            topP: call.request.top_p,
-            topK: call.request.top_k,
-            maxTokens: call.request.max_tokens,
-            frequencyPenalty: call.request.frequency_penalty,
-            presencePenalty: call.request.presence_penalty,
-            seed: call.request.seed,
             inputMessages: call.input_messages,
           },
           async (modelCall) => {

@@ -187,7 +187,6 @@ describe('beside the application', () => {
       'gen_ai.operation.name',
       'telmoni.agent',
       'telmoni.run_id',
-      'telmoni.sample_rate',
       'telmoni.tag.a',
       'user.id',
     ]);

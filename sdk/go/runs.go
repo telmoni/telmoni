@@ -30,9 +30,6 @@ type RunOptions struct {
 	SessionID string
 	// Tags travel as telmoni.tag.<key>.
 	Tags map[string]string
-	// SampleRate is this run's share of being sent, above 0 and up to 1; 0
-	// means the client's.
-	SampleRate float64
 	// MaxSteps and MaxSpend, in US dollars, are the guard's caps, 0 for none:
 	// once the run reaches one, what it opens next opens nothing, and the
 	// context it returns is cancelled with a *CapExceededError as its cause.
@@ -62,15 +59,6 @@ type ModelCallOptions struct {
 	// sent only when CaptureContent is on and the project's mode allows.
 	InputMessages      any
 	SystemInstructions any
-	// The parameters the model was asked with, each sent as given; nil is
-	// not given, since 0 is a value each can take.
-	Temperature      *float64
-	TopP             *float64
-	TopK             *float64
-	FrequencyPenalty *float64
-	PresencePenalty  *float64
-	MaxTokens        *int64
-	Seed             *int64
 }
 
 // ToolCallOptions is what a tool call is opened with.
@@ -177,19 +165,13 @@ func errorTypeName(err error) string {
 }
 
 // Run is a run of an agent: a span of its own in whatever trace was current.
-// Every span inside it carries the run's id, agent, sample rate, user and
-// session, so ingest knows each span's run without waiting for the trace's tree.
+// Every span inside it carries the run's id, agent, user and session, so
+// ingest knows each span's run without waiting for the trace's tree.
 type Run struct {
 	handle
-	id    string
-	agent string
-	// rate is the run's sample rate, handed to another service; 0 for a
-	// continued run whose headers named none.
-	rate      float64
+	id        string
+	agent     string
 	inherited []attribute.KeyValue
-	// sampledOut is whether the sample rate kept this run out: nothing of it
-	// is sent, nor handed to another service.
-	sampledOut bool
 	// guard is held by every run with a span, a continued run's with no caps.
 	guard *guard
 	// displaced is the provider instrumentation opened spans on where the run
@@ -267,11 +249,10 @@ func RunFromContext(ctx context.Context) *Run {
 // run. End it with run.End, usually deferred.
 //
 // A blank agent name opens no run: its handle does nothing, and the client
-// warns once. A SampleRate outside (0, 1] falls back to the client's; an
-// agent past 128 characters is cut to them; and a user or session id past its
-// cap, or a tag ingest drops or past the 32nd by key, is left off, each with
-// one warning. None panics: telemetry never takes the agent down, where
-// Python and TypeScript raise for a blank agent or a bad rate.
+// warns once. An agent past 128 characters is cut to them, and a user or
+// session id past its cap, or a tag ingest drops or past the 32nd by key, is
+// left off, each with one warning. None panics: telemetry never takes the
+// agent down, where Python and TypeScript raise for a blank agent.
 func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (context.Context, *Run) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -284,15 +265,6 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		return ctx, &Run{handle: handle{client: c}}
 	}
 	agent = c.cut(agent, agentMax, "run's agent")
-	rate := c.config.SampleRate
-	if opts.SampleRate != 0 {
-		if opts.SampleRate > 0 && opts.SampleRate <= 1 {
-			rate = opts.SampleRate
-		} else {
-			c.exporter.warnOnce("run:rate", WarningInput, "telmoni: a run's SampleRate must be above 0 and up to 1; the client's is used")
-		}
-	}
-	sampledOut := rate < 1 && c.random() >= rate
 	caps := &guard{}
 	if opts.MaxSteps > 0 {
 		caps.maxSteps = opts.MaxSteps
@@ -312,12 +284,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id") {
 		sessionID = ""
 	}
-	inherited := inheritedAttributes(runID, agent, rate, userID, sessionID)
-	// On every span of the run from its start, for the processor to drop: a
-	// sampler's drop would clear the flag the application's spans inherit.
-	if sampledOut {
-		inherited = append(inherited, attribute.Bool(attrSampledOut, true))
-	}
+	inherited := inheritedAttributes(runID, agent, userID, sessionID)
 	name, attrs := c.runOpening(agent, inherited, opts.Tags)
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
@@ -327,7 +294,7 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
-	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, rate: rate, inherited: inherited, sampledOut: sampledOut, guard: caps, displaced: displaced}
+	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, guard: caps, displaced: displaced}
 	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, displaced}), run), run
 }
 
@@ -588,26 +555,6 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 		c.warnOperation()
 	}
 	name, attrs := modelCallOpening(model, operation, provider)
-	for _, p := range []struct {
-		name  string
-		value *float64
-	}{
-		{attrRequestTemperature, opts.Temperature},
-		{attrRequestTopP, opts.TopP},
-		{attrRequestTopK, opts.TopK},
-		{attrRequestFrequencyPenalty, opts.FrequencyPenalty},
-		{attrRequestPresencePenalty, opts.PresencePenalty},
-	} {
-		if p.value != nil {
-			attrs = append(attrs, attribute.Float64(p.name, *p.value))
-		}
-	}
-	if opts.MaxTokens != nil {
-		attrs = append(attrs, attribute.Int64(attrRequestMaxTokens, *opts.MaxTokens))
-	}
-	if opts.Seed != nil {
-		attrs = append(attrs, attribute.Int64(attrRequestSeed, *opts.Seed))
-	}
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
@@ -636,16 +583,11 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 }
 
 // inheritedAttributes is what every span of a run carries, live or recorded:
-// its id and agent, its sample rate, which a sum of spend over runs scales
-// each span by, and its user and session where it has them; a rate of 0 is
-// none, as a continued run's headers may name.
-func inheritedAttributes(runID, agent string, rate float64, userID, sessionID string) []attribute.KeyValue {
+// its id and agent, and its user and session where it has them.
+func inheritedAttributes(runID, agent, userID, sessionID string) []attribute.KeyValue {
 	inherited := []attribute.KeyValue{
 		attribute.String(attrRunID, runID),
 		attribute.String(attrAgent, agent),
-	}
-	if rate > 0 {
-		inherited = append(inherited, attribute.Float64(attrSampleRate, rate))
 	}
 	if userID != "" {
 		inherited = append(inherited, attribute.String(attrUserID, userID))

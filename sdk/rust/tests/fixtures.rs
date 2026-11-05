@@ -150,7 +150,6 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             user_id: Some(text(run_spec, "user_id")?.to_owned()),
             session_id: Some(text(run_spec, "session_id")?.to_owned()),
             tags,
-            sample_rate: Some(float(run_spec, "sample_rate")?),
             ..RunOptions::default()
         },
     )?;
@@ -165,19 +164,11 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             .ok_or("a model call")?,
         "model_call",
     )?;
-    let request = field(call_spec, "request")?;
     let call = step.model_call(
         text(call_spec, "model")?,
         ModelCallOptions {
             provider: Some(text(call_spec, "provider")?.to_owned()),
             input_messages: Some(field(call_spec, "input_messages")?.clone().into()),
-            temperature: Some(float(request, "temperature")?),
-            top_p: Some(float(request, "top_p")?),
-            top_k: Some(float(request, "top_k")?),
-            frequency_penalty: Some(float(request, "frequency_penalty")?),
-            presence_penalty: Some(float(request, "presence_penalty")?),
-            max_tokens: Some(int(request, "max_tokens")?),
-            seed: Some(int(request, "seed")?),
             ..ModelCallOptions::default()
         },
     )?;

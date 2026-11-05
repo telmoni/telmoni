@@ -2,9 +2,7 @@ package telmoni
 
 import (
 	"context"
-	"errors"
 	"log/slog"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"runtime"
@@ -29,7 +27,6 @@ type options struct {
 	transport Transport
 	sleep     func(time.Duration)
 	logger    *slog.Logger
-	random    func() float64
 	limits    queueLimits
 }
 
@@ -109,16 +106,6 @@ const (
 	WarningMaskFailed WarningKind = "mask_failed"
 )
 
-// withRandom replaces the source the sample rate is drawn against, so a test
-// decides which runs are kept.
-func withRandom(random func() float64) Option {
-	return func(o *options) {
-		if random != nil {
-			o.random = random
-		}
-	}
-}
-
 // WithBatching sizes the export queue and its batches and sets how long spans
 // wait for company: each size at least 1, the delay at least a millisecond,
 // as a queue or batch of nothing would drop every span or spin the worker.
@@ -143,7 +130,6 @@ type Client struct {
 	processor *processor
 	provider  *sdktrace.TracerProvider
 	tracer    trace.Tracer
-	random    func() float64
 	// prices are the project's own, which the guard counts a call by first.
 	prices map[name]rate
 }
@@ -170,14 +156,11 @@ func defaultClient(endpoint string) *http.Client {
 	return client
 }
 
-// New builds a client from cfg. It fails on a SampleRate outside (0, 1], on
-// an endpoint no export could use or that would carry the key in the clear,
-// and on a price that names no model or is no number of dollars from 0.
+// New builds a client from cfg. It fails on an endpoint no export could use or
+// that would carry the key in the clear, and on a price that names no model or
+// is no number of dollars from 0.
 func New(cfg Config, opts ...Option) (*Client, error) {
 	cfg = cfg.normalized()
-	if !(cfg.SampleRate > 0 && cfg.SampleRate <= 1) {
-		return nil, errors.New("telmoni: SampleRate must be above 0 and up to 1")
-	}
 	if err := checkEndpoint(cfg.Endpoint); err != nil {
 		return nil, err
 	}
@@ -188,7 +171,6 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	o := options{
 		transport: defaultClient(cfg.Endpoint).Do,
 		logger:    slog.Default(),
-		random:    rand.Float64,
 		limits:    defaultQueueLimits,
 	}
 	for _, opt := range opts {
@@ -231,7 +213,6 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		processor: proc,
 		provider:  provider,
 		tracer:    provider.Tracer(scope, trace.WithInstrumentationVersion(Version)),
-		random:    o.random,
 		prices:    prices,
 	}, nil
 }

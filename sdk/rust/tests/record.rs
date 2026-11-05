@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -502,56 +502,6 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
 }
 
 #[test]
-fn the_sample_rate_drops_a_record_whole() -> Outcome {
-    let transport = FakeTransport::new([])?;
-    let warnings = Warnings::default();
-    let sleeps = Sleeps::default();
-    let draws = Arc::new(Mutex::new(VecDeque::from([0.9, 0.1])));
-    let source = Arc::clone(&draws);
-    let mut hooks = hooks(&transport, &warnings, &sleeps);
-    hooks.random = Box::new(move || lock(&source).pop_front().unwrap_or(0.0));
-    let telmoni = Telmoni::with_hooks(
-        Config {
-            sample_rate: 0.25,
-            ..keyed()
-        },
-        hooks,
-    );
-
-    let dropped = the_record()?;
-    telmoni.record_run(dropped.clone())?;
-    assert!(telmoni.flush());
-    assert_eq!(
-        transport.count(),
-        0,
-        "a span of the record dropped was sent"
-    );
-    // Its warnings, the operation set aside among them, are for a record kept.
-    assert_eq!(warnings.all(), Vec::<String>::new());
-    let kept = RunRecord {
-        run_id: "0f8fad5b-d9cb-469f-a165-70867728950e".to_owned(),
-        ..dropped
-    };
-    telmoni.record_run(kept.clone())?;
-    assert!(telmoni.flush());
-    telmoni.shutdown();
-
-    let spans = transport.spans()?;
-    assert_eq!(
-        of_run(&spans, &kept.run_id).len(),
-        spans.len(),
-        "only the record kept"
-    );
-    assert_eq!(spans.len(), 10, "the record kept is sent whole");
-    assert_eq!(
-        attributes_of(run_span(&spans, &kept.run_id)?)?.get("telmoni.sample_rate"),
-        Some(&json!(0.25))
-    );
-    assert!(lock(&draws).is_empty(), "one draw per record");
-    Ok(())
-}
-
-#[test]
 fn a_record_refused_sends_nothing() -> Outcome {
     let harness = Harness::new()?;
     let record = the_record()?;
@@ -612,17 +562,6 @@ fn a_record_refused_sends_nothing() -> Outcome {
     }
     harness.flush()?;
     assert_eq!(harness.transport.count(), 0, "nothing of a refused record");
-
-    let misconfigured = Harness::with(Config {
-        sample_rate: 0.0,
-        ..keyed()
-    })?;
-    assert!(matches!(
-        misconfigured.telmoni.record_run(record),
-        Err(Error::SampleRate(_))
-    ));
-    misconfigured.flush()?;
-    assert_eq!(misconfigured.transport.count(), 0);
     Ok(())
 }
 

@@ -23,10 +23,9 @@ var ScoreLimits = map[string]int{
 	"sent_max":     scoresSentMax,
 }
 
-// The hooks the tests reach for: the sample rate's random source, a record's
-// hold and its spans' ids, the W3C grammar's helpers and a time as sent.
+// The hooks the tests reach for: a record's hold and its spans' ids, the W3C
+// grammar's helpers and a time as sent.
 var (
-	WithRandom         = withRandom
 	HoldOne            = holdOne
 	RecordedSpanID     = recordedSpanID
 	EncodeBaggageValue = encodeBaggageValue

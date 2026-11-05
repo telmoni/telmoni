@@ -1,5 +1,5 @@
 import { trace } from '@opentelemetry/api';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { Run, currentRun } from '../src/index';
 import { type Harness, answer, attributesOf, harness, one, runsIn } from './helpers';
@@ -13,7 +13,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  vi.restoreAllMocks();
   await h.telmoni.shutdown();
 });
 
@@ -45,17 +44,9 @@ describe('a run', () => {
       'telmoni.agent': 'support-bot',
       'user.id': 'user_1',
       'gen_ai.conversation.id': 'conv_1',
-      'telmoni.sample_rate': 1,
       'telmoni.tag.env': 'test',
       'telmoni.tag.team': 'a',
     });
-  });
-
-  it('types the rate as the contract does, whatever the number', async () => {
-    h.telmoni.run('bot', { sampleRate: 1 }, () => {});
-    expect(await h.telmoni.flush()).toBe(true);
-    const typed = Object.fromEntries(one(runsIn(h.transport)).attributes.map((a) => [a.key, a.value]));
-    expect(typed['telmoni.sample_rate']).toEqual({ doubleValue: 1 });
   });
 
   it('fails with the class of an error rejected inside it, and rethrows it', async () => {
@@ -125,14 +116,11 @@ describe('a run', () => {
     expect(await h.telmoni.run('bot', async () => 'later')).toBe('later');
   });
 
-  it('needs an agent and a valid rate', () => {
+  it('needs an agent', () => {
     expect(() => h.telmoni.run(' ', () => {})).toThrow(TypeError);
     expect(() => h.telmoni.run(null as unknown as string, () => {})).toThrow("a run needs its agent's name");
     // Its text is blank: `String([])` is `''`.
     expect(() => h.telmoni.run([] as unknown as string, () => {})).toThrow("a run needs its agent's name");
-    expect(() => h.telmoni.run('bot', { sampleRate: 0 }, () => {})).toThrow(RangeError);
-    expect(() => h.telmoni.run('bot', { sampleRate: 1.5 }, () => {})).toThrow(RangeError);
-    expect(() => h.telmoni.run('bot', { sampleRate: '0.5' as unknown as number }, () => {})).toThrow(RangeError);
   });
 
   it('sends its first 32 tags, warned once of the rest, so none crowds out its own', async () => {
@@ -475,53 +463,5 @@ describe('outside a run', () => {
     await h.telmoni.shutdown();
     expect(h.transport.requests).toEqual([]);
     expect(h.warnings).toEqual([]);
-  });
-});
-
-describe('the sample rate', () => {
-  it('drops whole runs in the processor', async () => {
-    const sampled = harness({ sampleRate: 0.25 });
-    try {
-      vi.spyOn(Math, 'random').mockReturnValue(0.9);
-      sampled.telmoni.run('bot', (run) => run.step('s', () => {}));
-      vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      const kept = sampled.telmoni.run('bot', (run) => run);
-      expect(await sampled.telmoni.flush()).toBe(true);
-      const spans = sampled.transport.spans();
-      expect(new Set(spans.map((span) => attributesOf(span)['telmoni.run_id']))).toEqual(new Set([kept.runId]));
-      expect(spans.map((span) => span.name)).toEqual(['invoke_agent bot']);
-      expect(attributesOf(spans[0]!)['telmoni.sample_rate']).toBe(0.25);
-    } finally {
-      await sampled.telmoni.shutdown();
-    }
-  });
-
-  it('drops a span that ends after its run', async () => {
-    const sampled = harness({ sampleRate: 0.25 });
-    try {
-      vi.spyOn(Math, 'random').mockReturnValue(0.9);
-      let late: Promise<void> | undefined;
-      sampled.telmoni.run('bot', (run) => {
-        late = run.step('late', () => new Promise<void>((resolve) => setTimeout(resolve, 10)));
-      });
-      await late;
-      vi.spyOn(Math, 'random').mockReturnValue(0.1);
-      const kept = sampled.telmoni.run('bot', (run) => run);
-      expect(await sampled.telmoni.flush()).toBe(true);
-      const spans = sampled.transport.spans();
-      expect(new Set(spans.map((span) => attributesOf(span)['telmoni.run_id']))).toEqual(new Set([kept.runId]));
-    } finally {
-      await sampled.telmoni.shutdown();
-    }
-  });
-
-  it("is the run's own over the client's", async () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
-    h.telmoni.run('bot', { sampleRate: 0.4 }, () => {});
-    h.telmoni.run('bot', { sampleRate: 0.6 }, () => {});
-    expect(await h.telmoni.flush()).toBe(true);
-    const runs = runsIn(h.transport);
-    expect(runs).toHaveLength(1);
-    expect(attributesOf(runs[0]!)['telmoni.sample_rate']).toBe(0.6);
   });
 });

@@ -404,32 +404,6 @@ func TestARecordsContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	}
 }
 
-func TestTheSampleRateDropsARecordWhole(t *testing.T) {
-	random := 0.9
-	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,
-		telmoni.WithRandom(func() float64 { return random }))
-	record := theRecord(t)
-	recordRun(t, h, record)
-	if sent := len(h.transport.all()); sent != 0 {
-		t.Fatalf("a record sampled out sent %d exports", sent)
-	}
-	// Its warnings, the operation set aside among them, are for a record kept.
-	if got := h.logs.warnings(); len(got) != 0 {
-		t.Errorf("a record sampled out warned %q", got)
-	}
-	// A record sampled out builds no span, so the same record, drawn in, is
-	// sent.
-	random = 0.1
-	recordRun(t, h, record)
-	spans := h.transport.spans(t)
-	if len(spans) != 10 {
-		t.Fatalf("sent %d spans, want the record's 10", len(spans))
-	}
-	if got := attributesOf(t, byName(spans)["invoke_agent claude-code"])["telmoni.sample_rate"]; got != 0.25 {
-		t.Errorf("telmoni.sample_rate = %v, want the client's 0.25", got)
-	}
-}
-
 func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 	const outOfRange = "telmoni: a recorded time must fall after the Unix epoch and less than 2^64 nanoseconds after it"
 	start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)

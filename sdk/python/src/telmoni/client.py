@@ -105,7 +105,6 @@ class Telmoni:
         user_id: str | None = None,
         session_id: str | None = None,
         tags: Mapping[str, str] | None = None,
-        sample_rate: float | None = None,
         max_steps: int | None = None,
         max_spend: float | None = None,
         input_messages: object | None = None,
@@ -124,7 +123,6 @@ class Telmoni:
                 user_id=user_id,
                 session_id=session_id,
                 tags=tags,
-                sample_rate=sample_rate,
                 max_steps=max_steps,
                 max_spend=max_spend,
                 input_messages=input_messages,
@@ -143,28 +141,9 @@ class Telmoni:
         operation: str = contract.DEFAULT_MODEL_OPERATION,
         input_messages: object | None = None,
         system_instructions: object | None = None,
-        temperature: float | None = None,
-        top_p: float | None = None,
-        top_k: float | None = None,
-        max_tokens: int | None = None,
-        frequency_penalty: float | None = None,
-        presence_penalty: float | None = None,
-        seed: int | None = None,
         run: Run | None = None,
     ) -> Scope[ModelCall]:
-        """A model call inside the current run; ``answered()`` records the reply.
-
-        ``temperature`` to ``seed`` are what the model was asked with; one
-        given as no number is left off the call with one warning."""
-        request = {
-            contract.REQUEST_TEMPERATURE: temperature,
-            contract.REQUEST_TOP_P: top_p,
-            contract.REQUEST_TOP_K: top_k,
-            contract.REQUEST_MAX_TOKENS: max_tokens,
-            contract.REQUEST_FREQUENCY_PENALTY: frequency_penalty,
-            contract.REQUEST_PRESENCE_PENALTY: presence_penalty,
-            contract.REQUEST_SEED: seed,
-        }
+        """A model call inside the current run; ``answered()`` records the reply."""
         return Scope(
             lambda: self._opener.model_call(
                 model,
@@ -173,7 +152,6 @@ class Telmoni:
                 operation=operation,
                 input_messages=input_messages,
                 system_instructions=system_instructions,
-                request=request,
             )
         )
 
@@ -220,18 +198,17 @@ class Telmoni:
     def inject(self, headers: MutableMapping[str, str]) -> None:
         """Write into ``headers`` what the next service continues the run
         from: the W3C ``traceparent`` of the span current inside the run, and
-        the run's id, agent and sample rate as the W3C ``baggage`` members
-        ``telmoni.run_id``, ``telmoni.agent`` and ``telmoni.sample_rate``,
-        beside whatever members the headers hold. Outside a run, or for a run sampled out, nothing is
-        written.
+        the run's id and agent as the W3C ``baggage`` members ``telmoni.run_id``
+        and ``telmoni.agent``, beside whatever members the headers hold.
+        Outside a run, nothing is written.
         """
         run = current_run()
-        if run is None or run.sampled_out:
+        if run is None:
             return
         span = trace.get_current_span().get_span_context()
         if not span.is_valid:
             return
-        write_headers(headers, span, run.run_id, run.agent, run.rate)
+        write_headers(headers, span, run.run_id, run.agent)
 
     def extract(self, headers: Mapping[str, str]) -> Run | None:
         """The run ``headers`` name, continued here: its steps and calls —
@@ -244,9 +221,7 @@ class Telmoni:
         read = read_headers(headers)
         if read is None:
             return None
-        return self._opener.continued(
-            read.span_context, read.run_id, read.agent, read.sample_rate
-        )
+        return self._opener.continued(read.span_context, read.run_id, read.agent)
 
     def flush(self, timeout_s: float = 30.0) -> bool:
         """Send everything queued; True once nothing is left to send, kept or not,

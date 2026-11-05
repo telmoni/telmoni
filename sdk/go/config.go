@@ -35,10 +35,6 @@ type Config struct {
 	// or false to send its span without it; it is called only where content
 	// leaves, and a panic sends the span without that field.
 	Mask func(key, value string) (string, bool) `json:"-" xml:"-"`
-	// SampleRate is the share of runs sent, above 0 and up to 1; 0 means 1.
-	// A run is dropped whole, in the processor, never through the trace's
-	// sampled flag, so an application's own sampling is untouched.
-	SampleRate float64 `json:"sample_rate"`
 	// Sampler decides a run that starts a trace of its own, as the
 	// application's root sampler would decide its own spans; nil samples
 	// every such run. Nothing is dropped by it: a run it does not sample is
@@ -58,14 +54,14 @@ type Config struct {
 
 // String formats the configuration for %v and %s, with the API key redacted.
 func (c Config) String() string {
-	return fmt.Sprintf("{Endpoint:%s OrganizationID:%s APIKey:%s CaptureContent:%t SampleRate:%g Environment:%s Release:%s}",
-		c.Endpoint, c.OrganizationID, c.APIKey.String(), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
+	return fmt.Sprintf("{Endpoint:%s OrganizationID:%s APIKey:%s CaptureContent:%t Environment:%s Release:%s}",
+		c.Endpoint, c.OrganizationID, c.APIKey.String(), c.CaptureContent, c.Environment, c.Release)
 }
 
 // GoString formats the configuration for %#v, with the API key redacted.
 func (c Config) GoString() string {
-	return fmt.Sprintf("telmoni.Config{Endpoint:%q, OrganizationID:%q, APIKey:%q, CaptureContent:%t, SampleRate:%g, Environment:%q, Release:%q}",
-		c.Endpoint, c.OrganizationID, c.APIKey.String(), c.CaptureContent, c.SampleRate, c.Environment, c.Release)
+	return fmt.Sprintf("telmoni.Config{Endpoint:%q, OrganizationID:%q, APIKey:%q, CaptureContent:%t, Environment:%q, Release:%q}",
+		c.Endpoint, c.OrganizationID, c.APIKey.String(), c.CaptureContent, c.Environment, c.Release)
 }
 
 // Secret holds the API key where nothing that prints or encodes a Config can
@@ -119,9 +115,6 @@ func (c Config) normalized() Config {
 	c.APIKey = NewSecret(strings.TrimSpace(c.APIKey.Expose()))
 	c.Environment = strings.TrimSpace(c.Environment)
 	c.Release = strings.TrimSpace(c.Release)
-	if c.SampleRate == 0 {
-		c.SampleRate = 1
-	}
 	return c
 }
 
@@ -292,7 +285,7 @@ func checkEndpoint(endpoint string) error {
 
 // DefaultConfig returns the default SDK configuration.
 func DefaultConfig() Config {
-	return Config{Endpoint: DefaultEndpoint, SampleRate: 1}
+	return Config{Endpoint: DefaultEndpoint}
 }
 
 // ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG,

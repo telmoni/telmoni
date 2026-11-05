@@ -64,7 +64,7 @@ marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
 mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
 `step.toolCall(...)` open under the step; the same methods on `run` open under
 the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
-for a sample rate that is no number or outside (0, 1], or a cap that is no cap
+for a cap that is no cap
 ([The guard](#the-guard)). A token count is read from a number, a bigint or a
 decimal numeral's text, its fraction cut, and the usage's `cost` is what the
 call cost in US dollars, where your provider reports it; of what ingest would
@@ -138,7 +138,7 @@ A time is a `Date` or milliseconds since the Unix epoch; a step (`type: 'step'`)
 holds its own `calls`, steps among them, a subagent's own subagents say, up to
 16 deep, each under the step that holds it. A model call's `reasoningEffort`,
 how hard it was asked to reason, is sent in every content mode. The run is sent as the live calls would have sent it,
-through the same exporter, content rules and sample rate, in a trace of its own
+through the same exporter and content rules, in a trace of its own
 named by the run's id, whatever context is active. Each span's id is derived
 from the run's id and the span's place in the record, so the same record sent
 again is the same bytes, which ingest answers once: give a run the same id each
@@ -210,7 +210,6 @@ const telmoni = new Telmoni({
   apiKey: 'tm_…',
   organizationId: 'org_…',
   captureContent: false, // the default
-  sampleRate: 1, // the default: every run
   environment: 'production', // the deployment, sent as deployment.environment.name
   release: '2026.10.18', // its release, sent as service.version
 });
@@ -232,7 +231,7 @@ it out.
 ## A run across services
 
 Before a request leaves a run, `telmoni.inject(headers, step)` writes the W3C
-`traceparent` of the step's span and the run's id, agent and sample rate as
+`traceparent` of the step's span and the run's id and agent as
 `baggage` members into a record or a `Headers`; without a handle it writes from the
 active context, where your application runs OpenTelemetry's context manager.
 In the service that answers, `telmoni.extract(req.headers)` gives the run
@@ -304,11 +303,11 @@ the application's spans opened inside a callback nest under ours, and
 `currentRun()` finds the run. Without a context manager, nest explicitly:
 `tracer.startSpan('db.query', {}, run.context)`.
 
-`sampleRate` drops whole runs inside the SDK, never through the trace's
-sampled flag, so the application's own sampling rate holds inside runs as
-outside them. A run inside a trace the application does not sample is still
-sent. The optional `sampler` is an OpenTelemetry `Sampler` whose decision a run
-takes when it starts a trace of its own.
+A run takes the sampled flag of the trace it joins, so the application's own
+sampling rate holds inside runs as outside them. Every run is sent whatever the
+flag says, one inside a trace the application does not sample too. The optional
+`sampler` is an OpenTelemetry `Sampler` whose decision a run takes when it
+starts a trace of its own.
 
 ## Sending
 

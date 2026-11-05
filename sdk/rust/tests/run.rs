@@ -1,16 +1,15 @@
 //! A run: its span and attributes, what fails and cancels it, the closures,
-//! the sample rate, and what it refuses.
+//! and what it refuses.
 
 mod common;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex};
 
 use common::{
     FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, hooks, is_uuid_v4, keyed,
-    lock, mode_on, name_of, named, only, run_span, starting_with, tags,
+    mode_on, name_of, named, only, run_span, starting_with, tags,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TraceContextExt as _;
@@ -51,7 +50,6 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             user_id: Some("user_1".to_owned()),
             session_id: Some("conv_1".to_owned()),
             tags: tags(&[("env", "test"), ("team", "a")]),
-            sample_rate: None,
             max_steps: None,
             max_spend: None,
             input_messages: None,
@@ -77,7 +75,6 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             "telmoni.agent": "support-bot",
             "user.id": "user_1",
             "gen_ai.conversation.id": "conv_1",
-            "telmoni.sample_rate": 1.0,
             "telmoni.tag.env": "test",
             "telmoni.tag.team": "a",
         })
@@ -200,107 +197,12 @@ fn the_closure_opens_a_run_per_call_and_returns_its_value() -> Outcome {
 }
 
 #[test]
-fn the_sample_rate_drops_whole_runs_in_the_processor() -> Outcome {
-    let transport = FakeTransport::new([])?;
-    let warnings = Warnings::default();
-    let sleeps = Sleeps::default();
-    let draws = Arc::new(Mutex::new(VecDeque::from([0.9, 0.1])));
-    let source = Arc::clone(&draws);
-    let mut hooks = hooks(&transport, &warnings, &sleeps);
-    hooks.random = Box::new(move || lock(&source).pop_front().unwrap_or(0.0));
-    let telmoni = Telmoni::with_hooks(
-        Config {
-            sample_rate: 0.25,
-            ..keyed()
-        },
-        hooks,
-    );
-
-    {
-        let dropped = telmoni.run("bot", RunOptions::default())?;
-        let step = dropped.step("s")?;
-        step.end();
-        dropped.end();
-    }
-    let kept = telmoni.run("bot", RunOptions::default())?;
-    let kept_id = kept.run_id().to_owned();
-    kept.end();
-    assert!(telmoni.flush());
-    telmoni.shutdown();
-
-    let spans = transport.spans()?;
-    let run_ids: HashSet<_> = spans
-        .iter()
-        .map(|span| Ok(attributes_of(span)?.get("telmoni.run_id").cloned()))
-        .collect::<Result<_, common::Failure>>()?;
-    assert_eq!(run_ids, HashSet::from([Some(json!(kept_id))]));
-    assert_eq!(
-        spans.iter().map(name_of).collect::<Vec<_>>(),
-        ["invoke_agent bot"]
-    );
-    assert_eq!(
-        attributes_of(spans.first().ok_or("a span")?)?.get("telmoni.sample_rate"),
-        Some(&json!(0.25))
-    );
-    assert!(lock(&draws).is_empty(), "one draw per run");
-    Ok(())
-}
-
-#[test]
-fn a_span_ending_after_its_sampled_out_run_is_dropped_too() -> Outcome {
-    let transport = FakeTransport::new([])?;
-    let warnings = Warnings::default();
-    let sleeps = Sleeps::default();
-    let draws = Arc::new(Mutex::new(VecDeque::from([0.9, 0.1])));
-    let source = Arc::clone(&draws);
-    let mut hooks = hooks(&transport, &warnings, &sleeps);
-    hooks.random = Box::new(move || lock(&source).pop_front().unwrap_or(0.0));
-    let telmoni = Telmoni::with_hooks(
-        Config {
-            sample_rate: 0.25,
-            ..keyed()
-        },
-        hooks,
-    );
-
-    let dropped = telmoni.run("bot", RunOptions::default())?;
-    let late = dropped.step("late")?;
-    dropped.end();
-    late.end();
-    let kept = telmoni.run("bot", RunOptions::default())?;
-    let kept_id = kept.run_id().to_owned();
-    kept.end();
-    assert!(telmoni.flush());
-    telmoni.shutdown();
-
-    let run_ids: HashSet<_> = transport
-        .spans()?
-        .iter()
-        .map(|span| Ok(attributes_of(span)?.get("telmoni.run_id").cloned()))
-        .collect::<Result<_, common::Failure>>()?;
-    assert_eq!(run_ids, HashSet::from([Some(json!(kept_id))]));
-    Ok(())
-}
-
-#[test]
-fn a_run_needs_an_agent_and_a_valid_rate() -> Outcome {
+fn a_run_needs_an_agent() -> Outcome {
     let harness = Harness::new()?;
     assert!(matches!(
         harness.telmoni.run(" ", RunOptions::default()),
         Err(Error::EmptyAgent)
     ));
-    for rate in [0.0, 1.5, -0.5, f64::NAN] {
-        assert!(matches!(
-            harness.telmoni.run(
-                "bot",
-                RunOptions {
-                    sample_rate: Some(rate),
-                    ..RunOptions::default()
-                },
-            ),
-            Err(Error::SampleRate(_))
-        ));
-    }
     assert!(matches!(
         harness
             .telmoni
@@ -312,15 +214,6 @@ fn a_run_needs_an_agent_and_a_valid_rate() -> Outcome {
             .telmoni
             .try_run_with(" ", RunOptions::default(), |_run| Ok(()));
     assert!(matches!(result, Err(Failed::Sdk(Error::EmptyAgent))));
-
-    let misconfigured = Harness::with(Config {
-        sample_rate: 0.0,
-        ..keyed()
-    })?;
-    assert!(matches!(
-        misconfigured.telmoni.run("bot", RunOptions::default()),
-        Err(Error::SampleRate(_))
-    ));
 
     harness.flush()?;
     assert!(harness.transport.requests().is_empty(), "nothing opened");

@@ -1,9 +1,8 @@
 /**
- * A run across services: the W3C `traceparent` of the span current inside a
- * run, and the run's id, agent and sample rate as the W3C `baggage` members
- * `telmoni.run_id`, `telmoni.agent` and `telmoni.sample_rate`, written into an outgoing request's
- * headers and read back from an incoming one's. The SDK's own helpers, never
- * a propagator set globally: an application's propagators are its own.
+ * A run across services: the W3C `traceparent`, and the run's id and agent as
+ * the `baggage` members `telmoni.run_id` and `telmoni.agent`. The SDK's own
+ * helpers, never a propagator set globally: an application's propagators are
+ * its own.
  */
 
 import { TraceFlags } from '@opentelemetry/api';
@@ -17,21 +16,13 @@ export interface Continued {
   spanContext: SpanContext;
   runId: string;
   agent: string;
-  /** The run's, undefined where the headers name none above 0 and up to 1. */
-  sampleRate: number | undefined;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX = /^[0-9a-f]+$/;
 
 /** `span` and the run as the next service reads them, beside the members `headers` already hold. */
-export function writeHeaders(
-  headers: HeaderCarrier,
-  span: SpanContext,
-  runId: string,
-  agent: string,
-  rate: number | undefined,
-): void {
+export function writeHeaders(headers: HeaderCarrier, span: SpanContext, runId: string, agent: string): void {
   const sampled = (span.traceFlags & TraceFlags.SAMPLED) !== 0 ? '01' : '00';
   setHeader(headers, contract.TRACEPARENT, `00-${span.traceId}-${span.spanId}-${sampled}`);
   const members = (getHeader(headers, contract.BAGGAGE) ?? '')
@@ -39,7 +30,6 @@ export function writeHeaders(
     .map((member) => member.trim())
     .filter((member) => member !== '' && !isOurs(member));
   members.push(`${contract.RUN_ID}=${runId}`, `${contract.AGENT}=${encodeBaggageValue(agent)}`);
-  if (rate !== undefined) members.push(`${contract.SAMPLE_RATE}=${String(rate)}`);
   setHeader(headers, contract.BAGGAGE, members.join(','));
 }
 
@@ -53,8 +43,7 @@ export function readHeaders(headers: HeaderCarrier): Continued | undefined {
   const runId = members.get(contract.RUN_ID);
   const agent = members.get(contract.AGENT);
   if (runId === undefined || !UUID.test(runId) || agent === undefined || agent === '') return undefined;
-  const rate = Number(members.get(contract.SAMPLE_RATE) ?? '');
-  return { spanContext, runId: runId.toLowerCase(), agent, sampleRate: rate > 0 && rate <= 1 ? rate : undefined };
+  return { spanContext, runId: runId.toLowerCase(), agent };
 }
 
 /**
@@ -89,7 +78,7 @@ function baggageMembers(header: string): Map<string, string> {
 
 function isOurs(member: string): boolean {
   const key = member.split('=', 1)[0]!.trim();
-  return key === contract.RUN_ID || key === contract.AGENT || key === contract.SAMPLE_RATE;
+  return key === contract.RUN_ID || key === contract.AGENT;
 }
 
 function isHex(text: string, length: number): boolean {

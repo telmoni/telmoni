@@ -6,7 +6,7 @@
  */
 
 import { context, trace } from '@opentelemetry/api';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { Run, currentRun } from '../src/index';
 import { decodeBaggageValue, encodeBaggageValue, parseTraceparent } from '../src/propagation';
@@ -28,16 +28,11 @@ interface HeadersFixture {
       trace_id: string;
       parent_span_id: string;
       sampled: boolean;
-      sample_rate: number | null;
     } | null;
   }>;
 }
 
 const fixture = loadFixture<HeadersFixture>('headers.json');
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('inject', () => {
   it("writes the headers the fixture spells, from the span current inside the run, beside the carrier's own members", async () => {
@@ -71,24 +66,15 @@ describe('inject', () => {
     expect(fetchHeaders.get('baggage')).toBe(fill(fixture.inject.beside.written));
   });
 
-  it('writes nothing outside a run, or for a run sampled out', async () => {
-    const h = harness({ sampleRate: 0.5 });
-    vi.spyOn(Math, 'random').mockReturnValue(0.9);
+  it('writes nothing outside a run', async () => {
+    const h = harness();
     const outside: Record<string, string> = { baggage: 'tenant=acme' };
-    h.telmoni.inject(outside);
-    expect(outside).toEqual({ baggage: 'tenant=acme' });
     try {
-      h.telmoni.run('bot', (run) => {
-        expect(run.sampledOut).toBe(true);
-        const headers: Record<string, string> = {};
-        h.telmoni.inject(headers, run);
-        expect(headers).toEqual({});
-      });
-      expect(await h.telmoni.flush()).toBe(true);
+      h.telmoni.inject(outside);
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(h.transport.spans()).toEqual([]);
+    expect(outside).toEqual({ baggage: 'tenant=acme' });
   });
 
   describe('under a context manager', () => {
@@ -119,7 +105,7 @@ describe('inject', () => {
       const step = byName(h.transport)['plan']!;
       expect(headers).toEqual({
         traceparent: `00-${step.traceId}-${step.spanId}-01`,
-        baggage: `telmoni.run_id=${runId},telmoni.agent=bot,telmoni.sample_rate=1`,
+        baggage: `telmoni.run_id=${runId},telmoni.agent=bot`,
       });
     });
   });
@@ -138,9 +124,6 @@ describe('extract', () => {
         expect(run, given.name).toBeInstanceOf(Run);
         expect(run?.runId, given.name).toBe(given.run.run_id);
         expect(run?.agent, given.name).toBe(given.run.agent);
-        expect(run?.rate, given.name).toBe(given.run.sample_rate ?? undefined);
-        expect(run?.inherited['telmoni.sample_rate'], given.name).toBe(given.run.sample_rate ?? undefined);
-        expect(run?.sampledOut, given.name).toBe(false);
         const parent = trace.getSpanContext(run!.context);
         expect(parent?.traceId, given.name).toBe(given.run.trace_id);
         expect(parent?.spanId, given.name).toBe(given.run.parent_span_id);
@@ -192,7 +175,6 @@ describe('extract', () => {
       const attributes = attributesOf(span);
       expect(attributes['telmoni.run_id'], span.name).toBe(callerRun);
       expect(attributes['telmoni.agent'], span.name).toBe('orchestrator');
-      expect(attributes['telmoni.sample_rate'], span.name).toBe(1);
     }
     const named = byName(worker.transport);
     const parentOf = (span: JsonSpan | undefined) => span?.parentSpanId;

@@ -566,17 +566,6 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
     assert sent["chat m"]["gen_ai.request.reasoning.level"] == "high"
 
 
-def test_the_sample_rate_drops_a_record_whole(transport: FakeTransport) -> None:
-    client = Telmoni(Config(api_key="k", sample_rate=0.25), transport=transport)
-    try:
-        with mock.patch("telmoni.runs.random.random", return_value=0.9):
-            client.record_run(the_record())
-        assert client.flush()
-    finally:
-        client.shutdown()
-    assert transport.requests == []
-
-
 START = at("2026-10-12T09:00:00.000Z")
 RUN = RunRecord(run_id=str(uuid.UUID(int=1)), agent="a", start=START, end=START)
 STEP = StepRecord(name="s", start=START, end=START)

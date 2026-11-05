@@ -38,7 +38,6 @@ fn a_tool_call_carries_the_conventions_names() -> Outcome {
         json!({
             "telmoni.run_id": run_id,
             "telmoni.agent": "bot",
-            "telmoni.sample_rate": 1.0,
             "user.id": "user",
             "gen_ai.operation.name": "execute_tool",
             "gen_ai.tool.name": "search",

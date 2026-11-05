@@ -27,11 +27,8 @@ const defaultWait = 30 * time.Second
 
 // processor is the SDK's own batch processor: OpenTelemetry's batching and
 // bounded queue, without the check that skips a span whose trace is not
-// sampled.
-//
-// A run inside a trace the application does not sample is still sent; the
-// run's own sample rate is applied here, by run, never through the trace's
-// flag. The queue is bounded, so a slow Telmoni never slows an agent: past its
+// sampled, so a run inside a trace the application does not sample is still
+// sent. The queue is bounded, so a slow Telmoni never slows an agent: past its
 // size, spans are dropped and counted. A recorded run goes at once, in exports
 // of its own.
 type processor struct {
@@ -126,11 +123,6 @@ func (p *processor) hold(id trace.TraceID, need int) (release func(built bool), 
 func (p *processor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
 
 func (p *processor) OnEnd(span sdktrace.ReadOnlySpan) {
-	for _, kv := range span.Attributes() {
-		if string(kv.Key) == attrSampledOut {
-			return
-		}
-	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.stopped {

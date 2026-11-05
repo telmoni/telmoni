@@ -40,11 +40,6 @@ pub struct Config {
     /// field; with `panic = "abort"` it ends the process, as any panic does.
     #[serde(skip)]
     pub mask: Option<Mask>,
-    /// The share of runs sent, above 0 and up to 1. Decided per run as it
-    /// starts or its record is sent, in the SDK's own processor, never through
-    /// the trace's sampled flag, so an application's own sampling is
-    /// untouched.
-    pub sample_rate: f64,
     /// The sampler whose decision a run takes when it starts a trace of its
     /// own, so an application sampling at a tenth keeps a tenth of its own
     /// spans inside runs as outside them; `None` samples. The run itself is
@@ -97,7 +92,6 @@ impl fmt::Debug for Config {
             api_key,
             capture_content,
             mask,
-            sample_rate,
             sampler,
             environment,
             release,
@@ -109,7 +103,6 @@ impl fmt::Debug for Config {
             .field("api_key", &api_key.as_ref().map(|_| "<redacted>"))
             .field("capture_content", capture_content)
             .field("mask", &mask.as_ref().map(|_| "<set>"))
-            .field("sample_rate", sample_rate)
             .field("sampler", sampler)
             .field("environment", environment)
             .field("release", release)
@@ -126,7 +119,6 @@ impl Default for Config {
             api_key: None,
             capture_content: false,
             mask: None,
-            sample_rate: 1.0,
             sampler: None,
             environment: None,
             release: None,

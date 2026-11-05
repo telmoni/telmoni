@@ -321,10 +321,6 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
     // Checked whole before anything is queued, so a record refused sends
     // nothing rather than half a run.
     check(&record)?;
-    let rate = inner.config.sample_rate;
-    if !(rate > 0.0 && rate <= 1.0) {
-        return Err(Error::SampleRate(rate));
-    }
     let need = 1 + spans_in(&record.inside);
 
     let RunRecord {
@@ -343,19 +339,13 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         ..
     } = record;
     let run_id = run_uuid.to_string();
-    let inherited = runs::inherited(&run_id, &agent, Some(rate), user_id, session_id);
+    let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
     let mut attributes = runs::run_attributes(&agent, &inherited, tags, &inner.warner);
     attributes.extend(content([
         (contract::INPUT_MESSAGES, input_messages),
         (contract::OUTPUT_MESSAGES, output_messages),
     ]));
-    // Sampled out, no span is built: none of a record's ends after it, and
-    // the same record sent again draws again.
-    if rate < 1.0 && (inner.random)() >= rate {
-        return Ok(());
-    }
-    // After the draw, as Python and TypeScript warn, and before the hold: a
-    // sink is the application's, and may record a run of its own.
+    // Before the hold: a sink is the application's, and may record a run of its own.
     for call in model_calls(&mut inside) {
         call.usage = call
             .usage

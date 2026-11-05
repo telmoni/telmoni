@@ -1,12 +1,10 @@
 /**
  * A sampler that records every span and decides nothing of its own.
  *
- * A run takes the sampled flag of the trace it joins. Where it starts a trace,
- * it takes the decision the configured sampler gives it, so an application
- * sampling at a tenth keeps a tenth of its own spans inside runs as outside
- * them. Nothing is ever dropped here: the SDK's processor exports recorded
- * spans whether the flag is set or not, and applies the run's sample rate
- * itself.
+ * A run takes the sampled flag of the trace it joins, or the configured
+ * sampler's decision where it starts one, so an application sampling at a tenth
+ * keeps a tenth of its own spans inside runs as outside them; the SDK's
+ * processor exports recorded spans whatever the flag.
  */
 
 import { TraceFlags, isSpanContextValid, trace } from '@opentelemetry/api';

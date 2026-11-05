@@ -12,9 +12,6 @@ use std::fmt;
 pub enum Error {
     /// The agent's name was blank; a run is counted under its agent.
     EmptyAgent,
-    /// The sample rate, given per run or in the configuration, was not above 0
-    /// and up to 1.
-    SampleRate(f64),
     /// A run's `max_steps` was 0, a cap no step fits under.
     MaxSteps,
     /// A run's `max_spend` was not a finite number of US dollars above 0.
@@ -132,9 +129,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyAgent => f.write_str("a run needs its agent's name"),
-            Self::SampleRate(rate) => {
-                write!(f, "sample_rate must be above 0 and up to 1, not {rate}")
-            }
             Self::MaxSteps => f.write_str("max_steps must be a whole number above 0"),
             Self::MaxSpend(spend) => write!(
                 f,

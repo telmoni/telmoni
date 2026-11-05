@@ -23,7 +23,6 @@ describe('configuration', () => {
     const client = new Telmoni();
     expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
     expect(client.config.captureContent).toBe(false);
-    expect(client.config.sampleRate).toBe(1);
     expect(client.config.sampler).toBeUndefined();
   });
 
@@ -86,11 +85,15 @@ describe('configuration', () => {
     expect(() => h.telmoni.run('\ufeff', () => {})).not.toThrow();
   });
 
-  it('refuses a captureContent that is no boolean', () => {
+  it('refuses a captureContent that is no boolean, given or set later', () => {
     // 'false' from the environment is truthy, and would let content out.
     expect(() => new Telmoni({ apiKey: 'k', captureContent: 'false' as unknown as boolean })).toThrow(
       'captureContent must be a boolean',
     );
+    const config = new Telmoni({ apiKey: 'k' }).config as { captureContent: unknown };
+    expect(() => {
+      config.captureContent = 'false';
+    }).toThrow(TypeError);
   });
 
   it('reads the six variables from the environment and no other', () => {
@@ -141,21 +144,6 @@ describe('configuration', () => {
   it('holds back every name the server keeps as content, and no other', () => {
     const { content } = loadFixture<{ content: string[] }>('content.json');
     expect([...CONTENT].sort()).toEqual([...content].sort());
-  });
-
-  it('holds the sample rate to a number above zero and up to one', () => {
-    expect(new Telmoni({ sampleRate: 1 }).config.sampleRate).toBe(1);
-    expect(new Telmoni({ sampleRate: 0.25 }).config.sampleRate).toBe(0.25);
-    expect(() => new Telmoni({ sampleRate: 0 })).toThrow(RangeError);
-    expect(() => new Telmoni({ sampleRate: 1.5 })).toThrow(RangeError);
-    expect(() => new Telmoni({ sampleRate: Number.NaN })).toThrow(RangeError);
-    for (const notANumber of ['0.5', true, 1n]) {
-      expect(() => new Telmoni({ sampleRate: notANumber as unknown as number })).toThrow(RangeError);
-    }
-    const config = new Telmoni({ sampleRate: 0.25 }).config as { sampleRate: unknown };
-    expect(() => {
-      config.sampleRate = '0.5';
-    }).toThrow(TypeError);
   });
 
   it('is the version package.json names', () => {

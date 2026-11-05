@@ -1,10 +1,9 @@
 """The SDK's own batch processor: OpenTelemetry's batching and bounded queue,
 without the check that skips a span whose trace is not sampled.
 
-A run inside a trace the application does not sample is still sent; the run's
-own sample rate is applied here, by run, never through the trace's flag. The
-queue is bounded, so a slow Telmoni never slows an agent: past its size, spans
-are dropped and counted. A recorded run goes at once, in exports of its own.
+A run inside a trace the application does not sample is still sent. The queue
+is bounded, so a slow Telmoni never slows an agent: past its size, spans are
+dropped and counted. A recorded run goes at once, in exports of its own.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from multiprocessing import util as multiprocessing_util
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 
-from . import contract
 from .exporter import Exporter, warn
 from .models import WarningInfo
 
@@ -174,8 +172,6 @@ class Processor(SpanProcessor):
         return None
 
     def on_end(self, span: ReadableSpan) -> None:
-        if contract.SAMPLED_OUT in (span.attributes or {}):
-            return
         with self._lock:
             if self._shutdown:
                 return

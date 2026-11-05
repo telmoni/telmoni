@@ -53,30 +53,10 @@ def test_inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own(
     }, "the carrier's members kept, ours replaced, the header's key set once"
 
 
-def test_inject_writes_nothing_outside_a_run_or_for_a_run_sampled_out(
-    transport: FakeTransport,
-) -> None:
-    client = Telmoni(
-        Config(api_key="k", sample_rate=0.5), transport=transport, sleep=lambda _: None
-    )
-    try:
-        outside = {"baggage": "tenant=acme"}
-        client.inject(outside)
-        assert outside == {"baggage": "tenant=acme"}
-        from unittest import mock
-
-        with (
-            mock.patch("telmoni.runs.random.random", return_value=0.9),
-            client.run("bot") as run,
-        ):
-            assert run.sampled_out
-            headers: dict[str, str] = {}
-            client.inject(headers)
-            assert headers == {}
-        assert client.flush()
-    finally:
-        client.shutdown()
-    assert transport.spans() == []
+def test_inject_writes_nothing_outside_a_run(telmoni: Telmoni) -> None:
+    outside = {"baggage": "tenant=acme"}
+    telmoni.inject(outside)
+    assert outside == {"baggage": "tenant=acme"}
 
 
 def test_extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none(
@@ -90,11 +70,6 @@ def test_extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming
         assert isinstance(run, Run), given["name"]
         assert run.run_id == given["run"]["run_id"], given["name"]
         assert run.agent == given["run"]["agent"], given["name"]
-        assert run.rate == given["run"]["sample_rate"], given["name"]
-        assert (
-            run.inherited.get("telmoni.sample_rate") == given["run"]["sample_rate"]
-        ), given["name"]
-        assert not run.sampled_out, given["name"]
         parent = run._span.get_span_context()
         assert f"{parent.trace_id:032x}" == given["run"]["trace_id"], given["name"]
         assert f"{parent.span_id:016x}" == given["run"]["parent_span_id"], given["name"]
@@ -141,7 +116,6 @@ def test_a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span(
         attributes = attributes_of(span)
         assert attributes["telmoni.run_id"] == run.run_id, span["name"]
         assert attributes["telmoni.agent"] == "orchestrator", span["name"]
-        assert attributes["telmoni.sample_rate"] == 1.0, span["name"]
     named = by_name(worker_transport)
     assert named["work"]["parentSpanId"] == caller["spanId"]
     assert named["execute_tool search"]["parentSpanId"] == caller["spanId"]

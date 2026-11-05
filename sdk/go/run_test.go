@@ -75,7 +75,6 @@ func TestARunIsASpanWithTheContractAttributes(t *testing.T) {
 		"telmoni.agent":          "support-bot",
 		"user.id":                "user_1",
 		"gen_ai.conversation.id": "conv_1",
-		"telmoni.sample_rate":    1.0,
 		"telmoni.tag.env":        "test",
 		"telmoni.tag.team":       "a",
 	}
@@ -422,57 +421,6 @@ func TestNothingIsSentOutsideARun(t *testing.T) {
 	}
 }
 
-func TestTheSampleRateDropsWholeRunsInTheProcessor(t *testing.T) {
-	random := 0.9
-	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,
-		telmoni.WithRandom(func() float64 { return random }))
-	ctx, out := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, step := out.Step(ctx, "s")
-	step.End()
-	out.End()
-	random = 0.1
-	_, kept := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	kept.End()
-	_, keptAtHalf := h.client.Run(context.Background(), "bot", telmoni.RunOptions{SampleRate: 0.5})
-	keptAtHalf.End()
-	h.flush()
-	spans := h.transport.spans(t)
-	rates := map[string]any{}
-	for _, span := range spans {
-		attributes := attributesOf(t, span)
-		rates[attributes["telmoni.run_id"].(string)] = attributes["telmoni.sample_rate"]
-	}
-	if want := map[string]any{kept.ID(): 0.25, keptAtHalf.ID(): 0.5}; !reflect.DeepEqual(rates, want) {
-		t.Errorf("runs and rates sent\n got: %v\nwant: %v", rates, want)
-	}
-	want := []string{"invoke_agent bot", "invoke_agent bot"}
-	if got := sortedNames(spans); !reflect.DeepEqual(got, want) {
-		t.Errorf("spans sent: %v", got)
-	}
-}
-
-func TestASpanEndingAfterItsSampledOutRunIsDroppedToo(t *testing.T) {
-	random := 0.9
-	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), SampleRate: 0.25}, nil,
-		telmoni.WithRandom(func() float64 { return random }))
-	ctx, dropped := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, late := dropped.Step(ctx, "late")
-	dropped.End()
-	late.End()
-	random = 0.1
-	_, kept := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	kept.End()
-	h.flush()
-	sent := map[any][]string{}
-	for _, span := range h.transport.spans(t) {
-		id := attributesOf(t, span)["telmoni.run_id"]
-		sent[id] = append(sent[id], span["name"].(string))
-	}
-	if len(sent) != 1 || len(sent[kept.ID()]) == 0 {
-		t.Errorf("spans sent by run: %v; want the kept run's alone", sent)
-	}
-}
-
 func TestABlankAgentOpensNoRunAndNeverPanics(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx, run := h.client.Run(context.Background(), " ", telmoni.RunOptions{})
@@ -495,28 +443,6 @@ func TestABlankAgentOpensNoRunAndNeverPanics(t *testing.T) {
 	warnings := h.logs.warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "agent's name") {
 		t.Errorf("warnings = %q, want one naming the agent", warnings)
-	}
-}
-
-func TestABadRunRateFallsBackToTheClientsWithOneWarning(t *testing.T) {
-	h := newHarness(t, testConfig(), nil)
-	for _, rate := range []float64{1.5, -0.5} {
-		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{SampleRate: rate})
-		run.End()
-	}
-	h.flush()
-	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
-	if len(runs) != 2 {
-		t.Fatalf("want two runs sent at the client's rate, got %v", names(runs))
-	}
-	for _, span := range runs {
-		if got := attributesOf(t, span)["telmoni.sample_rate"]; got != 1.0 {
-			t.Errorf("telmoni.sample_rate = %v, want the client's 1", got)
-		}
-	}
-	warnings := h.logs.warnings()
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "SampleRate") {
-		t.Errorf("warnings = %q, want one about the rate", warnings)
 	}
 }
 

@@ -217,13 +217,6 @@ def check_endpoint(endpoint: str) -> None:
         )
 
 
-def check_rate(rate: float) -> float:
-    """A sample rate as the client and a run take it: above 0 and up to 1."""
-    if not 0 < rate <= 1:
-        raise ValueError("sample_rate must be above 0 and up to 1")
-    return rate
-
-
 def header(headers: Mapping[str, str], name: str) -> str | None:
     """The header named ``name``, however either name is cased."""
     wanted = name.lower()
@@ -257,9 +250,6 @@ class Config:
     # value's JSON, where content leaves, and answers the string to send
     # instead, or None to send its span without it.
     mask: Callable[[str, str], str | None] | None = field(default=None, repr=False)
-    # The share of runs sent, decided per run in the processor and never through
-    # the trace's sampled flag, so an application's own sampling is untouched.
-    sample_rate: float = 1.0
     # The sampler whose root decision a run takes when it starts a trace of its
     # own; None reads it from the application's tracer provider, or samples.
     sampler: Sampler | None = field(default=None, repr=False)
@@ -284,7 +274,6 @@ class Config:
         if isinstance(self.api_key, str):
             key = _unset_if_blank(self.api_key)
             self.api_key = Secret(key) if key is not None else None
-        check_rate(self.sample_rate)
         # "false" from an environment variable is truthy, and would let content out.
         if not isinstance(self.capture_content, bool):
             raise TypeError("capture_content must be a bool")

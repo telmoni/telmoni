@@ -21,11 +21,7 @@ pub(crate) const TAGS_MAX: usize = 32;
 pub(crate) const TAG_KEY_MAX: usize = 64;
 /// The most characters a tag's value holds: ingest's `TAG_VALUE_MAX`.
 pub(crate) const TAG_VALUE_MAX: usize = 256;
-pub(crate) const SAMPLE_RATE: &str = "telmoni.sample_rate";
 pub(crate) const CANCELLED: &str = "telmoni.cancelled";
-/// Never sent: on every span of a run the sample rate kept out, from its
-/// start, so the processor drops each however late it ends.
-pub(crate) const SAMPLED_OUT: &str = "telmoni.sampled_out";
 /// The deployment, on the resource: the configuration's `environment` and
 /// `release`.
 pub(crate) const ENVIRONMENT: &str = "deployment.environment.name";
@@ -59,13 +55,6 @@ pub(crate) const SESSION_ID: &str = "gen_ai.conversation.id";
 /// In seconds, from the request to the answer's first chunk.
 pub(crate) const TIME_TO_FIRST_CHUNK: &str = "gen_ai.response.time_to_first_chunk";
 
-pub(crate) const REQUEST_TEMPERATURE: &str = "gen_ai.request.temperature";
-pub(crate) const REQUEST_TOP_P: &str = "gen_ai.request.top_p";
-pub(crate) const REQUEST_TOP_K: &str = "gen_ai.request.top_k";
-pub(crate) const REQUEST_FREQUENCY_PENALTY: &str = "gen_ai.request.frequency_penalty";
-pub(crate) const REQUEST_PRESENCE_PENALTY: &str = "gen_ai.request.presence_penalty";
-pub(crate) const REQUEST_MAX_TOKENS: &str = "gen_ai.request.max_tokens";
-pub(crate) const REQUEST_SEED: &str = "gen_ai.request.seed";
 pub(crate) const REQUEST_REASONING_LEVEL: &str = "gen_ai.request.reasoning.level";
 
 pub(crate) const INPUT_MESSAGES: &str = "gen_ai.input.messages";

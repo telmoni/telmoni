@@ -1,17 +1,14 @@
 /**
  * The SDK's own batch processor: OpenTelemetry's batching and bounded queue,
- * without the check that skips a span whose trace is not sampled.
- *
- * A run inside a trace the application does not sample is still sent; the run's
- * own sample rate is applied here, by run, never through the trace's flag. The
- * queue is bounded, so a slow Telmoni never slows an agent: past its size, spans
- * are dropped and counted. A recorded run goes at once, in exports of its own.
+ * without the check that skips a span whose trace is not sampled, so a run
+ * inside a trace the application does not sample is still sent. The queue is
+ * bounded, so a slow Telmoni never slows an agent: past its size, spans are
+ * dropped and counted. A recorded run goes at once, in exports of its own.
  */
 
 import type { Context } from '@opentelemetry/api';
 import type { ReadableSpan, Span, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
-import * as contract from './contract.js';
 import { QueueFullError, ShutdownError, errorName } from './errors.js';
 import type { Exporter } from './exporter.js';
 import type { ProcessorOptions } from './types.js';
@@ -108,7 +105,7 @@ export class Processor implements SpanProcessor {
   onStart(_span: Span, _parentContext: Context): void {}
 
   onEnd(span: ReadableSpan): void {
-    if (this.#down || contract.SAMPLED_OUT in span.attributes) return;
+    if (this.#down) return;
     if (this.#stage !== undefined && span.spanContext().traceId === this.#stage.traceId) {
       this.#stage.spans.push(span);
       return;

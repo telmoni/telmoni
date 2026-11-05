@@ -1,11 +1,10 @@
 //! The SDK's own batch processor: OpenTelemetry's batching and bounded queue,
 //! without the check that skips a span whose trace is not sampled.
 //!
-//! A run inside a trace the application does not sample is still sent; the
-//! run's own sample rate is applied here, by run, never through the trace's
-//! flag. The queue is bounded, so a slow Telmoni never slows an agent: past
-//! its size, spans are dropped and counted. A recorded run goes at once, in
-//! exports of its own.
+//! A run inside a trace the application does not sample is still sent. The
+//! queue is bounded, so a slow Telmoni never slows an agent: past its size,
+//! spans are dropped and counted. A recorded run goes at once, in exports of
+//! its own.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -18,7 +17,6 @@ use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{Span, SpanData, SpanProcessor};
 
-use crate::contract;
 use crate::error::Error;
 use crate::exporter::Exporter;
 use crate::lock;
@@ -186,13 +184,6 @@ impl SpanProcessor for Processor {
     fn on_start(&self, _span: &mut Span, _cx: &Context) {}
 
     fn on_end(&self, span: SpanData) {
-        if span
-            .attributes
-            .iter()
-            .any(|attribute| attribute.key.as_str() == contract::SAMPLED_OUT)
-        {
-            return;
-        }
         let mut state = lock(&self.shared.state);
         if state.life != Life::Running {
             return;

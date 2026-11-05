@@ -44,9 +44,6 @@ func TestTheDefaultEndpointIsTheMachineHost(t *testing.T) {
 	if cfg.Endpoint != telmoni.DefaultEndpoint {
 		t.Errorf("New(Config{}).Config().Endpoint = %q", cfg.Endpoint)
 	}
-	if cfg.SampleRate != 1 {
-		t.Errorf("the default SampleRate = %g, want 1", cfg.SampleRate)
-	}
 }
 
 // A span's time outside 64 bits of nanoseconds goes as 0, so ingest refuses
@@ -269,19 +266,6 @@ func TestCaptureContentSetInCodeWinsOverTheEnvironment(t *testing.T) {
 	cfg.CaptureContent = true
 	if !mustNew(t, cfg).Config().CaptureContent {
 		t.Error("CaptureContent true in code was read as off")
-	}
-}
-
-func TestSampleRateIsAboveZeroAndUpToOne(t *testing.T) {
-	for given, want := range map[float64]float64{1: 1, 0.25: 0.25, 0: 1} {
-		if got := mustNew(t, telmoni.Config{SampleRate: given}).Config().SampleRate; got != want {
-			t.Errorf("SampleRate %g became %g, want %g", given, got, want)
-		}
-	}
-	for _, bad := range []float64{-0.5, 1.5, math.NaN()} {
-		if _, err := telmoni.New(telmoni.Config{SampleRate: bad}); err == nil {
-			t.Errorf("New accepted SampleRate %g", bad)
-		}
 	}
 }
 

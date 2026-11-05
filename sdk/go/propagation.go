@@ -1,9 +1,9 @@
 package telmoni
 
 // A run across services: the W3C traceparent of the span current inside a
-// run, and the run's id, agent and sample rate as the W3C baggage members
-// telmoni.run_id, telmoni.agent and telmoni.sample_rate, written into an outgoing request's headers and read
-// back from an incoming one's. The SDK's own helpers, never a propagator set
+// run, and the run's id and agent as the baggage members telmoni.run_id and
+// telmoni.agent, written into an outgoing request's headers and read back
+// from an incoming one's. The SDK's own helpers, never a propagator set
 // globally: an application's propagators are its own.
 
 import (
@@ -17,14 +17,12 @@ import (
 )
 
 // Inject writes into header what the next service continues the run from:
-// the W3C traceparent of the span ctx carries, inside a run, and the run's
-// id, agent and sample rate as the W3C baggage members telmoni.run_id,
-// telmoni.agent and telmoni.sample_rate, beside whatever members the header
-// holds. Outside a run, or for a run
-// sampled out, it writes nothing.
+// the W3C traceparent of the span ctx carries, inside a run, and the run's id
+// and agent as the baggage members telmoni.run_id and telmoni.agent, beside
+// whatever members the header holds. Outside a run it writes nothing.
 func (c *Client) Inject(ctx context.Context, header http.Header) {
 	run := RunFromContext(ctx)
-	if run == nil || run.span == nil || run.sampledOut || header == nil {
+	if run == nil || run.span == nil || header == nil {
 		return
 	}
 	span := trace.SpanContextFromContext(ctx)
@@ -34,7 +32,7 @@ func (c *Client) Inject(ctx context.Context, header http.Header) {
 	if !span.IsValid() {
 		return
 	}
-	writeHeaders(header, span, run.id, run.agent, run.rate)
+	writeHeaders(header, span, run.id, run.agent)
 }
 
 // Extract returns ctx carrying the run header names, continued here: a step
@@ -63,8 +61,7 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 		handle:    handle{span: remote, client: c},
 		id:        read.runID,
 		agent:     agent,
-		rate:      read.rate,
-		inherited: inheritedAttributes(read.runID, agent, read.rate, "", ""),
+		inherited: inheritedAttributes(read.runID, agent, "", ""),
 		guard:     &guard{},
 		displaced: displaced,
 	}
@@ -76,14 +73,11 @@ type continued struct {
 	spanContext trace.SpanContext
 	runID       string
 	agent       string
-	// rate is the run's sample rate, 0 where the headers name none above 0
-	// and up to 1.
-	rate float64
 }
 
 // writeHeaders is span and the run as the next service reads them, beside
 // the members header already holds.
-func writeHeaders(header http.Header, span trace.SpanContext, runID, agent string, rate float64) {
+func writeHeaders(header http.Header, span trace.SpanContext, runID, agent string) {
 	sampled := "00"
 	if span.IsSampled() {
 		sampled = "01"
@@ -98,9 +92,6 @@ func writeHeaders(header http.Header, span trace.SpanContext, runID, agent strin
 		kept = append(kept, member)
 	}
 	kept = append(kept, attrRunID+"="+runID, attrAgent+"="+encodeBaggageValue(agent))
-	if rate > 0 {
-		kept = append(kept, attrSampleRate+"="+strconv.FormatFloat(rate, 'g', -1, 64))
-	}
 	header.Set(headerBaggage, strings.Join(kept, ","))
 }
 
@@ -119,11 +110,7 @@ func readHeaders(header http.Header) (continued, bool) {
 	if _, ok := parseUUID(runID); !ok || agent == "" {
 		return continued{}, false
 	}
-	rate, err := strconv.ParseFloat(members[attrSampleRate], 64)
-	if err != nil || !(rate > 0 && rate <= 1) {
-		rate = 0
-	}
-	return continued{spanContext: span, runID: strings.ToLower(runID), agent: agent, rate: rate}, true
+	return continued{spanContext: span, runID: strings.ToLower(runID), agent: agent}, true
 }
 
 // parseTraceparent reads a traceparent as the W3C spells it: a version that
@@ -182,7 +169,7 @@ func baggageMembers(header string) map[string]string {
 func isOurs(member string) bool {
 	key, _, _ := strings.Cut(member, "=")
 	key = strings.TrimSpace(key)
-	return key == attrRunID || key == attrAgent || key == attrSampleRate
+	return key == attrRunID || key == attrAgent
 }
 
 // isHex is whether s is n lowercase hex digits.

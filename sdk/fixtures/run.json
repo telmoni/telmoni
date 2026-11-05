@@ -5,7 +5,6 @@
       "user_id": "user_42",
       "session_id": "conv_7",
       "tags": { "env": "test" },
-      "sample_rate": 1.0,
       "inside": [
         {
           "step": "plan",
@@ -15,7 +14,6 @@
                 "provider": "openai",
                 "model": "gpt-4o-mini",
                 "response_model": "gpt-4o-mini-2024-07-18",
-                "request": { "temperature": 0.2, "top_p": 0.9, "top_k": 40.0, "max_tokens": 256, "frequency_penalty": 0.5, "presence_penalty": -0.5, "seed": 7 },
                 "time_to_first_token": 0.35,
                 "usage": { "input_tokens": 12, "output_tokens": 7, "cache_read_input_tokens": 3, "cache_write_input_tokens": 0, "cost": 0.000123 },
                 "input_messages": [{ "role": "user", "parts": [{ "type": "text", "content": "hello" }] }],
@@ -61,14 +59,7 @@
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
                   { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
-                  { "key": "gen_ai.request.frequency_penalty", "value": { "doubleValue": 0.5 } },
-                  { "key": "gen_ai.request.max_tokens", "value": { "intValue": "256" } },
                   { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o-mini" } },
-                  { "key": "gen_ai.request.presence_penalty", "value": { "doubleValue": -0.5 } },
-                  { "key": "gen_ai.request.seed", "value": { "intValue": "7" } },
-                  { "key": "gen_ai.request.temperature", "value": { "doubleValue": 0.2 } },
-                  { "key": "gen_ai.request.top_k", "value": { "doubleValue": 40.0 } },
-                  { "key": "gen_ai.request.top_p", "value": { "doubleValue": 0.9 } },
                   { "key": "gen_ai.response.model", "value": { "stringValue": "gpt-4o-mini-2024-07-18" } },
                   { "key": "gen_ai.response.time_to_first_chunk", "value": { "doubleValue": 0.35 } },
                   { "key": "gen_ai.usage.cache_read.input_tokens", "value": { "intValue": "3" } },
@@ -78,7 +69,6 @@
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
-                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -97,7 +87,6 @@
                   { "key": "gen_ai.tool.name", "value": { "stringValue": "search" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
-                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ],
                 "status": { "code": 2 }
@@ -115,7 +104,6 @@
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
-                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "telmoni.tag.env", "value": { "stringValue": "test" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
@@ -132,7 +120,6 @@
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
-                  { "key": "telmoni.sample_rate", "value": { "doubleValue": 1.0 } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               }

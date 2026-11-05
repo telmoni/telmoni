@@ -33,12 +33,6 @@ use crate::warnings::{Warner, WarningKind};
 pub(crate) struct RunInfo {
     pub(crate) run_id: String,
     pub(crate) agent: String,
-    /// The run's sample rate, handed to another service; `None` for a
-    /// continued run whose headers named none.
-    pub(crate) rate: Option<f64>,
-    /// Whether the sample rate kept the run out: nothing of it is sent, nor
-    /// handed to another service.
-    pub(crate) sampled_out: bool,
 }
 
 /// A model call's tokens as the conventions count them: input with the cache's
@@ -92,9 +86,6 @@ pub struct RunOptions {
     pub session_id: Option<String>,
     /// Tags, sent as `telmoni.tag.<key>`.
     pub tags: BTreeMap<String, String>,
-    /// This run's share of being sent, above 0 and up to 1, in place of the
-    /// configuration's.
-    pub sample_rate: Option<f64>,
     /// The guard's cap on the run's steps: its next step past it is
     /// [`Error::CapExceeded`].
     pub max_steps: Option<u64>,
@@ -133,21 +124,6 @@ pub struct ModelCallOptions {
     pub input_messages: Option<Content>,
     /// The system instructions: content, as above.
     pub system_instructions: Option<Content>,
-    /// The parameters the model was asked with, each sent as given; `None` is
-    /// not given, since 0 is a value each can take.
-    pub temperature: Option<f64>,
-    /// As above.
-    pub top_p: Option<f64>,
-    /// As above.
-    pub top_k: Option<f64>,
-    /// As above.
-    pub frequency_penalty: Option<f64>,
-    /// As above.
-    pub presence_penalty: Option<f64>,
-    /// As above.
-    pub max_tokens: Option<i64>,
-    /// As above.
-    pub seed: Option<i64>,
 }
 
 /// What a tool call is opened with.
@@ -317,31 +293,6 @@ impl Handle {
         };
         let operation = model_operation(options.operation.as_deref(), warner);
         let (name, mut attributes) = model_call_opening(&model, operation, provider);
-        attributes.extend(
-            [
-                (
-                    contract::REQUEST_TEMPERATURE,
-                    options.temperature.map(Value::F64),
-                ),
-                (contract::REQUEST_TOP_P, options.top_p.map(Value::F64)),
-                (contract::REQUEST_TOP_K, options.top_k.map(Value::F64)),
-                (
-                    contract::REQUEST_FREQUENCY_PENALTY,
-                    options.frequency_penalty.map(Value::F64),
-                ),
-                (
-                    contract::REQUEST_PRESENCE_PENALTY,
-                    options.presence_penalty.map(Value::F64),
-                ),
-                (
-                    contract::REQUEST_MAX_TOKENS,
-                    options.max_tokens.map(Value::I64),
-                ),
-                (contract::REQUEST_SEED, options.seed.map(Value::I64)),
-            ]
-            .into_iter()
-            .filter_map(|(key, value)| value.map(|value| KeyValue::new(key, value))),
-        );
         if let Some(messages) = options.input_messages {
             attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
         }
@@ -876,16 +827,12 @@ impl ToolCall {
     }
 }
 
-/// Opens a run for the client: its span and its sampling.
+/// Opens a run for the client: its span.
 pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Result<Run, Error> {
     if agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
     }
     let agent = cut(agent, contract::AGENT_MAX, "run's agent", &inner.warner);
-    let rate = options.sample_rate.unwrap_or(inner.config.sample_rate);
-    if !(rate > 0.0 && rate <= 1.0) {
-        return Err(Error::SampleRate(rate));
-    }
     if options.max_steps == Some(0) {
         return Err(Error::MaxSteps);
     }
@@ -895,18 +842,12 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         return Err(Error::MaxSpend(spend));
     }
 
-    let sampled_out = rate < 1.0 && (inner.random)() >= rate;
     let run_id = Uuid::new_v4().to_string();
     let user_id =
         (options.user_id).filter(|id| fits(id, contract::USER_ID_MAX, "user id", &inner.warner));
     let session_id = (options.session_id)
         .filter(|id| fits(id, contract::SESSION_ID_MAX, "session id", &inner.warner));
-    let mut inherited = inherited(&run_id, &agent, Some(rate), user_id, session_id);
-    // On every span of the run from its start, for the processor to drop: a
-    // sampler's drop would clear the flag the application's spans inherit.
-    if sampled_out {
-        inherited.push(KeyValue::new(contract::SAMPLED_OUT, true));
-    }
+    let inherited = inherited(&run_id, &agent, user_id, session_id);
     let mut attributes = run_attributes(&agent, &inherited, options.tags, &inner.warner);
     if let Some(messages) = options.input_messages {
         attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
@@ -922,8 +863,6 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     let cx = parent.with_span(span).with_value(RunInfo {
         run_id: run_id.clone(),
         agent: agent.clone(),
-        rate: Some(rate),
-        sampled_out,
     });
 
     Ok(Run {
@@ -953,14 +892,12 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
         "run's agent",
         &inner.warner,
     );
-    let inherited = inherited(&read.run_id, &agent, read.sample_rate, None, None);
+    let inherited = inherited(&read.run_id, &agent, None, None);
     let cx = Context::current()
         .with_remote_span_context(read.span_context)
         .with_value(RunInfo {
             run_id: read.run_id.clone(),
             agent: agent.clone(),
-            rate: read.sample_rate,
-            sampled_out: false,
         });
     Run {
         handle: Handle {
@@ -978,13 +915,11 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
     }
 }
 
-/// What every span inside a run carries: its id and agent, its sample rate,
-/// which a sum of spend over runs scales each span by, and its user and
+/// What every span inside a run carries: its id and agent, and its user and
 /// session when it has them.
 pub(crate) fn inherited(
     run_id: &str,
     agent: &str,
-    rate: Option<f64>,
     user_id: Option<String>,
     session_id: Option<String>,
 ) -> Vec<KeyValue> {
@@ -994,9 +929,6 @@ pub(crate) fn inherited(
         KeyValue::new(contract::RUN_ID, shared(run_id)),
         KeyValue::new(contract::AGENT, shared(agent)),
     ];
-    if let Some(rate) = rate {
-        inherited.push(KeyValue::new(contract::SAMPLE_RATE, rate));
-    }
     if let Some(user) = user_id.filter(|id| !id.is_empty()) {
         inherited.push(KeyValue::new(contract::USER_ID, shared(&user)));
     }

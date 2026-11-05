@@ -14,7 +14,6 @@ import inspect
 import itertools
 import json
 import math
-import random
 import threading
 import traceback
 import uuid
@@ -54,8 +53,6 @@ from .models import (
     WarningInfo,
     _blank,
     _from_zero,
-    _number,
-    check_rate,
 )
 
 if TYPE_CHECKING:
@@ -180,25 +177,17 @@ class Run(Handle):
         *,
         run_id: str,
         agent: str,
-        rate: float | None,
-        inherited: Mapping[str, str | float],
-        sampled_out: bool = False,
+        inherited: Mapping[str, str],
         caps: guard.Guard | None = None,
     ) -> None:
         super().__init__(span, client)
         self.run_id = run_id
         self.agent = agent
-        # The run's sample rate, handed to another service; None for a
-        # continued run whose headers named none.
-        self.rate = rate
-        # Whether the sample rate kept this run out: nothing of it is sent,
-        # nor handed to another service.
-        self.sampled_out = sampled_out
         self._inherited = dict(inherited)
         self._guard = caps or guard.Guard(None, None)
 
     @property
-    def inherited(self) -> dict[str, str | float]:
+    def inherited(self) -> dict[str, str]:
         """What every span inside the run carries."""
         return dict(self._inherited)
 
@@ -235,13 +224,6 @@ class Run(Handle):
         operation: str = contract.DEFAULT_MODEL_OPERATION,
         input_messages: object | None = None,
         system_instructions: object | None = None,
-        temperature: float | None = None,
-        top_p: float | None = None,
-        top_k: float | None = None,
-        max_tokens: int | None = None,
-        frequency_penalty: float | None = None,
-        presence_penalty: float | None = None,
-        seed: int | None = None,
     ) -> Scope[ModelCall]:
         return self._client.model_call(
             model,
@@ -249,13 +231,6 @@ class Run(Handle):
             operation=operation,
             input_messages=input_messages,
             system_instructions=system_instructions,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            max_tokens=max_tokens,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-            seed=seed,
             run=self,
         )
 
@@ -534,7 +509,6 @@ class Opener:
         user_id: str | None,
         session_id: str | None,
         tags: Mapping[str, str] | None,
-        sample_rate: float | None,
         max_steps: int | None = None,
         max_spend: float | None = None,
         input_messages: object | None = None,
@@ -549,10 +523,7 @@ class Opener:
             "run's agent",
             warn_once,
         )
-        rate = self._client.config.sample_rate if sample_rate is None else sample_rate
-        check_rate(rate)
         caps = guard.Guard(*guard.caps(max_steps, max_spend))
-        sampled_out = rate < 1 and random.random() >= rate
         run_id = str(uuid.uuid4())
         user = _text(user_id, "user id", warn_once) if user_id is not None else ""
         if user and not _within(user, contract.USER_ID_MAX, "user id", warn_once):
@@ -564,11 +535,7 @@ class Opener:
             session, contract.SESSION_ID_MAX, "session id", warn_once
         ):
             session = ""
-        inherited = _inherited(run_id, agent, rate, user, session)
-        # On every span of the run from its start, for the processor to drop:
-        # a sampler's drop would clear the flag the application's spans inherit.
-        if sampled_out:
-            inherited[contract.SAMPLED_OUT] = "true"
+        inherited = _inherited(run_id, agent, user, session)
         name, attributes = _run_opening(agent, inherited, tags, warn_once)
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
@@ -580,9 +547,7 @@ class Opener:
             span,
             run_id=run_id,
             agent=agent,
-            rate=rate,
             inherited=inherited,
-            sampled_out=sampled_out,
             caps=caps,
         )
         # The run is found from the context by step(), model_call() and
@@ -590,9 +555,7 @@ class Opener:
         run._attach(context.set_value(_RUN_KEY, run, ctx))
         return run
 
-    def continued(
-        self, remote: SpanContext, run_id: str, agent: str, rate: float | None
-    ) -> Run:
+    def continued(self, remote: SpanContext, run_id: str, agent: str) -> Run:
         """A run another service opened, continued here under the span the
         headers named: a run whose own span is the caller's, non-recording
         here, so its steps and calls nest under it and carry the run, and
@@ -604,8 +567,7 @@ class Opener:
             NonRecordingSpan(remote),
             run_id=run_id,
             agent=agent,
-            rate=rate,
-            inherited=_inherited(run_id, agent, rate, None, None),
+            inherited=_inherited(run_id, agent, None, None),
         )
 
     def step(self, name: str, run: Run | None) -> Step | None:
@@ -635,7 +597,6 @@ class Opener:
         operation: str,
         input_messages: object | None,
         system_instructions: object | None,
-        request: Mapping[str, Any],
     ) -> ModelCall | None:
         run = run or self._outside("model_call")
         if run is None:
@@ -662,24 +623,6 @@ class Opener:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
-        for key, value in request.items():
-            if value is None:
-                continue
-            sent: float | None = None
-            if key in (contract.REQUEST_MAX_TOKENS, contract.REQUEST_SEED):
-                sent, must = _whole(value, _INT64), "a whole number within 64 bits"
-            else:
-                number = _number(value)
-                finite = number is not None and math.isfinite(number)
-                sent, must = (number if finite else None), "a finite number"
-            if sent is None:
-                warn_once(
-                    f"call:{key}",
-                    f"telmoni: {key} must be {must}; the call is sent without it",
-                    _INPUT,
-                )
-            else:
-                attributes[key] = sent
         call = self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
         call._run = run
         call._provider = provider
@@ -750,9 +693,8 @@ class Opener:
                 )
             if end < start:
                 raise ValueError("a recorded span cannot end before it starts")
-        rate = self._client.config.sample_rate
         inherited = _inherited(
-            str(run_uuid), record.agent, rate, record.user_id, record.session_id
+            str(run_uuid), record.agent, record.user_id, record.session_id
         )
         run_name, attributes = _run_opening(
             record.agent, inherited, tags, self._client.exporter.warn_once
@@ -763,10 +705,6 @@ class Opener:
         ):
             if messages is not None:
                 attributes[key] = _as_json(messages)
-        # Sampled out, no span is built: none of a record's ends after it, and
-        # the same record sent again draws again.
-        if rate < 1 and random.random() >= rate:
-            return
         # Queued whole or not at all: a record that outgrows the queue's room
         # would lose its tail, the run's own span first.
         need = len(spans)
@@ -944,18 +882,11 @@ def _usage(
 
 
 def _inherited(
-    run_id: str,
-    agent: str,
-    rate: float | None,
-    user_id: str | None,
-    session_id: str | None,
-) -> dict[str, str | float]:
+    run_id: str, agent: str, user_id: str | None, session_id: str | None
+) -> dict[str, str]:
     """What every span of a run carries, live or recorded: its id and agent,
-    its sample rate, which a sum of spend over runs scales each span by, and
-    its user and session where it has them."""
-    inherited: dict[str, str | float] = {contract.RUN_ID: run_id, contract.AGENT: agent}
-    if rate is not None:
-        inherited[contract.SAMPLE_RATE] = float(rate)
+    and its user and session where it has them."""
+    inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
     if user_id:
         inherited[contract.USER_ID] = user_id
     if session_id:
@@ -965,7 +896,7 @@ def _inherited(
 
 def _run_opening(
     agent: str,
-    inherited: Mapping[str, str | float],
+    inherited: Mapping[str, str],
     tags: Mapping[str, str] | None,
     warn_once: Callable[[str, str, WarningInfo], None],
 ) -> tuple[str, dict[str, Any]]:
@@ -1361,7 +1292,6 @@ def _close(
 
 # What ingest takes: a token count from 0 that fits 64 bits.
 _COUNT = range(2**63)
-_INT64 = range(-(2**63), 2**63)
 
 
 def _whole(value: float, allowed: range) -> int | None:

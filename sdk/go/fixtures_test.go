@@ -41,12 +41,11 @@ var versioned = map[string]bool{"telemetry.sdk.version": true, "telemetry.distro
 type runFixture struct {
 	Scenario struct {
 		Run struct {
-			Agent      string            `json:"agent"`
-			UserID     string            `json:"user_id"`
-			SessionID  string            `json:"session_id"`
-			Tags       map[string]string `json:"tags"`
-			SampleRate float64           `json:"sample_rate"`
-			Inside     []struct {
+			Agent     string            `json:"agent"`
+			UserID    string            `json:"user_id"`
+			SessionID string            `json:"session_id"`
+			Tags      map[string]string `json:"tags"`
+			Inside    []struct {
 				Step   string `json:"step"`
 				Inside []struct {
 					ModelCall *modelCallSpec `json:"model_call"`
@@ -65,18 +64,9 @@ type runFixture struct {
 }
 
 type modelCallSpec struct {
-	Provider      string `json:"provider"`
-	Model         string `json:"model"`
-	ResponseModel string `json:"response_model"`
-	Request       struct {
-		Temperature      *float64 `json:"temperature"`
-		TopP             *float64 `json:"top_p"`
-		TopK             *float64 `json:"top_k"`
-		MaxTokens        *int64   `json:"max_tokens"`
-		FrequencyPenalty *float64 `json:"frequency_penalty"`
-		PresencePenalty  *float64 `json:"presence_penalty"`
-		Seed             *int64   `json:"seed"`
-	} `json:"request"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	ResponseModel    string  `json:"response_model"`
 	TimeToFirstToken float64 `json:"time_to_first_token"`
 	Usage            struct {
 		InputTokens           int      `json:"input_tokens"`
@@ -241,24 +231,16 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 	t.Helper()
 	spec := fixture.Scenario.Run
 	ctx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{
-		UserID:     spec.UserID,
-		SessionID:  spec.SessionID,
-		Tags:       spec.Tags,
-		SampleRate: spec.SampleRate,
+		UserID:    spec.UserID,
+		SessionID: spec.SessionID,
+		Tags:      spec.Tags,
 	})
 	stepSpec := spec.Inside[0]
 	stepCtx, step := run.Step(ctx, stepSpec.Step)
 	callSpec := stepSpec.Inside[0].ModelCall
 	_, call := run.ModelCall(stepCtx, callSpec.Model, telmoni.ModelCallOptions{
-		Provider:         callSpec.Provider,
-		InputMessages:    callSpec.InputMessages,
-		Temperature:      callSpec.Request.Temperature,
-		TopP:             callSpec.Request.TopP,
-		TopK:             callSpec.Request.TopK,
-		FrequencyPenalty: callSpec.Request.FrequencyPenalty,
-		PresencePenalty:  callSpec.Request.PresencePenalty,
-		MaxTokens:        callSpec.Request.MaxTokens,
-		Seed:             callSpec.Request.Seed,
+		Provider:      callSpec.Provider,
+		InputMessages: callSpec.InputMessages,
 	})
 	call.Answered(telmoni.Answer{
 		ResponseModel:    callSpec.ResponseModel,

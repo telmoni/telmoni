@@ -31,7 +31,6 @@ describe('a tool call', () => {
     expect(attributesOf(span)).toEqual({
       'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
-      'telmoni.sample_rate': 1,
       'user.id': 'user',
       'gen_ai.operation.name': 'execute_tool',
       'gen_ai.tool.name': 'search',

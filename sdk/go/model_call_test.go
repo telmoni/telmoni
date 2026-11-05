@@ -57,7 +57,6 @@ func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":                        run.ID(),
 		"telmoni.agent":                         "bot",
-		"telmoni.sample_rate":                   1.0,
 		"gen_ai.conversation.id":                "conv",
 		"gen_ai.operation.name":                 "chat",
 		"gen_ai.request.model":                  "gpt-4o-mini",
@@ -84,7 +83,6 @@ func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":        run.ID(),
 		"telmoni.agent":         "bot",
-		"telmoni.sample_rate":   1.0,
 		"gen_ai.operation.name": "chat",
 		"gen_ai.request.model":  "m",
 	}
@@ -111,7 +109,6 @@ func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 	want := map[string]any{
 		"telmoni.run_id":                        run.ID(),
 		"telmoni.agent":                         "bot",
-		"telmoni.sample_rate":                   1.0,
 		"gen_ai.operation.name":                 "chat",
 		"gen_ai.request.model":                  "m",
 		"gen_ai.usage.output_tokens":            int64(7),
@@ -128,51 +125,6 @@ func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 	}
 	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
 		t.Errorf("warnings = %q\nwant one for each count: %q", warnings, wantWarnings)
-	}
-}
-
-// The parameters a call was asked with go typed, a 0 among them, and none
-// not given.
-func TestAModelCallCarriesTheParametersItWasAskedWith(t *testing.T) {
-	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	zero, topP, topK, frequency, presence := 0.0, 0.9, 40.0, 0.5, -0.5
-	maxTokens, seed := int64(256), int64(0)
-	_, call := run.ModelCall(ctx, "asked", telmoni.ModelCallOptions{
-		Temperature:      &zero,
-		TopP:             &topP,
-		TopK:             &topK,
-		FrequencyPenalty: &frequency,
-		PresencePenalty:  &presence,
-		MaxTokens:        &maxTokens,
-		Seed:             &seed,
-	})
-	call.End()
-	_, call = run.ModelCall(ctx, "unasked", telmoni.ModelCallOptions{})
-	call.End()
-	run.End()
-	h.flush()
-	spans := byName(calls(t, h))
-	want := map[string]any{
-		"gen_ai.request.temperature":       0.0,
-		"gen_ai.request.top_p":             0.9,
-		"gen_ai.request.top_k":             40.0,
-		"gen_ai.request.frequency_penalty": 0.5,
-		"gen_ai.request.presence_penalty":  -0.5,
-		"gen_ai.request.max_tokens":        int64(256),
-		"gen_ai.request.seed":              int64(0),
-	}
-	asked := attributesOf(t, spans["chat asked"])
-	for key, value := range want {
-		if asked[key] != value {
-			t.Errorf("%s = %#v, want %#v", key, asked[key], value)
-		}
-	}
-	unasked := attributesOf(t, spans["chat unasked"])
-	for key := range want {
-		if value, ok := unasked[key]; ok {
-			t.Errorf("%s = %v on a call not asked with it", key, value)
-		}
 	}
 }
 

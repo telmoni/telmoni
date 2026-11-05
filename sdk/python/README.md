@@ -66,7 +66,7 @@ an `exception` event and the status's message, content
 ([Content](#content)), and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed before
 its end, marks it cancelled. `fail()` and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
-name, a sample rate outside (0, 1] or a cap that is no cap
+name or a cap that is no cap
 ([The guard](#the-guard)). A token count is read from a number or its text,
 its fraction cut, and `Usage`'s `cost` is what the call cost in US dollars,
 where your provider reports it; of what ingest would refuse, these are left off
@@ -127,8 +127,8 @@ telmoni.flush()
 A `StepRecord` holds its `calls`, steps among them, a subagent's own subagents
 say, up to 16 deep, each under the step that holds it. A model call's
 `reasoning_effort`, how hard it was asked to reason, is sent in every content
-mode. It is sent as the live calls would have sent it, through the same exporter,
-content rules and sample rate, in a trace of its own named by the run's id,
+mode. It is sent as the live calls would have sent it, through the same exporter
+and content rules, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
@@ -248,7 +248,7 @@ telmoni = Telmoni(config)
 
 ## Configuration
 
-`Config(endpoint, organization_id, api_key, capture_content, mask, sample_rate, sampler,
+`Config(endpoint, organization_id, api_key, capture_content, mask, sampler,
 environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
 (default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
 `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and `TELMONI_CAPTURE_CONTENT`, a blank
@@ -259,8 +259,7 @@ it off, and a `capture_content` set in code afterwards stands.
 the resource's `deployment.environment.name` and `service.version`. `prices`
 hands [the guard](#the-guard) prices of your own, a `ValueError` for one that
 names no provider or model or is no number from 0; nothing of them is sent.
-`sample_rate` is the share of runs sent, dropped whole in the SDK's processor
-and never through the trace's sampled flag. The key never appears in `repr`,
+The key never appears in `repr`,
 `str` or `dataclasses.asdict`, and `pickle` refuses it. It travels over HTTPS
 only: a plain-HTTP endpoint is refused with a `ValueError` unless its host is
 this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
@@ -278,8 +277,8 @@ an IPv4 address in four decimal parts, nor an IPv6 one in brackets.
 ## A run across services
 
 Before a request leaves a run, `telmoni.inject(headers)` writes the W3C
-`traceparent` of the span current and the run's id, agent and sample rate as
-`baggage` members into any mutable mapping of headers. In the service that answers,
+`traceparent` of the span current and the run's id and agent as `baggage`
+members into any mutable mapping of headers. In the service that answers,
 `run = telmoni.extract(request.headers)` gives the run back, continued there:
 `telmoni.step("work", run=run)` and the calls inside nest under the caller's
 span and carry the caller's run, and nothing of the run itself is sent from

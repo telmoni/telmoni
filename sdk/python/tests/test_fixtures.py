@@ -81,7 +81,6 @@ def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
         user_id=run_spec["user_id"],
         session_id=run_spec["session_id"],
         tags=run_spec["tags"],
-        sample_rate=run_spec["sample_rate"],
     ):
         step_spec = run_spec["inside"][0]
         with telmoni.step(step_spec["step"]):
@@ -90,7 +89,6 @@ def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
                 call_spec["model"],
                 provider=call_spec["provider"],
                 input_messages=call_spec["input_messages"],
-                **call_spec["request"],
             ) as call:
                 call.answered(
                     response_model=call_spec["response_model"],

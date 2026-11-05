@@ -95,9 +95,8 @@ fn the_key_is_never_printed_or_serialized() -> Outcome {
 }
 
 #[test]
-fn the_defaults_send_every_run_and_no_content() {
+fn the_defaults_send_no_content_and_set_no_sampler() {
     let config = Config::default();
-    assert!((config.sample_rate - 1.0).abs() < f64::EPSILON);
     assert!(!config.capture_content);
     assert!(config.sampler.is_none());
 }

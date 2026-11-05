@@ -172,15 +172,6 @@ def test_capture_content_that_is_no_bool_is_refused() -> None:
         Config(capture_content="false")  # type: ignore[arg-type]
 
 
-def test_sample_rate_is_above_zero_and_up_to_one() -> None:
-    assert Config(sample_rate=1.0).sample_rate == 1.0
-    assert Config(sample_rate=0.25).sample_rate == 0.25
-    with pytest.raises(ValueError):
-        Config(sample_rate=0)
-    with pytest.raises(ValueError):
-        Config(sample_rate=1.5)
-
-
 def test_the_version_is_the_installed_one() -> None:
     from importlib import metadata
 

@@ -7,13 +7,10 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::{
-    FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, field, hooks, keyed,
-    load_fixture, name_of, named, text,
-};
+use common::{Harness, Outcome, attributes_of, field, load_fixture, name_of, named, text};
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::Value;
-use telmoni::{Config, Hooks, ModelCallOptions, RunOptions, Telmoni, ToolCallOptions};
+use telmoni::{ModelCallOptions, RunOptions, ToolCallOptions};
 
 type Headers = HashMap<String, String>;
 
@@ -87,37 +84,17 @@ fn inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own() -> Out
 }
 
 #[test]
-fn inject_writes_nothing_outside_a_run_or_for_a_run_sampled_out() -> Outcome {
-    let transport = FakeTransport::new([])?;
-    let (warnings, sleeps) = (Warnings::default(), Sleeps::default());
-    let telmoni = Telmoni::with_hooks(
-        Config {
-            sample_rate: 0.5,
-            ..keyed()
-        },
-        Hooks {
-            random: Box::new(|| 0.9),
-            ..hooks(&transport, &warnings, &sleeps)
-        },
-    );
+fn inject_writes_nothing_outside_a_run() -> Outcome {
+    let harness = Harness::new()?;
     let mut outside: Headers = [("baggage".to_owned(), "tenant=acme".to_owned())]
         .into_iter()
         .collect();
-    telmoni.inject(&mut outside);
+    harness.telmoni.inject(&mut outside);
     assert_eq!(outside.len(), 1);
     assert_eq!(
         outside.get("baggage").map(String::as_str),
         Some("tenant=acme")
     );
-
-    let run = telmoni.run("bot", RunOptions::default())?;
-    let mut headers: Headers = HashMap::new();
-    telmoni.inject_from(&run.context(), &mut headers);
-    assert!(headers.is_empty(), "a run sampled out wrote {headers:?}");
-    run.end();
-    assert!(telmoni.flush());
-    assert!(transport.spans()?.is_empty());
-    telmoni.shutdown();
     Ok(())
 }
 
@@ -154,36 +131,6 @@ fn extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none(
         assert_eq!(
             parent.is_sampled(),
             field(expected, "sampled")?.as_bool().ok_or("sampled")?,
-            "{name}"
-        );
-    }
-    Ok(())
-}
-
-/// A continued run's spans carry the rate its headers named, or none where
-/// they named none a share of runs reads as.
-#[test]
-fn a_continued_runs_spans_carry_the_rate_its_headers_named() -> Outcome {
-    let fixture = load_fixture("headers.json")?;
-    for given in field(&fixture, "extract")?.as_array().ok_or("extract")? {
-        let expected = field(given, "run")?;
-        if expected.is_null() {
-            continue;
-        }
-        let name = text(given, "name")?;
-        let harness = Harness::new()?;
-        let run = harness
-            .telmoni
-            .extract(&headers_of(field(given, "headers")?)?)
-            .ok_or_else(|| format!("{name}: no run was read"))?;
-        run.step("work")?.end();
-        harness.flush()?;
-        let spans = harness.spans()?;
-        let span = spans.first().ok_or("the step")?;
-        let attributes = attributes_of(span)?;
-        assert_eq!(
-            attributes.get("telmoni.sample_rate"),
-            expected.get("sample_rate").filter(|rate| !rate.is_null()),
             "{name}"
         );
     }
@@ -244,12 +191,6 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
             attributes["telmoni.agent"],
             "orchestrator",
             "{}",
-            name_of(span)
-        );
-        assert_eq!(
-            attributes["telmoni.sample_rate"],
-            1.0,
-            "{}: the caller's run's rate",
             name_of(span)
         );
     }

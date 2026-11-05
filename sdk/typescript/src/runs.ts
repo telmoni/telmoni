@@ -174,10 +174,6 @@ export abstract class Parent extends Handle {
 export class Run extends Parent {
   readonly runId: string;
   readonly agent: string;
-  /** The run's sample rate, handed to another service; undefined for a continued run whose headers named none. */
-  readonly rate: number | undefined;
-  /** Whether the sample rate kept this run out: nothing of it is sent, nor handed to another service. */
-  readonly sampledOut: boolean;
   readonly #inherited: Attributes;
   readonly #warnOnce: WarnOnce;
   readonly [GUARD]: Guard;
@@ -188,16 +184,12 @@ export class Run extends Parent {
     parent: Context,
     runId: string,
     agent: string,
-    rate: number | undefined,
     inherited: Attributes,
-    sampledOut = false,
     guard = new Guard(),
   ) {
     super(opener, span, parent, undefined);
     this.runId = runId;
     this.agent = agent;
-    this.rate = rate;
-    this.sampledOut = sampledOut;
     this.#inherited = { ...inherited };
     this.#warnOnce = opener.warnOnce;
     this[GUARD] = guard;
@@ -391,7 +383,6 @@ type WarnOnce = (key: string, text: string, warning: Warning) => void;
 export class Opener {
   readonly #tracer: Tracer;
   readonly #processor: Processor;
-  readonly #config: ResolvedConfig;
   readonly #ids: Ids;
   readonly #warnOnce: WarnOnce;
   /** The project's own prices, which the guard counts a call by first. */
@@ -400,7 +391,6 @@ export class Opener {
   constructor(tracer: Tracer, processor: Processor, config: ResolvedConfig, ids: Ids, warnOnce: WarnOnce) {
     this.#tracer = tracer;
     this.#processor = processor;
-    this.#config = config;
     this.#ids = ids;
     this.#warnOnce = warnOnce;
     this.#prices = ownRates(config.prices);
@@ -417,29 +407,23 @@ export class Opener {
       throw new TypeError("a run needs its agent's name");
     }
     const agent = cut(asText(named, "run's agent", this.#warnOnce), contract.AGENT_MAX, "run's agent", this.#warnOnce);
-    const rate = checkedRate(options.sampleRate ?? this.#config.sampleRate);
     const guard = Guard.of(options);
-    const sampledOut = rate < 1 && Math.random() >= rate;
     const runId = randomUUID();
     const user = filled(options.userId, 'user id', this.#warnOnce);
     const session = filled(options.sessionId, 'session id', this.#warnOnce);
     const inherited = inheritedOf(
       runId,
       agent,
-      rate,
       user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', this.#warnOnce) ? user : undefined,
       session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', this.#warnOnce) ? session : undefined,
     );
-    // On every span of the run from its start, for the processor to drop: a
-    // sampler's drop would clear the flag the application's spans inherit.
-    if (sampledOut) inherited[contract.SAMPLED_OUT] = true;
     const attributes = runAttributes(agent, inherited, tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce));
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
     const parent = context.active();
     const span = this.#start(runSpanName(agent), parent, attributes, SpanKind.INTERNAL);
-    return new Run(this, span, parent, runId, agent, rate, inherited, sampledOut, guard);
+    return new Run(this, span, parent, runId, agent, inherited, guard);
   }
 
   /**
@@ -448,10 +432,10 @@ export class Opener {
    * steps and calls nest under it and carry the run, and nothing of it is
    * sent or ended from this side.
    */
-  continued(remote: SpanContext, runId: string, given: string, rate: number | undefined): Run {
+  continued(remote: SpanContext, runId: string, given: string): Run {
     const agent = cut(given, contract.AGENT_MAX, "run's agent", this.#warnOnce);
-    const inherited = inheritedOf(runId, agent, rate);
-    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, rate, inherited);
+    const inherited = inheritedOf(runId, agent);
+    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inherited);
   }
 
   step(run: Run, parent: Context, given: string): Step {
@@ -482,35 +466,6 @@ export class Opener {
     const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
     const operation = operationOf(options.operation, this.#warnOnce);
     const [name, attributes] = modelCallOpening(run.inherited, model, operation, provider);
-    for (const [key, value] of [
-      [contract.REQUEST_TEMPERATURE, options.temperature],
-      [contract.REQUEST_TOP_P, options.topP],
-      [contract.REQUEST_TOP_K, options.topK],
-      [contract.REQUEST_FREQUENCY_PENALTY, options.frequencyPenalty],
-      [contract.REQUEST_PRESENCE_PENALTY, options.presencePenalty],
-    ] as const) {
-      if (!isSet(value)) continue;
-      const number = numberOf(value);
-      if (!Number.isFinite(number)) {
-        this.#warnOnce(`call:${key}`, `telmoni: ${key} must be a finite number; the call is sent without it`, { kind: 'input' });
-      } else {
-        attributes[key] = number;
-      }
-    }
-    for (const [key, value] of [
-      [contract.REQUEST_MAX_TOKENS, options.maxTokens],
-      [contract.REQUEST_SEED, options.seed],
-    ] as const) {
-      if (!isSet(value)) continue;
-      const count = whole(value, -(2 ** 63), 2 ** 63);
-      if (count === undefined) {
-        this.#warnOnce(`call:${key}`, `telmoni: ${key} must be a whole number within 64 bits; the call is sent without it`, {
-          kind: 'input',
-        });
-      } else {
-        attributes[key] = count;
-      }
-    }
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
@@ -576,16 +531,12 @@ export class Opener {
       }
       if (later(start, end)) throw new RangeError('a recorded span cannot end before it starts');
     }
-    const rate = this.#config.sampleRate;
     const runId = hyphenated(runHex);
-    const inherited = inheritedOf(runId, record.agent, rate, record.userId, record.sessionId);
+    const inherited = inheritedOf(runId, record.agent, record.userId, record.sessionId);
     const attributes = runAttributes(record.agent, inherited, tagsOf(tagged, this.#warnOnce));
     for (const [key, value] of messages) {
       if (isSet(value)) attributes[key] = asJson(value);
     }
-    // Sampled out, no span is built: none of a record's ends after it, and
-    // the same record sent again draws again.
-    if (rate < 1 && Math.random() >= rate) return;
     // Worked out before the record is built: a count that warns calls the
     // `warn` hook, which may record a run of its own.
     const usages = new Map<CallRecord, Attributes>();
@@ -942,22 +893,9 @@ function numberOf(value: unknown): number {
   return typeof value === 'string' && DECIMAL.test(value) ? Number(value) : Number.NaN;
 }
 
-/** A sample rate as the client and a run take it: a number above 0 and up to 1. */
-export function checkedRate(rate: unknown): number {
-  // '0.5' from an environment variable compares as a number, and goes out as text ingest refuses.
-  if (typeof rate !== 'number' || !(rate > 0 && rate <= 1)) {
-    throw new RangeError('sampleRate must be a number above 0 and up to 1');
-  }
-  return rate;
-}
-
-/**
- * What every span of a run carries, live or recorded: its id and agent, its sample rate, which a sum of spend over
- * runs scales each span by, and its user and session where it has them.
- */
-function inheritedOf(runId: string, agent: string, rate: number | undefined, user?: string, session?: string): Attributes {
+/** What every span of a run carries, live or recorded: its id and agent, and its user and session where it has them. */
+function inheritedOf(runId: string, agent: string, user?: string, session?: string): Attributes {
   const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
-  if (rate !== undefined) inherited[contract.SAMPLE_RATE] = rate;
   if (user) inherited[contract.USER_ID] = user;
   if (session) inherited[contract.SESSION_ID] = session;
   return inherited;

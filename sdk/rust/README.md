@@ -68,8 +68,7 @@ fn main() -> Result<(), telmoni::Error> {
 ```
 
 Every handle is a guard: its span ends when it is dropped or on `end()`.
-`run` returns `Error::EmptyAgent` for a blank agent name,
-`Error::SampleRate` for a rate outside (0, 1], and `Error::MaxSteps` or
+`run` returns `Error::EmptyAgent` for a blank agent name, and `Error::MaxSteps` or
 `Error::MaxSpend` for a cap that is no cap ([The guard](#the-guard)). A
 negative token count, or a `Usage`'s `cost` below 0 or not finite, is left
 off its call with one warning; a run sends its first 32 tags by key, the most
@@ -154,8 +153,8 @@ up to 16 deep, each under the step that holds it:
 mode. Times are `SystemTime`s, which `chrono`'s and `time`'s convert into with
 `SystemTime::from`.
 
-It is sent as the live calls would have sent it, through the same exporter,
-content rules and sample rate, in a trace of its own named by the run's id,
+It is sent as the live calls would have sent it, through the same exporter and
+content rules, in a trace of its own named by the run's id,
 whatever trace is current. Each span's id is derived from the run's id and the
 span's place in the record, so the same record sent again is the same bytes,
 which ingest answers once: give a run the same id each time you send it. A
@@ -232,9 +231,7 @@ as; else nothing. A call answered again counts as its span then holds it.
 Nothing in the SDK reads an `OTEL_*` variable. `Config` also holds
 `capture_content` (default `false`), `mask`, the code's own over content
 ([Content](#content)), which no variable sets and `Debug` shows only as set or
-not, `sample_rate` (default `1.0`; above 0 and
-up to 1, decided per run and never through the trace's sampled flag),
-`sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
+not, `sampler`, the OpenTelemetry sampler whose decision a run takes when it starts
 a trace of its own, `environment` and `release`, the deployment the
 variables above name, and `prices`, the guard's prices of your own, a price
 that names no provider or model, or is no number from 0, left out with one
@@ -257,8 +254,8 @@ no proxy, whatever the environment names. An endpoint without a scheme gets
 
 Before a request leaves a run, `telmoni.inject(&mut headers)` writes the W3C
 `traceparent` of the span current — what a handle's `attach()` or
-`FutureExt::with_context` made so — and the run's id, agent and sample rate
-as `baggage` members; `telmoni.inject_from(&step.context(), &mut headers)` writes from a
+`FutureExt::with_context` made so — and the run's id and agent as `baggage`
+members; `telmoni.inject_from(&step.context(), &mut headers)` writes from a
 handle's context instead. In the service that answers,
 `telmoni.extract(&headers)` gives `Some(run)`, continued there: its steps and
 calls nest under the caller's span and carry the caller's run, and nothing of

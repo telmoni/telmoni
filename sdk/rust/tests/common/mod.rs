@@ -627,8 +627,10 @@ fn the_fakes_work() -> Outcome {
 
     let fixture = load_fixture("run.json")?;
     assert!(text(field(&fixture, "scenario")?, "capture_content").is_err());
-    let run = field(field(&fixture, "scenario")?, "run")?;
-    assert!((float(run, "sample_rate")? - 1.0).abs() < f64::EPSILON);
+    let call = fixture
+        .pointer("/scenario/run/inside/0/inside/0/model_call")
+        .ok_or("the scenario's model call")?;
+    assert!((float(call, "time_to_first_token")? - 0.35).abs() < f64::EPSILON);
     assert_eq!(
         int(&load_fixture("answers/forbidden.json")?, "status")?,
         403

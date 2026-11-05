@@ -34,13 +34,6 @@ export interface Config {
   mask?: ((key: string, value: string) => string | null | undefined) | undefined;
 
   /**
-   * The share of runs sent, above 0 and up to 1 (default: 1). Decided per run,
-   * never through the trace's sampled flag, so an application's own sampling
-   * is untouched.
-   */
-  sampleRate?: number | undefined;
-
-  /**
    * The sampler whose root decision a run takes when it starts a trace of its
    * own; without one, every run samples.
    */
@@ -87,7 +80,6 @@ export interface ResolvedConfig {
   readonly apiKey: string | undefined;
   readonly captureContent: boolean;
   readonly mask: ((key: string, value: string) => string | null | undefined) | undefined;
-  readonly sampleRate: number;
   readonly sampler: Sampler | undefined;
   readonly environment: string | undefined;
   readonly release: string | undefined;
@@ -128,8 +120,6 @@ export interface RunOptions {
   userId?: string | undefined;
   sessionId?: string | undefined;
   tags?: Readonly<Record<string, string | number | boolean>> | undefined;
-  /** This run's share, over the client's `sampleRate`. */
-  sampleRate?: number | undefined;
   /** The guard's cap on the run's steps: its next step past it throws `CapExceededError`. */
   maxSteps?: number | undefined;
   /** The guard's cap on the run's spend, in US dollars: reached, what it opens next throws. */
@@ -148,15 +138,6 @@ export interface ModelCallOptions {
   provider?: string | undefined;
   /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
-  /** What the model was asked with, each sent under the conventions' `gen_ai.request.*` name. */
-  temperature?: number | undefined;
-  topP?: number | undefined;
-  topK?: number | undefined;
-  /** A whole number within 64 bits, as is `seed`; another is left off the call with one warning. */
-  maxTokens?: number | undefined;
-  frequencyPenalty?: number | undefined;
-  presencePenalty?: number | undefined;
-  seed?: number | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;
   /** Content, as above. */
