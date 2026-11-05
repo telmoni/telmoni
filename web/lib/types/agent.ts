@@ -10,15 +10,6 @@ import { AgentMessageRole } from "./enums";
 // it too, so a message it forwards is never one the server would turn away.
 export const AGENT_MESSAGE_MAX = 4000;
 
-// The longest sentence the trace list is asked, in characters after trim, as
-// the server holds it.
-export const TRACE_QUESTION_MAX = 500;
-
-// How long a sentence asked of the trace list is waited for: the server's
-// read of the list's values, its one model call of thirty seconds and its
-// check of the answer.
-export const TRACE_QUESTION_TIMEOUT_MS = 60_000;
-
 // How long one turn may stream, the reply's body included. The server ends a
 // turn and saves it first (`STREAM_MAX` in the wire contract), so this cut-off
 // is only the backstop, and the contract test holds it the longer.

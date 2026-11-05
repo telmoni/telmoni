@@ -357,38 +357,6 @@ CREATE POLICY maintenance_access ON agent.questions_asked
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON agent.questions_asked TO agent_maintenance;
 
-
--- ══════════════════════════════════════════════════════════════════════════════
--- 5c. LIST QUESTIONS
--- ══════════════════════════════════════════════════════════════════════════════
--- When a person asked the trace list a sentence, which keeps no conversation:
--- the hourly cap counts these beside the questions in `messages`. When alone,
--- never the sentence; gone with the person, the organization, and the hour.
-CREATE TABLE agent.list_questions (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id TEXT        NOT NULL,
-    user_id         TEXT        NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX list_questions_rate_idx ON agent.list_questions (user_id, created_at);
-CREATE INDEX list_questions_organization_idx ON agent.list_questions (organization_id, id);
-CREATE INDEX list_questions_retention_idx ON agent.list_questions (created_at);
-
-ALTER TABLE agent.list_questions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent.list_questions FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation ON agent.list_questions
-    USING      (user_id = current_setting('app.user_id', true) AND organization_id = current_setting('app.organization_id', true))
-    WITH CHECK (user_id = current_setting('app.user_id', true) AND organization_id = current_setting('app.organization_id', true));
-
-CREATE POLICY maintenance_access ON agent.list_questions
-    TO agent_maintenance
-    USING      (current_user = 'agent_maintenance')
-    WITH CHECK (current_user = 'agent_maintenance');
-
-GRANT SELECT, DELETE ON agent.list_questions TO agent_maintenance;
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 6. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════

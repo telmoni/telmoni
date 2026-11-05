@@ -354,14 +354,14 @@ fn bounded(text: String) -> String {
     out
 }
 
-pub(crate) const OPEN: &str = "<data>\n";
-pub(crate) const CLOSE: &str = "\n</data>";
+const OPEN: &str = "<data>\n";
+const CLOSE: &str = "\n</data>";
 
 /// Tenant text with every angle bracket, fullwidth too, swapped for a
 /// look-alike the model still reads: a `</data>` in a connector name — in any
 /// case, spaced or split by a zero-width space — would otherwise end the fence,
 /// and no other tag can open one either.
-pub(crate) fn inert(text: &str) -> String {
+fn inert(text: &str) -> String {
     text.chars()
         .map(|c| match c {
             '<' | '\u{FF1C}' => '‹',

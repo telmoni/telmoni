@@ -26,16 +26,13 @@ use telmoni_agent::config::{
 use telmoni_agent::db::{self, AgentLane, Source, Visibility};
 use telmoni_agent::embed::Embedder;
 use telmoni_agent::index::{self, Entry, Passage};
-use telmoni_agent::model::{Message, Model, ModelTurn, TextSink, ToolCall, ToolSpec};
+use telmoni_agent::model::{Message, Model, ModelTurn, TextSink, ToolSpec};
 use telmoni_agent::seam::AgentSeam;
 use telmoni_agent::{AppState, Live, retention, retrieve};
 use telmoni_shared::acting::{Acting, ActingProject};
 use telmoni_shared::db::tenant_session::{maintenance_scope, person_scope};
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{
-    Agent, Auth, CheckedTraceView, DroppedValue, Emitted, FilterValues, Notice, Notifications,
-    ProjectHome, Telemetry, TraceVocabulary,
-};
+use telmoni_shared::seam::{Agent, Auth, Emitted, Notice, Notifications, ProjectHome};
 use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::{ServiceRole, service_pool};
 use telmoni_shared::{
@@ -114,22 +111,6 @@ impl Notifications for Absent {
     }
 }
 
-#[async_trait]
-impl Telemetry for Absent {
-    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
-        Ok(0)
-    }
-    async fn purge_project(&self, _: &OrganizationId, _: &ProjectId) -> Result<u64, TelmoniError> {
-        Ok(0)
-    }
-    async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
-        Ok(())
-    }
-    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
-        Ok(())
-    }
-}
-
 fn state(pool: &PgPool, embedder: Arc<SameVector>) -> AppState {
     state_with(pool, embedder, Arc::new(Absent))
 }
@@ -179,7 +160,6 @@ fn state_with(pool: &PgPool, embedder: Arc<SameVector>, auth: Arc<dyn Auth>) -> 
         service_secrets: ServiceSecrets::new("secret", None::<String>),
         auth,
         notifications: Arc::new(Absent),
-        telemetry: Arc::new(Absent),
         entitlements: Arc::new(telmoni_shared::seam::NoLimits),
         live: Some(Arc::new(Live {
             model: Arc::new(Unasked),
@@ -513,14 +493,6 @@ async fn erasure_and_the_organizations_purge_clear_the_agents_rows(pool: PgPool)
     .execute(&pool)
     .await
     .unwrap();
-    // When each asked the trace list, which the hour counts.
-    sqlx::query(
-        "INSERT INTO agent.list_questions (organization_id, user_id)
-         VALUES ('org_a', 'user_1'), ('org_b', 'user_2')",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
     let seam = AgentSeam(Arc::new(state(
         &pool,
         Arc::new(SameVector(AtomicUsize::new(0))),
@@ -627,15 +599,6 @@ async fn erasure_and_the_organizations_purge_clear_the_agents_rows(pool: PgPool)
         1,
         "someone else's question went with mine"
     );
-    assert_eq!(
-        count(
-            &pool,
-            "SELECT count(*) FROM agent.list_questions WHERE user_id = 'user_1'"
-        )
-        .await,
-        0,
-        "their questions of the trace list went with them"
-    );
 
     seam.purge_organization(&OrganizationId::try_new("org_b").unwrap())
         .await
@@ -656,14 +619,6 @@ async fn erasure_and_the_organizations_purge_clear_the_agents_rows(pool: PgPool)
         .await,
         1,
         "the docs belong to nobody's organization"
-    );
-    assert_eq!(
-        count(
-            &pool,
-            "SELECT count(*) FROM agent.list_questions WHERE organization_id = 'org_b'"
-        )
-        .await,
-        0
     );
 }
 
@@ -1302,287 +1257,4 @@ async fn the_index_takes_the_notices_a_plans_month_holds(pool: PgPool) {
     .await
     .expect("the index is read");
     assert_eq!(indexed, 2, "two of the three, as the month holds");
-}
-
-/// A model that calls `trace_filters` with `input`, or answers in words
-/// where there is none, and counts its calls.
-struct Filters {
-    input: Option<serde_json::Value>,
-    calls: AtomicUsize,
-}
-
-#[async_trait]
-impl Model for Filters {
-    async fn stream(
-        &self,
-        _: &str,
-        _: &[Message],
-        tools: &[ToolSpec],
-        _: TextSink<'_>,
-    ) -> Result<ModelTurn, TelmoniError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(
-            tools.iter().map(|t| t.name).collect::<Vec<_>>(),
-            [telmoni_agent::trace_filters::TOOL],
-            "the list's question offers its own tool alone"
-        );
-        Ok(ModelTurn {
-            text: if self.input.is_none() {
-                "no".into()
-            } else {
-                String::new()
-            },
-            tool_calls: self
-                .input
-                .iter()
-                .map(|input| ToolCall {
-                    id: "call_1".into(),
-                    name: telmoni_agent::trace_filters::TOOL.into(),
-                    input: input.clone(),
-                })
-                .collect(),
-            ..ModelTurn::default()
-        })
-    }
-}
-
-/// Telemetry whose window holds `filters`, and whose check leaves out an
-/// agent named `ghost`.
-struct Window {
-    filters: Vec<FilterValues>,
-}
-
-#[async_trait]
-impl Telemetry for Window {
-    async fn purge_organization(&self, _: &OrganizationId) -> Result<u64, TelmoniError> {
-        Ok(0)
-    }
-    async fn purge_project(&self, _: &OrganizationId, _: &ProjectId) -> Result<u64, TelmoniError> {
-        Ok(0)
-    }
-    async fn move_project(&self, _: &ProjectId, _: &OrganizationId) -> Result<(), TelmoniError> {
-        Ok(())
-    }
-    async fn drop_model_connections(&self, _: &ProjectId) -> Result<(), TelmoniError> {
-        Ok(())
-    }
-    async fn trace_vocabulary(
-        &self,
-        _: &Acting,
-        days: u16,
-    ) -> Result<TraceVocabulary, TelmoniError> {
-        Ok(TraceVocabulary {
-            days,
-            max_days: 30,
-            filters: self.filters.clone(),
-        })
-    }
-    async fn checked_trace_view(
-        &self,
-        _: &Acting,
-        mut query: serde_json::Value,
-        _: &TraceVocabulary,
-    ) -> Result<CheckedTraceView, TelmoniError> {
-        if query.get("sort").is_some_and(|sort| sort == "nonsense") {
-            return Err(TelmoniError::BadRequest("a view's sort is none".into()));
-        }
-        let mut dropped = Vec::new();
-        if let Some(agents) = query.get_mut("agent").and_then(|a| a.as_array_mut()) {
-            agents.retain(|agent| {
-                let ghost = agent == "ghost";
-                if ghost {
-                    dropped.push(DroppedValue {
-                        filter: "agent".into(),
-                        value: "ghost".into(),
-                    });
-                }
-                !ghost
-            });
-        }
-        Ok(CheckedTraceView { query, dropped })
-    }
-}
-
-fn asking_the_list(
-    pool: &PgPool,
-    input: Option<serde_json::Value>,
-    filters: Vec<FilterValues>,
-) -> (Arc<AppState>, Arc<Filters>) {
-    let model = Arc::new(Filters {
-        input,
-        calls: AtomicUsize::new(0),
-    });
-    let mut state = state_with(
-        pool,
-        Arc::new(SameVector(AtomicUsize::new(0))),
-        Arc::new(OneAsker),
-    );
-    let live = state.live.take().unwrap();
-    state.live = Some(Arc::new(Live {
-        model: model.clone(),
-        model_config: live.model_config.clone(),
-        embedder: live.embedder.clone(),
-        reranker: None,
-    }));
-    state.telemetry = Arc::new(Window { filters });
-    (Arc::new(state), model)
-}
-
-async fn ask_the_list(
-    state: &Arc<AppState>,
-    sentence: &str,
-) -> Result<serde_json::Value, TelmoniError> {
-    telmoni_agent::handler::post_trace_filters(
-        axum::extract::State(state.clone()),
-        HeaderMap::new(),
-        telmoni_shared::extract::Json(
-            serde_json::from_value(serde_json::json!({ "sentence": sentence, "days": 7 })).unwrap(),
-        ),
-    )
-    .await
-    .map(|answer| serde_json::to_value(answer.0).unwrap())
-}
-
-fn agents() -> Vec<FilterValues> {
-    vec![FilterValues {
-        filter: "agent".into(),
-        values: vec!["billing".into(), "support".into()],
-        more: false,
-    }]
-}
-
-/// A sentence becomes the list's query, the window's own where it names
-/// none, what the window holds no trace of named apart; it is kept nowhere,
-/// and counts once in the hour and once in the plan's month.
-#[sqlx::test]
-async fn a_sentence_asked_of_the_list_becomes_its_query_and_one_question(pool: PgPool) {
-    let (state, model) = asking_the_list(
-        &pool,
-        Some(serde_json::json!({
-            "agent": ["billing", "ghost"],
-            "status": ["error"],
-            "unmet": "slower than five seconds",
-        })),
-        agents(),
-    );
-    let mut state = Arc::into_inner(state).unwrap();
-    state.entitlements = Arc::new(OneQuestion);
-    let state = Arc::new(state);
-
-    let answer = ask_the_list(&state, "billing and ghost errors slower than 5s")
-        .await
-        .expect("an answer");
-    assert_eq!(
-        answer,
-        serde_json::json!({
-            "query": { "agent": ["billing"], "status": ["error"], "days": 7 },
-            "unmet": "slower than five seconds",
-            "dropped": [{ "filter": "agent", "value": "ghost" }],
-        })
-    );
-    assert_eq!(model.calls.load(Ordering::SeqCst), 1, "one call");
-    assert_eq!(
-        count(
-            &pool,
-            "SELECT count(*) FROM agent.list_questions WHERE user_id = 'user_ask'"
-        )
-        .await,
-        1
-    );
-    assert_eq!(
-        count(&pool, "SELECT count(*) FROM agent.messages").await
-            + count(&pool, "SELECT count(*) FROM agent.conversations").await,
-        0,
-        "no conversation keeps it"
-    );
-    let refused = ask_the_list(&state, "errors")
-        .await
-        .expect_err("the month held one")
-        .to_problem_details();
-    assert_eq!(
-        (refused.status, refused.type_uri.as_str()),
-        (402, "/errors/plan/limit-reached")
-    );
-    assert_eq!(
-        model.calls.load(Ordering::SeqCst),
-        1,
-        "a refused question asks nothing"
-    );
-}
-
-/// The hour counts a list's questions beside a conversation's.
-#[sqlx::test]
-async fn the_hour_counts_the_lists_questions_with_the_conversations(pool: PgPool) {
-    let (state, _) = asking_the_list(&pool, Some(serde_json::json!({})), agents());
-    let mut state = Arc::into_inner(state).unwrap();
-    state.config.messages_per_hour = 1;
-    let state = Arc::new(state);
-    ask_the_list(&state, "everything")
-        .await
-        .expect("the hour's one");
-    let refused = telmoni_agent::handler::post_turn(
-        axum::extract::State(state.clone()),
-        HeaderMap::new(),
-        telmoni_shared::extract::Json(
-            serde_json::from_value(serde_json::json!({ "message": "how are my runs?" }))
-                .expect("a turn"),
-        ),
-    )
-    .await
-    .expect_err("the hour is spent")
-    .to_problem_details();
-    assert_eq!(refused.status, 429);
-    sqlx::query("UPDATE agent.list_questions SET created_at = now() - interval '2 hours'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    retention::sweep_once(&state).await.unwrap();
-    assert_eq!(
-        count(&pool, "SELECT count(*) FROM agent.list_questions").await,
-        0,
-        "retention forgets the hour once it has passed"
-    );
-}
-
-/// A window with no trace, or a sentence too long, asks nothing and spends
-/// nothing; an answer that is no view of the list opens nothing, and says so.
-#[sqlx::test]
-async fn a_question_the_list_cannot_answer_opens_nothing(pool: PgPool) {
-    let (empty, model) = asking_the_list(&pool, Some(serde_json::json!({})), Vec::new());
-    let answer = ask_the_list(&empty, "errors").await.expect("an answer");
-    assert_eq!(answer["query"], serde_json::Value::Null);
-    assert_eq!(
-        answer["unmet"],
-        telmoni_agent::trace_filters::EMPTY_WINDOW,
-        "{answer}"
-    );
-    let long = "x".repeat(telmoni_agent::trace_filters::SENTENCE_MAX_CHARS + 1);
-    assert_eq!(
-        ask_the_list(&empty, &long)
-            .await
-            .expect_err("too long")
-            .to_problem_details()
-            .status,
-        400
-    );
-    assert_eq!(model.calls.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        count(&pool, "SELECT count(*) FROM agent.list_questions").await,
-        0
-    );
-
-    for input in [None, Some(serde_json::json!({ "sort": "nonsense" }))] {
-        let (state, model) = asking_the_list(&pool, input, agents());
-        let answer = ask_the_list(&state, "make it pretty")
-            .await
-            .expect("an answer");
-        assert_eq!(answer["query"], serde_json::Value::Null, "{answer}");
-        assert_eq!(answer["unmet"], telmoni_agent::trace_filters::NOT_READ);
-        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
-    }
-    assert_eq!(
-        count(&pool, "SELECT count(*) FROM agent.list_questions").await,
-        2,
-        "a question the model answered was spent"
-    );
 }

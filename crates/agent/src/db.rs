@@ -695,9 +695,8 @@ pub async fn reembed(
 
 // ── Conversations ────────────────────────────────────────────────────────────
 
-/// A person's questions in the last hour, those of a conversation and those
-/// asked of the trace list, and when the oldest of them was asked — which is
-/// when the window next has room.
+/// A person's questions in the last hour, and when the oldest of them was
+/// asked — which is when the window next has room.
 ///
 /// ⚠ `role = 'user'` stays a literal: it is `messages_rate_idx`'s predicate,
 /// and a bound `$n` in a generic plan cannot be proved to match it, so the
@@ -715,32 +714,12 @@ pub async fn recent_questions<B: AuthorBinding>(
         .execute(tx.conn())
         .await?;
     sqlx::query_as(
-        "SELECT count(*), min(created_at) FROM (
-             SELECT created_at FROM agent.messages
-              WHERE user_id = $1 AND role = 'user' AND created_at > now() - interval '1 hour'
-             UNION ALL
-             SELECT created_at FROM agent.list_questions
-              WHERE user_id = $1 AND created_at > now() - interval '1 hour'
-         ) AS asked",
+        "SELECT count(*), min(created_at) FROM agent.messages
+          WHERE user_id = $1 AND role = 'user' AND created_at > now() - interval '1 hour'",
     )
     .bind(user_id)
     .fetch_one(tx.conn())
     .await
-}
-
-/// A question asked of the trace list, counted in the asker's hour; the
-/// sentence is not kept.
-pub async fn insert_list_question<B: AuthorBinding>(
-    tx: &mut Scoped<'_, B>,
-    organization_id: &OrganizationId,
-    user_id: &UserId,
-) -> sqlx::Result<()> {
-    sqlx::query("INSERT INTO agent.list_questions (organization_id, user_id) VALUES ($1, $2)")
-        .bind(organization_id)
-        .bind(user_id)
-        .execute(tx.conn())
-        .await
-        .map(|_| ())
 }
 
 /// How many questions the organization's people have asked in the month
@@ -1147,18 +1126,6 @@ pub async fn sweep_conversations(
     .rows_affected())
 }
 
-/// Every list question past the hour it was counted in, forgotten.
-pub async fn forget_list_questions(
-    tx: &mut Scoped<'_, Maintenance<AgentLane>>,
-) -> sqlx::Result<u64> {
-    Ok(sqlx::query(
-        "DELETE FROM agent.list_questions WHERE created_at <= now() - interval '1 hour'",
-    )
-    .execute(tx.conn())
-    .await?
-    .rows_affected())
-}
-
 /// Every month's count of questions begun more than `days` ago, forgotten.
 pub async fn forget_months(
     tx: &mut Scoped<'_, Maintenance<AgentLane>>,
@@ -1312,8 +1279,8 @@ pub async fn close_erasure(
     Ok(())
 }
 
-/// Everything held of one person: their conversations, the times they asked
-/// the trace list, and every passage that is theirs, is about them, or quotes them. Behind `fence`, each
+/// Everything held of one person: their conversations and every passage
+/// that is theirs, is about them, or quotes them. Behind `fence`, each
 /// statement in a transaction of its own — the reads of whole tables in
 /// batches of rows — so none holds its rows locked, or runs, long: the fence
 /// stands across all of them, put down again as each commits. Answers how
@@ -1353,7 +1320,6 @@ pub async fn erase_person(
     let mut gone = 0u64;
     for sql in [
         "DELETE FROM agent.conversations WHERE user_id = $1 RETURNING organization_id",
-        "DELETE FROM agent.list_questions WHERE user_id = $1 RETURNING organization_id",
         "DELETE FROM agent.chunks WHERE user_id = $1 OR subject_user_id = $1
          RETURNING organization_id",
     ] {
@@ -1650,8 +1616,6 @@ pub async fn purge_organization(
         "DELETE FROM agent.questions_asked
           WHERE (organization_id, month_start) IN (SELECT organization_id, month_start
               FROM agent.questions_asked WHERE organization_id = $1 LIMIT $2)",
-        "DELETE FROM agent.list_questions
-          WHERE id IN (SELECT id FROM agent.list_questions WHERE organization_id = $1 LIMIT $2)",
     ] {
         gone += sqlx::query(sql)
             .bind(organization_id)

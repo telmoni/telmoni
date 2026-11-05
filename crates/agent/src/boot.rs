@@ -7,7 +7,7 @@ use std::sync::Arc;
 use telmoni::Telmoni;
 use telmoni_shared::heartbeat::Heartbeats;
 use telmoni_shared::middleware::service_auth::ServiceSecrets;
-use telmoni_shared::seam::{Auth, Entitlements, Notifications, Telemetry};
+use telmoni_shared::seam::{Auth, Entitlements, Notifications};
 
 use crate::config::{Config, EMBEDDING_DIMENSIONS};
 use crate::db::AgentLane;
@@ -38,7 +38,6 @@ pub fn state(
     service_secrets: ServiceSecrets,
     auth: Arc<dyn Auth>,
     notifications: Arc<dyn Notifications>,
-    telemetry: Arc<dyn Telemetry>,
     entitlements: Arc<dyn Entitlements>,
 ) -> anyhow::Result<AppState> {
     let live = match &config.model {
@@ -73,7 +72,6 @@ pub fn state(
         service_secrets,
         auth,
         notifications,
-        telemetry,
         entitlements,
         live,
         telmoni,

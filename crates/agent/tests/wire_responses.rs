@@ -10,9 +10,8 @@ use serde_json::json;
 use uuid::Uuid;
 
 use telmoni_agent::db::{ConversationSummary, MessageRole, StoredMessage};
-use telmoni_agent::handler::{Conversation, ConversationList, ListAnswer, Status, TurnEvent};
+use telmoni_agent::handler::{Conversation, ConversationList, Status, TurnEvent};
 use telmoni_agent::tools::{Citation, Tool};
-use telmoni_shared::seam::DroppedValue;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{ProblemDetails, ProjectId};
 
@@ -126,27 +125,4 @@ fn a_turn_streams_as_the_console_reads() {
         })
         .collect();
     pin("turn", &frames);
-}
-
-/// A sentence asked of the trace list: the view's query it opens on, the
-/// note of what the filters could not say, and a value the window lacks.
-#[test]
-fn a_list_question_answers_as_the_console_reads() {
-    pin(
-        "trace-filters",
-        &ListAnswer {
-            query: Some(json!({
-                "agent": ["support"],
-                "status": ["error"],
-                "sort": "duration",
-                "dir": "desc",
-                "days": 7,
-            })),
-            unmet: Some("slower than five seconds".into()),
-            dropped: vec![DroppedValue {
-                filter: "model".into(),
-                value: "gpt-9".into(),
-            }],
-        },
-    );
 }

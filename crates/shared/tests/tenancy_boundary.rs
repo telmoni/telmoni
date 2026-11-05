@@ -363,9 +363,6 @@ const PERSON_IN_TENANT_TABLES: &[&str] = &[
     // organization. Every answer saved there reads whether one fell inside
     // its turn; the person is an id, and no lane serves the row.
     "agent.erasures",
-    // When a person asked the trace list a sentence, for the hourly cap:
-    // `tenant_isolation` compares `user_id` as well, so it is theirs alone.
-    "agent.list_questions",
 ];
 
 /// ⚠ **A table keyed on both a person and a tenant is isolated only as far as
