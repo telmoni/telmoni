@@ -1544,7 +1544,7 @@ mod tests {
         let too_many: Vec<(String, String)> = (0..=FILTER_VALUES_MAX)
             .map(|i| ("agent".to_owned(), format!("agent-{i}")))
             .collect();
-        let refusals: Vec<TelmoniError> = [
+        let answers = [
             read(Reading::List, &[("status", "maybe<script>")])
                 .and_then(|q| q.filter().map(|_| ())),
             read(Reading::List, &[("sort", "price")]).and_then(|q| q.sort().map(|_| ())),
@@ -1586,11 +1586,10 @@ mod tests {
             )
             .and_then(|q| q.filter().map(|_| ())),
             TraceQuery::read(too_many, Reading::List).and_then(|q| q.filter().map(|_| ())),
-        ]
-        .into_iter()
-        .filter_map(Result::err)
-        .collect();
-        assert_eq!(refusals.len(), 20, "every query above is refused");
+        ];
+        let asked = answers.len();
+        let refusals: Vec<TelmoniError> = answers.into_iter().filter_map(Result::err).collect();
+        assert_eq!(refusals.len(), asked, "every query above is refused");
         for (filter, value) in [
             ("agent", "a".repeat(AGENT_MAX)),
             ("tool", "t".repeat(NAME_MAX)),
