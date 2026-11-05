@@ -93,9 +93,10 @@ for, never a member of your organization. Name each when you open a run —
 `session_id` and `user_id` in the [SDKs](/docs/api/sdks) (`sessionId` and
 `userId` in TypeScript, `SessionID` and `UserID` in Go), or
 `gen_ai.conversation.id` and `user.id` on the span — and every span inside
-the run carries them. A user's id is stored hashed under the project's own
-key, so no page names anybody by it; a project admin erases one by the id your
-app sends, on the project's **Settings** page
+the run carries them. A user's id and a session's are each stored hashed
+under the project's own key, so no page names anybody by one, even a session
+id built from an email or an account number; a project admin erases a user by
+the id your app sends, on the project's **Settings** page
 ([Data deletion](/docs/workspace/data-deletion#deleting-a-trace-or-an-end-user)).
 
 **Group by**, beside **Table** and **Chart**, lays the list out by session or

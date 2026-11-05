@@ -3275,15 +3275,36 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
         let answer = post("POST", scores.clone()).await.expect("an answer");
         assert_eq!(answer.status(), StatusCode::NO_CONTENT);
     }
+    // The session is named as sent and kept as its spans keep it, hashed, so
+    // it is read by the hash and by the id as sent finds nothing.
+    let session = telmoni_telemetry::hashing::storage_for_project(&door.state, &door.project)
+        .await
+        .expect("the project's key")
+        .store("conv-1");
     let (status, read) = door
         .lane(
             "GET",
-            &format!("/scores?run_id={RUN}&session_id=conv-1"),
+            &format!("/scores?run_id={RUN}&session_id={session}"),
             "admin-1",
             None,
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{read}");
+    let (status, as_sent) = door
+        .lane(
+            "GET",
+            // Another run: a session's score names the nil run, which would match it.
+            &format!("/scores?run_id={}&session_id=conv-1", uuid::Uuid::new_v4()),
+            "admin-1",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{as_sent}");
+    assert_eq!(
+        as_sent["scores"],
+        json!([]),
+        "the session as sent is kept nowhere"
+    );
     let mut got: Vec<(String, String, String, String)> = read["scores"]
         .as_array()
         .expect("scores")
@@ -3490,6 +3511,11 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
             Some(Role::Member),
         );
     door.send(scored_export(RUN)).await;
+    // The session as the console names it: as its spans keep it, hashed.
+    let conv = telmoni_telemetry::hashing::storage_for_project(&door.state, &door.project)
+        .await
+        .expect("the project's key")
+        .store("conv-1");
     let put = |user: &'static str, body: Value| {
         let door = &door;
         async move { door.lane("PUT", "/scores", user, Some(body)).await }
@@ -3506,7 +3532,7 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{span}");
     let (status, session) = put(
         "member-2",
-        json!({ "session_id": "conv-1", "name": "resolved", "data_type": "boolean", "value": 1 }),
+        json!({ "session_id": conv, "name": "resolved", "data_type": "boolean", "value": 1 }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{session}");
@@ -3537,7 +3563,7 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
         let (status, scores) = door
             .lane(
                 "GET",
-                &format!("/scores?run_id={RUN}&session_id=conv-1"),
+                &format!("/scores?run_id={RUN}&session_id={conv}"),
                 "member-1",
                 None,
             )
@@ -3607,9 +3633,10 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
     .expect("the chain");
     assert_eq!(filed.len(), 5, "{filed:?}");
     assert!(
-        filed
-            .iter()
-            .all(|d| d.to_string().find("4.0").is_none() && !d.to_string().contains("conv-1")),
+        filed.iter().all(|d| {
+            let d = d.to_string();
+            d.find("4.0").is_none() && !d.contains("conv-1") && !d.contains(conv.as_str())
+        }),
         "names a score, never its value or a session: {filed:?}"
     );
 }

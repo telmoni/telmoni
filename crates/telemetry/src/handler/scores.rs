@@ -23,6 +23,7 @@ use crate::AppState;
 use crate::contract::SESSION_ID_MAX;
 use crate::handler::chain::{self, Change};
 use crate::handler::traces::read_failed;
+use crate::hashing;
 use crate::scores::{
     COMMENT_MAX, Judgement, RUN_SQL, ScoreRow, TargetKey, VERSION_MAX, api_score_id,
     member_score_id, version_of,
@@ -353,6 +354,12 @@ pub async fn post_scores(
             "a request sends 1 to {SENT_MAX} scores"
         )));
     }
+    // A session is named as its spans store it, hashed under the project's key.
+    let storage = if sent.scores.iter().any(|score| score.session_id.is_some()) {
+        Some(hashing::storage_for(&state, &key).await?)
+    } else {
+        None
+    };
     let now = Utc::now();
     let rows = sent
         .scores
@@ -374,6 +381,10 @@ pub async fn post_scores(
                 )))
             })?;
             let (run_id, span_id, session_id) = target.ids();
+            let session_id = match &storage {
+                Some(storage) if !session_id.is_empty() => storage.store(&session_id),
+                _ => session_id,
+            };
             let judgement = judgement.into_inner();
             Ok(ScoreRow {
                 project_id: key.project_id.clone(),

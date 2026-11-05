@@ -348,7 +348,8 @@ scores:
 ```
 
 - What it scores: a `run_id`; a `run_id` and a `span_id`, 16 hex digits; or a
-  `session_id`, up to 200 characters. It is not looked up, since a run's spans
+  `session_id`, up to 200 characters, as the session's spans send it, kept
+  hashed as they are. It is not looked up, since a run's spans
   may land after its score: a score of a run that never arrives shows nowhere,
   and leaves with retention.
 - `name`: 1 to 64 characters. `data_type`: `number`, with a finite `value`,

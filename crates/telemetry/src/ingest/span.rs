@@ -33,8 +33,9 @@ pub struct Context<'a> {
     pub resource: &'a [(String, String)],
     /// The inventory rows the resource's attributes fall under.
     pub resource_sent: &'a [&'static str],
-    /// What a `user_id` is stored as: the project's own hash of it.
-    pub store_user_id: &'a dyn Fn(&str) -> String,
+    /// What a `user_id` or a `session_id` is stored as: the project's own
+    /// hash of it, so an id built from an email is never kept as sent.
+    pub store_id: &'a dyn Fn(&str) -> String,
     /// Whether the project keeps content: its mode is `on`.
     pub keep_content: bool,
 }
@@ -317,7 +318,11 @@ pub fn map(
     let user_id = fields
         .user_id
         .as_deref()
-        .map_or_else(String::new, context.store_user_id);
+        .map_or_else(String::new, context.store_id);
+    let session_id = fields
+        .session_id
+        .as_deref()
+        .map_or_else(String::new, context.store_id);
 
     let mut row = SpanRow {
         project_id: context.project_id.clone(),
@@ -346,7 +351,7 @@ pub fn map(
         cost: fields.cost,
         time_to_first_token: fields.time_to_first_token,
         user_id,
-        session_id: fields.session_id.unwrap_or_default(),
+        session_id,
         environment: context.environment.to_owned(),
         release: context.release.to_owned(),
         tags: fields.tags,
@@ -946,7 +951,7 @@ mod tests {
             release: "",
             resource,
             resource_sent: &[],
-            store_user_id: store,
+            store_id: store,
             keep_content: false,
         }
     }
@@ -1024,7 +1029,10 @@ mod tests {
         assert_eq!(row.time_to_first_token, Some(0.35));
         assert_eq!(row.status, SpanStatus::Error);
         assert_eq!(row.user_id, "h(acme-42)", "stored as the project hashes it");
-        assert_eq!(row.session_id, "7", "a scalar reads as text");
+        assert_eq!(
+            row.session_id, "h(7)",
+            "a scalar reads as text, stored as the project hashes it"
+        );
         assert_eq!(row.tags, [("team".to_owned(), "search".to_owned())]);
         assert_eq!(
             row.attributes,

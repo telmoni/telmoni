@@ -82,7 +82,7 @@ commas, a key they keep for it alone. It is kept as any tag is, and so are the
 | `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cost` | a model call | the column `cost` | any | a number, 0 or more: what the call cost in US dollars, as reported; a call without one is [priced by its tokens](/docs/api/ingest#what-a-call-cost) |
 | `gen_ai.response.time_to_first_chunk` | a model call | the column `time_to_first_token` | any | a number of seconds, 0 or more: from the call's request to its answer's first chunk |
-| `gen_ai.conversation.id` | any span | the column `session_id` | any | 1 to 200 characters, kept as sent |
+| `gen_ai.conversation.id` | any span | the column `session_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 200 characters |
 | `deployment.environment.name` | the resource | the column `environment`, on every span of the export | any | up to 128 characters, as sent: `production`, `staging`; longer, read as none |
 | `service.version` | the resource | the column `release`, on every span of the export | any | up to 128 characters, as sent: a version or a commit; longer, read as none |
 

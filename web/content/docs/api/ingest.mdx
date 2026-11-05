@@ -95,7 +95,7 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `cost` | `gen_ai.usage.cost` | a number, 0 or more: what the call cost in US dollars, as reported; empty where none was ([below](#what-a-call-cost)) |
 | `time_to_first_token` | `gen_ai.response.time_to_first_chunk` | a number of seconds, 0 or more: from the call's request to its answer's first chunk; empty where none was |
 | `user_id` | `user.id` | 1 to 128 characters; stored as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex, so no stored id names a person |
-| `session_id` | `gen_ai.conversation.id` | 1 to 200 characters, kept as sent |
+| `session_id` | `gen_ai.conversation.id` | 1 to 200 characters; stored as its HMAC-SHA-256 under the project's key, as `user_id` is, so a session id built from an email or an account number is never kept as sent |
 | `environment`, `release` | the resource's `deployment.environment.name` and `service.version`, on every span of the export | up to 128 characters each, as sent; empty where the resource names none, or past the cap |
 | `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values (below) |
 | `sample_rate` | a plan's sampling, [past its capacity](#what-is-dropped-at-the-door) | a tenth, on every span of a run kept whole; empty on every other span |

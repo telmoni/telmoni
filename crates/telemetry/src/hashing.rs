@@ -1,6 +1,6 @@
-//! What a `user_id` is stored as: its HMAC-SHA-256 under a key of the
-//! project's own, the first 16 bytes in hex, unless the project keeps it
-//! plain. The key is made with the project's first export, sealed under
+//! What a `user_id` and a `session_id` are stored as: each its HMAC-SHA-256
+//! under a key of the project's own, the first 16 bytes in hex. The key is
+//! made with the project's first export, sealed under
 //! `TELEMETRY_KEK` as a connector's grant is under `CONNECTOR_KEK`
 //! (`telmoni_shared::envelope`), and held in memory once opened, so the key
 //! service is asked once per project per process.
@@ -25,8 +25,8 @@ use crate::handler::chain;
 /// users of one project share in practice and nobody reverses.
 pub const HASH_BYTES: usize = 16;
 
-/// How a project stores the user ids its spans carry: hashed under the
-/// project's own key, always.
+/// How a project stores the user and session ids its spans carry: hashed
+/// under the project's own key, always.
 #[derive(Clone)]
 pub struct UserIdStorage(Arc<HmacKey>);
 

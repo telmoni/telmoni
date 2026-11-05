@@ -56,7 +56,7 @@ pub struct SenderClock {
 }
 
 /// Every span of `request`, read as the key's `project_id`'s, received at
-/// `received_at`, each `user_id` stored as `store_user_id` says, its content
+/// `received_at`, each `user_id` and `session_id` stored as `store_id` says, its content
 /// kept where `keep_content`; `sender` is the sender's clock, where its export
 /// names it.
 ///
@@ -69,7 +69,7 @@ pub fn read(
     project_id: &ProjectId,
     received_at: DateTime<Utc>,
     sender: Option<SenderClock>,
-    store_user_id: &dyn Fn(&str) -> String,
+    store_id: &dyn Fn(&str) -> String,
     keep_content: bool,
 ) -> Result<Batch, BatchError> {
     let count: usize = request
@@ -102,7 +102,7 @@ pub fn read(
                 release: &resource.release,
                 resource: &resource.attributes,
                 resource_sent: &resource.sent,
-                store_user_id,
+                store_id,
                 keep_content,
             };
             for one in &scope_spans.spans {

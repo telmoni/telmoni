@@ -170,13 +170,16 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(run["agent"], "nightly-triage");
     assert_eq!(run["name"], "nightly-triage");
     assert_eq!(run["status"], "ok");
-    assert_eq!(run["session_id"], session);
-    // ⚠ The user id is hashed at the door under the project's own key, never
-    // stored as sent.
+    // ⚠ The user's and the session's ids are hashed at the door under the
+    // project's own key, never stored as sent.
     let user = run["user_id"].as_str().expect("a user");
     assert_eq!(user.len(), HASH_BYTES * 2);
     assert!(user.bytes().all(|b| b.is_ascii_hexdigit()));
     assert_ne!(user, "user_42");
+    let stored_session = run["session_id"].as_str().expect("a session");
+    assert_eq!(stored_session.len(), HASH_BYTES * 2);
+    assert!(stored_session.bytes().all(|b| b.is_ascii_hexdigit()));
+    assert_ne!(stored_session, session);
     assert_eq!(run["tags"], serde_json::json!({ "asked_about": "project" }));
     let first = &spans[1];
     assert_eq!(first["model"], "claude-sonnet-5-5");
@@ -223,15 +226,16 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(trace["output_tokens"], 140);
     assert_eq!(trace["ended"], true);
     assert_eq!(trace["user_id"], user);
-    assert_eq!(trace["session_id"], session);
+    assert_eq!(trace["session_id"], stored_session);
     assert_eq!(trace["environments"], serde_json::json!(["staging"]));
     assert_eq!(trace["releases"], serde_json::json!(["2026.10.18"]));
 
-    // The record's score rode on the run's span; the two sent after it, to `/v1/scores`.
+    // The record's score rode on the run's span; the two sent after it, to
+    // `/v1/scores`, the session's by its id as sent, found by the id as stored.
     let response = app
         .clone()
         .oneshot(request(format!(
-            "/internal/v1/telemetry/scores?run_id={run_id}&session_id={session}"
+            "/internal/v1/telemetry/scores?run_id={run_id}&session_id={stored_session}"
         )))
         .await
         .expect("the router answers");

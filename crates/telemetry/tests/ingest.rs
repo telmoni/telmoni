@@ -25,10 +25,12 @@ use sqlx::PgPool;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tower::ServiceExt;
 
-use common::{AuthStub, clickhouse_or_skip};
+use chrono::Utc;
+use common::{AuthStub, SECRET, clickhouse_or_skip};
+use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::seam::{Entitlements, NoLimits, Telemetry as _};
 use telmoni_shared::test_util::captured_logs;
-use telmoni_shared::{ApiKeyScope, OrganizationId, ProjectId};
+use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role};
 use telmoni_telemetry::contract;
 use telmoni_telemetry::seam::TelemetrySeam;
 use telmoni_telemetry::store::{Projects, Store};
@@ -279,6 +281,168 @@ async fn an_export_is_kept_its_content_dropped_and_its_user_hashed(pool: PgPool)
     .await
     .expect("the settings row the first export files");
     assert!(sealed, "the project's key is made and sealed with its row");
+}
+
+/// A session's id is kept as a user's is, hashed under the project's key: an
+/// email sent as one is stored nowhere, and its runs still group and filter
+/// by the hash, which the id as sent never matches.
+#[sqlx::test]
+async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_group(pool: PgPool) {
+    const EMAIL: &str = "dana.whitfield@example.com";
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    auth.seat(
+        "user_member",
+        &organization,
+        &project,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    );
+    let app = lanes(common::state_with_stores_under(
+        &pool,
+        auth,
+        Arc::new(NoLimits),
+    ));
+    let started = Utc::now() - chrono::Duration::minutes(5);
+    let nanos = |at: chrono::DateTime<Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
+    let export = |run: &str, trace: &str, session: &str| {
+        json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
+            "traceId": trace, "spanId": "00f067aa0ba902b7", "name": "triage", "kind": 1,
+            "startTimeUnixNano": nanos(started),
+            "endTimeUnixNano": nanos(started + chrono::Duration::seconds(2)),
+            "attributes": [
+                { "key": contract::RUN_ID, "value": { "stringValue": run } },
+                { "key": contract::AGENT, "value": { "stringValue": "triage" } },
+                { "key": contract::OPERATION, "value": { "stringValue": "invoke_agent" } },
+                { "key": contract::SESSION_ID, "value": { "stringValue": session } }
+            ]
+        }]}]}]})
+        .to_string()
+    };
+    let runs = [
+        (
+            "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f11",
+            "4bf92f3577b34da6a3ce929d0e0e4711",
+            EMAIL,
+        ),
+        (
+            "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f12",
+            "4bf92f3577b34da6a3ce929d0e0e4712",
+            EMAIL,
+        ),
+        (
+            "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f13",
+            "4bf92f3577b34da6a3ce929d0e0e4713",
+            "another-session",
+        ),
+    ];
+    for (run, trace, session) in runs {
+        let answer = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(LANE)
+                    .header(header::AUTHORIZATION, format!("Bearer {INGEST_KEY}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(export(run, trace, session)))
+                    .expect("a request"),
+            )
+            .await
+            .expect("an answer");
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body = answer
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        assert!(
+            !String::from_utf8_lossy(&body).contains(EMAIL),
+            "the answer never echoes it"
+        );
+    }
+
+    let only = Projects::one(project.clone());
+    let rows: Vec<(String, String)> = ch
+        .store
+        .read(
+            &only,
+            "SELECT toString(run_id), session_id FROM telemetry.spans \
+             WHERE project_id IN {projects:Array(String)} ORDER BY run_id",
+        )
+        .fetch_all()
+        .await
+        .expect("the rows");
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    for (_, session) in &rows {
+        assert_eq!(session.len(), 32, "16 bytes of HMAC in hex: {session}");
+        assert!(session.bytes().all(|b| b.is_ascii_hexdigit()));
+    }
+    assert_eq!(rows[0].1, rows[1].1, "the same session hashes the same");
+    assert_ne!(rows[0].1, rows[2].1, "another session hashes apart");
+    let anywhere: u64 = ch
+        .store
+        .read(
+            &only,
+            "SELECT count() FROM telemetry.spans WHERE project_id IN {projects:Array(String)} \
+             AND (position(session_id, {email:String}) > 0 OR position(name, {email:String}) > 0 \
+             OR position(user_id, {email:String}) > 0 \
+             OR position(toJSONString(attributes), {email:String}) > 0 \
+             OR position(toJSONString(tags), {email:String}) > 0)",
+        )
+        .param("email", EMAIL)
+        .fetch_one()
+        .await
+        .expect("the count");
+    assert_eq!(anywhere, 0, "the email is kept nowhere a span holds text");
+
+    // Runs, as the console reads them: the hash groups the session's two, and
+    // the id as sent finds none.
+    let list = |session: &str| {
+        let app = app.clone();
+        let (organization, project) = (organization.clone(), project.clone());
+        let session = session.to_owned();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri(format!("/internal/v1/telemetry/traces?session={session}"))
+                        .header(SERVICE_SECRET_HEADER, SECRET)
+                        .header(header::AUTHORIZATION, "Bearer tok_user_member")
+                        .header("x-organization-id", organization.as_str())
+                        .header("x-project-id", project.as_str())
+                        .body(Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("an answer");
+            assert_eq!(response.status(), StatusCode::OK);
+            json_body(
+                &response
+                    .into_body()
+                    .collect()
+                    .await
+                    .expect("a body")
+                    .to_bytes(),
+            )
+        }
+    };
+    let grouped = list(&rows[0].1).await;
+    let mut listed: Vec<&str> = grouped["traces"]
+        .as_array()
+        .expect("traces")
+        .iter()
+        .map(|trace| trace["run_id"].as_str().expect("a run"))
+        .collect();
+    listed.sort_unstable();
+    assert_eq!(listed, [runs[0].0, runs[1].0], "{grouped}");
+    assert_eq!(list(EMAIL).await["total"], 0);
 }
 
 #[sqlx::test]

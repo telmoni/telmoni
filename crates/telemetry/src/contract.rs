@@ -687,9 +687,10 @@ pub const INVENTORY: &[InventoryRow] = &[
     row(
         SESSION_ID,
         ReadOn::AnySpan,
-        "the column session_id",
+        "the column session_id, as its HMAC-SHA-256 under a key of the project's own, the \
+         first 16 bytes in hex",
         Needs::AnyMode,
-        "1 to 200 characters, kept as sent",
+        "1 to 200 characters",
     ),
     row(
         ENVIRONMENT,
