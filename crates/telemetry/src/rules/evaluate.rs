@@ -8,7 +8,9 @@
 //! and settled in a transaction of its own with the severity it sets and the
 //! incident that moves with it ([`incidents`]), told once that commits.
 //! Before a pass evaluates an organization's alerts it holds them to its
-//! plan's number, read at most every few minutes an organization.
+//! plan's number, read at most every few minutes an organization, then reads
+//! its batch together ([`Together`]): one query a group of a project's alerts
+//! that share what they read, each alert's value the one it reads alone.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,7 +26,7 @@ use telmoni_shared::AlertCeilings;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::{
     MissingData, OrganizationId, ProjectId, RuleAggregation, RuleBaseline, RuleMeasure, RuleWindow,
-    Severity, TelmoniError,
+    Severity, SpanKind, TelmoniError,
 };
 
 use crate::AppState;
@@ -103,6 +105,74 @@ const TOTALS_SQL: &str = concat!(
     "))"
 );
 
+/// The filters a run's calls take, each alert's by its place `i` in the
+/// `Array(Array(String))` parameters `bind_together` binds: what
+/// [`crate::rules::calls_admitted!`] says of one alert, `has` for `IN`.
+macro_rules! calls_together {
+    () => {
+        concat!(
+            "(empty({agents:Array(Array(String))}[i + 1]) OR has({agents:Array(Array(String))}[i + 1], agent)) ",
+            "AND (empty({models:Array(Array(String))}[i + 1]) OR has({models:Array(Array(String))}[i + 1], model)) ",
+            "AND (empty({providers:Array(Array(String))}[i + 1]) OR has({providers:Array(Array(String))}[i + 1], provider)) ",
+            "AND (empty({environments:Array(Array(String))}[i + 1]) OR has({environments:Array(Array(String))}[i + 1], environment)) ",
+            "AND (empty({releases:Array(Array(String))}[i + 1]) OR has({releases:Array(Array(String))}[i + 1], release)) ",
+        )
+    };
+}
+
+/// [`calls_together!`] and the rest an alert on the totals takes.
+macro_rules! admitted_together {
+    ($tool:literal) => {
+        concat!(
+            calls_together!(),
+            "AND (empty({tools:Array(Array(String))}[i + 1]) OR ", $tool, ") ",
+            "AND (empty({statuses:Array(Array(String))}[i + 1]) OR has({statuses:Array(Array(String))}[i + 1], status)) ",
+        )
+    };
+}
+
+/// Each alert's place in a group read together.
+macro_rules! places {
+    () => {
+        "range(toUInt32(length({agents:Array(Array(String))})))"
+    };
+}
+
+/// [`TOTALS_SQL`] for every alert of a group at once, one project, kind and
+/// window: each row read once and counted for each alert it passes, `i` the
+/// alert's place; one whose window held nothing is left out.
+const TOTALS_TOGETHER_SQL: &str = concat!(
+    "SELECT i, sum(n) AS spans, sum(f) AS failed, sum(d) AS duration_sum, sum(t) AS tokens, ",
+    "CAST(quantilesTDigestMerge(0.5, 0.9, 0.95, 0.99)(q) AS Array(Float64)) AS quantiles ",
+    "FROM (",
+    "SELECT i, sum(spans) AS n, sumIf(spans, status = 'error') AS f, sum(duration_ms_sum) AS d, ",
+    "sum(input_tokens) + sum(output_tokens) AS t, ",
+    "quantilesTDigestMergeState(0.5, 0.9, 0.99)(duration_ms) AS q ",
+    "FROM telemetry.spans_hourly ARRAY JOIN ",
+    places!(),
+    " AS i ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    "AND hour >= {full_from:DateTime('UTC')} AND hour < {full_to:DateTime('UTC')} ",
+    "AND kind = {kind:String} AND ",
+    admitted_together!("has({tools:Array(Array(String))}[i + 1], tool)"),
+    "GROUP BY i ",
+    "UNION ALL ",
+    "SELECT i, count() AS n, countIf(status = 'error') AS f, sum(duration) AS d, ",
+    "sum(input_tokens + output_tokens) AS t, quantilesTDigestState(0.5, 0.9, 0.99)(duration) AS q ",
+    "FROM (SELECT i, status, input_tokens, output_tokens, ",
+    "greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000 AS duration ",
+    "FROM telemetry.spans ARRAY JOIN ",
+    places!(),
+    " AS i ",
+    "WHERE project_id IN {projects:Array(String)} ",
+    "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+    "AND (received_at < {full_from:DateTime('UTC')} OR received_at >= {full_to:DateTime('UTC')}) ",
+    "AND kind = {kind:String} AND ",
+    admitted_together!("(kind = 'tool_call' AND has({tools:Array(Array(String))}[i + 1], name))"),
+    ") GROUP BY i",
+    ") GROUP BY i"
+);
+
 /// A score alert's window: each score of its name once, as its last row in
 /// the window has it, a number's value or a yes or no's 1 or 0, taken back
 /// ones left out. Scores are kept by their id, so the window's are found by
@@ -120,15 +190,20 @@ const SCORES_SQL: &str = concat!(
 );
 
 /// The runs any of whose spans landed in the window, as the alert's filters
-/// admit them: agent, environment and release, which all of a run's spans carry.
+/// admit them: agent, environment and release, which all of a run's spans
+/// carry; given `""`, every run of the window, as a group read together
+/// admits each alert's itself.
 macro_rules! window_runs {
     () => {
+        $crate::rules::evaluate::window_runs!($crate::rules::calls_admitted!())
+    };
+    ($($admitted:tt)+) => {
         concat!(
             "run_id IN (SELECT run_id FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} ",
             "AND received_at < {to:DateTime64(6, 'UTC')} ",
-            $crate::rules::calls_admitted!(),
+            $($admitted)+,
             ") "
         )
     };
@@ -138,11 +213,14 @@ macro_rules! window_runs {
 /// began before the window is read whole.
 macro_rules! runs_whole {
     () => {
+        $crate::rules::evaluate::runs_whole!($crate::rules::calls_admitted!())
+    };
+    ($($admitted:tt)+) => {
         concat!(
             "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
             "AND received_at < {to:DateTime64(6, 'UTC')} AND ",
-            $crate::rules::evaluate::window_runs!(),
+            $crate::rules::evaluate::window_runs!($($admitted)+),
             "GROUP BY run_id"
         )
     };
@@ -151,9 +229,12 @@ macro_rules! runs_whole {
 /// Each run of the window, `n` its steps.
 macro_rules! run_steps {
     () => {
+        $crate::rules::evaluate::run_steps!($crate::rules::calls_admitted!())
+    };
+    ($($admitted:tt)+) => {
         concat!(
             "SELECT run_id, countIf(kind = 'step') AS n, max(received_at) AS last ",
-            $crate::rules::evaluate::runs_whole!()
+            $crate::rules::evaluate::runs_whole!($($admitted)+)
         )
     };
 }
@@ -163,6 +244,9 @@ macro_rules! run_steps {
 /// breaking no stretch.
 macro_rules! run_repeats {
     () => {
+        $crate::rules::evaluate::run_repeats!($crate::rules::calls_admitted!())
+    };
+    ($($admitted:tt)+) => {
         concat!(
             "SELECT run_id, any(agent) AS agent, max(received_at) AS last, ",
             "arrayMap(c -> c.3, arraySort(groupArrayIf((started_at, span_id, name), ",
@@ -170,7 +254,7 @@ macro_rules! run_repeats {
             "arraySplit((c, p) -> c != p, calls, arrayPopBack(arrayPushFront(calls, ''))) ",
             "AS stretches, arrayMap(s -> length(s), stretches) AS lengths, ",
             "arrayMax(lengths) AS n, stretches[indexOf(lengths, n)][1] AS tool ",
-            $crate::rules::evaluate::runs_whole!()
+            $crate::rules::evaluate::runs_whole!($($admitted)+)
         )
     };
 }
@@ -179,13 +263,16 @@ macro_rules! run_repeats {
 /// since the window ended: `n` how long, in seconds.
 macro_rules! stalled_runs {
     () => {
+        $crate::rules::evaluate::stalled_runs!($crate::rules::calls_admitted!())
+    };
+    ($($admitted:tt)+) => {
         concat!(
             "SELECT run_id, max(received_at) AS last, ",
             "toUInt64(greatest(dateDiff('second', last, {now:DateTime64(6, 'UTC')}), 0)) AS n ",
             "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
             "AND received_at < {now:DateTime64(6, 'UTC')} AND ",
-            $crate::rules::evaluate::window_runs!(),
+            $crate::rules::evaluate::window_runs!($($admitted)+),
             "GROUP BY run_id ",
             "HAVING countIf(kind = 'run') = 0 AND last < {to:DateTime64(6, 'UTC')}"
         )
@@ -207,6 +294,31 @@ macro_rules! folded_runs {
 const STEPS_SQL: &str = concat!(folded_runs!(), run_steps!(), ")");
 const REPEATS_SQL: &str = concat!(folded_runs!(), run_repeats!(), ")");
 const STALLED_SQL: &str = concat!(folded_runs!(), stalled_runs!(), ")");
+
+/// A read run by run for every alert of a group at once, one project,
+/// measure and window: each run of the window read once, then counted for
+/// each alert one of its spans in the window passes, `i` the alert's place.
+macro_rules! folded_together {
+    ($runs:expr) => {
+        concat!(
+            "SELECT i, count() AS count, avg(n) AS mean, toFloat64(max(n)) AS top, ",
+            "CAST(quantiles(0.5, 0.9, 0.95, 0.99)(n) AS Array(Float64)) AS quantiles ",
+            "FROM (SELECT runs.n AS n, admitted.alerts AS alerts FROM (",
+            $runs,
+            ") AS runs INNER JOIN (SELECT run_id, groupUniqArrayArray(arrayFilter(i -> ",
+            calls_together!(),
+            ", ", places!(), ")) AS alerts FROM telemetry.spans ",
+            "WHERE project_id IN {projects:Array(String)} ",
+            "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
+            "GROUP BY run_id) AS admitted ON runs.run_id = admitted.run_id) ",
+            "ARRAY JOIN alerts AS i GROUP BY i"
+        )
+    };
+}
+
+const STEPS_TOGETHER_SQL: &str = folded_together!(run_steps!(""));
+const REPEATS_TOGETHER_SQL: &str = folded_together!(run_repeats!(""));
+const STALLED_TOGETHER_SQL: &str = folded_together!(stalled_runs!(""));
 
 /// One agent's runs over a window, and those that missed its objective:
 /// failed, or for a latency objective, ran past it.
@@ -487,6 +599,203 @@ pub async fn totals(
     rule.definition.filters.bind(read).fetch_one().await
 }
 
+/// What a pass read together for its batch before evaluating it: each
+/// alert's value at each time its reading asks for, by the alert and the time.
+#[derive(Debug, Default)]
+pub struct Together(HashMap<(Uuid, DateTime<Utc>), Option<f64>>);
+
+/// Alerts one query reads together: those of a project on the totals that
+/// share a kind and a window, or read run by run that share a measure and a
+/// window, at one time.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Group {
+    Totals(ProjectId, SpanKind, RuleWindow, DateTime<Utc>),
+    Runs(ProjectId, RuleMeasure, RuleWindow, DateTime<Utc>),
+}
+
+/// [`Totals`] of the alert at place `i`.
+#[derive(Debug, Row, Deserialize)]
+struct TotalsAt {
+    i: u32,
+    spans: u64,
+    failed: u64,
+    duration_sum: f64,
+    tokens: u64,
+    quantiles: Vec<f64>,
+}
+
+/// [`Folded`] of the alert at place `i`.
+#[derive(Debug, Row, Deserialize)]
+struct FoldedAt {
+    i: u32,
+    count: u64,
+    mean: f64,
+    top: f64,
+    quantiles: Vec<f64>,
+}
+
+impl Together {
+    /// `rules`' values at `now`, read together where they can be: one query a
+    /// group, however many alerts it holds, each alert's filters by its place.
+    /// A score, a cost and an objective are read alone, as is every alert of
+    /// a group ClickHouse does not answer, logged.
+    pub async fn read(state: &AppState, rules: &[&RuleRow], now: DateTime<Utc>) -> Self {
+        let mut groups: HashMap<Group, Vec<&RuleRow>> = HashMap::new();
+        for rule in rules {
+            let definition = &rule.definition;
+            if definition.objective.is_some() {
+                continue;
+            }
+            let mut times = vec![now];
+            if definition.baseline == RuleBaseline::Previous {
+                times.push(
+                    now - TimeDelta::from_std(definition.window.duration()).unwrap_or_default(),
+                );
+            }
+            for at in times {
+                let project = rule.project_id.clone();
+                let group = match definition.measure {
+                    RuleMeasure::Count
+                    | RuleMeasure::Failures
+                    | RuleMeasure::Duration
+                    | RuleMeasure::Tokens => {
+                        Group::Totals(project, definition.kind, definition.window, at)
+                    }
+                    RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled => {
+                        Group::Runs(project, definition.measure, definition.window, at)
+                    }
+                    RuleMeasure::Cost | RuleMeasure::Score | RuleMeasure::Burn => continue,
+                };
+                groups.entry(group).or_default().push(rule);
+            }
+        }
+        let mut together = Self::default();
+        for (group, members) in groups {
+            let at = match &group {
+                Group::Totals(.., at) | Group::Runs(.., at) => *at,
+            };
+            match group_values(state, &group, &members).await {
+                Ok(values) => {
+                    for (rule, value) in members.iter().zip(values) {
+                        together.0.insert((rule.id, at), value);
+                    }
+                }
+                Err(error) => tracing::warn!(
+                    alerts = members.len(),
+                    kind = crate::store::Fault::of(&error).as_str(),
+                    "telemetry: alerts read together could not be; each is read alone"
+                ),
+            }
+        }
+        together
+    }
+
+    /// The value read together for `rule` at `at`, if it was.
+    #[must_use]
+    pub fn of(&self, rule: &RuleRow, at: DateTime<Utc>) -> Option<Option<f64>> {
+        self.0.get(&(rule.id, at)).copied()
+    }
+}
+
+/// `read` bound to each of `members`' filters by its place.
+fn bind_together(read: Read, members: &[&RuleRow]) -> Read {
+    let field = |of: fn(&crate::rules::RuleFilters) -> Vec<String>| -> Vec<Vec<String>> {
+        members
+            .iter()
+            .map(|rule| of(&rule.definition.filters))
+            .collect()
+    };
+    read.param("agents", field(|filters| filters.agent.clone()))
+        .param("models", field(|filters| filters.model.clone()))
+        .param("providers", field(|filters| filters.provider.clone()))
+        .param("environments", field(|filters| filters.environment.clone()))
+        .param("releases", field(|filters| filters.release.clone()))
+        .param("tools", field(|filters| filters.tool.clone()))
+        .param(
+            "statuses",
+            field(|filters| filters.status.iter().map(ToString::to_string).collect()),
+        )
+}
+
+/// Each of `members`' values over `group`'s window, in their order: as
+/// [`totals`] and [`by_run`] read one alone, each alert's own filters and
+/// aggregation.
+async fn group_values(
+    state: &AppState,
+    group: &Group,
+    members: &[&RuleRow],
+) -> clickhouse::error::Result<Vec<Option<f64>>> {
+    match group {
+        Group::Totals(project, kind, window, at) => {
+            let window = Window::of(*at, *window);
+            let read = state
+                .store
+                .read(&Projects::one(project.clone()), TOTALS_TOGETHER_SQL)
+                .param("from", micros(window.from))
+                .param("to", micros(window.to))
+                .param("full_from", seconds(window.full_from))
+                .param("full_to", seconds(window.full_to))
+                .param("kind", kind.to_string());
+            let rows: Vec<TotalsAt> = bind_together(read, members).fetch_all().await?;
+            let mut totals = vec![Totals::default(); members.len()];
+            for row in rows {
+                if let Some(slot) = usize::try_from(row.i).ok().and_then(|i| totals.get_mut(i)) {
+                    *slot = Totals {
+                        spans: row.spans,
+                        failed: row.failed,
+                        duration_sum: row.duration_sum,
+                        tokens: row.tokens,
+                        quantiles: row.quantiles,
+                    };
+                }
+            }
+            Ok(members
+                .iter()
+                .zip(totals)
+                .map(|(rule, totals)| {
+                    totals.value(rule.definition.measure, rule.definition.aggregation)
+                })
+                .collect())
+        }
+        Group::Runs(project, measure, window_kind, at) => {
+            let sql = match measure {
+                RuleMeasure::Steps => STEPS_TOGETHER_SQL,
+                RuleMeasure::Repeats => REPEATS_TOGETHER_SQL,
+                _ => STALLED_TOGETHER_SQL,
+            };
+            let window = Window::of(*at, *window_kind);
+            let runs = if *measure == RuleMeasure::Stalled {
+                Window::ending(window.from, window_kind.duration())
+            } else {
+                window
+            };
+            let read = state
+                .store
+                .read(&Projects::one(project.clone()), sql)
+                .param("from", micros(runs.from))
+                .param("to", micros(runs.to))
+                .param("now", micros(window.to));
+            let rows: Vec<FoldedAt> = bind_together(read, members).fetch_all().await?;
+            let mut folded = vec![Folded::default(); members.len()];
+            for row in rows {
+                if let Some(slot) = usize::try_from(row.i).ok().and_then(|i| folded.get_mut(i)) {
+                    *slot = Folded {
+                        count: row.count,
+                        mean: row.mean,
+                        top: row.top,
+                        quantiles: row.quantiles,
+                    };
+                }
+            }
+            Ok(members
+                .iter()
+                .zip(folded)
+                .map(|(rule, folded)| folded.value(rule.definition.aggregation))
+                .collect())
+        }
+    }
+}
+
 /// What one replica holds of the organizations' plans: when it last held
 /// each to its number.
 #[derive(Default)]
@@ -611,6 +920,14 @@ pub async fn pass_within(state: &AppState, work: Duration) -> Result<u64, Telmon
                 paused.extend(newly_paused(state, &organization_id, &leased).await?);
             }
         }
+        // One moment for the batch, so what its alerts read together is what
+        // each would read alone.
+        let now = Utc::now();
+        let due: Vec<&RuleRow> = leased
+            .iter()
+            .filter(|rule| !paused.contains(&rule.id) && !closing.contains(&rule.organization_id))
+            .collect();
+        let together = Together::read(state, &due, now).await;
         let mut rules = leased.into_iter();
         while let Some(rule) = rules.next() {
             if state.alerts_stopping.asked() || leased_at.elapsed() >= work {
@@ -628,8 +945,8 @@ pub async fn pass_within(state: &AppState, work: Duration) -> Result<u64, Telmon
                 defer(state, &rule, lease_id).await?;
                 continue;
             }
-            let rule = crate::starters::tuned(state, rule, Utc::now()).await;
-            if evaluate(state, &rule, lease_id).await? {
+            let rule = crate::starters::tuned(state, rule, now).await;
+            if evaluate(state, &rule, lease_id, (now, &together)).await? {
                 settled += 1;
             }
         }
@@ -733,7 +1050,21 @@ pub async fn value_of(
     rule: &RuleRow,
     now: DateTime<Utc>,
 ) -> Result<Option<f64>, Unread> {
-    let value = value_at(state, rule, now).await?;
+    value_with(state, rule, now, &Together::default()).await
+}
+
+/// [`value_of`], from what was read `together` where it was.
+///
+/// # Errors
+///
+/// As [`value_of`].
+pub async fn value_with(
+    state: &AppState,
+    rule: &RuleRow,
+    now: DateTime<Utc>,
+    together: &Together,
+) -> Result<Option<f64>, Unread> {
+    let value = value_at(state, rule, now, together).await?;
     if rule.definition.baseline == RuleBaseline::None {
         return Ok(value);
     }
@@ -746,7 +1077,7 @@ pub async fn value_of(
         return Ok(None);
     };
     let length = TimeDelta::from_std(rule.definition.window.duration()).unwrap_or_default();
-    let previous = counted(value_at(state, rule, now - length).await?);
+    let previous = counted(value_at(state, rule, now - length, together).await?);
     Ok(change(value, previous))
 }
 
@@ -778,7 +1109,11 @@ async fn value_at(
     state: &AppState,
     rule: &RuleRow,
     now: DateTime<Utc>,
+    together: &Together,
 ) -> Result<Option<f64>, Unread> {
+    if let Some(value) = together.of(rule, now) {
+        return Ok(value);
+    }
     let by_runs = match rule.definition.measure {
         RuleMeasure::Steps => Some(STEPS_SQL),
         RuleMeasure::Repeats => Some(REPEATS_SQL),
@@ -826,12 +1161,13 @@ async fn reading(
     state: &AppState,
     rule: &RuleRow,
     now: DateTime<Utc>,
+    together: &Together,
 ) -> Result<(Option<f64>, Severity), Unread> {
     if let Some(objective) = &rule.definition.objective {
         let (fast, slow) = burns(state, rule, objective, now).await?;
         return Ok(burned(&rule.definition, fast, slow));
     }
-    let value = value_of(state, rule, now).await?;
+    let value = value_with(state, rule, now, together).await?;
     // A window holding no span, read as 0, is kept and told as the 0 it crossed at.
     let value = value.or((rule.definition.missing_data == MissingData::Zero).then_some(0.0));
     Ok((value, incidents::next_severity(rule, value)))
@@ -840,9 +1176,13 @@ async fn reading(
 /// One alert: its value read and settled. Answers whether it was; one
 /// ClickHouse could not answer for waits for the next pass, logged by the
 /// error's kind alone, since its text can carry ClickHouse's message.
-async fn evaluate(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<bool, TelmoniError> {
-    let now = Utc::now();
-    let (value, next) = match reading(state, rule, now).await {
+async fn evaluate(
+    state: &AppState,
+    rule: &RuleRow,
+    lease_id: Uuid,
+    (now, together): (DateTime<Utc>, &Together),
+) -> Result<bool, TelmoniError> {
+    let (value, next) = match reading(state, rule, now, together).await {
         Ok(read) => read,
         Err(Unread::Db(error)) => return Err(error.into()),
         Err(Unread::Store(error)) => {
