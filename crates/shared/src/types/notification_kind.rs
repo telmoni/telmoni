@@ -29,6 +29,9 @@ pub enum NotificationKind {
     IncidentOpened,
     /// An alert recovered, or a member resolved its incident.
     IncidentResolved,
+    /// A project's first run made its starter alerts, naming those its plan
+    /// had no room for.
+    StarterAlerts,
 }
 
 crate::wire_enum!(NotificationKind {
@@ -39,6 +42,7 @@ crate::wire_enum!(NotificationKind {
     ConnectorDisconnected => "connector_disconnected",
     IncidentOpened => "incident_opened",
     IncidentResolved => "incident_resolved",
+    StarterAlerts => "starter_alerts",
 });
 
 #[cfg(test)]

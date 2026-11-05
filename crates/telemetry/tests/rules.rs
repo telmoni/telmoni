@@ -505,7 +505,7 @@ async fn leased(state: &AppState, id: Uuid) -> (Uuid, RuleRow) {
     let mut tx = maintenance_scope(&state.db, TelemetryLane)
         .await
         .expect("the lane");
-    let rows = rules_db::lease_due(&mut tx, 60, lease_id, 120, 100)
+    let rows = rules_db::lease_due(&mut tx, (60, 300), lease_id, 120, 100)
         .await
         .expect("leased");
     tx.commit().await.expect("commit");

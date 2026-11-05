@@ -2,7 +2,8 @@
 //! usually does, for an alert's threshold to start from: plain percentiles,
 //! from the hourly totals of the last [`HISTORY_DAYS`] whole UTC days, so the
 //! numbers move once a night. Durations are the spans' own percentiles;
-//! tokens and spend, which the totals keep only summed, an hour's.
+//! tokens, spend and the share that failed, which the totals keep only
+//! summed, an hour's.
 
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
-use telmoni_shared::{SpanKind, TelmoniError};
+use telmoni_shared::{ProjectId, SpanKind, TelmoniError};
 
 use crate::AppState;
 use crate::handler::traces::read_failed;
@@ -34,9 +35,11 @@ const HISTORY_SQL: &str = concat!(
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(q) AS Array(Float64)) AS duration_ms, ",
     "CAST(quantiles(0.5, 0.9, 0.99)(t) AS Array(Float64)) AS tokens_hourly, ",
     "CAST(quantiles(0.5, 0.9, 0.99)(t / n) AS Array(Float64)) AS tokens_per_span, ",
-    "CAST(quantiles(0.5, 0.9, 0.99)(s) AS Array(Float64)) AS spend_hourly ",
+    "CAST(quantiles(0.5, 0.9, 0.99)(s) AS Array(Float64)) AS spend_hourly, ",
+    "CAST(quantiles(0.5, 0.9, 0.99)(f / n) AS Array(Float64)) AS failure_share ",
     "FROM (SELECT who.1 AS agent, who.2 AS every, h.kind AS kind, h.hour AS at, ",
-    "sum(h.spans) AS n, sum(h.input_tokens) + sum(h.output_tokens) AS t, sum((",
+    "sum(h.spans) AS n, sumIf(h.spans, h.status = 'error') AS f, ",
+    "sum(h.input_tokens) + sum(h.output_tokens) AS t, sum((",
     crate::spend::rollup_spent_of!(),
     ") / h.sample_rate) AS s, ",
     "quantilesTDigestMergeState(0.5, 0.9, 0.99)(h.duration_ms) AS q ",
@@ -61,6 +64,7 @@ struct HistoryRow {
     tokens_hourly: Vec<f64>,
     tokens_per_span: Vec<f64>,
     spend_hourly: Vec<f64>,
+    failure_share: Vec<f64>,
 }
 
 /// The 50th, 90th and 99th percentiles of one measure.
@@ -100,6 +104,8 @@ pub struct AgentHistory {
     pub tokens_per_span: Percentiles,
     /// What an hour's spans spent, in US dollars, priced as the totals are.
     pub spend_hourly: Percentiles,
+    /// The share of an hour's spans that failed.
+    pub failure_share: Percentiles,
 }
 
 /// What the lane answers: the days read, and each agent's history.
@@ -127,9 +133,23 @@ pub async fn get_history(
     let project_id = &acting
         .require_project(Verb::Read, Resource::Alert)?
         .project_id;
-    let (from, to) = window(Utc::now());
+    Ok(Json(read(&state, project_id, Utc::now()).await?))
+}
+
+/// The project's history at `now`: what the lane answers, and what a
+/// starter alert's threshold is set from ([`crate::starters`]).
+///
+/// # Errors
+///
+/// ClickHouse or Postgres did not answer.
+pub async fn read(
+    state: &AppState,
+    project_id: &ProjectId,
+    now: DateTime<Utc>,
+) -> Result<History, TelmoniError> {
+    let (from, to) = window(now);
     let projects = Projects::one(project_id.clone());
-    let book = crate::spend::book_for_rollups(&state, &projects, from)
+    let book = crate::spend::book_for_rollups(state, &projects, from)
         .await
         .map_err(|unread| match unread {
             crate::spend::Unread::Store(error) => read_failed(error),
@@ -157,10 +177,11 @@ pub async fn get_history(
                 tokens_hourly: Percentiles::of(&row.tokens_hourly),
                 tokens_per_span: Percentiles::of(&row.tokens_per_span),
                 spend_hourly: Percentiles::of(&row.spend_hourly),
+                failure_share: Percentiles::of(&row.failure_share),
             })
         })
         .collect();
-    Ok(Json(History { from, to, agents }))
+    Ok(History { from, to, agents })
 }
 
 #[cfg(test)]

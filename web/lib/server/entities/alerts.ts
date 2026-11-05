@@ -89,6 +89,8 @@ const AlertSchema = z.object({
   severity: z.enum(Severity),
   severity_since: z.string(),
   connectors: z.array(AlertLinkSchema),
+  /** Made by the project's first run rather than a member. */
+  starter: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -128,8 +130,13 @@ const MuteSchema = z.object({
 });
 export type Mute = z.infer<typeof MuteSchema>;
 
-// The three lanes the page reads, each its rows under one key.
-export const AlertListSchema = z.object({ rules: z.array(AlertSchema) });
+// The three lanes the page reads, each its rows under one key; the alerts'
+// beside the starters the plan had no room for, and its sentence on them.
+export const AlertListSchema = z.object({
+  rules: z.array(AlertSchema),
+  starters_withheld: z.array(z.enum(RuleMeasure)),
+  starters_detail: z.string().nullable(),
+});
 export const IncidentListSchema = z.object({ incidents: z.array(IncidentSchema) });
 export const MuteListSchema = z.object({ mutes: z.array(MuteSchema) });
 
@@ -137,6 +144,10 @@ export type AlertsAccess =
   | {
       kind: "ok";
       alerts: Alert[];
+      /** The starters the project's first run found no room for, by measure. */
+      startersWithheld: RuleMeasure[];
+      /** Where any were, the plan's own sentence on what holds more. */
+      startersDetail: string | null;
       incidents: Incident[];
       mutes: Mute[];
       /** When it was read, in epoch milliseconds: the page's now. */
@@ -164,7 +175,7 @@ export type Percentiles = z.infer<typeof PercentilesSchema>;
 
 // What one agent's spans of one kind usually did over the whole days read,
 // or every agent's together where `agent` is none: durations as the spans'
-// own percentiles, tokens and spend an hour's.
+// own percentiles, tokens, spend and the share failed an hour's.
 const AgentHistorySchema = z.object({
   agent: z.string().nullable(),
   kind: z.enum(SpanKind),
@@ -174,6 +185,7 @@ const AgentHistorySchema = z.object({
   tokens_hourly: PercentilesSchema,
   tokens_per_span: PercentilesSchema,
   spend_hourly: PercentilesSchema,
+  failure_share: PercentilesSchema,
 });
 export type AgentHistory = z.infer<typeof AgentHistorySchema>;
 
@@ -233,6 +245,8 @@ export const fetchAlerts = cache(async (projectId: string): Promise<AlertsAccess
   return {
     kind: "ok",
     alerts: alerts.value.rules,
+    startersWithheld: alerts.value.starters_withheld,
+    startersDetail: alerts.value.starters_detail,
     incidents: incidents.value.incidents,
     mutes: mutes.value.mutes,
     at,

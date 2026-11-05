@@ -26,7 +26,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam;
 use telmoni_shared::{
-    AuditAction, AuthError, ProjectId, Severity, TelmoniError, TelmoniResourceKind,
+    AuditAction, AuthError, ProjectId, RuleMeasure, Severity, TelmoniError, TelmoniResourceKind,
 };
 
 use crate::AppState;
@@ -58,6 +58,8 @@ pub struct Alert {
     pub severity_since: DateTime<Utc>,
     /// The connectors its notices go to.
     pub connectors: Vec<AlertLink>,
+    /// Made by the project's first run rather than a member.
+    pub starter: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -100,6 +102,7 @@ impl From<RuleRow> for Alert {
             evaluated_at: row.evaluated_at,
             severity: row.severity,
             severity_since: row.severity_since,
+            starter: row.starter,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }
@@ -111,6 +114,10 @@ impl From<RuleRow> for Alert {
 pub struct AlertList {
     /// The project's alerts, by name.
     pub rules: Vec<Alert>,
+    /// The starter alerts its first run found no room for, by measure.
+    pub starters_withheld: Vec<RuleMeasure>,
+    /// Where any were, the plan's own sentence on what holds more.
+    pub starters_detail: Option<String>,
 }
 
 /// An alert's id from its path: a UUID, or an alert the project does not have.
@@ -148,7 +155,15 @@ pub async fn list_rules(
     let rows = rules::rules(&mut tx, project_id).await?;
     let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
     let links = rules::links(&mut tx, project_id, &ids).await?;
+    let starters_withheld = crate::starters::withheld(&mut tx, project_id).await?;
     tx.commit().await?;
+    let starters_detail = if starters_withheld.is_empty() {
+        None
+    } else {
+        seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id)
+            .await
+            .map(|ceilings| ceilings.detail)
+    };
     let mut linked: HashMap<Uuid, Vec<Link>> = HashMap::with_capacity(rows.len());
     for link in links {
         linked.entry(link.rule_id).or_default().push(link.link());
@@ -175,7 +190,11 @@ pub async fn list_rules(
             Alert::of(row, own, &muted)
         })
         .collect();
-    Ok(Json(AlertList { rules: alerts }))
+    Ok(Json(AlertList {
+        rules: alerts,
+        starters_withheld,
+        starters_detail,
+    }))
 }
 
 /// `GET /internal/v1/telemetry/rules/{id}` — one of the project's alerts.
@@ -252,7 +271,7 @@ async fn save(
         tx,
         project_id,
         &acting.organization_id,
-        Uuid::new_v4(),
+        (Uuid::new_v4(), false),
         rule,
     )
     .await

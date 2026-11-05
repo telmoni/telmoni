@@ -59,8 +59,14 @@ CREATE TABLE telemetry.project_settings (
     -- How long the project's spans and content are kept, in days, where an
     -- owner or admin chose fewer than the longest sold; none for the longest.
     retention_days          SMALLINT,
+    -- When the project's first run made its starter alerts, once: one deleted
+    -- is never made again. Those its plan had no room for, by their measure.
+    starters_made_at        TIMESTAMPTZ,
+    starters_withheld       TEXT[]      NOT NULL DEFAULT '{}',
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT project_settings_content_mode_check CHECK (content_mode IN ('off', 'on')),
+    CONSTRAINT project_settings_starters_withheld_check
+        CHECK (starters_withheld <@ ARRAY['failures', 'repeats', 'stalled']::text[]),
     CONSTRAINT project_settings_retention_days_check CHECK (retention_days BETWEEN 1 AND 360),
     -- The key is there whole or not at all.
     CONSTRAINT project_settings_hashing_key_check CHECK (
@@ -195,6 +201,11 @@ CREATE TABLE telemetry.rules (
     told_to           UUID[]           NOT NULL DEFAULT '{}',
     lease_id          UUID,
     leased_until      TIMESTAMPTZ,
+    -- Made by the project's first run rather than a member (`starters.rs`),
+    -- evaluated every five minutes; `tuned_at` when its threshold was
+    -- settled, by the project's history or a member's edit, whichever came first.
+    starter           BOOLEAN          NOT NULL DEFAULT false,
+    tuned_at          TIMESTAMPTZ,
     created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),

@@ -20,6 +20,7 @@ import {
   offsetWords,
   renotifyWords,
   splitValues,
+  starterWords,
   suggestionFor,
   thresholdWords,
   toldWords,
@@ -72,6 +73,7 @@ const ALERT: Alert = {
       muted: false,
     },
   ],
+  starter: false,
   created_at: "2026-10-25T03:00:00Z",
   updated_at: "2026-10-25T03:00:00Z",
 };
@@ -594,6 +596,15 @@ describe("maintenance windows", () => {
   });
 });
 
+describe("starterWords", () => {
+  it("names the starters in a sentence", () => {
+    expect(starterWords([RuleMeasure.Stalled])).toBe("Stalled runs");
+    expect(starterWords([RuleMeasure.Failures, RuleMeasure.Repeats, RuleMeasure.Stalled])).toBe(
+      "Failing runs, Looping runs and Stalled runs",
+    );
+  });
+});
+
 describe("suggestionFor", () => {
   const percentiles = (p50: number, p90: number, p99: number) => ({ p50, p90, p99 });
   const HISTORY = {
@@ -609,6 +620,7 @@ describe("suggestionFor", () => {
         tokens_hourly: percentiles(5_000, 12_000, 40_000),
         tokens_per_span: percentiles(300, 900, 2_000),
         spend_hourly: percentiles(0.123456, 0.5, 2),
+        failure_share: percentiles(0, 0.1, 0.5),
       },
       {
         agent: null,
@@ -619,6 +631,18 @@ describe("suggestionFor", () => {
         tokens_hourly: percentiles(9_000, 20_000, 70_000),
         tokens_per_span: percentiles(250, 800, 1_800),
         spend_hourly: percentiles(0.2, 0.9, 3),
+        failure_share: percentiles(0, 0.05, 0.25),
+      },
+      {
+        agent: null,
+        kind: SpanKind.Run,
+        spans: 400,
+        hours: 200,
+        duration_ms: percentiles(20_000, 60_000, 90_000),
+        tokens_hourly: percentiles(0, 0, 0),
+        tokens_per_span: percentiles(0, 0, 0),
+        spend_hourly: percentiles(0, 0, 0),
+        failure_share: percentiles(0, 0.034, 0.2),
       },
     ],
   };
@@ -651,6 +675,21 @@ describe("suggestionFor", () => {
     expect(spend?.levels[0]).toMatchObject({ level: "p50", typed: "0.2" });
   });
 
+  it("offers the share of an hour's runs that failed in whole percents, up, as a starter's is set", () => {
+    const got = suggestionFor(
+      draft({ kind: SpanKind.Run, measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg }),
+      HISTORY,
+    );
+    expect(got?.what).toBe("the share of an hour's runs that failed");
+    expect(got?.levels).toEqual([
+      { level: "p50", shown: "0%", typed: "0" },
+      { level: "p90", shown: "4%", typed: "4" },
+      { level: "p99", shown: "20%", typed: "20" },
+    ]);
+    // A new alert's form starts on that measure, so it offers them first.
+    expect(suggestionFor(NEW_ALERT, HISTORY)?.levels).toHaveLength(3);
+  });
+
   it("offers none where the history cannot answer what the alert reads", () => {
     const named = { ...NEW_ALERT.filters, agent: "support-bot" };
     for (const over of [
@@ -658,7 +697,8 @@ describe("suggestionFor", () => {
       { filters: { ...NEW_ALERT.filters, agent: "a, b" } },
       { baseline: RuleBaseline.Previous },
       { measure: RuleMeasure.Tokens, aggregation: RuleAggregation.Sum, window: RuleWindow.Day },
-      { measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg },
+      { measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg, window: RuleWindow.Day },
+      { measure: RuleMeasure.Failures, aggregation: RuleAggregation.Count },
       { filters: { ...NEW_ALERT.filters, agent: "unknown-bot" } },
     ] satisfies Partial<AlertDraft>[]) {
       expect(suggestionFor(draft(over), HISTORY)).toBeNull();

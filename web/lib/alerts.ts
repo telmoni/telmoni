@@ -759,6 +759,10 @@ export function suggestionFor(draft: AlertDraft, history: History | null): Sugge
       case RuleMeasure.Cost:
         // A run's spend is its model calls'.
         return hourly ? { percentiles: of(SpanKind.ModelCall)?.spend_hourly, what: "an hour's spend" } : null;
+      case RuleMeasure.Failures:
+        return draft.aggregation === RuleAggregation.Avg && draft.window === RuleWindow.Hour
+          ? { percentiles: of(draft.kind)?.failure_share, what: `the share of an hour's ${KIND_PLURAL[draft.kind]} that failed` }
+          : null;
       default:
         return null;
     }
@@ -768,12 +772,33 @@ export function suggestionFor(draft: AlertDraft, history: History | null): Sugge
   const levels = (["p50", "p90", "p99"] as const).flatMap((level) => {
     const value = read.percentiles?.[level];
     if (value === null || value === undefined) return [];
-    // Whole milliseconds and tokens, a spend to three figures: a threshold a person would type.
-    const plain = unit === "dollars" ? Number(value.toPrecision(3)) : Math.round(value);
+    // Whole milliseconds and tokens, a spend to three figures and a share in
+    // whole percents up, as the starter's is set: a threshold a person would type.
+    const plain =
+      unit === "dollars"
+        ? Number(value.toPrecision(3))
+        : unit === "percent"
+          ? Math.max(0, Math.ceil(value * 100 - 1e-9)) / 100
+          : Math.round(value);
     return [{ level, shown: amount(draft.measure, draft.aggregation, plain), typed: shown(plain, unit) }];
   });
   if (levels.length === 0) return null;
   return { who: agent ?? "every agent", what: read.what, days: historyDays(history), levels };
+}
+
+/** The starter alerts a project's first run makes, by measure, named as the
+ *  server names them (`crates/telemetry/src/starters.rs`). */
+export const STARTER_NAME: Partial<Record<RuleMeasure, string>> = {
+  [RuleMeasure.Failures]: "Failing runs",
+  [RuleMeasure.Repeats]: "Looping runs",
+  [RuleMeasure.Stalled]: "Stalled runs",
+};
+
+/** Starters by name in a sentence: `A`, `A and B`, `A, B and C`. */
+export function starterWords(measures: readonly RuleMeasure[]): string {
+  const names = measures.map((measure) => STARTER_NAME[measure] ?? measure);
+  const last = names.pop();
+  return names.length === 0 ? (last ?? "") : `${names.join(", ")} and ${last}`;
 }
 
 /** The whole days `history` was read over. */

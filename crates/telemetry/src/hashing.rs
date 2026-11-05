@@ -70,6 +70,15 @@ impl<T: Clone> Cache<T> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(project_id, storage);
     }
+
+    /// An entry kept ahead of the work it stands for, let go when that failed;
+    /// never a key's.
+    pub(crate) fn forget(&self, project_id: &ProjectId) {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(project_id);
+    }
 }
 
 /// How the key's project stores user ids: from the cache, else from its

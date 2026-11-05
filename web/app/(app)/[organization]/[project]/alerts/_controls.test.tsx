@@ -84,6 +84,7 @@ const ALERT: Alert = {
   severity: "unknown",
   severity_since: "2026-10-26T11:00:00Z",
   connectors: [{ connection_id: SLACK, level: "alert", hours: null, muted: false }],
+  starter: false,
   created_at: "2026-10-25T00:00:00Z",
   updated_at: "2026-10-25T00:00:00Z",
 };

@@ -1,4 +1,5 @@
-//! The notices telemetry raises: an alert's incidents, told after the
+//! The notices telemetry raises: a project's starter alerts, told once its
+//! first run made them; an alert's incidents, told after the
 //! evaluation that moved them commits, or when a member resolves one. An
 //! opening and a resolution go to the project's feed and its connectors,
 //! keyed by the incident and the kind, so an incident has one feed row of
@@ -1081,6 +1082,67 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
             error = %error,
             "telemetry: an incident resolved by hand could not be told"
         ),
+    }
+}
+
+/// A project's first run told to its feed: the starter alerts it made, and
+/// those the plan had no room for in the plan's own words; one that fails is
+/// logged, the starters standing all the same.
+pub(crate) async fn starters_made(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    made: &crate::starters::Made,
+) {
+    if !crate::handler::chain::open(state.auth.as_ref(), organization_id).await {
+        return;
+    }
+    let title = if made.names.is_empty() {
+        "No starter alerts made: the plan is full"
+    } else {
+        "Starter alerts watch this project"
+    };
+    let mut body = if made.names.is_empty() {
+        "Its first run landed, but the plan had no room for its starter alerts.".to_owned()
+    } else {
+        format!(
+            "Its first run landed, so {} now watch its runs, read every five minutes. Edit or \
+             delete them on its Alerts page.",
+            crate::starters::words(&made.names)
+        )
+    };
+    if let Some(detail) = &made.detail {
+        let names: Vec<String> = made
+            .withheld
+            .iter()
+            .map(|measure| crate::starters::name_of(*measure))
+            .collect();
+        body = format!(
+            "{body} Not made: {}. {detail}",
+            crate::starters::words(&names)
+        );
+    }
+    let dedup_key = format!("telemetry:starters:{project_id}");
+    let withheld: Vec<String> = made.withheld.iter().map(ToString::to_string).collect();
+    let notice = Notice {
+        kind: NotificationKind::StarterAlerts,
+        subject_user_id: None,
+        title,
+        body: &body,
+        metadata: json!({ "made": made.names, "withheld": withheld }),
+        dedup_key: Some(&dedup_key),
+        incident: None,
+    };
+    if let Err(error) = state
+        .notifications
+        .emit(organization_id, project_id, notice)
+        .await
+    {
+        tracing::warn!(
+            project_id = %project_id,
+            error = %error,
+            "telemetry: a project's feed could not be told of its starter alerts"
+        );
     }
 }
 

@@ -60,6 +60,7 @@ const ALERT = {
   severity: "alert",
   severity_since: "2026-10-26T03:00:00Z",
   connectors: [{ connection_id: CONNECTION, level: "warning", hours: null, muted: false }],
+  starter: false,
   created_at: "2026-10-25T03:00:00Z",
   updated_at: "2026-10-25T03:00:00Z",
 };
@@ -87,7 +88,10 @@ function lanes(answers: Record<string, { status: number; body: unknown }>) {
 }
 
 const PAGE = {
-  "/rules": { status: 200, body: { rules: [ALERT] } },
+  "/rules": {
+    status: 200,
+    body: { rules: [ALERT], starters_withheld: ["stalled"], starters_detail: "The plan holds ten alerts." },
+  },
   "/incidents": { status: 200, body: { incidents: [INCIDENT_ROW] } },
   "/mutes": { status: 200, body: { mutes: [MUTE] } },
 };
@@ -103,7 +107,9 @@ describe("fetchAlerts", () => {
     const access = await fetchAlerts(PROJECT);
     expect(access).toMatchObject({
       kind: "ok",
-      alerts: [{ name: "Slow calls", connectors: [{ connection_id: CONNECTION }] }],
+      alerts: [{ name: "Slow calls", connectors: [{ connection_id: CONNECTION }], starter: false }],
+      startersWithheld: ["stalled"],
+      startersDetail: "The plan holds ten alerts.",
       incidents: [{ id: INCIDENT, told_to: [CONNECTION], runs: [RUN] }],
       mutes: [{ rule_id: null }],
     });

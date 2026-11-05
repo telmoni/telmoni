@@ -33,6 +33,10 @@ pub struct RuleRow {
     pub told_at: Option<DateTime<Utc>>,
     /// The connections its last notice reached, so a reminder goes to the rest.
     pub told_to: Vec<Uuid>,
+    /// Made by the project's first run ([`crate::starters`]), and when its
+    /// threshold was settled, by the project's history or a member's edit.
+    pub starter: bool,
+    pub tuned_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -68,7 +72,7 @@ impl<'q> BindDefinition<'q>
 const RULE_COLUMNS: &str = "id, project_id, organization_id, name, kind, measure, aggregation, \
     filters, lookback, operator, alert_threshold, warning_threshold, missing_data, \
     renotify_minutes, score_name, baseline, objective, paused, paused_at, value, evaluated_at, severity, \
-    severity_since, told_at, told_to, created_at, updated_at";
+    severity_since, told_at, told_to, starter, tuned_at, created_at, updated_at";
 
 /// Who paused an alert: a member, by hand, or its plan, on a fall past its
 /// number, which lifts its own once there is room again.
@@ -145,25 +149,27 @@ pub async fn organization_ahead(
     .await
 }
 
-/// A new alert of the project, filed under its organization.
+/// A new alert of the project, filed under its organization: a member's, or
+/// a `starter` its first run made.
 pub async fn insert(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     organization_id: &OrganizationId,
-    id: Uuid,
+    (id, starter): (Uuid, bool),
     rule: &Rule,
 ) -> sqlx::Result<RuleRow> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO telemetry.rules (id, project_id, organization_id, name, kind, measure,
              aggregation, filters, lookback, operator, alert_threshold, warning_threshold,
-             missing_data, renotify_minutes, score_name, baseline, objective)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+             missing_data, renotify_minutes, score_name, baseline, objective, starter)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
          RETURNING {RULE_COLUMNS}"
     )))
     .bind(id)
     .bind(project_id)
     .bind(organization_id)
     .bind_definition(&rule.definition)
+    .bind(starter)
     .fetch_one(tx.conn())
     .await
 }
@@ -184,6 +190,7 @@ pub async fn update<B: HasProject>(
                 missing_data = $12, renotify_minutes = $13, score_name = $14, baseline = $15,
                 objective = $16,
                 value = NULL, evaluated_at = NULL,
+                tuned_at = CASE WHEN starter THEN coalesce(tuned_at, now()) END,
                 lease_id = NULL, leased_until = NULL, updated_at = now()
           WHERE project_id = $1 AND id = $2
          RETURNING {RULE_COLUMNS}"
@@ -212,13 +219,14 @@ pub async fn delete<B: HasProject>(
     )
 }
 
-/// Up to `limit` running alerts whose last evaluation is a minute old or
-/// more, and that no lease holds, leased under `lease_id` for `lease_secs`:
-/// locked as they are read (`FOR UPDATE SKIP LOCKED`), so replicas share the
-/// loop without a leader and never take one alert twice.
+/// Up to `limit` running alerts whose last evaluation is as old as their
+/// interval or older — `every_secs`, a starter's the second — and that no
+/// lease holds, leased under `lease_id` for `lease_secs`: locked as they are
+/// read (`FOR UPDATE SKIP LOCKED`), so replicas share the loop without a
+/// leader and never take one alert twice.
 pub async fn lease_due(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
-    every_secs: i64,
+    (every_secs, starter_every_secs): (i64, i64),
     lease_id: Uuid,
     lease_secs: i64,
     limit: i64,
@@ -229,7 +237,8 @@ pub async fn lease_due(
                 SELECT id FROM telemetry.rules
                  WHERE paused IS NULL
                    AND (evaluated_at IS NULL
-                        OR evaluated_at <= now() - make_interval(secs => $1))
+                        OR evaluated_at <= now() - make_interval(
+                               secs => CASE WHEN starter THEN $5 ELSE $1 END))
                    AND (leased_until IS NULL OR leased_until < now())
                  ORDER BY evaluated_at NULLS FIRST, id
                  LIMIT $4
@@ -240,6 +249,7 @@ pub async fn lease_due(
     .bind(lease_id)
     .bind(lease_secs)
     .bind(limit)
+    .bind(starter_every_secs)
     .fetch_all(tx.conn())
     .await
 }

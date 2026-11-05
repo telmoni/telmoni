@@ -352,8 +352,9 @@ fn saved_dashboards_answer_as_the_console_reads() {
     );
 }
 
-/// The alerts page's alerts: one evaluated and linked within hours, and one
-/// its plan paused before a first evaluation.
+/// The alerts page's alerts: one evaluated and linked within hours, one its
+/// plan paused before a first evaluation, and a starter beside one the plan
+/// had no room for.
 #[test]
 fn alerts_answer_as_the_console_reads() {
     let alert = Alert {
@@ -397,6 +398,7 @@ fn alerts_answer_as_the_console_reads() {
             },
             muted: false,
         }],
+        starter: false,
         created_at: at(0),
         updated_at: at(30),
     };
@@ -427,13 +429,43 @@ fn alerts_answer_as_the_console_reads() {
             },
             muted: true,
         }],
+        starter: false,
         created_at: at(0),
         updated_at: at(90),
+    };
+    let starter = Alert {
+        id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b1f),
+        definition: Definition {
+            name: "Failing runs".into(),
+            measure: RuleMeasure::Failures,
+            aggregation: RuleAggregation::Avg,
+            filters: RuleFilters::default(),
+            alert_threshold: 0.1,
+            warning_threshold: Some(0.05),
+            missing_data: MissingData::Zero,
+            renotify_minutes: None,
+            ..alert.definition.clone()
+        },
+        paused: None,
+        paused_at: None,
+        value: Some(0.0),
+        evaluated_at: Some(at(300)),
+        severity: Severity::Ok,
+        severity_since: at(0),
+        connectors: Vec::new(),
+        starter: true,
+        created_at: at(0),
+        updated_at: at(0),
     };
     pin(
         "alerts",
         &AlertList {
-            rules: vec![alert, paused],
+            rules: vec![alert, paused, starter],
+            starters_withheld: vec![RuleMeasure::Stalled],
+            starters_detail: Some(
+                "This organization's plan holds 10 alerts across its projects, paused ones counted."
+                    .into(),
+            ),
         },
     );
 }

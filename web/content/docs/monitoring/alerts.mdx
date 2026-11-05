@@ -9,7 +9,8 @@ met first: the share of runs that failed, the p95 duration of model calls,
 the tokens they used, the most a run spent, the most times a run called one
 tool in a row, the runs left open, the average of a
 [score](/docs/monitoring/scores) — or its change from the window before, so a
-drop opens an incident. It is evaluated every minute.
+drop opens an incident. It is evaluated every minute, a
+[starter alert](#starter-alerts) every five.
 When its value crosses a threshold it opens an **incident**, told in the
 project's feed and to the connectors the alert links; when the value comes
 back inside its thresholds the incident resolves, and that is told too. A
@@ -18,9 +19,10 @@ each alert's incidents under it. Everything on it is metadata — names and
 numbers, never a prompt, a completion or a tool payload — and so is every
 notice.
 
-A project with no alert opens **Alerts** on its first run: where its alerts
-go first, Slack or a webhook on the **Connectors** page, ticked once the project
-has one, and then what to watch, made with **New alert**.
+A project with no alert opens **Alerts** on a guide: where its alerts go
+first, Slack or a webhook on the **Connectors** page, ticked once the project
+has one, and then what to watch: the three [starter alerts](#starter-alerts)
+its first run makes, and more with **New alert**.
 
 Any member of the project, whatever their role, makes, edits, pauses, mutes
 and deletes its alerts, and acknowledges and resolves its incidents, each
@@ -28,9 +30,10 @@ change recorded in the organization's [audit log](/docs/workspace/audit-log).
 
 ## The list
 
-Every alert of the project, by name, each with where it stands, its controls,
-and its metric in its notices' own words — "The p95 duration of model calls
-over the last hour" — then:
+Every alert of the project, by name, each with where it stands, **Starter**
+on a [starter alert](#starter-alerts), its controls, and its metric in its
+notices' own words — "The p95 duration of model calls over the last hour" —
+then:
 
 | Line | What it says |
 |---|---|
@@ -59,7 +62,7 @@ objective's own form.
 
 On a deployment that sells plans, such as the hosted service, an
 organization holds as many alerts across its projects as its plan does,
-paused ones and objectives counted, and its alerts make as many deliveries a UTC day as its
+paused ones, objectives and starters counted, and its alerts make as many deliveries a UTC day as its
 plan holds, the feed never counted. An alert past the number is refused when
 it is made. Where the organization holds more than its plan does, the oldest
 alerts keep running and the newest wait, **Paused by the plan**, until there
@@ -116,7 +119,7 @@ project's feed alone.
 | Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; and the status a span ended with, on all but a cost, steps, repeats and stalls, which are read before a run has a status of its own. None on a score, which names no agent, model or status of its own. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
 | Compared as | How the value is compared: above, at or above, below, at or below, equal to, or not equal to |
 | Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, in US dollars for a cost, and as a percentage for a change, below 0 for a drop: **Below** −20 alerts on a fall of more than a fifth |
-| From its history | Where the alert reads one agent, or every agent, and filters by nothing else: the 50th, 90th and 99th percentiles of what that agent usually does, read from the hourly totals of the last 14 whole UTC days, so they change once a night. For a duration, its spans' own durations; for tokens folded as an average, an hour's tokens a model call, and as a total over the last hour, an hour's tokens; and for a run's cost totalled over the last hour, an hour's spend. Each percentile is a button that puts it in **Alert when**, and the line under them says what it replaces |
+| From its history | Where the alert reads one agent, or every agent, and filters by nothing else: the 50th, 90th and 99th percentiles of what that agent usually does, read from the hourly totals of the last 14 whole UTC days, so they change once a night. For a duration, its spans' own durations; for tokens folded as an average, an hour's tokens a model call, and as a total over the last hour, an hour's tokens; for a run's cost totalled over the last hour, an hour's spend; and for failures folded as the share that failed over the last hour, the share of an hour's spans that failed, in whole percents up. Each percentile is a button that puts it in **Alert when**, and the line under them says what it replaces |
 | Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
 | No data | A window holding nothing to read is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none. A window of no score, and a change with nothing to compare, is no 0, so neither takes **Read as 0** unless the alert counts |
 | Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |
@@ -167,6 +170,40 @@ none reads as stalled.
 
 A notice of a loop counts the runs of its agent that called its tool as often:
 "3 runs of support-agent called search 12 or more times in a row, this one 15".
+
+## Starter alerts
+
+A project's first run makes three alerts for it, so it is watched before
+anyone writes one:
+
+| Starter | What it reads | Alerts | Warns |
+|---|---|---|---|
+| Failing runs | The share of the last hour's runs that ended in error | Above 10% | Above 5% |
+| Looping runs | The most times in a row a run of the last hour called one tool ([loops and stalls](#loops-and-stalls)) | At 10 or more | — |
+| Stalled runs | The runs left open longer than the last hour | At 1 or more | — |
+
+Each reads every agent of the project, reads a window with no run as 0, tells
+the project's feed alone until you link a connector to it, and is evaluated
+every five minutes rather than every minute. Each says **Starter** beside its
+severity and is edited, paused, muted and deleted as any alert is; one deleted
+is never made again. A run's cost and duration differ too much from one agent
+to the next for one number to start from, so no starter reads them: start
+them from an agent's history with **New alert**, or keep an
+[objective](/docs/monitoring/objectives).
+
+Once the project has run for 14 days, **Failing runs** takes its own history,
+as **From its history** offers it: its alert threshold the 99th percentile of
+the share of an hour's runs that failed over the last 14 whole UTC days, in
+whole percents up and at least 1%, and its warning the 90th, where that is
+lower. A project with no run in those days keeps 10% and 5%, and one you
+edited first keeps yours. It is set once.
+
+The project's feed is told what its first run made, and the making and the
+threshold its history sets are recorded in the
+[audit log](/docs/workspace/audit-log) as `service:starter-alerts`. On a
+deployment that sells plans, a starter counts in the plan's alerts as any
+alert does: one that would pass the plan's number is not made, and the
+**Alerts** page names it with the plan's own words on what holds more.
 
 ## Maintenance windows
 

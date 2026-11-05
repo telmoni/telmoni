@@ -35,6 +35,7 @@ export const NotificationKind = {
   ConnectorDisconnected: "connector_disconnected",
   IncidentOpened:        "incident_opened",
   IncidentResolved:      "incident_resolved",
+  StarterAlerts:         "starter_alerts",
 } as const;
 export type NotificationKind = typeof NotificationKind[keyof typeof NotificationKind];
 

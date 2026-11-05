@@ -7,6 +7,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { FirstRun, FirstRunStep } from "@/components/first-run";
 import { Button } from "@/components/ui/button";
 import { LocalTime } from "@/components/local-time";
+import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
@@ -29,6 +30,7 @@ import {
   metricWords,
   renotifyWords,
   severityVariant,
+  starterWords,
   thresholdWords,
   toldWords,
   windowsFor,
@@ -135,7 +137,7 @@ export default async function AlertsPage({
       <PageHeader
         title="Alerts"
         headingId={ALERTS_HEADING}
-        info="Each reads a measure of the project's spans over a window against its thresholds, every minute, with the incidents it opened under it, open ones first. Any member makes, edits, pauses, mutes and deletes alerts, and acknowledges or resolves their incidents."
+        info="Each reads a measure of the project's spans over a window against its thresholds, every minute, a starter every five, with the incidents it opened under it, open ones first. Any member makes, edits, pauses, mutes and deletes alerts, and acknowledges or resolves their incidents."
         action={
           <>
             {/* A window over every alert mutes nothing until there is one. */}
@@ -172,6 +174,18 @@ export default async function AlertsPage({
               ))}
             </Rows>
           )}
+          {access.startersWithheld.length > 0 && (
+            <NoticeCard
+              title={`Not made, past the plan's number: ${starterWords(access.startersWithheld)}`}
+              body={
+                <>
+                  This project&apos;s first run found no room for{" "}
+                  {access.startersWithheld.length === 1 ? "this starter alert" : "these starter alerts"}.
+                  {access.startersDetail && <> {access.startersDetail}</>}
+                </>
+              }
+            />
+          )}
           {access.alerts.length === 0 ? (
             <FirstRun
               title="Hear about it before your users do"
@@ -203,7 +217,7 @@ export default async function AlertsPage({
               <FirstRunStep
                 n={2}
                 title="Decide what to watch"
-                note="With New alert, above: the share of runs that fail, the p95 duration of model calls, the tokens they use, or a month's spend as a budget."
+                note="This project's first run brings three starter alerts: failing runs, looping runs and stalled runs. Add your own with New alert, above: the p95 duration of model calls, the tokens they use, or a month's spend as a budget."
               />
             </FirstRun>
           ) : (
@@ -310,6 +324,11 @@ function AlertCard({
               {/* Read, an alert keeping its last severity can still have none to keep. */}
               {alert.severity === Severity.Unknown && read ? "No severity" : SEVERITY_LABEL[alert.severity]}
             </Badge>
+            {alert.starter && (
+              <Badge variant="secondary" className="shrink-0 font-normal">
+                Starter
+              </Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">{metricWords(alert)}</p>
         </div>

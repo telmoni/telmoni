@@ -66,6 +66,7 @@ pub mod schema;
 pub mod scores;
 pub mod seam;
 pub mod spend;
+pub mod starters;
 pub mod store;
 pub mod sweep;
 pub mod traces;
@@ -108,6 +109,9 @@ pub struct AppState {
     /// the wrapped key it was opened from, which every use checks against
     /// the row ([`content`]).
     pub content_keys: hashing::Cache<(Vec<u8>, Arc<telmoni_shared::envelope::Dek>)>,
+    /// The projects whose starter alerts this process knows were made
+    /// ([`starters`]).
+    pub starters_made: hashing::Cache<()>,
     /// The projects an export's settling is asking auth about again, one
     /// task a project at once and one after an insert's wait
     /// ([`handler::ingest`]).

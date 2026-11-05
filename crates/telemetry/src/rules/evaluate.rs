@@ -1,5 +1,7 @@
-//! Each alert, evaluated a minute after its last evaluation by whichever
-//! replica leases it first: its value read over the window that ends then —
+//! Each alert, evaluated a minute after its last evaluation, a starter five
+//! ([`crate::starters`]), by whichever replica leases it first, a starter's
+//! threshold set from its project's history first once it is due: its value
+//! read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
 //! at either end; a run's cost ([`crate::spend`]), steps, repeats and stalls
 //! from `spans` run by run, and an objective's burn from its agent's runs —
@@ -35,6 +37,10 @@ use crate::store::{Projects, Read, micros, seconds};
 
 /// How often each alert is evaluated.
 pub const EVERY: Duration = Duration::from_secs(60);
+
+/// How often a starter alert is evaluated: watching from the first run, it
+/// need not cost a query a minute ([`crate::starters`]).
+pub const STARTER_EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// How often a pass looks for the alerts due: well inside [`EVERY`], since an
 /// alert comes due a minute after it was read, partway into its pass.
@@ -582,7 +588,10 @@ pub async fn pass_within(state: &AppState, work: Duration) -> Result<u64, Telmon
         let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
         let leased = db::lease_due(
             &mut tx,
-            i64::try_from(EVERY.as_secs()).unwrap_or(60),
+            (
+                i64::try_from(EVERY.as_secs()).unwrap_or(60),
+                i64::try_from(STARTER_EVERY.as_secs()).unwrap_or(300),
+            ),
             lease_id,
             LEASE_SECS,
             BATCH,
@@ -619,6 +628,7 @@ pub async fn pass_within(state: &AppState, work: Duration) -> Result<u64, Telmon
                 defer(state, &rule, lease_id).await?;
                 continue;
             }
+            let rule = crate::starters::tuned(state, rule, Utc::now()).await;
             if evaluate(state, &rule, lease_id).await? {
                 settled += 1;
             }

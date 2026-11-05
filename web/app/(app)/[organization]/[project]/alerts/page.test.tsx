@@ -125,6 +125,7 @@ const SLOW = {
       muted: true,
     },
   ],
+  starter: false,
   created_at: "2026-10-25T00:00:00Z",
   updated_at: "2026-10-25T00:00:00Z",
 };
@@ -194,6 +195,8 @@ beforeEach(() => {
     kind: "ok",
     at: NOW,
     alerts: [CAP, SLOW],
+    startersWithheld: [],
+    startersDetail: null,
     incidents: [
       incident("i-open", { told_to: [SLACK, "5e6a4c96-0000-4000-8000-000000000008"], runs: [RUN] }),
       incident("i-taken", { status: "acknowledged", acknowledged_by: "user_2", acknowledged_at: "2026-10-26T11:10:00Z", severity: "warning" }),
@@ -554,6 +557,52 @@ describe("AlertsPage", () => {
     const row = screen.getByText("Every alert is muted").closest("div")!.parentElement!;
     expect(row).toHaveTextContent("set by Ada");
     expect(within(row).getByTestId("end-mute").dataset.mute).toBe("m-all");
+  });
+
+  it("names each starter alert as one, beside its severity", async () => {
+    const STARTER = "6c3e2084-0000-4000-8000-000000000009";
+    mockAlerts = {
+      ...(mockAlerts as object),
+      alerts: [
+        CAP,
+        SLOW,
+        {
+          ...SLOW,
+          id: STARTER,
+          name: "Failing runs",
+          kind: "run",
+          measure: "failures",
+          aggregation: "avg",
+          filters: {},
+          alert_threshold: 0.1,
+          warning_threshold: 0.05,
+          connectors: [],
+          starter: true,
+        },
+      ],
+    };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const starter = document.getElementById(`alert-${STARTER}`)!;
+    expect(within(starter).getByText("Starter")).toBeInTheDocument();
+    expect(within(starter).getByText("Alert > 10%, warning > 5%")).toBeInTheDocument();
+    // Edited and deleted as any alert is, in one click.
+    expect(within(starter).getByTestId("alert-actions").dataset.alert).toBe(STARTER);
+    expect(within(document.getElementById(`alert-${RULE}`)!).queryByText("Starter")).toBeNull();
+  });
+
+  it("names the starters the plan had no room for, in the plan's own words", async () => {
+    const plan = "This organization is on Hobby, which holds 10 alerts across its projects.";
+    mockAlerts = { ...(mockAlerts as object), startersWithheld: ["repeats", "stalled"], startersDetail: plan };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const notice = screen.getByText("Not made, past the plan's number: Looping runs and Stalled runs");
+    expect(notice.parentElement).toHaveTextContent(
+      `This project's first run found no room for these starter alerts. ${plan}`,
+    );
+
+    cleanup();
+    mockAlerts = { ...(mockAlerts as object), startersWithheld: [], startersDetail: null };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByText(/Not made, past the plan's number/)).toBeNull();
   });
 
   it("draws a project with no alert as its first run, where its alerts go first", async () => {

@@ -137,7 +137,8 @@
       "connector_connected",
       "connector_disconnected",
       "incident_opened",
-      "incident_resolved"
+      "incident_resolved",
+      "starter_alerts"
     ],
     "OrganizationRole": [
       "owner",

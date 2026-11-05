@@ -34,7 +34,7 @@ use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::middleware::problem;
 use telmoni_shared::{
-    ContentMode, OrInternal, OrganizationId, ProblemDetails, ProjectId, TelemetryError,
+    ContentMode, OrInternal, OrganizationId, ProblemDetails, ProjectId, SpanKind, TelemetryError,
     TelmoniError,
 };
 
@@ -378,6 +378,13 @@ pub(crate) async fn land(
             project_id.as_str(),
             batch.rows.iter().map(|row| row.run_id),
         );
+        if batch.rows.iter().any(|row| row.kind == SpanKind::Run) {
+            crate::starters::make_once(
+                Arc::clone(state),
+                organization_id.clone(),
+                project_id.clone(),
+            );
+        }
     }
     Ok(held)
 }
