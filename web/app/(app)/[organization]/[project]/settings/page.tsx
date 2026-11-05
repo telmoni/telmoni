@@ -129,7 +129,12 @@ export default async function SettingsPage({
               <Link href="/docs/workspace/data-retention" className="underline underline-offset-4">
                 Every window
               </Link>
-              .
+              . The organization&apos;s{" "}
+              <Link href={`/${organization}/data-sheet`} className="underline underline-offset-4">
+                data sheet
+              </Link>{" "}
+              says this of every project, with what each keeps and who read its content, for a
+              security review.
             </>
           }
         >

@@ -464,6 +464,48 @@ pub struct InventoryRow {
     pub rule: &'static str,
 }
 
+/// Whether a field can carry a person, as the data sheet says it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Person {
+    /// Never: a number, a vocabulary's word, or what software names.
+    No,
+    /// Only where the application's own code puts one there: a name or a tag
+    /// it chooses.
+    IfSent,
+    /// An id that may name a person, kept only as the project's hash of it.
+    Hashed,
+    /// Content: what a person or a model wrote, which can name anyone.
+    Content,
+}
+
+/// The rows whose text the application chooses, so can hold a person if its
+/// code puts one there.
+const CHOSEN_TEXT: &[&str] = &[
+    AGENT,
+    AGENT_NAME,
+    WORKFLOW_NAME,
+    TOOL_NAME,
+    TAG_FAMILY,
+    "gen_ai.prompt.name",
+    "gen_ai.data_source.id",
+    "server.address",
+    "service.name",
+];
+
+impl InventoryRow {
+    /// Whether its field can carry a person.
+    #[must_use]
+    pub fn person(&self) -> Person {
+        match self.needs {
+            Needs::Content => Person::Content,
+            Needs::AnyMode if [USER_ID, SESSION_ID].contains(&self.attribute) => Person::Hashed,
+            Needs::AnyMode if CHOSEN_TEXT.contains(&self.attribute) => Person::IfSent,
+            Needs::AnyMode => Person::No,
+        }
+    }
+}
+
 /// How the page spells a tag: any key under [`TAG_PREFIX`].
 pub const TAG_FAMILY: &str = "telmoni.tag.<key>";
 /// The rows for what arrives under a name no other row gives.
@@ -1015,6 +1057,34 @@ pub const INVENTORY: &[InventoryRow] = &[
 
 #[cfg(test)]
 mod tests {
+
+    /// Content can name anyone; a user's and a session's ids are kept only as
+    /// their hash; a name or a tag the code chooses can hold one; the rest never.
+    #[test]
+    fn each_row_says_whether_it_can_carry_a_person() {
+        let of = |attribute: &str| {
+            INVENTORY
+                .iter()
+                .find(|row| row.attribute == attribute)
+                .map(InventoryRow::person)
+        };
+        for row in INVENTORY.iter().filter(|row| row.needs == Needs::Content) {
+            assert_eq!(row.person(), Person::Content, "{}", row.attribute);
+        }
+        assert_eq!(of(USER_ID), Some(Person::Hashed));
+        assert_eq!(of(SESSION_ID), Some(Person::Hashed));
+        assert_eq!(of(TAG_FAMILY), Some(Person::IfSent));
+        assert_eq!(of(OTHER_TEXT), Some(Person::Content));
+        assert_eq!(of(INPUT_TOKENS), Some(Person::No));
+        assert_eq!(of(SCRUBBED), Some(Person::No));
+        for chosen in CHOSEN_TEXT {
+            assert!(
+                of(chosen).is_some(),
+                "{chosen} names no row of the inventory"
+            );
+        }
+    }
+
     use super::*;
 
     /// The caps the inventory prints are those ingest holds: a const table

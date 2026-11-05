@@ -14,6 +14,9 @@ const InventoryRowSchema = z.object({
   kept: z.string(),
   needs: z.string(),
   rule: z.string(),
+  /** Whether the field can carry a person: never, where the application's
+   *  code puts one, as the project's hash of an id, or as content. */
+  person: z.enum(["no", "if_sent", "hashed", "content"]),
 });
 
 export const FieldInventorySchema = z.object({

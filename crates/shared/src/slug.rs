@@ -132,6 +132,7 @@ pub const PROJECT_RESERVED: &[&str] = &[
     "audit-log",
     "billing",
     "connectors",
+    "data-sheet",
     "integrations",
     "members",
     "new",

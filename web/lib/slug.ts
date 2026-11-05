@@ -128,6 +128,7 @@ export const RESERVED_PROJECT_SLUGS: ReadonlySet<string> = new Set([
   "audit-log",
   "billing",
   "connectors",
+  "data-sheet",
   "integrations",
   "members",
   "new",

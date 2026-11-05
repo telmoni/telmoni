@@ -31,7 +31,10 @@ const AuditEventSchema = z.object({
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
-export const AuditPageSchema = z.object({ events: z.array(AuditEventSchema) });
+export const AuditPageSchema = z.object({
+  events: z.array(AuditEventSchema),
+  nextCursor: z.string().nullish(),
+});
 
 const LIST_LIMIT = 100;
 
@@ -83,6 +86,67 @@ export const fetchOrganizationAudit = cache(
     );
   },
 );
+
+/** The most pages of a thousand rows a filtered read of the organization's
+ *  chain follows: past them, the read says it stopped short. */
+const FOLLOWED_PAGES = 10;
+
+/** Every event of the organization's chain over the last `days` that the
+ *  filter admits, newest first, its pages followed up to [`FOLLOWED_PAGES`];
+ *  `complete` false where more stood past them. Its owners and admins alone
+ *  read it. */
+export const fetchOrganizationAuditSince = cache(
+  async (
+    filter: Omit<AuditFilter, "from"> & { days: number },
+  ): Promise<{ kind: "ok"; events: AuditEvent[]; complete: boolean } | { kind: "forbidden" } | { kind: "unavailable" }> => {
+    const ctx = await identityContext();
+    if (!ctx) return { kind: "unavailable" };
+    const from = new Date(Date.now() - filter.days * 86_400_000).toISOString();
+    const events: AuditEvent[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < FOLLOWED_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        limit: "1000",
+        action: filter.action,
+        resource_kind: filter.resourceKind,
+        from,
+      });
+      if (cursor) query.set("cursor", cursor);
+      const read = await readJson(
+        "fetchOrganizationAuditSince",
+        `${env.SERVER_URL}/internal/v1/audit/organizations/${encodeURIComponent(ctx.organizationId)}?${query}`,
+        { headers: organizationHeaders(ctx) },
+        AuditPageSchema,
+      );
+      if (read.kind !== "ok") return read;
+      events.push(...read.value.events);
+      cursor = read.value.nextCursor ?? null;
+      if (!cursor) return { kind: "ok", events, complete: true };
+    }
+    return { kind: "ok", events, complete: false };
+  },
+);
+
+/** Where a data sheet was drawn: its own read, filed in the organization's
+ *  chain, as the chain's head. */
+const DrawnSchema = z.object({ seq: z.number().int(), rowHash: z.string(), drawnAt: z.string() });
+export type DataSheetDrawn = z.infer<typeof DrawnSchema>;
+
+/** The active organization's data sheet drawn: the read filed in its audit
+ *  chain, which only its owner and admins may. */
+export async function drawDataSheet(): Promise<
+  { kind: "ok"; drawn: DataSheetDrawn } | { kind: "forbidden" } | { kind: "unavailable" }
+> {
+  const ctx = await identityContext();
+  if (!ctx) return { kind: "unavailable" };
+  const read = await readJson(
+    "drawDataSheet",
+    `${env.SERVER_URL}/internal/v1/audit/organizations/${encodeURIComponent(ctx.organizationId)}/data-sheet`,
+    { method: "POST", headers: organizationHeaders(ctx) },
+    DrawnSchema,
+  );
+  return read.kind === "ok" ? { kind: "ok", drawn: read.value } : read;
+}
 
 export type AuditExportsAccess =
   | { kind: "ok"; exports: AuditExport[]; limits: AuditExportLimits }

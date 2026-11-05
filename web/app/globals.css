@@ -527,6 +527,24 @@ html.a11y-more-contrast [data-slot="card"] {
 html.a11y-more-contrast.dark [data-slot="input"] {
   border-color: var(--input);
 }
+/* Printed, a page (the data sheet) is its main alone and whole: the header,
+   the rail and what is marked so left off, every scroll let out. */
+@media print {
+  [data-slot="console-header"],
+  #console-sidebar,
+  [data-print="hide"] {
+    display: none !important;
+  }
+  html,
+  body,
+  [data-slot="console-shell"],
+  [data-slot="scroll-area"],
+  [data-slot="scroll-area-viewport"] {
+    height: auto !important;
+    overflow: visible !important;
+  }
+}
+
 @media (prefers-contrast: more) {
   html:not(.a11y-standard-contrast),
   html:not(.a11y-standard-contrast) :is(.theme-console, .theme-paper) {

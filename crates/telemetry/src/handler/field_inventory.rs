@@ -15,7 +15,7 @@ use telmoni_shared::extract::Json;
 use telmoni_shared::rbac::{Resource, Verb};
 
 use crate::AppState;
-use crate::contract::{self, InventoryRow};
+use crate::contract::{self, InventoryRow, Person};
 
 /// What the lane answers.
 #[derive(Debug, Serialize)]
@@ -23,7 +23,15 @@ pub struct FieldInventory {
     /// The commit of the GenAI semantic conventions the names are taken from.
     pub conventions_commit: &'static str,
     /// Every row, in the page's order.
-    pub rows: &'static [InventoryRow],
+    pub rows: Vec<Row>,
+}
+
+/// One row, and whether its field can carry a person.
+#[derive(Debug, Serialize)]
+pub struct Row {
+    #[serde(flatten)]
+    pub row: &'static InventoryRow,
+    pub person: Person,
 }
 
 /// `GET /internal/v1/telemetry/field-inventory` — the inventory, to anyone on
@@ -36,6 +44,12 @@ pub async fn get_field_inventory(
     acting.require_project(Verb::Read, Resource::Project)?;
     Ok(Json(FieldInventory {
         conventions_commit: contract::CONVENTIONS_COMMIT,
-        rows: contract::INVENTORY,
+        rows: contract::INVENTORY
+            .iter()
+            .map(|row| Row {
+                row,
+                person: row.person(),
+            })
+            .collect(),
     }))
 }

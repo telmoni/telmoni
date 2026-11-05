@@ -704,6 +704,102 @@ async fn an_export_is_built_in_the_background_and_verifies_from_the_file_alone(p
     assert_eq!(again, file);
 }
 
+/// The book's `verify-audit.mjs`, as `workspace/audit-log.mdx` prints it.
+fn book_script() -> String {
+    let page = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/content/docs/workspace/audit-log.mdx"),
+    )
+    .expect("the audit log's page is readable");
+    let opening = "```js title=\"verify-audit.mjs\"\n";
+    let (_, script) = page
+        .split_once(opening)
+        .expect("the page prints the script");
+    let (script, _) = script.split_once("```").expect("the script's block closes");
+    script.to_owned()
+}
+
+/// ⚠ A data sheet is drawn at its own read: an owner's draw is filed in the
+/// chain and answered as its head, a member is refused and files nothing, and
+/// the book's script finds that head in an export and refuses another.
+#[sqlx::test]
+async fn a_data_sheet_is_drawn_at_its_own_read_and_the_books_script_finds_its_head(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let organization = sign_in(&pool, OWNER).await;
+    let project = create_project(&pool, &organization, "Platform").await;
+    mint(&pool, OWNER, &organization, &project, "first key").await;
+    sign_in(&pool, MEMBER).await;
+    seat(&pool, &organization, MEMBER, OrganizationRole::Member).await;
+    let draw = format!("/internal/v1/audit/organizations/{organization}/data-sheet");
+
+    let (status, refused) = call(&pool, "POST", &draw, MEMBER, &organization, None, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    let (status, drawn) = call(&pool, "POST", &draw, OWNER, &organization, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{drawn}");
+    let head = drawn["rowHash"]
+        .as_str()
+        .expect("the head's hash")
+        .to_owned();
+    assert!(drawn["seq"].as_i64().is_some_and(|seq| seq > 0), "{drawn}");
+
+    let (_, body) = call(
+        &pool,
+        "GET",
+        &format!("/internal/v1/audit/organizations/{organization}"),
+        OWNER,
+        &organization,
+        None,
+        None,
+    )
+    .await;
+    let newest = &events(&body)[0];
+    assert_eq!(newest["action"], json!("viewed"));
+    assert_eq!(newest["resourceKind"], json!("organization"));
+    assert_eq!(newest["actorId"], json!(OWNER));
+    assert_eq!(newest["metadata"], json!({ "page": "data_sheet" }));
+    assert_eq!(
+        newest["rowHash"],
+        json!(head),
+        "the sheet names its own read"
+    );
+    let viewed = events(&body)
+        .iter()
+        .filter(|row| row["action"] == json!("viewed"))
+        .count();
+    assert_eq!(viewed, 1, "the member's refused draw filed nothing");
+
+    let id = start(&pool, &organization, OWNER, json!({ "format": "json" })).await;
+    let entry = finished(&pool, &organization, OWNER, &id).await;
+    assert_eq!(entry["status"], json!("ready"), "{entry}");
+    let (_, _, file) = download(&pool, &organization, OWNER, &id).await;
+    let exported: Value = serde_json::from_slice(&file).expect("one JSON document");
+    verifies(&organization, events(&exported));
+
+    let dir = std::env::temp_dir().join(format!("telmoni-data-sheet-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    std::fs::write(dir.join("verify-audit.mjs"), book_script()).expect("the script written");
+    std::fs::write(dir.join("export.json"), &file).expect("the export written");
+    let run = |head: &str| {
+        std::process::Command::new("node")
+            .current_dir(&dir)
+            .args(["verify-audit.mjs", "export.json", head])
+            .output()
+    };
+    let Ok(found) = run(&head) else {
+        eprintln!("skipping the book's script: node is not installed");
+        return;
+    };
+    let said = String::from_utf8_lossy(&found.stdout);
+    assert!(found.status.success(), "the head is in the export: {said}");
+    assert!(
+        said.contains("The data sheet's head hash is in the file."),
+        "{said}"
+    );
+    let other = run(&"0".repeat(64)).expect("node ran");
+    assert!(!other.status.success(), "a head the chain never held fails");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// A range is cut on the chain, not the clock: the file holds every row from
 /// the first written in it to the last, so it verifies on its own, and none
 /// written before or after.

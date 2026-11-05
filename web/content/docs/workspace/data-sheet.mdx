@@ -1,0 +1,37 @@
+---
+title: "Data sheet"
+description: "An organization's data sheet: what each of its projects keeps, where and under which key, who read its content, what the SDKs scrub, and who else processes it, drawn from the stores when asked, recorded in the audit log, and printed for a security review."
+---
+
+The **data sheet** (`/{organization}/data-sheet`) is the page you hand a
+security team in place of a meeting. It is drawn from the stores and the code
+each time it is opened, never written by hand, and only the organization's
+**Owner** and **Admins** open it. Each opening is recorded in the
+[audit log](/docs/workspace/audit-log), and the sheet names that row as the
+chain's head it was drawn at. **Print** prints it whole, the console's header
+and rail left off.
+
+## What it says
+
+| Section | What it holds |
+| :--- | :--- |
+| **Drawn** | Who drew it and when, and the audit log's row and hash it was drawn at |
+| **Where it is kept** | Spans' metadata in ClickHouse, never a prompt or a reply; content, kept only by a project whose content mode is on, sealed in Postgres under a key of the project's own; user and session ids kept only as the project's keyed hash of them; and, on a deployment that says so, where its stores are |
+| **Each project** | Its [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode) and every change of it, when and by whom, read from the audit log; its [retention](/docs/workspace/data-retention); its own keys; how many of its spans of the last 30 days arrived with something [scrubbed](/docs/api/sdks#scrubbing-secrets-and-personal-data); and who read its content over the last 90 days, a person by name and an API key by its id |
+| **What a project keeps** | The [field inventory](/docs/api/field-inventory), each attribute with what it is kept as, the content mode it needs, and whether it can carry a person: never, only if your code puts one there, only as the project's hash of it, or as content |
+| **What the SDKs scrub** | Each kind of secret and personal data the SDKs' scrubbers replace before content leaves, their switches, and what no pattern finds |
+| **Subprocessors** | The providers the deployment hands what it keeps to, where it names them; a self-hosted deployment names none |
+
+## Checking it against the audit log
+
+The sheet names the row its own drawing wrote. To check the sheet is the one
+the chain recorded, [export](/docs/workspace/audit-log#exporting-and-verifying)
+the audit log as JSON over a range that includes the day it was drawn, and run
+the book's script with the sheet's hash after the file's name:
+
+```bash
+node verify-audit.mjs ada-works-audit-log-2026-11-05.json 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+```
+
+It checks every row's hash and link as ever, and that the file holds the
+sheet's row.

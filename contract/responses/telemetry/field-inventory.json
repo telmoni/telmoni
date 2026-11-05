@@ -6,7 +6,16 @@
       "kept": "model",
       "needs": "any",
       "on": "a model call",
+      "person": "no",
       "rule": "at most 256 characters"
+    },
+    {
+      "attribute": "gen_ai.input.messages",
+      "kept": "sealed in Postgres alone",
+      "needs": "on",
+      "on": "a model call",
+      "person": "content",
+      "rule": "content"
     }
   ]
 }

@@ -16,7 +16,7 @@ use telmoni_shared::{
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::agents::{AGENTS_DAYS, AgentRow, Agents};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
-use telmoni_telemetry::handler::field_inventory::FieldInventory;
+use telmoni_telemetry::handler::field_inventory::{FieldInventory, Row};
 use telmoni_telemetry::handler::incidents::IncidentList;
 use telmoni_telemetry::handler::mutes::MuteList;
 use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
@@ -521,20 +521,35 @@ fn the_content_mode_answers_as_the_console_reads() {
     );
 }
 
-/// The field inventory, one row of it.
+/// The field inventory, two rows of it: one that names no person, and one
+/// whose content can.
 #[test]
 fn the_field_inventory_answers_as_the_console_reads() {
+    static MODEL: InventoryRow = InventoryRow {
+        attribute: "gen_ai.request.model",
+        on: ReadOn::ModelCall,
+        kept: "model",
+        needs: Needs::AnyMode,
+        rule: "at most 256 characters",
+    };
+    static MESSAGES: InventoryRow = InventoryRow {
+        attribute: "gen_ai.input.messages",
+        on: ReadOn::ModelCall,
+        kept: "sealed in Postgres alone",
+        needs: Needs::Content,
+        rule: "content",
+    };
     pin(
         "field-inventory",
         &FieldInventory {
             conventions_commit: "a1b2c3d",
-            rows: &[InventoryRow {
-                attribute: "gen_ai.request.model",
-                on: ReadOn::ModelCall,
-                kept: "model",
-                needs: Needs::AnyMode,
-                rule: "at most 256 characters",
-            }],
+            rows: [&MODEL, &MESSAGES]
+                .into_iter()
+                .map(|row| Row {
+                    row,
+                    person: row.person(),
+                })
+                .collect(),
         },
     );
 }

@@ -139,9 +139,11 @@ export type {
 
 export {
   auditExportFile,
+  drawDataSheet,
   fetchAuditEvents,
   fetchOrganizationAudit,
+  fetchOrganizationAuditSince,
   listAuditExports,
   startAuditExport,
 } from "./entities/audit";
-export type { AuditEvent } from "./entities/audit";
+export type { AuditEvent, DataSheetDrawn } from "./entities/audit";

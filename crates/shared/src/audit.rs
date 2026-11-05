@@ -155,6 +155,20 @@ async fn newest_link(
     .await
 }
 
+/// The organization's chain head, its newest row's `seq` and `row_hash`: read
+/// in the caller's transaction, and under the chain's lock where it must be
+/// the row the caller just wrote.
+///
+/// # Errors
+///
+/// Postgres refused.
+pub async fn head(
+    conn: &mut PgConnection,
+    organization_id: &OrganizationId,
+) -> sqlx::Result<Option<(i64, String)>> {
+    newest_link(conn, organization_id).await
+}
+
 /// Wait for `organization_id`'s chain lock, held to the end of the caller's
 /// transaction. [`emit_audit`] takes it for every row it writes, so every
 /// audited change in the organization — a transfer, an ownership hand-over, a

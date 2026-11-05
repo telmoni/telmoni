@@ -21,7 +21,7 @@ Telmoni records changes to organizations, projects, members, API keys, sessions,
 
 | Category | Events |
 | :--- | :--- |
-| **Organization** | Creation, renames and URL changes, ownership transfers, deletion requests, and exports of the audit log. |
+| **Organization** | Creation, renames and URL changes, ownership transfers, deletion requests, exports of the audit log, and each drawing of its [data sheet](/docs/workspace/data-sheet). |
 | **Members** | Invitations sent, accepted, declined, and withdrawn; members of the organization added to a project from its roster; role changes; removals and departures. |
 | **API keys** | Creation, rotation, and revocation. |
 | **Sessions** | A session ended from the **Active sessions** panel, and a CLI session ended by `telmoni logout`, recorded in the organization the CLI was acting in. |
@@ -40,7 +40,7 @@ Sign-ins, signing out of the console, password changes, project renames, changes
 Every audit log entry carries:
 
 - **Actor**: The user ID of the person who acted. The platform's own routines act as `service:operator` (an operator's termination of an organization), `service:starter-alerts` (the [starter alerts](/docs/monitoring/alerts#starter-alerts) a project's first run makes, and the threshold its history sets), `service:deletion-saga` (the memberships an account deletion removes) or `service:default-organization` (a self-hosted deployment's [default organization](/docs/self-host/configuration#a-default-organization-and-project), joined by a person as they were created), a change made from Slack's side as `external:slack`, and a read of content through the [API](/docs/api/reference#get-v1tracesrun_id) as `key:` and the API key's ID.
-- **Action**: One of `created`, `updated`, `deleted`, `exported` or `viewed`. `exported` records an export; its details name what was exported under `export`: `audit_log`, with the file's format, range and number of events. `viewed` records a read of a project's content, by a person, an export or an API key; its details name the traces read under `trace_ids` and how many fields were read, or a file read under `media` by its hash, never what they hold.
+- **Action**: One of `created`, `updated`, `deleted`, `exported` or `viewed`. `exported` records an export; its details name what was exported under `export`: `audit_log`, with the file's format, range and number of events. `viewed` records a read of a project's content, by a person, an export or an API key; its details name the traces read under `trace_ids` and how many fields were read, or a file read under `media` by its hash, never what they hold; on the organization, with `page` `data_sheet`, it records the [data sheet](/docs/workspace/data-sheet) drawn.
 - **Resource**: The kind of thing acted on (`organization`, `project`, `member`, `token`, which the console shows as **API key**, `session`, `connector`, `alert`, `maintenance_window`, `incident`, `trace`, or `end_user`) and its identifier, and the project it was written inside, if any.
 - **Details**: Metadata specific to the event, such as the name given, the role granted, a content mode's change, from and to, or the traces whose content was read. The console's **Details** switch shows it under **Metadata**, with the project the event was written inside, the request's id when one was recorded, and the row's hash.
 - **Timestamp**: Taken in UTC when the event was written, inside the transaction that made the change. The console shows it in your local time.
@@ -143,11 +143,12 @@ installed. It recomputes every row's hash and checks every row follows the one
 before it:
 
 ```js title="verify-audit.mjs"
-// node verify-audit.mjs ada-works-audit-log-2026-10-08.json
+// node verify-audit.mjs ada-works-audit-log-2026-10-08.json [a data sheet's head hash]
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const file = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const head = process.argv[3];
 
 const canonical = (v) =>
   v === null || typeof v !== "object"
@@ -190,9 +191,18 @@ for (const row of file.events) {
   }
   previous = row.row_hash;
 }
+const holdsHead = head === undefined || file.events.some((row) => row.row_hash === head);
+if (head !== undefined) {
+  console.log(holdsHead ? "The data sheet's head hash is in the file." : "The data sheet's head hash is not in the file.");
+}
 console.log(intact ? `${file.events.length} rows verify.` : "The file does not verify.");
-process.exit(intact ? 0 : 1);
+process.exit(intact && holdsHead ? 0 : 1);
 ```
+
+Given a [data sheet](/docs/workspace/data-sheet)'s head hash after the file's
+name, the script also checks the file holds that row, the sheet's own drawing,
+so the sheet is the one the chain recorded: export a range that includes the
+day it was drawn.
 
 A file's first row links to the row before it, which the file does not hold
 unless it starts at the organization's first event. An export of the range

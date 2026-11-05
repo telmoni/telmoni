@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use axum::http::HeaderMap;
 use uuid::Uuid;
 
+use serde_json::json;
 use telmoni_shared::OrganizationAction;
+use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, head, lock_chain_in_time};
 use telmoni_shared::db::tenant_session::{PersonAndOrganization, Scoped, organization_scope};
 use telmoni_shared::error::TelmoniError;
 use telmoni_shared::extract::{Json, Path, Query};
@@ -130,6 +132,57 @@ pub async fn list_organization_audit(
     .await?;
     tx.commit().await?;
     Ok(page(events, limit))
+}
+
+/// What a data sheet was drawn at: its own read, filed in the chain, as the
+/// chain's head — the row's place and hash, which an export holding it checks.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataSheetDrawn {
+    pub seq: i64,
+    pub row_hash: String,
+    pub drawn_at: DateTime<Utc>,
+}
+
+/// `POST /internal/v1/audit/organizations/{organization_id}/data-sheet` — the
+/// organization's data sheet drawn by its owner or an admin: the read filed in
+/// its chain under the chain's lock, the role checked under it, and that row
+/// answered as the head the sheet names.
+pub async fn draw_data_sheet(
+    State(state): State<Arc<AppState>>,
+    Path(organization_id): Path<OrganizationId>,
+    principal: Principal,
+    headers: HeaderMap,
+) -> Result<Json<DataSheetDrawn>, TelmoniError> {
+    if organization_id != super::organization_of(&headers)? {
+        return Err(AuthzError::Forbidden("not the acting organization".to_string()).into());
+    }
+    let mut tx = organization_scope(&state.db, &organization_id).await?;
+    lock_chain_in_time(tx.conn(), &organization_id).await?;
+    let role = super::organization_role_or_forbidden(&mut tx, &organization_id, &principal.user_id)
+        .await?;
+    authorize_organization(role, OrganizationAction::ReadWholeAudit)?;
+    emit_audit(
+        &mut tx,
+        AuditEvent::new(
+            &organization_id,
+            Actor::User(principal.user_id.as_str()),
+            AuditAction::Viewed,
+            TelmoniResourceKind::Organization,
+        )
+        .on(organization_id.as_str())
+        .details(json!({ "page": "data_sheet" })),
+    )
+    .await?;
+    let (seq, row_hash) = head(tx.conn(), &organization_id)
+        .await?
+        .ok_or_else(|| TelmoniError::Internal("the data sheet's read was not filed".into()))?;
+    tx.commit().await?;
+    Ok(Json(DataSheetDrawn {
+        seq,
+        row_hash,
+        drawn_at: Utc::now(),
+    }))
 }
 
 /// What `POST …/exports` asks for: a format, and a range — `from` absent for

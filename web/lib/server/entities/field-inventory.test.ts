@@ -26,6 +26,7 @@ const INVENTORY = {
       kept: "the column run_id",
       needs: "any",
       rule: "a UUID, the same on every span of a run",
+      person: "no",
     },
   ],
 };

@@ -471,6 +471,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::audit::list_organization_audit),
         )
         .route(
+            "/audit/organizations/{organization_id}/data-sheet",
+            post(handler::audit::draw_data_sheet),
+        )
+        .route(
             "/audit/organizations/{organization_id}/exports",
             get(handler::audit::list_audit_exports).post(handler::audit::start_audit_export),
         )
