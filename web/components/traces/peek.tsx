@@ -22,7 +22,6 @@ import {
 } from "@/components/traces/peek-read";
 import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
 import { MediaProjectProvider } from "@/components/traces/span-content";
-import { NEXT_KEY, PREVIOUS_KEY } from "@/lib/keys";
 import { openPeek, peekedRun } from "@/lib/peek";
 import { summarizeTrace } from "@/lib/trace-tree";
 import { PEEK_PARAM, shortId, traceHref, traceReadHref } from "@/lib/traces";
@@ -134,7 +133,6 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
               noun="trace"
               previous={previous}
               next={next}
-              keys={{ previous: PREVIOUS_KEY, next: NEXT_KEY }}
             />
             <FullSizeAction full={full} toggleFull={toggleFull} />
           </>

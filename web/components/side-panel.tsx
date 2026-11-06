@@ -14,7 +14,6 @@ import { XIcon, type LucideIcon } from "lucide-react";
 
 import { useConsoleShell } from "@/components/console-shell";
 import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useNonModal } from "@/components/use-non-modal";
@@ -69,12 +68,10 @@ function useCoversArea(panel: RefObject<HTMLDivElement | null>): boolean {
 }
 
 /** One of the header's buttons: an icon, muted as the console header's are,
- *  named for a screen reader and, under the pointer, in a tooltip with its
- *  letter key where it has one. A step past the end of a list is
+ *  named for a screen reader and, under the pointer, in a tooltip. A step past the end of a list is
  *  `unavailable` rather than disabled, so the focus stays on it. */
 export function PanelAction({
   label,
-  letterKey,
   unavailable,
   onClick,
   children,
@@ -82,7 +79,6 @@ export function PanelAction({
   ...props
 }: {
   label: string;
-  letterKey?: string;
   unavailable?: boolean;
   children: ReactNode;
 } & Omit<ComponentProps<typeof Button>, "aria-label" | "aria-disabled">) {
@@ -106,14 +102,7 @@ export function PanelAction({
           {children}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>
-        {label}
-        {letterKey && (
-          <Kbd data-letter-key="" className="ml-1.5">
-            {letterKey.toUpperCase()}
-          </Kbd>
-        )}
-      </TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }

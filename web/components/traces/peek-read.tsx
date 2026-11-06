@@ -195,24 +195,20 @@ export function OpenPageAction({ href, label }: { href: string; label: string })
   );
 }
 
-/** The header's ↑ and ↓, stepping the page's rows; `keys` names their letter
- *  keys where the panel offers them. */
+/** The header's ↑ and ↓, stepping the page's rows. */
 export function StepActions({
   noun,
   previous,
   next,
-  keys,
 }: {
   noun: string;
   previous: string | null;
   next: string | null;
-  keys?: { previous: string; next: string };
 }) {
   return (
     <>
       <PanelAction
         label={`Previous ${noun}`}
-        {...(keys ? { letterKey: keys.previous } : {})}
         unavailable={!previous}
         onClick={() => previous && openPeek(previous)}
       >
@@ -220,7 +216,6 @@ export function StepActions({
       </PanelAction>
       <PanelAction
         label={`Next ${noun}`}
-        {...(keys ? { letterKey: keys.next } : {})}
         unavailable={!next}
         onClick={() => next && openPeek(next)}
       >

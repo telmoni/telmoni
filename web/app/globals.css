@@ -570,12 +570,6 @@ html.a11y-more-contrast.dark [data-slot="input"] {
   }
 }
 
-/* Letter-key shortcuts off: a keycap that advertises a bare key
-   (`data-letter-key`) hides, rather than promising a key that does nothing. */
-html.a11y-no-letter-keys [data-letter-key] {
-  display: none !important;
-}
-
 .theme-console
   [data-slot="card"]
   table

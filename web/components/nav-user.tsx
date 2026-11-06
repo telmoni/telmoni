@@ -18,14 +18,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { signOut } from "@/lib/auth/sign-out";
 import { SEARCH_MODIFIER_KEY, inFront, isChord } from "@/lib/keys";
 import { useIsMac } from "@/lib/use-platform";
 import { DOCS_URL, REPO_URL, STATUS_URL } from "@/lib/site";
 import { useUser } from "@/lib/store";
 import { displayName } from "@/lib/user-display";
-import { cn } from "@/lib/utils";
 
 const ROW = "h-7 gap-2 px-2 cursor-pointer";
 
@@ -118,18 +116,9 @@ export function NavUser() {
               </DropdownMenuItem>
             )}
 
-            <DropdownMenuItem
-              className={cn(ROW, "pr-1")}
-              onSelect={() => setShortcutsOpen(true)}
-            >
+            <DropdownMenuItem className={ROW} onSelect={() => setShortcutsOpen(true)}>
               <Keyboard />
-              <span className="flex-1">Keyboard shortcuts</span>
-              {/* The `?` it is, as the sheet lists it: the keys that type one
-                  differ from keyboard to keyboard. Hidden while letter-key
-                  shortcuts are off, when it does nothing. */}
-              <KbdGroup data-letter-key="">
-                <Kbd>?</Kbd>
-              </KbdGroup>
+              <span>Keyboard shortcuts</span>
             </DropdownMenuItem>
 
             {STATUS_URL && (

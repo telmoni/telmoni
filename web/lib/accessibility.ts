@@ -38,9 +38,7 @@ export const REDUCE_MOTION_CLASS = "a11y-reduce-motion";
 export const ALLOW_MOTION_CLASS = "a11y-allow-motion";
 export const MORE_CONTRAST_CLASS = "a11y-more-contrast";
 export const STANDARD_CONTRAST_CLASS = "a11y-standard-contrast";
-/** On the root while letter keys are off. Every keycap that advertises a bare
- *  key carries `data-letter-key`, and hides under this class (`globals.css`)
- *  rather than promising a key that does nothing. */
+/** On the root while letter keys are off, read by every bare-key handler. */
 export const LETTER_KEYS_OFF_CLASS = "a11y-no-letter-keys";
 /** ⚠ The console draws no focus indicator by default (`globals.css`, the
  *  unlayered `*:focus` rule), short of WCAG 2.1's 2.4.7 at level AA; this
