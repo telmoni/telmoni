@@ -378,6 +378,14 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Member",
         actor_id: ActorPattern::Variable,
     },
+    // A read, filed so the sheet can name its own row in the chain.
+    Mutation {
+        file: "crates/auth/src/handler/audit.rs",
+        fn_name: "draw_data_sheet",
+        action: "Viewed",
+        resource_kind: "Organization",
+        actor_id: ActorPattern::Variable,
+    },
     Mutation {
         file: "crates/auth/src/handler/deletion.rs",
         fn_name: "finalize_organization",
