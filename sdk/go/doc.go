@@ -1,11 +1,16 @@
-// Package telmoni is the Go SDK for Telmoni: an agent's runs, steps, model
-// calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere
-// else.
+// Package telmoni is the Go SDK for Telmoni, privacy-first, open-source
+// monitoring for AI agents: an agent's runs, steps, model calls and tool
+// calls as OpenTelemetry spans, sent to Telmoni and nowhere else.
 //
 // A client runs a tracer provider of its own beside whatever OpenTelemetry the
 // application already has, sends nothing outside a run, and takes prompts,
 // completions and tool payloads off every span before it leaves the process
 // unless the code asks and the project allows.
+//
+// The hosted service at https://api.telmoni.com, the default endpoint, is not
+// open yet. Until it is, run Telmoni yourself
+// (https://github.com/telmoni/telmoni#self-hosting) and point TELMONI_ENDPOINT
+// at its machine host.
 //
 //	client, err := telmoni.NewFromEnv()
 //	if err != nil {

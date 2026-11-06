@@ -29,7 +29,7 @@ row each, fifty to a page:
 | Started | When the run's first span started, in your time zone |
 | Agent | The run's agent (`telmoni.agent`) |
 | User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
-| Session | The session the run belongs to (`gen_ai.conversation.id`), as the application set it |
+| Session | The session the run belongs to (`gen_ai.conversation.id`), as stored: hashed under the project's own key |
 | Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the run's spans failed: a run can recover from a failed call |
 | Steps | How many steps the run took; hover for its model and tool calls |
 | Tokens | Its model calls' input and output tokens, summed; hover for the split |
@@ -64,8 +64,8 @@ with how many runs carry it — counted under every other filter, so a value
 beside a ticked one says what ticking it would add. Tick values to narrow the
 list: the values of one filter add to each other, and filters narrow
 together. The panel names fifty values of each at most, the most runs first;
-a session's id can be typed in as well (**Text**), so can a user's as it is
-stored, the hashed id the User column shows, and so can a tag, as
+a session's or a user's id can be typed in as well (**Text**), as it is
+stored: the hashed id the Session or User column shows; and so can a tag, as
 `key:value`. A run carries an environment, a release, a tag or a prompt
 where any of its spans does: the deployment is the resource's
 `deployment.environment.name` and `service.version`, a tag each

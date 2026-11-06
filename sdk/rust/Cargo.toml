@@ -8,7 +8,7 @@ edition.workspace = true
 # on theirs. Let chains need 1.88; clippy's incompatible_msrv holds std to it.
 rust-version = "1.88"
 # The second sentence meets whoever typed `cargo install telmoni`.
-description = "Rust SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans. The telmoni command is the crate telmoni-cli."
+description = "Rust SDK for Telmoni: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans. Telmoni is privacy-first, open-source monitoring for AI agents. The telmoni command is the crate telmoni-cli."
 repository = "https://github.com/telmoni/telmoni"
 authors = ["Kendrick Lawton"]
 license.workspace = true

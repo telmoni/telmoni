@@ -1,7 +1,9 @@
 # Telmoni Python SDK
 
-`telmoni`: an agent's runs, steps, model calls and tool calls as OpenTelemetry
-spans, sent to Telmoni and nowhere else. It runs a tracer provider of its own
+`telmoni`, the Python SDK for [Telmoni](https://github.com/telmoni/telmoni),
+privacy-first, open-source monitoring for AI agents: an agent's runs, steps,
+model calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere
+else. It runs a tracer provider of its own
 beside whatever OpenTelemetry your application already has, sends nothing
 outside a run, and takes prompts, completions and tool payloads off every span
 before it leaves the process unless you ask and the project allows.
@@ -16,7 +18,7 @@ pip install telmoni
 
 The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
 is not open yet, nor are the docs at telmoni.com/docs. Until they are,
-[run Telmoni yourself](https://github.com/telmoni/telmoni#-self-hosting) and
+[run Telmoni yourself](https://github.com/telmoni/telmoni#self-hosting) and
 point `TELMONI_ENDPOINT` at its machine host; the docs read in
 [`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs).
 
@@ -228,8 +230,10 @@ string it answers instead, or the span without that field where it answers
 image is put, so a part it takes out is never uploaded. A mask that raises, or
 answers anything but a `str`, sends the span without that field, warned once
 (`mask_failed`) by the key alone. It sees the content the SDK records, never a
-name, an id, a tag or an attribute your code sets on a span itself, which a
-project keeping content keeps too: keep a person out of those in your own code.
+span's name, a tag or a user id, which are metadata kept on every project, nor
+an attribute your code sets on a span itself, which leaves the process whatever
+`capture_content` says and which a project keeping content keeps too: keep a
+person out of those in your own code.
 
 ```python
 import re

@@ -10,7 +10,7 @@ to a **Project** and are managed from the project's **API keys** page
 
 ## Creating a key
 
-Project **Owners** and **Admins** can mint, rotate, and revoke API keys.
+A project's **Owner** and **Admins** can mint, rotate, and revoke API keys.
 
 1. Navigate to your project's **API keys** page.
 2. Select **Mint key**, which opens the form over the page, as **New project** opens.
@@ -80,7 +80,8 @@ const client = new Telmoni({ apiKey: process.env.TELMONI_API_KEY });
 A key is minted in a project, is deleted with it, and follows it if the project
 is transferred to another organization. On `/v1` it reads its project's
 organization (`GET /v1/organization`) and its project's traces, totals and
-incidents ([API reference](/docs/api/reference)), never another project's: a
+incidents and, where the project keeps it, their content, each read filed in
+the [audit log](/docs/workspace/audit-log) ([API reference](/docs/api/reference)), never another project's: a
 key reads no more than the project Admin who minted it can see. A key remains active regardless
 of whether the individual user who created it leaves the project.
 

@@ -9,7 +9,7 @@ and their tokens, the tools it used, and Claude Code's subagents, each with its
 times and whether it failed. Unless you turn [content](#a-turns-conversation)
 on, a plugin never sends a prompt, a reply, a thought, a tool's input or
 output, a command, a file's path or the folder you work in: a local model named
-by the path to its file is sent by the file's name alone.
+by the path to its file is sent by the file's name alone, or as `unknown`.
 
 | Agent | Plugin | Package | Runs as |
 |---|---|---|---|
@@ -70,7 +70,7 @@ reaches its Redis, a copy that arrives within the hour of the first is stored
 once: its run's id is derived from the session and the turn, and every span's
 from the run's.
 
-**What is never read.** With content off, of what Claude Code writes down, its
+**What is read with content off.** With content off, of what Claude Code writes down, its
 plugin reads only names, ids, times, counts and flags: each entry's kind, id,
 time and outcome, a reply's model, provider and token counts, a tool call's
 name, and a subagent's kind. It also reads the skill a `Skill` call names,
@@ -87,7 +87,7 @@ a compaction's summary, a tool's input or output beyond that skill's name, a
 command, the path or contents of a file you work on, the working folder, a
 session's title or anyone's email, whatever the project's content mode.
 
-Of what Antigravity writes down, its plugin reads only each step's kind, time
+With content off, of what Antigravity writes down, its plugin reads only each step's kind, time
 and status, each model call's tokens, each tool call's name, a command's exit
 code and an error's code; of what its hook is handed, the conversation's id,
 the transcript's path, the model's name, why the turn ended and whether the
@@ -129,8 +129,9 @@ subagent's task and answer on its step. Each model call carries what it was
 handed since the call before: your prompt for a turn's first, a subagent's task
 for its first, and the tools' results for the rest; a compaction's step carries
 its summary. An image goes as the SDKs send one, put aside under `/v1/media`
-and named in the message. Still never sent: your email and the workspace's
-folders, beyond what you or the agent wrote in the conversation itself. An
+and named in the message. Still never sent: the folder you work in, the
+transcript's path, a session's title or anyone's email, beyond what the
+conversation itself holds, a tool's output among it. An
 Antigravity turn carries your prompt as you typed it, without the metadata
 Antigravity wraps it in, each reply with the reasoning written in plain text,
 each tool's arguments and output, and each compaction's summary. A turn

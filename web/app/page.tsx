@@ -26,7 +26,7 @@ const docs = (path: string) => `${DOCS_URL}${path}`;
 
 // What the product is, over the sentence the page makes, and the paragraph
 // under it: one job, said once.
-const KICKER = "Open-source monitoring for AI agents";
+const KICKER = "Privacy-first, open-source monitoring for AI agents";
 // Beside the kicker, so nobody takes the product for finished.
 const STAGE = "Beta";
 const CLAIM = "Know when your agents fail, stall, loop or overspend, and stop them at the cap you set.";

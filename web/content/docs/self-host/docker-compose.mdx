@@ -3,7 +3,7 @@ title: Docker Compose Quickstart
 description: Run Telmoni on a single host with Docker Compose.
 ---
 
-Docker Compose runs a Telmoni instance on a single host, to evaluate it or to serve a small company; it runs every module as one database user, without the per-module roles a [production](/docs/self-host/production) deployment gives them. That user is the database's superuser, which Row-Level Security does not bind, so the database itself does not keep organizations' rows apart here. ClickHouse, the store for your agents' spans, likewise has one user here, which its row policy does not hold. The stack bundles PostgreSQL 17 with `pgvector`, ClickHouse, Redis 7 Alpine, the automated database migrator, the Rust core backend server, and the Next.js web console.
+Docker Compose runs a Telmoni instance on a single host, to evaluate it or, after the platform's first release, to serve a small company; it runs every module as one database user, without the per-module roles a [production](/docs/self-host/production) deployment gives them. That user is the database's superuser, which Row-Level Security does not bind, so the database itself does not keep organizations' rows apart here. ClickHouse, the store for your agents' spans, likewise has one user here, which its row policy does not hold. The stack bundles PostgreSQL 17 with `pgvector`, ClickHouse, Redis 7 Alpine, the automated database migrator, the Rust core backend server, and the Next.js web console.
 
 ## Prerequisites
 
@@ -48,7 +48,7 @@ Six values have no default, and `up` refuses to start without them, naming the o
 - `AUTH_SECRET`: A secret of 32 bytes or more used to seal and decrypt session cookies.
 - `POSTGRES_PASSWORD`: The password of the stack's one database user. A default in the compose file would be the same on every install.
 - `CLICKHOUSE_PASSWORD`: The password of ClickHouse's one user. Like `POSTGRES_PASSWORD`, it goes into a connection URL, so keep to the hex `openssl` prints.
-- `TELEMETRY_KEK`: `local:` followed by 64 hex characters: the key that seals each project's hashing key, which the user ids its spans carry are hashed under before they are stored. A secret to back up beside your database dumps: a dump restored without it leaves every stored user id matching nothing a new key makes.
+- `TELEMETRY_KEK`: `local:` followed by 64 hex characters: the key that seals each project's hashing key, which the user and session ids its spans carry are hashed under before they are stored. A secret to back up beside your database dumps: a dump restored without it leaves every stored user and session id matching nothing a new key makes.
 - `CONTENT_KEK`: `local:` followed by 64 hex characters, another key: the one that seals each project's content key, for a project that keeps content. A secret to back up the same way: a dump restored without it leaves that content unreadable.
 
 A sixth, `CONNECTOR_KEK`, seals connector secrets at rest. The server starts without it unless Slack credentials are configured, but no connector (webhooks included) is offered without it. It has no default: a key shipped in the compose file would be the same on every install, and a database dump would then open every connector's grant.
@@ -215,7 +215,7 @@ docker compose -f deploy/compose/docker-compose.yml run --rm migrate rotate
 
 ### Upgrading
 
-The Compose file builds both images from your checkout, as `telmoni-server:local` and `telmoni-web:local` unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others. Upgrade by checking out a newer commit and building both from it: the console and the server change their contract with each other in place before Telmoni's first release, so a pair from two commits can fail. Build first, then run the migration alone, then start the rest (with `--profile agent` on each if you run the agent):
+The Compose file builds both images from your checkout, as `telmoni-server:local` and `telmoni-web:local` unless `TELMONI_IMAGE_SERVER` and `TELMONI_IMAGE_WEB` name others. Upgrade by checking out a newer commit and building both from it: the console and the server change their contract with each other in place before the platform's first release, so a pair from two commits can fail. Build first, then run the migration alone, then start the rest (with `--profile agent` on each if you run the agent):
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml build
@@ -225,7 +225,7 @@ docker compose -f deploy/compose/docker-compose.yml up -d --wait --wait-timeout 
 
 `run --rm migrate` first: a migration it refuses leaves the running server and console as they were.
 
-Before Telmoni's first release its migrations are edited in place rather than added to, so an upgrade across such an edit is refused: `migrate` exits naming the schema whose applied migration has changed, or ClickHouse's ledger whose digest differs. The way forward is to make both stores again, which deletes every organization, project and span:
+Before the platform's first release its migrations are edited in place rather than added to, so an upgrade across such an edit is refused: `migrate` exits naming the schema whose applied migration has changed, or ClickHouse's ledger whose digest differs. The way forward is to make both stores again, which deletes every organization, project and span:
 
 ```bash
 docker compose -f deploy/compose/docker-compose.yml down -v

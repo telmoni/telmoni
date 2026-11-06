@@ -4,18 +4,21 @@ description: "What a run said, kept in full when both locks are on: the project'
 ---
 
 **Content** is what a person or a model wrote during a run: the prompts and
-completions of its model calls, the inputs and outputs of its tool calls, the
-images and files a message carried, a failure's message and stack trace, and
-any metadata your code attaches beyond what the
-[field inventory](/docs/api/field-inventory) names. Everything else a span
+completions of its model calls, the model's thinking, the inputs and outputs of its tool calls, the
+images and files a message carried, a failure's message and stack trace, the
+name or email address a span gives a person, and any text, list or map your
+code attaches beyond what the [field inventory](/docs/api/field-inventory) names. Everything else a span
 carries is **metadata** — its name, timings, status, tokens, model and tool
 names, tags, a user id, an error's type — which Telmoni keeps on every project,
 whatever its mode. Prompts stay in your process unless you turn content on.
 
 ## The two locks
 
-Content leaves your code only when both of these are on, and with either off
-the span is sent and kept without it:
+Telmoni's SDKs and plugins send the content they record only when both of
+these are on, and with either off the span is sent and kept without it. A
+framework's own instrumentation sends what its setting says, and an attribute
+your code sets on a span itself goes whatever the SDK's switch says: ingest
+drops either on a project left `off`. The two locks:
 
 1. **Your switch, in the SDK.** A client sends content only when it is built
    with `capture_content` on (`captureContent` in TypeScript, `CaptureContent`
@@ -58,10 +61,12 @@ characters an attribute is otherwise held to, sealed under a key of the
 project's own, in Postgres alone, never in the span store:
 
 - **Messages**: a model call's system instructions, the tools it was offered,
-  and its input and output messages; and a run's own input and output, its
-  turn of a conversation.
+  and its input and output messages; a prompt's variables; and a run's own
+  input and output, its turn of a conversation.
 - **Tool payloads**: a tool call's arguments and result; a retrieval's query
-  and documents.
+  and documents; a memory's query and records.
+- **People**: the `user.email`, `user.full_name` and `user.name` that name a
+  person.
 - **Images and files**: a part of a message holding a file's bytes is lifted
   out by the SDK before export and sent once, by its SHA-256, to
   `PUT /v1/media/{sha256}`, up to 5 MiB a file, and the message names it

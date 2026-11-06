@@ -1,5 +1,6 @@
-"""The Python SDK for Telmoni: an agent's runs, steps, model calls and tool
-calls as OpenTelemetry spans, sent to Telmoni and nowhere else."""
+"""The Python SDK for Telmoni, privacy-first, open-source monitoring for AI
+agents: an agent's runs, steps, model calls and tool calls as OpenTelemetry
+spans, sent to Telmoni and nowhere else."""
 
 from ._version import __version__
 from .client import Telmoni

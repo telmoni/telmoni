@@ -97,8 +97,9 @@ trace, named by `OTEL_SERVICE_NAME`. Content: the setting above.
 **TypeScript.** `npm install @opentelemetry/instrumentation-openai`, and
 `new OpenAIInstrumentation()` in the SDK's `instrumentations`. Its calls are
 model calls with their tokens; it writes messages to log events, not to the
-span, so Telmoni keeps none of them, whatever the project's mode, but a
-Responses call's instructions, which it puts on the span unasked.
+span, so Telmoni keeps none of them, whatever the project's mode, save a
+Responses call's instructions, which it puts on the span unasked: those leave
+your process, and a project whose content mode is `on` keeps them.
 
 ## Anthropic SDK
 

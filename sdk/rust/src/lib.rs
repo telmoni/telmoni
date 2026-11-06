@@ -1,5 +1,13 @@
-//! The Rust SDK for Telmoni: an agent's runs, steps, model calls and tool
-//! calls as OpenTelemetry spans, sent to Telmoni and nowhere else.
+//! The Rust SDK for Telmoni, privacy-first, open-source monitoring for AI
+//! agents: an agent's runs, steps, model calls and tool calls as
+//! OpenTelemetry spans, sent to Telmoni and nowhere else. The client takes
+//! prompts, completions and tool payloads off every span before it leaves the
+//! process unless you ask and the project allows.
+//!
+//! The hosted service at <https://api.telmoni.com>, the default endpoint, is
+//! not open yet. Until it is, run Telmoni yourself
+//! (<https://github.com/telmoni/telmoni#self-hosting>) and point
+//! `TELMONI_ENDPOINT` at its machine host.
 //!
 //! The client owns a tracer provider of its own, built part by part so no
 //! `OTEL_*` variable reaches it, and runs beside whatever OpenTelemetry the
@@ -14,7 +22,8 @@
 //! use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
 //!
 //! # fn main() -> Result<(), telmoni::Error> {
-//! // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE.
+//! // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE,
+//! // TELMONI_CAPTURE_CONTENT, TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII.
 //! let telmoni = Telmoni::new(Config::from_env());
 //!
 //! let run = telmoni.run(

@@ -6,7 +6,7 @@ description: "The Telmoni API: authentication, rate limits, and the public /v1 r
 The Telmoni API is an HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it reads a project as the console does:
 its organization, its traces with their spans and, if asked, their
-content, its totals by the hour or the day and its incidents, so the CLI, a
+content, its totals by the hour or the day and its incidents, so a script, a
 notebook or a BI tool can work with them. The routes here need the `read`
 scope, and write nothing. Spans go to a lane of their own,
 [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the `ingest` scope, as

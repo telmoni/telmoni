@@ -5,7 +5,7 @@
       <img src=".github/assets/lockup-color-on-light.svg" alt="telmoni" width="360">
     </picture>
   </a>
-  <h3>Privacy-first observability for AI agents</h3>
+  <h3>Privacy-first, open-source monitoring for AI agents</h3>
   <p>
     <a href="https://telmoni.com/docs"><strong>Docs</strong></a> ·
     <a href="#quickstart"><strong>Quickstart</strong></a> ·
@@ -22,10 +22,10 @@
 
 > Know when your agents fail, stall, loop or overspend, and stop them at the cap you set. Prompts stay in your process unless you turn content on.
 
-Telmoni is open-source monitoring for the AI agents you run: a Python service, a nightly batch, a LangGraph graph, a Claude Code session. Its SDKs and its Claude Code and Antigravity plugins record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; Telmoni alerts when a run fails, stalls, loops, overspends or stops arriving, stops a run at the caps you set, and shows you the run that did it. Only metadata is kept unless you choose otherwise: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway, until a project's owner turns its content on, when it is kept sealed under the project's own key. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
+Telmoni is privacy-first, open-source monitoring for the AI agents you run: a Python service, a nightly batch, a LangGraph graph, a Claude Code session. Its SDKs and its Claude Code and Antigravity plugins record each **run** of an agent, and the **steps**, **model calls** and **tool calls** inside it, as OpenTelemetry spans; Telmoni alerts when a run fails, stalls, loops, overspends or stops arriving, stops a run at the caps you set, and shows you the run that did it. Only metadata is kept unless you choose otherwise: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway, until a project's owner turns its content on and your code asks for it, when it is kept sealed under the project's own key. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
 
 > [!NOTE]
-> Telmoni hasn't launched yet, and it's built in the open. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the telemetry on them: the SDKs and the Claude Code and Antigravity plugins, ingest, the console's traces, grouped by session or user, dashboards, alerts, a cost cap among them, and objectives, each organization's open incidents on its Overview, the cost a call reports, scores, content an owner chooses to keep, and the SDKs' guard, which stops a run at the caps on its steps and spend you set. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what is built, and [Known gaps](ARCHITECTURE.md#known-gaps) what isn't right yet.
+> Telmoni hasn't launched yet and isn't at 1.0, and it's built in the open: until it is, expect it to change every month, sometimes incompatibly. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the telemetry on them: the SDKs and the Claude Code and Antigravity plugins, ingest, the console's traces, grouped by session or user, dashboards, alerts, a cost alert among them, and objectives, each organization's open incidents on its Overview, the cost a call reports, scores, content an owner chooses to keep, and the SDKs' guard, which stops a run at the caps on its steps and spend you set. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what is built, and [Known gaps](ARCHITECTURE.md#known-gaps) what isn't right yet.
 
 ## Features
 
@@ -33,7 +33,7 @@ Telmoni is open-source monitoring for the AI agents you run: a Python service, a
 - **[Guard](https://telmoni.com/docs/api/sdks#the-guard)**: opt-in caps on a run's steps and spend, counted in the agent's own process with no call to us, which stop a run before it overspends.
 - **[Objectives](https://telmoni.com/docs/monitoring/objectives) and [spend](https://telmoni.com/docs/monitoring/dashboards)**: objectives that promise a share of an agent's runs succeed or end in time, paging when the error budget burns too fast; budgets with the day they'll be reached; and spend, tokens, runs, failures and latency, split by agent, model, provider or tag.
 - **[Agent telemetry](https://telmoni.com/docs/api/sdks)**: open a run around your agent, or install a [coding-agent plugin](https://telmoni.com/docs/api/coding-agents), and each step, model call and tool call inside it becomes a span with its timings, status, model, tokens, cost and errors. Any framework that speaks OpenTelemetry works too.
-- **[Private by default](https://telmoni.com/docs/api/field-inventory)**: timings, statuses, counts and names, never content. End-user IDs are hashed with a key unique to each project, and the field inventory lists every attribute ingest reads, and what becomes of it.
+- **[Private by default](https://telmoni.com/docs/api/field-inventory)**: timings, statuses, counts and names, never content. End-user and session IDs are hashed with a key unique to each project, and the field inventory lists every attribute ingest reads, and what becomes of it.
 - **[Content, when you choose it](https://telmoni.com/docs/monitoring/content)**: prompts, completions, the model's thinking, tool inputs and outputs, images and files, and failures with their stack traces, kept in full only where a project's owner turns its content mode on and the developer's capture switch is on too, sealed under the project's own key, and every read of it in the audit log.
 - **[Traces](https://telmoni.com/docs/monitoring/traces)**: the run behind every alert, as the tree its spans ran in or as a timeline; filter, sort, chart and download runs, by session and end user too, and see new runs the moment they arrive.
 - **[Scores](https://telmoni.com/docs/monitoring/scores)**: scores on a run, a span or a session from your code or a member, alerted on when they drop.
@@ -112,7 +112,7 @@ Configuration comes only from the environment ([every setting](https://telmoni.c
 |---|---|---|
 | [SDKs](https://telmoni.com/docs/api/sdks) | Python, TypeScript, Go, Rust | Record an agent's runs, steps, model calls and tool calls as spans. |
 | [Coding-agent plugins](https://telmoni.com/docs/api/coding-agents) | Claude Code, Antigravity | Record each turn of a coding agent you already use as a run, with no code to write: metadata alone, unless you turn its content on. |
-| [CLI](https://github.com/telmoni/telmoni-cli) | macOS, Linux | `telmoni`: device-code sign-in and your organizations from a terminal, or an API key in CI. |
+| [CLI](https://github.com/telmoni/telmoni-cli) | macOS, Linux | `telmoni`: sign in from a terminal (device code) or CI (an API key), see who you are, and switch organizations. |
 | [Slack](https://telmoni.com/docs/integrations/slack) | Notifications | A project's notifications, posted to a channel. |
 | [Webhooks](https://telmoni.com/docs/integrations/webhooks) | Notifications | A project's notifications, delivered to your endpoint and signed with HMAC-SHA256. |
 | [OIDC](https://telmoni.com/docs/self-host/configuration) | Any OIDC provider | Single sign-on beside the password form, or instead of it. |

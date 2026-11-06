@@ -29,17 +29,20 @@ hourly totals keep their 13 months whatever the project chose.
 | The content a project whose content mode is `on` keeps: each field of a span, sealed under the project's own key, in Postgres | As long as its span | `rotate` deletes it with its span; purged with the project |
 | A file a message carried, an image, audio or a document a project whose mode is `on` keeps: sealed under the project's own key, in Postgres, kept once however many spans name it | While any span within retention names it, and a day at most when none ever did | `rotate` deletes it once no span names it; erased with the traces or the end user that named it alone; purged with the project |
 | The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
-| A project's telemetry settings: its content mode, its retention, the key its end-user ids are hashed under, and the key its content is sealed under | While the project exists | Purged with the project |
+| A project's telemetry settings: its content mode, its retention, the key its end-user and session ids are hashed under, and the key its content is sealed under | While the project exists | Purged with the project |
 | A project's saved dashboards: each one's name and charts | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 | A project's [alerts](/docs/monitoring/alerts): each one's definition, the connectors it tells and its last value | Until a member deletes it, or the project goes | Deleted with its incidents and its maintenance windows, or purged with the project |
 | An alert's incidents: their severity, who acknowledged or resolved them, where their notices went and the runs they showed | While their alert exists | Deleted with the alert |
 | Maintenance windows, kept after they end as the record of who muted what | While their alert, or their project, exists | Deleted with it |
 
-Content — prompts, completions, system instructions, tool inputs and outputs,
-retrieved documents and every attribute that names a person — is kept for no
-time at all on a project whose content mode is `off`, the default: it is
-dropped at the door, as the [ingest page](/docs/api/ingest#what-is-dropped-at-the-door)
-lists. On one whose mode is `on`, it is kept as long as its span, above. An end user's id is stored only as a keyed hash
+Content — prompts, completions, the model's thinking, system instructions,
+tool inputs and outputs, retrieved documents, images and files, a failure's
+message and stack trace, the attributes that name a person, and any text, list
+or map attribute the [field inventory](/docs/api/field-inventory) does not
+name — is kept for no time at all on a project whose content mode is `off`,
+the default: the SDKs hold back the content they record, and any that arrives
+is dropped at the door, as the [ingest page](/docs/api/ingest#what-is-dropped-at-the-door)
+lists. On one whose mode is `on`, it is kept as long as its span, above. An end user's id and a session's are each stored only as a keyed hash
 ([Sessions and users](/docs/monitoring/traces#sessions-and-users)).
 
 ## The organization's records

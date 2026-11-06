@@ -74,7 +74,7 @@ describe("the splash page", () => {
     render(await SplashPage());
 
     expect(screen.getByText("Beta")).toBeInTheDocument();
-    expect(screen.getByText("Open-source monitoring for AI agents")).toBeInTheDocument();
+    expect(screen.getByText("Privacy-first, open-source monitoring for AI agents")).toBeInTheDocument();
   });
 
   it("sends a member to the console instead", async () => {

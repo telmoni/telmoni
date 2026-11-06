@@ -1,7 +1,11 @@
 # Telmoni TypeScript / JavaScript SDK
 
-An agent's runs, steps, model calls and tool calls as OpenTelemetry spans,
-sent to Telmoni and nowhere else. Node 18.19 or 20.6 and later.
+`telmoni`, the TypeScript and JavaScript SDK for
+[Telmoni](https://github.com/telmoni/telmoni), privacy-first, open-source
+monitoring for AI agents: an agent's runs, steps, model calls and tool calls as
+OpenTelemetry spans, sent to Telmoni and nowhere else. It takes prompts,
+completions and tool payloads off every span before it leaves the process
+unless you ask and the project allows. Node 18.19 or 20.6 and later.
 
 ## Installation
 
@@ -11,7 +15,7 @@ npm install telmoni
 
 The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
 is not open yet, nor are the docs at telmoni.com/docs. Until they are,
-[run Telmoni yourself](https://github.com/telmoni/telmoni#-self-hosting) and
+[run Telmoni yourself](https://github.com/telmoni/telmoni#self-hosting) and
 point `TELMONI_ENDPOINT` at its machine host; the docs read in
 [`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs).
 
@@ -285,8 +289,10 @@ each export, before any image is put, so a part it takes out is never uploaded,
 and must answer at once: a mask that throws, or answers anything but a string, a
 `Promise` among them, sends the span without that field, warned once
 (`mask_failed`) by the key alone. It sees the content the SDK records, never a
-name, an id, a tag or an attribute your code sets on a span itself, which a
-project keeping content keeps too: keep a person out of those in your own code.
+span's name, a tag or a user id, which are metadata kept on every project, nor
+an attribute your code sets on a span itself, which leaves the process whatever
+`captureContent` says and which a project keeping content keeps too: keep a
+person out of those in your own code.
 `Telmoni.fromEnv()` sets none; give it to
 the constructor.
 

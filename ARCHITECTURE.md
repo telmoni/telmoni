@@ -28,7 +28,7 @@ Telmoni's core on one page: what it is for, what it is made of, how a request mo
 
 ## Purpose and scope
 
-Telmoni is a privacy-first observability platform for AI agents, open source under Apache-2.0. This repository is its core: everything an installation runs. Today that is:
+Telmoni is privacy-first, open-source monitoring for AI agents, under Apache-2.0. This repository is its core: everything an installation runs. Today that is:
 - organizations and projects, members and roles;
 - API keys, and a read API, `/v1`;
 - notifications, to an in-app feed, Slack and webhooks;
