@@ -49,7 +49,7 @@ updates:
   # digest-pinned, so this is the one grouped PR a week that still needs a look.
   #
   # ⚠ Dependabot never renames an image, and a distroless name carries its Debian
-  # release (`static-debian13`, `nodejs24-debian13`). A release distroless drops
+  # release (`static-debian13`, `nodejs26-debian13`). A release distroless drops
   # from its README stops updating, so its digest never moves and no PR comes.
   # Move the `-debianNN` suffix by hand when distroless moves on.
   - package-ecosystem: "docker"
@@ -78,7 +78,7 @@ updates:
         patterns:
           - "*"
     # ⚠ The web build stage must share a MAJOR with its distroless runtime, and
-    # the runtime carries its major in its name (`nodejs24-debian13`), which
+    # the runtime carries its major in its name (`nodejs26-debian13`), which
     # Dependabot never renames. A major bump of `node` moves both lines by hand;
     # this ignore ensures Dependabot does not propose a mismatched major.
     #
