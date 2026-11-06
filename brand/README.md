@@ -5,7 +5,7 @@ The mark, wordmark, lockup, icons, social cards and platform uploads for Telmoni
 ## What changed from today's pack
 
 - **Mark:** redrawn as the fused "tm" with the found unit. It now has **two tones** instead of three. `viewBox` is `0 0 1305 1000` (1.305:1), previously `40 125 955 740`.
-- **Colours:** pinned to `#0A0A0A` (dark) and `#FAFAFA` (light) everywhere. These replace `#09090B`, `#F7F7F8` and the drifted `#0A0A0B`.
+- **Colours:** pinned to `#0A0A0A` (dark) and `#FAFAFA` (light) everywhere, with the unit in amber, `#F2A93B`. These replace `#09090B`, `#F7F7F8` and the drifted `#0A0A0B`.
 - **Wordmark:** `viewBox` is now `0 -1000 4614.38 1010.5`.
 - **Lockup:** `viewBox` is now `0 -820 4546.17 827.35`, at **5.49:1**. The Stripe and WorkOS logo images are therefore **1024 × 186**.
 - **Favicons:** `icon.svg`, `favicon.ico` and `icon.png` use a small-size cut of the mark, fitted to whole pixels at 16, 32 and 48 px (see below).
@@ -22,7 +22,7 @@ Two tones:
 | **Unit** | the found square under the last leg | 5 `rect` |
 
 - Every shape carries exactly one tone; files hold no ids or classes, so map tones by order.
-- **Why two tones share a colour:** in all three palettes the unit takes the body's colour, because the mark is monochrome. It's a separate tone so the console can paint it from its own token, for example a live status or the "found" animation. Don't recolour it with brand or chart colours.
+- **The unit is amber:** `#F2A93B` in every colour palette; only the `-black`, `-white` and `currentColor` masters draw it in the body's colour. It's a separate tone so the console can paint it from its own token, for example a live status or the "found" animation. Don't recolour it with chart colours.
 - Body shapes overlap inside the letter, so no hairline seams show between them. Paint tones with opaque colours.
 - Construction, in `viewBox` units:
   - stem 200 (one fifth of the height); counters 250; crossbar 300–480.
@@ -34,7 +34,7 @@ Two tones:
 | Tone | on-light | on-dark | fallback |
 | --- | --- | --- | --- |
 | Body | `#0A0A0A` | `#FAFAFA` | `#787878` |
-| Unit | `#0A0A0A` | `#FAFAFA` | `#787878` |
+| Unit | `#F2A93B` | `#F2A93B` | `#F2A93B` |
 | Wordmark (in lockups) | `#0A0A0A` | `#FAFAFA` | — |
 
 | Tile | Background | Mark |
@@ -43,8 +43,9 @@ Two tones:
 | Dark tile | `#0A0A0A` | on-dark |
 
 - **Dark and light values:** `#0A0A0A` and `#FAFAFA` are shadcn New York neutral-950 and neutral-50. They're the only dark and light used in any file.
+- **Amber:** `#F2A93B`, the unit's colour, and the only colour beside the dark and light.
 - **Fallback:** `#787878` is the grey that reads equally on white (4.4:1) and on the dark tile (4.5:1).
-- **Card text:** the line on the social cards is the pinned light, `#FAFAFA`. Every card uses only the two pinned colours, and the line stays legible in small link previews.
+- **Card text:** the line on the social cards is `#404040`, on the light.
 - **Black and white masters:** the `-black` and `-white` files use pure `#000000` and `#FFFFFF`.
 
 ## Wordmark
@@ -103,13 +104,10 @@ One found unit (the square) on every side:
   - The ink stays inside 77% of the canvas width measured as a centred circle. That clears the maskable 80% circle and X's circular crop.
   - Used in the tiles, maskable icons, `apple-icon.png`, `icon-192/512.png` and every square upload.
 - **Social cards:**
-  - Background: the dark tile.
-  - Lockup: on-dark, 705 px wide.
-  - Line: Geist Regular 30 px, `#FAFAFA`, centred under the lockup.
-  - Nearest content to an edge: 208 px on Open Graph, 193 px on Twitter.
-- **X header:**
-  - The lockup (640 px wide) and the hosted line, centred left to right.
-  - The block sits in the upper part of the header. It ends about 50 px above the profile photo X lays over the bottom left.
+  - Background: the light, `#FAFAFA`.
+  - Lockup: on-light, centred.
+  - Line: Inter Regular, `#404040`, centred under the lockup.
+- **X header and GitHub's social preview:** the same layout as the cards, with the line "Privacy-first, open-source monitoring for AI agents."
 - **LinkedIn cover:** the lockup alone, 330 px wide, centred.
 
 ## Files
@@ -126,17 +124,18 @@ masters/
   mark-small-color-transparent.svg                           favicon source (extra)
 app/  and  web/app/             identical icons; the cards differ by their line
   icon.svg                      on-light, on-dark under prefers-color-scheme
-  favicon.ico                   16, 32, 48 · fallback
-  icon.png                      32 · fallback
-  icon-192.png  icon-512.png    fallback
-  icon-192-maskable.png  icon-512-maskable.png   dark tile, no alpha
-  apple-icon.png                180, dark tile, no alpha
+  favicon.ico                   16, 32, 48 · on-light
+  icon.png                      32 · on-light
+  icon-192.png  icon-512.png    light tile, no alpha
+  icon-192-maskable.png  icon-512-maskable.png   light tile, no alpha
+  apple-icon.png                180, light tile, no alpha
   opengraph-image.png           1200×630, opaque
   twitter-image.png             1200×600, opaque
-                                both cards in app/ read "Privacy-first telemetry and monitoring for AI agents."
+                                both cards in app/ read "Privacy-first, open-source monitoring for AI agents."
                                 both cards in web/app/ read "Console and docs"
 uploads/
-  github-avatar-1024.png  slack-icon-1024.png  stripe-icon-512.png  workos-logo-icon-512.png
+  github-avatar-1024.png                                      transparent, on-light
+  slack-icon-1024.png  stripe-icon-512.png  workos-logo-icon-512.png
   x-profile-400.png  linkedin-logo-300.png                    transparent, fallback
   stripe-logo-1024.png  workos-logo-1024.png                  1024×186, on-light
   stripe-logo-1024-on-dark.png                                1024×186, on-dark
@@ -150,4 +149,4 @@ proof/
 MANIFEST.md
 ```
 
-The card text is set in [Geist](https://github.com/vercel/geist-font) (SIL Open Font License 1.1) and converted to outlines.
+The card text is set in [Inter](https://rsms.me/inter/) (SIL Open Font License 1.1).

@@ -48,7 +48,7 @@ function MarkShapes() {
         d="M650 625A325 337.5 0 0 1 1300 625V720H1100V625C1100 523.5 1062.5 480 975 480C887.5 480 850 523.5 850 625Z"
         fill="currentColor"
       />
-      <rect x="1095" y="790" width="210" height="210" fill="currentColor" />
+      <rect x="1095" y="790" width="210" height="210" className="fill-brand-unit" />
     </>
   );
 }

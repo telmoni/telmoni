@@ -67,6 +67,8 @@
 
   --brand-positive: oklch(0.56 0.17 145);
   --brand-negative: oklch(0.55 0.22 25);
+  /* The logo's unit square, #F2A93B, one amber in every theme. */
+  --brand-unit: oklch(0.787 0.147 73);
   /* The marker is cyan, lightened at its hue on a light page; the words on
      it keep the mark's dark ink in both. */
   --highlight: oklch(0.9 0.067 223);
@@ -641,6 +643,7 @@ html.a11y-more-contrast.dark [data-slot="input"] {
   --color-ring: var(--ring);
   --color-brand-positive: var(--brand-positive);
   --color-brand-negative: var(--brand-negative);
+  --color-brand-unit: var(--brand-unit);
   --color-mark-ink: var(--mark-ink);
   --color-mark-mid: var(--mark-mid);
   --color-mark-faint: var(--mark-faint);
