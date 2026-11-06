@@ -28,7 +28,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 | `ARCHITECTURE.md` | How the platform is built, and why, on one page: the repository's one internal document. |
 | `scratch/` | The maintainer's notes, gitignored. Never write to it. |
 | [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) | Sibling repo, checked out as `../telmoni-cli`: the CLI, a client of the `/cli/v1` and `/v1` lanes and nothing else. |
-| [`telmoni/skills`](https://github.com/telmoni/skills), `telmoni/<agent>-observability-plugin` | Sibling repos, checked out as `../skills` and `../<agent>-observability-plugin` (`claude`, `codex`, `cursor`, `opencode`): the agent skill, which restates the SDKs, the CLI, the API and the book's paths and sends nothing of its own, and the four plugins, clients of the SDKs. A change to a lane, an SDK or a page's path names what it leaves wrong there. |
+| `telmoni/<agent>-observability-plugin` | Sibling repos, checked out as `../<agent>-observability-plugin` (`claude-code`, `antigravity`): the Claude Code and Antigravity plugins, clients of the TypeScript SDK. A change to a lane, an SDK or a page's path names what it leaves wrong there. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.
@@ -60,7 +60,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 
 ## The Book
 - A page says what the platform, the CLI and the SDKs do today, checked against their source, and never anything not built yet. Every page is published as written: examples use placeholders anyone can see are placeholders.
-- **Ask first:** a new top-level group in the sidebar, and renaming or moving a page: the skill, the plugins, the READMEs and `.github` link pages by their path, and nothing checks those links, so the ask names each link it would leave wrong.
+- **Ask first:** a new top-level group in the sidebar, and renaming or moving a page: the plugins, the READMEs and `.github` link pages by their path, and nothing checks those links, so the ask names each link it would leave wrong.
 - A page is an `.mdx` file with `title` and `description` in its frontmatter; the title is also its name in the sidebar. Each folder's `meta.json` is its reading order: a new page goes into its `pages`, and its `...` stays, since it takes in the pages a console built on this one lays over the tree.
 - Use only what `web/components/mdx.tsx` provides: Fumadocs' defaults (`Cards`, `Card` and `Callout` among them) and `Steps`, `Step`, `Tabs` and `Tab`. Outside a code fence, a bare `<flag>` or `{param}` breaks the build, and HTML comments are invalid.
 - Links use the served path (`/docs/integrations/webhooks`), never a file path. A page this console does not serve, one a console built on it lays over the book, is linked by its address on telmoni.com (`https://telmoni.com/docs/legal/subprocessors`).
@@ -69,7 +69,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 
 ## Agent Hygiene
 - **This repo only:** change nothing in another repository (`telmoni/telmoni-cli`, any other) unless the user says so for this task; that binds subagents too. Reading is fine.
-- Edit `AGENTS.md` (`.github/copilot-instructions.md` points here) only when the user asks outright; otherwise propose a diff. Delete any Next.js-generated `web/AGENTS.md`.
+- Edit `AGENTS.md` only when the user asks outright; otherwise propose a diff. Delete any Next.js-generated `web/AGENTS.md`.
 - Comments are for a person reading the code, and short: they say *why*, never *what* — a doc comment in a line or two, an inline comment in one, a test's doc in one line on what it proves. The reasoning behind a change (a race worked through, the designs turned down, its history) goes in `ARCHITECTURE.md` or the commit message, never above a function, and editing a comment means shortening its whole block. No AI signatures anywhere.
 - No scripted bulk edits: edit each file deliberately (formatters, generators and an approved lockfile write excepted). One-off scripts, backups and logs go in `/tmp/telmoni/`.
 - Never read, print, diff or recreate `.env` or `web/.env.local`: they hold real secrets. Change one key by name, after `cp -p` to `/tmp/telmoni/`.

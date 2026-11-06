@@ -193,7 +193,7 @@ export default async function DataSheetPage() {
               ],
               [
                 "Personal data",
-                `Off in the SDKs unless TELMONI_SCRUB_PII=1, on in the coding-agent plugins: ${SCRUBBED_BY("pii").join(", ")}.`,
+                `Off in the SDKs unless TELMONI_SCRUB_PII=1, on in the Claude Code and Antigravity plugins: ${SCRUBBED_BY("pii").join(", ")}.`,
               ],
               [
                 "Not caught",

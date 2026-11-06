@@ -1,173 +1,146 @@
 ---
 title: "Coding agents"
-description: "Telmoni's plugins for Claude Code, Codex, OpenCode and Cursor: each turn of the coding agent you already run, recorded as a run with no code, metadata alone unless you turn its conversation on."
+description: "Telmoni's plugins for Claude Code and Antigravity: each turn of the coding agent you already run, recorded as a run with no code, metadata alone unless you turn its conversation on."
 ---
 
-The coding-agent plugins record each turn of a coding agent you already run as
-a [run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
-and their tokens, the tools it used and the subagents it started, each with its
+Telmoni's two plugins record each turn of Claude Code or Antigravity as a
+[run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
+and their tokens, the tools it used, and Claude Code's subagents, each with its
 times and whether it failed. Unless you turn [content](#a-turns-conversation)
-on, they never send a prompt, a reply, a thought, a tool's input or output, a
-command, a file's path or the folder you work in: a local model named by the
-path to its file is sent by the file's name alone.
+on, a plugin never sends a prompt, a reply, a thought, a tool's input or
+output, a command, a file's path or the folder you work in: a local model named
+by the path to its file is sent by the file's name alone.
 
 | Agent | Plugin | Package | Runs as |
 |---|---|---|---|
-| **Claude Code** | [`telmoni/claude-observability-plugin`](https://github.com/telmoni/claude-observability-plugin) | the repository itself | `claude-code` |
-| **Codex** | [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) | `@telmoni/codex-observability-plugin` | `codex` |
-| **OpenCode** | [`telmoni/opencode-observability-plugin`](https://github.com/telmoni/opencode-observability-plugin) | `@telmoni/opencode-observability-plugin` | `opencode` |
-| **Cursor** | [`telmoni/cursor-observability-plugin`](https://github.com/telmoni/cursor-observability-plugin) | `@telmoni/cursor-observability-plugin`, or the repository as a Cursor plugin | `cursor` |
+| **[Claude Code](#claude-code)** | [`telmoni/claude-code-observability-plugin`](https://github.com/telmoni/claude-code-observability-plugin) | the repository itself | `claude-code` |
+| **[Antigravity](#antigravity)** | [`telmoni/antigravity-observability-plugin`](https://github.com/telmoni/antigravity-observability-plugin) | the repository itself | `antigravity` |
 
-The Claude Code plugin is built on the [Python SDK](/docs/api/sdks), which its
-worker fetches, in the background, the first time it runs; the other three on the [TypeScript
-SDK](/docs/api/sdks), which each carries inside its own package. All send what
-the SDKs send, under a [project API key](/docs/api/api-keys) holding only the
-**ingest** scope (**Send spans**). A self-hosted Telmoni's machine host is read
+Each plugin is built on the [TypeScript SDK](/docs/api/sdks), bundled with it
+into JavaScript committed in the repository, so nothing is built or fetched as
+it installs or first runs. It sends what the SDKs send, under a
+[project API key](/docs/api/api-keys) holding only the **ingest** scope
+(**Send spans**). A self-hosted Telmoni's machine host is read
 [as the SDKs read one](/docs/api/sdks#the-key-on-the-wire): given without a
 scheme, it is `https://`, or `http://` for this machine, the only host plain
-HTTP goes to. The Claude Code plugin needs git, with which Claude Code adds its
-marketplace, and [uv](https://docs.astral.sh/uv/) on your `PATH`, or without
-uv Python 3.10 or later with the `telmoni` package installed for `python3`. The
-Codex and Cursor plugins need Node.js 22.23.4, 24.22.1, 26.12.1 or later,
-October 2026's security releases, and npm on your `PATH`, which installs them,
-but for Cursor's installed as a Cursor plugin, which needs Node alone; Codex
-needs git too. The OpenCode plugin runs inside OpenCode, which installs
-it itself. The Claude Code plugin runs from a checkout as cloned; to run one of
-the others from a checkout, build it in its repository:
-
-```sh
-git clone https://github.com/telmoni/codex-observability-plugin.git   # or the opencode- or cursor-observability-plugin
-(cd codex-observability-plugin && npm install && npm run build)
-```
+HTTP goes to. Each needs [Node.js](https://nodejs.org) 22 or later on your
+`PATH`; without it the hook does nothing and writes no log, so
+`node --version` in the shell your agent starts in is the first thing to
+check. Claude Code also needs git, with which it adds the plugin's
+marketplace.
 
 ---
 
 ## What a turn records
 
 A turn — from your prompt to the agent's last reply, or to your interruption —
-is one run of the agent, and your session (Cursor's conversation) is the run's
-session (`gen_ai.conversation.id`), so the console groups a session's traces
+is one run of the agent, and your session is the run's session
+(`gen_ai.conversation.id`), so the console groups a session's traces
 together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Inside the run:
 
-- **the model's work**, a model call with its model, its provider, named as
-  the GenAI conventions and the console's prices name it (`aws.bedrock` for
-  Claude Code on Bedrock, `azure.ai.openai` for Codex's Azure), and its token
-  counts, the cache's reads and writes among them, counted as the GenAI
-  conventions count them: a call per reply for Claude Code, Codex and
-  OpenCode, and for Cursor, which gives its tokens a turn at a time, one for
-  the whole turn, or with content on one for each answer its transcript
-  holds, the turn's tokens on the last;
+- **the model's work**, a model call per reply with its model, its provider,
+  named as the GenAI conventions and the console's prices name it
+  (`aws.bedrock` for Claude Code on Bedrock), and its token counts, the
+  cache's reads and writes among them, counted as the GenAI conventions count
+  them;
 - **each tool call**, by its name, with its time, failed where the tool failed
-  and cancelled where it was stopped or never answered (Cursor's plugin hears
-  of a call only once it has ended, so there one that never ended is not
-  recorded);
-- **each subagent**, a step named by its kind (`subagent Explore`), holding its
-  own model and tool calls and its own subagents' steps, but for Cursor's,
-  whose calls Cursor runs under a conversation of their own; a Codex
-  subagent's step, from Codex 0.162, is named by its role, else its nickname
-  (`subagent explorer`), while a Codex subagent's turn that outlasts the turn
-  that started it, or one from an older Codex, is a run of its own in the same
-  session;
-- for Claude Code and Codex, **each compaction** of the context as a turn goes
-  on, a step named `compaction`;
-- for Claude Code, **the skills the turn ran**, by name, as the tag `skills`.
-
-The run's release is the version of the agent that ran the turn, for Claude
-Code, Codex and Cursor; OpenCode hands its plugin none.
+  and cancelled where it was stopped or never answered;
+- **each compaction** of the context as a turn goes on, a step named
+  `compaction`;
+- in Claude Code, **each subagent**, a step named by its kind
+  (`subagent Explore`), holding its own model and tool calls and its own
+  subagents' steps, and **the skills the turn ran**, by name, as the tag
+  `skills`; the run's release is the version of Claude Code that ran the turn;
+- in Antigravity, **each API error**, as a failed model call named by its
+  kind. A model call names the conversation's model with its effort apart:
+  `gemini-3.8-flash-low` goes as `gemini-3.8-flash` at the reasoning level
+  `low`, under the provider `gcp.vertex_ai`.
 
 An interrupted turn is a cancelled run, and a turn an error ended a failed one,
-named by the error's kind where the agent gives one (Claude Code's
-`rate_limit`, Codex's `context_window_exceeded`; Cursor gives none, so its run
-fails as `AgentError`), never its message. A turn is sent once it has ended.
-If Telmoni cannot be reached or is busy, if its database fails it (`500`
-`/errors/internal/database`), or if it refuses the key or the endpoint, the
-turn is sent again as the session's next turn ends, the session's later turns
-waiting for it, or, once the session has ended, as any session's next turn
-ends. One Telmoni took in part, or refused for good — for what it
-holds (`400`, `413`), for a paused organization (`402`) or for any other fault
-of its own (`500`) — is logged and not sent again. OpenCode's plugin holds
-turns not yet sent in memory and sends them every five minutes and as any
-session's next turn ends (on OpenCode 1, any session's in the same folder), so
-a turn still unsent three seconds into OpenCode's shutdown is lost; and it
-reads its key only as OpenCode loads it, so a turn refused for its key is not
-sent again either. Where Telmoni reaches its Redis, a copy that arrives within
-the hour of the first is stored once: its run's id is derived from the session
-and the turn, and every span's from the run's.
+named by the error's kind (`rate_limit`), never its message; in Antigravity, so
+is a turn that hit its limits (`max_invocations`). A turn is sent once it has
+ended. If Telmoni cannot be reached or is busy, if its database
+fails it (`500` `/errors/internal/database`), or if it refuses the key or the
+endpoint, the turn is sent again as the session's next turn ends, the
+session's later turns waiting for it, or, once the session has ended, as any
+session's next turn ends. One Telmoni took in part, or refused for good — for
+what it holds (`400`, `413`), for a paused organization (`402`) or for any
+other fault of its own (`500`) — is logged and not sent again. Where Telmoni
+reaches its Redis, a copy that arrives within the hour of the first is stored
+once: its run's id is derived from the session and the turn, and every span's
+from the run's.
 
-**What is never read.** With content off, of what an agent writes down, a plugin reads only
-names, ids, times, counts and flags: each entry's kind, id, time and outcome, a
-reply's model, provider and token counts, a tool call's name, and a subagent's
-kind. The Claude Code plugin also reads the skill a `Skill` call names, which
-it sends as the tag `skills`, the kind an `Agent` or `Task` call names and
+**What is never read.** With content off, of what Claude Code writes down, its
+plugin reads only names, ids, times, counts and flags: each entry's kind, id,
+time and outcome, a reply's model, provider and token counts, a tool call's
+name, and a subagent's kind. It also reads the skill a `Skill` call names,
+which it sends as the tag `skills`, the kind an `Agent` or `Task` call names and
 whether it runs in the background, whether a tool result says a subagent went
 on in the background, the tool call a background task's notice names, the
 subagent a report handed back names, whether a row is a compaction's summary, and
 whether a prompt is empty, opens with a tag or marks an interruption, which it
-never keeps; and the [tags](#tags) you set, which every plugin reads from a
-`.telmoni-tags.json` and the Claude Code plugin from its own `tag` skill too. A name is sent only as a plain name: a model named by a path goes
-as its file's name or `unknown`, and a tool, skill or subagent name holding
-anything else, as a model may write, as `unknown`. It never keeps or sends a
-prompt or a reply, the model's thinking, a compaction's summary, a tool's input or output beyond that
-skill's name, a command, the path or contents of a file you work on, the
-working folder, a session's title or anyone's email, whatever the project's
-content mode.
+never keeps; and the [tags](#tags) you set. A name is sent only as a plain
+name: a model named by a path goes as its file's name or `unknown`, and a
+tool, skill or subagent name holding anything else, as a model may write, as
+`unknown`. It never keeps or sends a prompt or a reply, the model's thinking,
+a compaction's summary, a tool's input or output beyond that skill's name, a
+command, the path or contents of a file you work on, the working folder, a
+session's title or anyone's email, whatever the project's content mode.
+
+Of what Antigravity writes down, its plugin reads only each step's kind, time
+and status, each model call's tokens, each tool call's name, a command's exit
+code and an error's code; of what its hook is handed, the conversation's id,
+the transcript's path, the model's name, why the turn ended and whether the
+conversation is idle, and the first workspace folder, only to find the
+[tags](#tags) file above it. It never keeps or sends your prompt, a reply, the
+reasoning, a tool's arguments or output, a file's path or contents, the
+workspace's folders, the transcript's path, a compaction's summary or an
+error's message, whatever the project's content mode.
 
 ### A turn's conversation
 
-Each plugin can send what was said too, under the same two locks as the
+A plugin can send what was said too, under the same two locks as the
 [SDKs' content](/docs/api/sdks#content): your switch, set beside the plugin's
 key, and the project's [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode), which must be
 `on`. With either off, nothing of the conversation leaves your machine. The
 switch travels with the key: a key in the environment takes
-`TELMONI_CAPTURE_CONTENT=1` there, `1` alone, as the SDKs read it, and a key in
-the plugin's own settings takes its own switch, never one from the other place.
-In Claude Code it is **Capture content** in `/plugin configure`
-(`{"TELMONI_CAPTURE_CONTENT": true}` through `--values-stdin`); in Codex and
-OpenCode, `"captureContent": true` in the plugin's `telmoni.json`; in Cursor,
-`telmoni-cursor-observability setup --capture-content`, which writes it there,
-while a repository's hooks, which hold no key, leave a cloud agent to
-`TELMONI_CAPTURE_CONTENT=1` beside its `TELMONI_API_KEY`. A switch in a file
-that is neither `true` nor `false` has the file passed over, and nothing is sent
-until it is fixed, the log saying why. A plugin takes no
-[mask](/docs/api/sdks#masking-content), its hook running no code of yours: with
-both locks on, a turn is sent as it was said, but for what the SDK it sends
-through scrubs first. In a plugin both of its scrubbers are on: secrets, and
-personal data such as email addresses, phone numbers and card numbers, each
-replaced by a marker like `[secret: aws_key]` or `[pii: email]`
+`TELMONI_CAPTURE_CONTENT=1` there, `1` alone, as the SDKs read it, never a
+switch from anywhere else. A key in Claude Code's plugin settings takes
+**Capture content** in `/plugin configure`
+(`{"TELMONI_CAPTURE_CONTENT": true}` through `--values-stdin`), and a key in
+Antigravity's key file takes `"captureContent": true` beside it. A plugin takes
+no [mask](/docs/api/sdks#masking-content), its hook running no code of yours:
+with both locks on, a turn is sent as it was said, but for what the SDK it
+sends through scrubs first. In each plugin both of its scrubbers are on:
+secrets, and personal data such as email addresses, phone numbers and card
+numbers, each replaced by a marker like `[secret: aws_key]` or `[pii: email]`
 ([what each finds](/docs/api/sdks#scrubbing-secrets-and-personal-data)). Each
-is a switch beside the content's: in Claude Code, **Scrub secrets** and
-**Scrub personal data** in `/plugin configure`; in Codex, OpenCode and Cursor,
-`"scrubSecrets": false` or `"scrubPii": false` in the plugin's `telmoni.json`;
-and a key in the environment takes `TELMONI_SCRUB_SECRETS=0` or
-`TELMONI_SCRUB_PII=0` there. No pattern finds a name or a street address.
+is a switch beside the content's: **Scrub secrets** and **Scrub personal
+data** in Claude Code's `/plugin configure`, `"scrubSecrets": false` or
+`"scrubPii": false` in Antigravity's key file, and a key in the environment
+takes `TELMONI_SCRUB_SECRETS=0` or `TELMONI_SCRUB_PII=0` there. No pattern
+finds a name or a street address.
 
-On, a turn carries its conversation as its agent recorded it: your prompt, with
-its images, as the run's input, and the last reply as its output; each model
-call's reply, with the reasoning the agent wrote in plain text, never an
+On, a Claude Code turn carries its conversation as Claude Code recorded it: your prompt,
+with its images, as the run's input, and the last reply as its output; each
+model call's reply, with the reasoning the agent wrote in plain text, never an
 encrypted or redacted thought; each tool call's input and output; and a
 subagent's task and answer on its step. Each model call carries what it was
 handed since the call before: your prompt for a turn's first, a subagent's task
 for its first, and the tools' results for the rest; a compaction's step carries
-its summary, never Codex's heading above it; and for OpenCode the run's output
-is the last reply but a compaction's summary. Codex's reasoning effort goes with
-the switch on, as metadata, whatever the project's mode. An image goes as the
-SDKs send one, put aside under `/v1/media` and named in the message. Cursor's
-hooks name an attachment by its path alone, so no image comes from Cursor; on,
-its plugin also reads Cursor's transcript, inside `~/.cursor` alone and keeping
-none of it, to tell where each answer ends: each is a model call with its words,
-thoughts and the tools it asked for, and a turn the transcript tells nothing of
-keeps one model call. Codex's and OpenCode's own instructions to the model are
-never read. Still never sent: your email, the
-workspace's folders and the transcript's path, beyond what you or the agent
-wrote in the conversation itself. A turn waiting to be sent keeps what was said
-in the plugin's own folder, readable by you alone, until it goes.
+its summary. An image goes as the SDKs send one, put aside under `/v1/media`
+and named in the message. Still never sent: your email and the workspace's
+folders, beyond what you or the agent wrote in the conversation itself. An
+Antigravity turn carries your prompt as you typed it, without the metadata
+Antigravity wraps it in, each reply with the reasoning written in plain text,
+each tool's arguments and output, and each compaction's summary. A turn
+waiting to be sent keeps what was said in the plugin's own folder, readable by
+you alone, until it goes.
 
-Each plugin's failures are lines in a log of its own, naming the session, or a
-Codex subagent's thread, by the start of its id, the kind of thing that went
-wrong and, where Telmoni refused a turn, its answer, never anything said in
-the session. None of them holds the agent up: a plugin that runs as a hook
-hands its work to a process of its own and returns at once, in Cursor, which
-waits on every hook, as soon as Node has started.
+The plugin's failures are lines in a log of its own, naming the session by the
+start of its id, the kind of thing that went wrong and, where Telmoni refused a
+turn, its answer, never anything said in the session. It never holds the
+agent up: its hook hands its work to a process of its own and returns at once.
 
 ### Tags
 
@@ -183,20 +156,19 @@ and never derived from a path:
   plain words, "tag this repo telmoni", which has Claude call the plugin's
   `tag` skill. Several go at once (`repo=telmoni branch=main`), and `repo=`
   takes one back. A tag you ask for holds from that turn to the session's end,
-  or until you change it or take it back, and wins over the file's for its
-  key; a turn already recorded keeps what it was sent with. In Codex, Cursor
-  and OpenCode, tags come from the file alone.
+  or until you change it or take it back, and wins over the file's for its key;
+  a turn already recorded keeps what it was sent with. In Antigravity, ask the
+  agent to tag the workspace and the plugin's skill writes the file.
 
 A key is 1 to 64 letters, digits, `_`, `.` or `-`, and a value up to 256
-characters; a turn carries 32 tags at most, Claude Code's `skills` among them,
-which is the plugin's own. A tag that breaks a rule is dropped with a line in
-the plugin's log, and the turn is sent without it. A project keeps up to 64
-tag keys a UTC day, each taking up to 500 values; past them, ingest drops the
-tag and keeps the span
-([its cap](/docs/api/ingest#what-is-dropped-at-the-door)). Tags are metadata:
-they are sent in every content mode and seen by everyone on the project, so no
-secret or personal detail belongs in one. `repo` and `branch` are good keys to
-start with.
+characters; a turn carries 32 tags at most, in Claude Code `skills` among
+them, which is its plugin's own. A tag that breaks a rule is dropped with a line in the plugin's
+log, and the turn is sent without it. A project keeps up to 64 tag keys a UTC
+day, each taking up to 500 values; past them, ingest drops the tag and keeps
+the span ([its cap](/docs/api/ingest#what-is-dropped-at-the-door)). Tags are
+metadata: they are sent in every content mode and seen by everyone on the
+project, so no secret or personal detail belongs in one. `repo` and `branch`
+are good keys to start with.
 
 ---
 
@@ -209,7 +181,7 @@ start, an editor's included, and `claude plugin update
 telmoni-observability@telmoni-plugins` takes the next version:
 
 ```sh
-claude plugin marketplace add telmoni/claude-observability-plugin
+claude plugin marketplace add telmoni/claude-code-observability-plugin
 claude plugin install telmoni-observability@telmoni-plugins
 ```
 
@@ -217,7 +189,7 @@ From a checkout, start Claude Code with the plugin and your key in its
 environment instead; that one session alone loads it, as cloned:
 
 ```sh
-TELMONI_API_KEY=tm_… claude --plugin-dir ./claude-observability-plugin
+TELMONI_API_KEY=tm_… claude --plugin-dir ./claude-code-observability-plugin
 ```
 
 In a Claude Code session, set the key with
@@ -244,169 +216,47 @@ data folder: `~/.claude/plugins/data/telmoni-observability-telmoni-plugins/`
 for an install from the marketplace, `telmoni-observability-inline/` there
 under `--plugin-dir`, or `~/.claude/telmoni/` where Claude Code gives the
 plugin no data folder, each under `CLAUDE_CONFIG_DIR` where you set one.
-Inside Cursor, which runs Claude Code's hooks too, the plugin does nothing:
-Cursor's own plugin records those conversations.
 
 ---
 
-## Codex
+## Antigravity
 
-You need Codex 0.143 or later. The plugin installs the same way, from its own
-repository, and Codex enables it in `~/.codex/config.toml`:
-
-```sh
-codex plugin marketplace add telmoni/codex-observability-plugin
-codex plugin add telmoni-observability@telmoni-plugins
-```
-
-Codex runs no plugin's hooks until you trust them: restart Codex and trust the
-plugin's hooks — at `Stop`, `SubagentStop`, `Interrupt` (from Codex 0.150) and
-`SessionEnd` (from 0.145) — when Codex asks, or in `/hooks`. `codex exec` asks
-nothing, so trust them once in Codex itself. Its repository's README says how
-to run it from a checkout.
-
-The key goes in `telmoni.json` in Codex's folder — `~/.codex`, or `CODEX_HOME`
-where you set one — as `{ "apiKey": "tm_…" }`, with `"endpoint"` beside
-it for a self-hosted Telmoni; a `TELMONI_API_KEY` in Codex's environment — your
-shell's, or the `.env` in Codex's folder — comes first, with the
-`TELMONI_ENDPOINT` beside it there or the default, never the file's, and with it
-set the file is not read. The plugin reads the file only while it is yours and
-shut to everyone else (`chmod 600`): past one it passes over, it sends nothing,
-since an endpoint the file names would otherwise give way to the default. Its log, which says why, is
-`telmoni/hook.log` in the same folder (`~/.codex/telmoni/hook.log`). A key in
-the file is read at every hook; one in Codex's environment, as a new session
-starts.
-
-A turn is sent when Codex closes it, which may be minutes after you see its
-answer, while another plugin's hooks run or Codex compacts the session. Codex
-before 0.145 writes no error at a turn's end, so there a turn an error ended
-is recorded as one that completed. Codex's older session files hold a shell
-command's exit code only in its output, which the plugin never reads: there, a
-command that failed is recorded as one that ran. From Codex 0.164, which runs
-every tool through one `exec`, each tool call is named `exec`.
-
----
-
-## OpenCode
-
-You need OpenCode 1.18.29 or later, or OpenCode 2, whose plugin systems differ;
-the one package serves both. Add it to your `opencode.json` under `plugin` on
-OpenCode 1:
-
-```json
-{ "plugin": ["@telmoni/opencode-observability-plugin"] }
-```
-
-or have OpenCode add it to the global configuration:
+The plugin is its repository, and the `agy` CLI installs it from its address or
+from a clone, copying it into
+`~/.gemini/config/plugins/telmoni-observability/`; there is nothing to build.
+To update, install it again: Antigravity replaces the copy it has.
 
 ```sh
-opencode plugin @telmoni/opencode-observability-plugin -g
+agy plugin install https://github.com/telmoni/antigravity-observability-plugin
 ```
 
-On OpenCode 2, the list is `plugins`:
-
-```json
-{ "plugins": ["@telmoni/opencode-observability-plugin"] }
-```
-
-or:
+Antigravity gives a plugin's hooks no settings of their own, so the key goes in
+one of two places. A `TELMONI_API_KEY` in the environment the CLI starts in
+comes first, with the `TELMONI_ENDPOINT` beside it there; else the key file,
+`~/.gemini/config/telmoni.json`, `{"apiKey": "tm_…"}`, with `"endpoint"`
+beside it for a self-hosted Telmoni. The plugin reads the file only while it is
+yours and shut to everyone else: one anyone else can read sends nothing, and
+the log says why. Write it so the key never reaches your shell's history: run
+this, type the JSON, press Enter, then Ctrl-D.
 
 ```sh
-opencode plugin add @telmoni/opencode-observability-plugin
+(umask 077 && cat > ~/.gemini/config/telmoni.json) && chmod 600 ~/.gemini/config/telmoni.json
 ```
 
-One list is enough: OpenCode 2 reads an OpenCode 1 `plugin` list too, and sets
-the plugin up once even where it is named in both. A checkout's build is
-named by its absolute path in place of the package: its `dist/index.mjs` on
-OpenCode 1, and its `dist` folder on OpenCode 2, which takes no file there.
+Left blank, the endpoint is `https://api.telmoni.com`. A key is never sent to
+an endpoint named somewhere else. The file is read as each turn ends, so a
+change takes effect from the next turn; a key in the environment is read as the
+CLI starts.
 
-The key goes in `telmoni.json` beside your OpenCode configuration
-(`~/.config/opencode/telmoni.json`, or in `OPENCODE_CONFIG_DIR` or under
-`XDG_CONFIG_HOME` where you set one), as `{ "apiKey": "tm_…" }`, with
-`"endpoint"` beside it for a self-hosted Telmoni; a `TELMONI_API_KEY` in the
-environment OpenCode starts in comes first, with the `TELMONI_ENDPOINT` beside it
-there or the default, never the file's, and with it set the file is not read.
-The plugin never writes the file, and reads it only while it is yours and shut
-to everyone else (`chmod 600`): past one it passes over, it sends nothing. Restart
-OpenCode once the key is in place: the plugin reads it as OpenCode loads it.
-The plugin runs inside OpenCode and keeps nothing on disk but its log,
-`~/.local/state/telmoni/opencode/plugin.log` (under `XDG_STATE_HOME` where you
-set one). A turn Telmoni could not take — out of reach, busy, or its database
-failing it — is kept, the newest 200, and sent again every five minutes and as
-the next turn ends, while OpenCode runs (on OpenCode 1, the next in the same
-folder); one it took in part or refused for good, for its key too, is not, and
-the log says what it answered. As OpenCode shuts down, it waits three seconds
-at most for what is still to send, as it does when it reloads its plugins. A
-turn still running as OpenCode quits is not recorded, and one running as it
-reloads its plugins is recorded from the reload on; on OpenCode 2, a subagent
-at work then is not recorded, the call that started it having begun before the
-reload.
-
----
-
-## Cursor
-
-The package installs with npm and brings the command that wires it into
-Cursor; a checkout's build runs the same command:
-
-```sh
-npm install -g @telmoni/cursor-observability-plugin && telmoni-cursor-observability setup
-node ./cursor-observability-plugin/dist/telmoni-cursor-observability.mjs setup   # from a checkout
-```
-
-`setup` asks for the key, or takes `TELMONI_API_KEY`, checks that it is shaped
-like one, and keeps it in `~/.cursor/telmoni.json`, readable by you alone;
-then it adds the plugin's hooks to `~/.cursor/hooks.json`, beside any other
-tool's. Cursor reloads that file as it changes, so your next prompt is
-recorded. The hooks read the key file only while it is yours and shut to
-everyone else, as `setup` leaves it: past one they pass over, they keep and send
-nothing, and `setup` changes nothing until it is fixed or moved aside; with
-`TELMONI_API_KEY` in their environment they never read it, and send that key
-with the `TELMONI_ENDPOINT` beside it there, or the default, never the file's. `remove` takes the hooks out again
-and deletes the key and `~/.cursor/telmoni/`, but for what `setup --project`
-kept of a repository's hooks file, for that repository's `remove --project`.
-For a self-hosted Telmoni, set `TELMONI_ENDPOINT` to its machine host when you
-run `setup`, which keeps it beside the key; one the SDK would not send to,
-`setup` refuses with the SDK's reason, changing nothing.
-The hooks run the Node that ran `setup`, and the plugin it ran, by their paths,
-so a Cursor opened from the Dock finds them; keep a checkout where it is, and
-run `setup` again after moving to another Node. Its log is
-`~/.cursor/telmoni/hook.log`. `telmoni-cursor-observability status` says what
-the hooks would find: where the key comes from and whether it is shaped like
-one, never the key; the endpoint's host; whether content is on; how many of the
-nine events `~/.cursor/hooks.json` runs the plugin at; and how many
-conversations have turns not yet sent. It sends and writes nothing, and reads
-the environment of the shell it runs in, which may not be Cursor's.
-
-Cursor installs the repository itself as a plugin too: from Cursor's marketplace
-once it is listed there, as **Telmoni Observability**; by its address,
-`https://github.com/telmoni/cursor-observability-plugin`, in the search field of
-Cursor's Plugins settings; or cloned into
-`~/.cursor/plugins/local/telmoni-observability` and loaded with **Developer:
-Reload Window**. Its hooks run the bundle committed in the repository's `dist/`
-with the `node` on Cursor's `PATH`, so npm is not needed. Installed so, there is
-no `setup`: give the key as `TELMONI_API_KEY` in the environment Cursor runs its
-hooks with, or write `~/.cursor/telmoni.json` yourself, `{"apiKey": "tm_…"}`,
-with an `"endpoint"` for a self-hosted Telmoni, readable by you alone (`chmod
-600`). Where hooks `setup` wrote run the plugin too, the plugin's stand aside.
-To take it out, remove the plugin in Cursor and delete `~/.cursor/telmoni.json`
-and `~/.cursor/telmoni/`.
-
-Cursor's cloud agents read the repository's hooks alone:
-`telmoni-cursor-observability setup --project` writes `.cursor/hooks.json`
-there, to commit, with the package installed in the agents' environment (the
-install step of `.cursor/environment.json`), and the key as the Cloud Agents
-secret `TELMONI_API_KEY`. Those hooks run on your teammates' machines too, and
-send nothing there until a teammate runs `setup`, or has `TELMONI_API_KEY` in
-the environment Cursor runs its hooks with. On a machine where both are set
-up, the repository's hooks record its conversations and your own stand aside,
-unless the repository's cannot start, their command,
-`telmoni-cursor-observability`, being in no folder of Cursor's `PATH`, when
-your own record.
-
-Cursor gives a turn's tokens, not each reply's, so a Cursor run holds one model
-call spanning the turn, its provider `cursor`; with content on, one for each
-answer Cursor's transcript holds, timed between the tools each asked for, the
-turn's tokens on the last. In Cursor's headless CLI
-(`agent -p`), which reports no prompt and no stop, a session's work is one
-run.
+The plugin runs on Antigravity's `Stop` hook and sends a turn once the agent's
+loop stops with no background task still running. The first stop it hears in
+a conversation is where it starts: turns from before it was installed, or
+before a key was set, stay on your machine. Antigravity's docs list a plugin's
+hooks for its CLI; if the App's or the IDE's sessions don't show up, add the
+plugin's hook to your global `~/.gemini/config/hooks.json`, as
+[its README](https://github.com/telmoni/antigravity-observability-plugin#the-antigravity-app-and-ide)
+shows; where both run, each turn is still sent once. Its log is
+`~/.gemini/config/telmoni/hook.log`; if it is missing, check that
+`agy plugin list` shows the plugin enabled. To remove it, run
+`agy plugin uninstall telmoni-observability`, then delete the key file and
+`~/.gemini/config/telmoni/`.

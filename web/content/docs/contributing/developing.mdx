@@ -1,9 +1,9 @@
 ---
 title: "Developing"
-description: "Running and checking each Telmoni repository on your machine: the platform with the SDKs and these docs in it, the CLI, and the agent skills."
+description: "Running and checking each Telmoni repository on your machine: the platform with the SDKs and these docs in it, and the CLI."
 ---
 
-One page for the three repositories. The gates named here are what each repository's CI runs.
+One page for the two repositories. The gates named here are what each repository's CI runs.
 
 ## The platform
 
@@ -73,19 +73,6 @@ $ cargo xtask ci
 ```
 
 `cargo xtask ci` is the gate CI runs: fmt, the toolchain check, clippy, build, test, doc and `cargo deny`. CI lints its workflows with actionlint beside it. `cargo xtask dist` packages this machine's binary as `dist/telmoni-<os>-<arch>.tar.gz`, with its `SHA256SUMS`; a release is the workspace's version bumped in one commit on `main`: `.github/workflows/release.yml` waits for CI to pass on it, builds the x86_64 Linux archive, and on the owner's approval tags the commit `v*`, publishes the crate to crates.io and cuts the GitHub release with the archive and `install.sh`, a Mac building from source until its archive can be signed ([`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md#distribution)).
-
-## The skills
-
-[`telmoni/skills`](https://github.com/telmoni/skills): the agent skills, packaged as a plugin for Claude Code and the other agents that read them.
-
-You need `uv` and Claude Code.
-
-```console
-$ make check
-$ claude --plugin-dir .
-```
-
-`make check` is the gate CI runs: it validates each skill against the Agent Skills spec, `plugin.json` against the Agent Plugins schema, `.cursor-plugin/plugin.json` against Cursor's, and the plugin and its marketplace with `claude plugin validate .`. CI lints its workflows with actionlint beside it. `claude --plugin-dir .` starts a Claude Code session with your checkout's plugin loaded. `make eval` runs the eval suite, each case with and without the plugin, and spends model usage; on Linux its runs need `bubblewrap` and `socat`. The repository's `AGENTS.md` says what a skill may say and how to test a change.
 
 ## The docs
 

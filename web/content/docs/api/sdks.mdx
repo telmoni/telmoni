@@ -522,7 +522,7 @@ is sending, which Telmoni, where it reaches its Redis, answers within the hour
 as it answered the first, storing nothing twice: give a run the same id each
 time you send it. A record's content, its run's and each step's and call's,
 leaves under the same two locks as a live run's.
-The [coding-agent plugins](/docs/api/coding-agents) are built on it.
+The [Claude Code and Antigravity plugins](/docs/api/coding-agents) are built on it.
 
 ---
 
@@ -1084,7 +1084,7 @@ the field's key: it never sends the field as it was.
 The secrets scrubber is on wherever content is sent: `scrub_secrets` /
 `scrubSecrets` / `ScrubSecrets` / `scrub_secrets` set false, or
 `TELMONI_SCRUB_SECRETS=0`, turns it off. The personal-data scrubber is off in
-the SDKs and on in the [coding-agent plugins](/docs/api/coding-agents):
+the SDKs and on in the [Claude Code and Antigravity plugins](/docs/api/coding-agents):
 `scrub_pii` / `scrubPii` / `ScrubPII` / `scrub_pii` set true, or
 `TELMONI_SCRUB_PII=1`, turns it on. Every client reads the two variables where
 your code leaves its switch unset, however the client was made; a switch set

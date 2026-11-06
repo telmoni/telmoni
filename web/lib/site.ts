@@ -21,6 +21,3 @@ export const SPONSORS_URL: string | null = null;
 // channel is for what, and where to write about the hosted service.
 export const SUPPORT_URL: string | null =
   "https://github.com/telmoni/.github/blob/main/SUPPORT.md";
-// The agent skills, installed as one plugin by Claude Code, Codex, Cursor and
-// any agent that reads `SKILL.md`.
-export const SKILLS_URL: string | null = "https://github.com/telmoni/skills";

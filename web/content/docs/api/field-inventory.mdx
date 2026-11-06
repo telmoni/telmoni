@@ -59,10 +59,10 @@ rather than a plain span.
 | `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
 
-The [coding-agent plugins](/docs/api/coding-agents) set one tag of their own:
-`skills` on Claude Code's runs, the names of the skills the turn ran, joined by
-commas, a key they keep for it alone. It is kept as any tag is, and so are the
-[tags a developer sets](/docs/api/coding-agents#tags) in a plugin.
+The [Claude Code plugin](/docs/api/coding-agents) sets one tag of its own:
+`skills`, the names of the skills the turn ran, joined by commas, a key it
+keeps for it alone. It is kept as any tag is, and so are the
+[tags a developer sets](/docs/api/coding-agents#tags) in either plugin.
 
 ## The conventions' fields
 

@@ -13,7 +13,7 @@ import {
 } from "@/components/paper-page";
 import { PaperShell } from "@/components/paper-shell";
 import { getServerSession } from "@/lib/server/session";
-import { DOCS_URL, SKILLS_URL } from "@/lib/site";
+import { DOCS_URL } from "@/lib/site";
 
 import { ForgetPersonalStorage } from "./_forget-personal-storage";
 import { WayIn } from "./_way-in";
@@ -42,17 +42,12 @@ const INSTALL: readonly InstallTab[] = [
   {
     label: "claude code",
     command:
-      "claude plugin marketplace add telmoni/claude-observability-plugin && claude plugin install telmoni-observability@telmoni-plugins",
+      "claude plugin marketplace add telmoni/claude-code-observability-plugin && claude plugin install telmoni-observability@telmoni-plugins",
   },
-  ...(SKILLS_URL
-    ? [
-        {
-          label: "skill",
-          command:
-            "claude plugin marketplace add telmoni/skills && claude plugin install telmoni@telmoni",
-        },
-      ]
-    : []),
+  {
+    label: "antigravity",
+    command: "agy plugin install https://github.com/telmoni/antigravity-observability-plugin",
+  },
 ];
 
 type Pointer = { label: string; href: string };
@@ -124,9 +119,7 @@ const STACK: { title: string; chips: Pointer[] }[] = [
     title: "Coding agents",
     chips: [
       { label: "Claude Code", href: docs("/api/coding-agents#claude-code") },
-      { label: "Codex", href: docs("/api/coding-agents#codex") },
-      { label: "Cursor", href: docs("/api/coding-agents#cursor") },
-      { label: "OpenCode", href: docs("/api/coding-agents#opencode") },
+      { label: "Antigravity", href: docs("/api/coding-agents#antigravity") },
     ],
   },
   {
@@ -143,7 +136,7 @@ const FAQ = [
   {
     question: "How do I get started?",
     answer:
-      "Sign up, create a project, make an API key and paste the first run its dialog offers for your language; or install the Claude Code plugin and give it the key. Your agent's runs appear in the console within minutes, and your alerts read them from there.",
+      "Sign up, create a project, make an API key and paste the first run its dialog offers for your language; or install the Claude Code or Antigravity plugin and give it the key. Your agent's runs appear in the console within minutes, and your alerts read them from there.",
   },
   {
     question: "What does it store?",

@@ -117,7 +117,7 @@ export default async function TracesPage({
               <FirstRunStep
                 n={2}
                 title="Have your coding agent add tracing"
-                note="Paste this into Claude Code, Codex, Cursor or another coding agent working in your application."
+                note="Paste this into Claude Code, Antigravity or another coding agent working in your application."
               >
                 <CopyBox value={AGENT_PROMPT} label="the prompt" />
                 <p className="text-sm text-muted-foreground">
@@ -154,7 +154,7 @@ export default async function TracesPage({
             <Link href="/docs/api/coding-agents" className="underline underline-offset-4">
               coding-agent plugin
             </Link>{" "}
-            for Claude Code, Codex, OpenCode or Cursor, and each run&rsquo;s trace lists here
+            for Claude Code or Antigravity, and each run&rsquo;s trace lists here
             within a minute of ending. A key minted on{" "}
             <Link
               href={`${projectPath(organization, slug)}/api-keys`}

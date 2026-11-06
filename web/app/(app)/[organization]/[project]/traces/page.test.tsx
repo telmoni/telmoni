@@ -402,7 +402,7 @@ describe("TracesPage", () => {
     expect(fetchTraces).toHaveBeenCalledWith(PROJECT, expect.objectContaining({ days: 360, limit: 1 }));
     expect(screen.getByRole("heading", { name: "Send your first trace" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first run");
-    expect(screen.getByText(/github\.com\/telmoni\/skills/)).toBeInTheDocument();
+    expect(screen.getByText(/telmoni\.com\/docs\/api\/sdks/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDK" })).toHaveAttribute("href", "/docs/api/sdks");
     expect(screen.queryByText("Nothing to show yet.")).toBeNull();
     expect(screen.queryByTestId("histogram")).toBeNull();

@@ -122,10 +122,11 @@ describe("the splash page", () => {
     }
   });
 
-  it("offers the Claude Code plugin beside the SDKs, and nothing the page no longer sells", async () => {
+  it("offers the Claude Code and Antigravity plugins beside the SDKs, and nothing the page no longer sells", async () => {
     render(await SplashPage());
 
     expect(screen.getByRole("tab", { name: "claude code" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "antigravity" })).toBeInTheDocument();
     for (const gone of ["What is Telmoni?", "Why Telmoni?", "Start in five minutes"]) {
       expect(screen.queryByRole("heading", { name: gone })).toBeNull();
     }
