@@ -494,10 +494,10 @@ function IncidentItem({
         <div className="ml-auto">
           <IncidentActions
             projectId={projectId}
-            ruleId={incident.rule_id}
+            ruleId={incident.rule_id ?? ""}
             incidentId={incident.id}
             status={incident.status}
-            name={incident.rule_name}
+            name={incident.rule_name ?? ""}
             openedAt={incident.opened_at}
           />
         </div>

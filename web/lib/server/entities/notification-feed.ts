@@ -10,8 +10,13 @@ import { fetchProject } from "./projects";
 import { readJson, valueOf } from "./read";
 
 // What an incident's notice carries besides its words: its incident and its
-// alert (`crates/telemetry/src/notify.rs`), the incident its row links to.
-const IncidentMetadataSchema = z.object({ incident_id: z.guid(), rule_id: z.guid() });
+// alert or monitor (`crates/telemetry/src/notify.rs`), the incident its row
+// links to.
+const IncidentMetadataSchema = z.object({
+  incident_id: z.guid(),
+  rule_id: z.guid().nullish(),
+  monitor_id: z.guid().nullish(),
+});
 
 const INCIDENT_KINDS: ReadonlySet<string> = new Set([
   NotificationKind.IncidentOpened,

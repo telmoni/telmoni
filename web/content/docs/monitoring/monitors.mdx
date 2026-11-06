@@ -1,0 +1,93 @@
+---
+title: "Monitors"
+description: "A monitor holds one agent to the schedule it should run on — a period, or a cron line in a time zone — with a grace, and opens an incident when a run due has not started, or a run fails."
+---
+
+An agent that runs on a schedule — `claude -p` from a crontab, a nightly
+batch, an agent in CI — fails worst by not running at all, which leaves
+nothing in its telemetry for an [alert](/docs/monitoring/alerts) to read. A
+**monitor** watches for that. It holds one agent of a project, by the name
+its runs carry (`telmoni.agent`), to the schedule it should run on, and opens
+an incident when a run that was due has not started within its grace, or
+when a run ends in error.
+
+Any member of the project, whatever their role, makes, edits, pauses and
+deletes its monitors, each change recorded in the organization's
+[audit log](/docs/workspace/audit-log). A project holds one monitor an agent.
+
+## A schedule and a grace
+
+A monitor's schedule is one of two:
+
+| Schedule | When a run is due |
+|---|---|
+| A period, `every_seconds`, from 60 (a minute) to 2,678,400 (31 days) | That long after the last run started |
+| A cron line, `cron`, in a time zone, `time_zone` | At the next time the line names after the last run started |
+
+A cron line has five fields, as a crontab's does — minute, hour, day of the
+month, month and day of the week — with lists, ranges, steps, names
+(`MON-FRI`, `JAN`) and the nicknames `@hourly`, `@daily`, `@weekly`,
+`@monthly` and `@yearly`; where both day fields are set, either one matching
+is enough, as cron reads them. A line of seconds, a sixth field, or one that
+names a time that never comes (`0 0 30 2 *`) is refused. The time zone is a
+name from the IANA time zone database, spelled as it spells it:
+`Europe/London`, `America/New_York`, `UTC`.
+
+The **grace**, `grace_seconds`, from a minute to 31 days, is how long after
+its due time a run may start before the monitor is down.
+
+A cron line is read in its time zone, so a run due at 02:00 in London stays
+due at 02:00 across a change of the clocks. A time the spring change skips is
+due at the first minute after it, and one the autumn change repeats is due
+once, the first time, as cron runs them. A period counts real time, so a
+daily period drifts an hour against a job at a fixed time of day across a
+clock change: give such a job its cron line.
+
+## Where a monitor stands
+
+| State | What it means |
+|---|---|
+| **new** | Nothing is due yet: made or resumed, it waits for its agent's next run to start, and is never late before then |
+| **up** | Its runs start when due, and the last one did not fail |
+| **late** | A run due has not started a minute after its due time (the cause **missed**) |
+| **down** | A run due has not started within its grace (**missed**), or the last run ended in error (**failed**) |
+| **paused** | Not judged, and nothing told, until it is resumed |
+
+Each minute the monitor is judged against the runs its agent sent. A minute
+past the due time with no run started, it is late; past its grace, down. A
+run's start ends a **missed**, whenever it comes, and makes the next run due
+after it. A run that ends in error makes the monitor down, **failed**, until a
+run of the agent ends well; a run stopped before it finished, **cancelled**,
+counts as neither. A run that starts early, before its due time, does not
+count for it.
+
+A monitor reads its agent's runs as they start: [our SDKs](/docs/api/sdks)
+send a run's start the moment it opens. A run from an exporter that sends
+only the run's own span, when it ends, is seen only then, so give that
+agent's monitor a grace longer than its runs.
+
+Editing a monitor's schedule or grace finds its next due time again from its
+last run, and it is judged again within a minute; a monitor late or down on
+a time that is no longer due is up again. A monitor holds the agent it was
+made for: watch another agent with a monitor of its own.
+
+## Incidents and notices
+
+A monitor's incidents are an alert's: one open at a time, told in the
+project's feed and to the connectors the monitor links, each hearing its
+warnings and alerts or its alerts alone, in the hours it is set to — the
+same [incidents](/docs/monitoring/alerts#incidents) and
+[maintenance windows](/docs/monitoring/alerts#maintenance-windows) as an
+alert's. Late is its warning and down its alert: a run late opens an
+incident, told once; down raises it, said again to the connectors; and the
+run that starts resolves it, told once. A failed run opens an incident of its
+own, naming the run, which the next run that ends well resolves. Notices name
+the agent, where it stands and when its run was due — never a prompt, a
+completion or a tool payload — and are counted in the organization's alert
+deliveries a day as an alert's are.
+
+A maintenance window of the whole project holds its monitors' notices too,
+and one may mute a single monitor. A paused monitor is told nothing; its open
+incident stands until it is resumed and its agent runs. Deleting a monitor
+deletes its incidents, an open one told resolved to the connectors that heard
+it.

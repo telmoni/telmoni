@@ -22,9 +22,10 @@ use telmoni_shared::types::WireEnum;
 use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
     ApiKeyScope, ChartMeasure, ContentMode, Flag, IncidentStatus, MetricsGroup, MissingData,
-    NotificationKind, OrganizationRole, OrganizationStatus, Role, RuleAggregation, RuleBaseline,
-    RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource, ScoreTarget, ScoreType,
-    Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind, TraceSort, slug,
+    MonitorCause, MonitorState, NotificationKind, OrganizationRole, OrganizationStatus, Role,
+    RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource,
+    ScoreTarget, ScoreType, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind,
+    TraceSort, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, NAME_MAX as SPAN_NAME_MAX, UTC_OFFSET_RANGE};
@@ -109,6 +110,8 @@ fn generated_contract() -> Value {
             "Severity": wire::<Severity>(),
             "IncidentStatus": wire::<IncidentStatus>(),
             "RuleLevel": wire::<RuleLevel>(),
+            "MonitorState": wire::<MonitorState>(),
+            "MonitorCause": wire::<MonitorCause>(),
             "Flag": wire::<Flag>(),
             "ResourceKind": wire::<TelmoniResourceKind>(),
             "PausedBy": wire::<PausedBy>(),

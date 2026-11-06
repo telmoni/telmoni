@@ -421,7 +421,7 @@ pub async fn delete_rule(
             let row = rules::rule(tx, project_id, id)
                 .await?
                 .ok_or_else(not_found)?;
-            let open = incidents::open_of(tx, id).await?;
+            let open = incidents::open_of(tx, incidents::Owner::Rule(id)).await?;
             let links = rules::links(tx, project_id, &[id])
                 .await?
                 .into_iter()
@@ -442,7 +442,7 @@ pub async fn delete_rule(
         .await?;
     tracing::info!(project_id = %project_id, rule_id = %id, "telemetry: an alert deleted");
     if let Some(open) = open {
-        crate::notify::deleted_with_alert(&state, &open, links).await;
+        crate::notify::deleted_with(&state, &open, links).await;
     }
     Ok(StatusCode::NO_CONTENT)
 }

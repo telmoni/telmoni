@@ -595,22 +595,7 @@ impl RuleInput {
                 "re-notification is every 1 to {RENOTIFY_MAX_MINUTES} minutes, or never"
             )));
         }
-        if self.connectors.len() > LINKS_MAX {
-            return Err(bad(&format!("an alert links up to {LINKS_MAX} connectors")));
-        }
-        let mut connectors: Vec<Link> = Vec::with_capacity(LINKS_MAX);
-        for link in self.connectors {
-            if connectors
-                .iter()
-                .any(|kept| kept.connection_id == link.connection_id)
-            {
-                return Err(bad("an alert links a connector once"));
-            }
-            connectors.push(Link {
-                hours: link.hours.map(Hours::checked).transpose()?,
-                ..link
-            });
-        }
+        let connectors = checked_links(self.connectors, "an alert")?;
         Ok(Rule {
             connectors,
             definition: Definition {
@@ -631,6 +616,29 @@ impl RuleInput {
             },
         })
     }
+}
+
+/// The connectors an alert or a monitor (`whose`) links, as the table keeps
+/// them: [`LINKS_MAX`] at most, each once, its hours checked.
+pub(crate) fn checked_links(links: Vec<Link>, whose: &str) -> Result<Vec<Link>, TelmoniError> {
+    let bad = |why: String| TelmoniError::BadRequest(why);
+    if links.len() > LINKS_MAX {
+        return Err(bad(format!("{whose} links up to {LINKS_MAX} connectors")));
+    }
+    let mut connectors: Vec<Link> = Vec::with_capacity(links.len());
+    for link in links {
+        if connectors
+            .iter()
+            .any(|kept| kept.connection_id == link.connection_id)
+        {
+            return Err(bad(format!("{whose} links a connector once")));
+        }
+        connectors.push(Link {
+            hours: link.hours.map(Hours::checked).transpose()?,
+            ..link
+        });
+    }
+    Ok(connectors)
 }
 
 /// Whether a value climbing toward the alert threshold meets `warning`

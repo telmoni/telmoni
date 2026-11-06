@@ -14,7 +14,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use telmoni_shared::{ContentMode, ProjectId, SpanKind};
+use telmoni_shared::{ContentMode, MonitorCause, MonitorState, ProjectId, SpanKind};
 use telmoni_telemetry::schema::{MIGRATION, statements};
 use telmoni_telemetry::store::{PROJECTS_SETTING, SpanRow};
 
@@ -74,6 +74,32 @@ fn the_content_mode_check_admits_exactly_the_modes_rust_holds() {
         sql.contains(&format!("DEFAULT '{}'", ContentMode::default())),
         "the column's default is not the enum's"
     );
+}
+
+/// A monitor's state and cause are `TEXT` read back through their enums, so
+/// each CHECK admits exactly the words Rust holds.
+#[test]
+fn the_monitor_checks_admit_exactly_the_words_rust_holds() {
+    let sql = postgres_migration();
+    let words = |constraint: &str| -> BTreeSet<String> {
+        check_body(&sql, constraint)
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    };
+    let states: BTreeSet<String> = MonitorState::all()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let causes: BTreeSet<String> = MonitorCause::all()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(words("monitors_state_check"), states);
+    assert_eq!(words("monitors_cause_check"), causes);
+    assert_eq!(words("incidents_cause_check"), causes);
 }
 
 /// ClickHouse's HTTP interface takes a statement at a time, and `migrate`

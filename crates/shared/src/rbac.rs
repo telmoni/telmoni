@@ -53,7 +53,8 @@ pub enum Resource {
     /// its owners and admins save them, as they change everything else the
     /// project's members share.
     View,
-    /// A project's alerts: a metric over its spans against thresholds. Any
+    /// A project's alerts — a metric over its spans against thresholds — and
+    /// its monitors, each an agent's schedule. Any
     /// member of the project makes, edits, pauses and deletes them, as
     /// Langfuse's members make alerts: an alert reads what every member may
     /// read already, and tells the connectors the project's admins set up.

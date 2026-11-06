@@ -4,6 +4,7 @@
   "pages": [
     "traces",
     "alerts",
+    "monitors",
     "objectives",
     "dashboards",
     "scores",

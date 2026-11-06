@@ -32,6 +32,20 @@ pub async fn content_mode<B: HasProject>(
     Ok(mode.unwrap_or_default())
 }
 
+/// The content mode of each of `projects` with a settings row.
+pub async fn content_modes(
+    tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
+    projects: &[ProjectId],
+) -> sqlx::Result<Vec<(ProjectId, ContentMode)>> {
+    sqlx::query_as(
+        "SELECT project_id, content_mode FROM telemetry.project_settings
+          WHERE project_id = ANY($1)",
+    )
+    .bind(projects)
+    .fetch_all(tx.conn())
+    .await
+}
+
 /// The project's content mode, read in its own scope.
 pub async fn content_mode_of(
     pool: &sqlx::PgPool,
@@ -177,6 +191,11 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let monitors = sqlx::query("DELETE FROM telemetry.monitors WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let mutes = sqlx::query("DELETE FROM telemetry.mutes WHERE project_id = ANY($1)")
         .bind(&projects)
         .execute(tx.conn())
@@ -207,7 +226,7 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + mutes + views + prices + content + held + settings)
+    Ok(rules + monitors + mutes + views + prices + content + held + settings)
 }
 
 /// How long a purge waits for any lock: one left queued for a project's lock
@@ -240,6 +259,11 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
+    let monitors = sqlx::query("DELETE FROM telemetry.monitors WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
     let mutes = sqlx::query("DELETE FROM telemetry.mutes WHERE project_id = $1")
         .bind(project_id)
         .execute(tx.conn())
@@ -261,7 +285,7 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + mutes + views + prices + content + settings)
+    Ok(rules + monitors + mutes + views + prices + content + settings)
 }
 
 /// A saved dashboard as its row keeps it: its query is the JSON the lane
@@ -372,7 +396,7 @@ pub async fn delete_view<B: HasProject>(
     )
 }
 
-/// A project's settings row and its alerts, handed to the
+/// A project's settings row, its alerts and its monitors, handed to the
 /// organization that now holds the project, counted against that one's plan
 /// from then on. Answers whether there was a settings row.
 pub async fn move_project(
@@ -390,6 +414,11 @@ pub async fn move_project(
     .bind(organization_id)
     .execute(tx.conn())
     .await?;
+    sqlx::query("UPDATE telemetry.monitors SET organization_id = $2 WHERE project_id = $1")
+        .bind(project_id)
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?;
     sqlx::query("UPDATE telemetry.incidents SET organization_id = $2 WHERE project_id = $1")
         .bind(project_id)
         .bind(organization_id)

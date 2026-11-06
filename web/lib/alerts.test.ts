@@ -556,6 +556,7 @@ describe("maintenance windows", () => {
   const mute = (id: string, rule: string | null, from: string, to: string): Mute => ({
     id,
     rule_id: rule,
+    monitor_id: null,
     starts_at: from,
     ends_at: to,
     created_by: "user_1",

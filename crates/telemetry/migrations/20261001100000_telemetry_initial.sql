@@ -277,11 +277,85 @@ GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, severity,
               told_at, lease_id, leased_until)
     ON telemetry.rules TO telemetry_maintenance;
 
+-- A project's monitors: each one agent's expected schedule — a period, or
+-- a cron line in an IANA zone — and the grace a run due has to start in.
+-- `new` until the agent's first run since it was made or resumed, nothing
+-- due; then `up`, `late` past its due time and `down` past its grace (the
+-- cause `missed`), or `down` once a run fails (`failed`). The loop keeps the
+-- last run it read on the row, and when the next is due.
+CREATE TABLE telemetry.monitors (
+    id               UUID        PRIMARY KEY,
+    project_id       TEXT        NOT NULL,
+    organization_id  TEXT        NOT NULL,
+    agent            TEXT        NOT NULL,
+    every_seconds    INTEGER,
+    cron             TEXT,
+    time_zone        TEXT,
+    grace_seconds    INTEGER     NOT NULL,
+    state            TEXT        NOT NULL DEFAULT 'new',
+    cause            TEXT,
+    state_since      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    next_due_at      TIMESTAMPTZ,
+    last_started_at  TIMESTAMPTZ,
+    last_ended_at    TIMESTAMPTZ,
+    last_status      TEXT,
+    last_run_id      UUID,
+    told_at          TIMESTAMPTZ,
+    told_to          UUID[]      NOT NULL DEFAULT '{}',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT monitors_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),
+    CONSTRAINT monitors_schedule_check
+        CHECK ((every_seconds IS NULL) <> (cron IS NULL) AND (cron IS NULL) = (time_zone IS NULL)),
+    CONSTRAINT monitors_every_check CHECK (every_seconds BETWEEN 60 AND 2678400),
+    CONSTRAINT monitors_cron_check CHECK (char_length(cron) BETWEEN 1 AND 100),
+    CONSTRAINT monitors_grace_check CHECK (grace_seconds BETWEEN 60 AND 2678400),
+    CONSTRAINT monitors_state_check CHECK (state IN ('new', 'up', 'late', 'down', 'paused')),
+    CONSTRAINT monitors_cause_check CHECK (cause IN ('missed', 'failed')),
+    CONSTRAINT monitors_state_cause_check
+        CHECK ((state IN ('late', 'down')) = (cause IS NOT NULL)
+               AND (state <> 'late' OR cause = 'missed')),
+    CONSTRAINT monitors_due_check CHECK ((state IN ('new', 'paused')) = (next_due_at IS NULL)),
+    CONSTRAINT monitors_last_status_check CHECK (last_status IN ('ok', 'error', 'cancelled')),
+    CONSTRAINT monitors_last_run_check
+        CHECK ((last_ended_at IS NULL) = (last_status IS NULL)
+               AND (last_ended_at IS NULL) = (last_run_id IS NULL))
+);
+
+-- One monitor an agent of a project.
+CREATE UNIQUE INDEX monitors_project_agent_idx ON telemetry.monitors (project_id, agent);
+-- The organization's purge deletes by it, and its plan counts by it.
+CREATE INDEX monitors_organization_idx ON telemetry.monitors (organization_id, created_at);
+
+ALTER TABLE telemetry.monitors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.monitors FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.monitors
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY organization_read ON telemetry.monitors
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.monitors
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop judges and settles them; the purges delete a project's or an
+-- organization's; a transfer moves a project's.
+GRANT SELECT, DELETE ON telemetry.monitors TO telemetry_maintenance;
+GRANT UPDATE (organization_id, state, cause, state_since, next_due_at, last_started_at,
+              last_ended_at, last_status, last_run_id, told_at)
+    ON telemetry.monitors TO telemetry_maintenance;
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 4. INCIDENTS
 -- ══════════════════════════════════════════════════════════════════════════════
--- Each breach of an alert: opened by the loop when its alert crosses a
+-- Each breach of an alert or a monitor: opened by the loop when its alert crosses a
 -- threshold — or, where the alert asks, once its window has held no span
 -- for as long as the window — at the severity it crossed, which follows the
 -- alert's while it lasts; acknowledged by a member, which stops its
@@ -294,9 +368,12 @@ GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, severity,
 -- runs they showed (`runs`, the last 20, oldest first), which link back to it.
 CREATE TABLE telemetry.incidents (
     id               UUID             PRIMARY KEY,
-    rule_id          UUID             NOT NULL REFERENCES telemetry.rules (id) ON DELETE CASCADE,
+    rule_id          UUID             REFERENCES telemetry.rules (id) ON DELETE CASCADE,
+    monitor_id       UUID             REFERENCES telemetry.monitors (id) ON DELETE CASCADE,
     project_id       TEXT             NOT NULL,
     organization_id  TEXT             NOT NULL,
+    -- A monitor's incident's cause, which it keeps: a new cause, a new incident.
+    cause            TEXT,
     status           TEXT             NOT NULL DEFAULT 'open',
     severity         TEXT             NOT NULL,
     value            DOUBLE PRECISION,
@@ -309,6 +386,9 @@ CREATE TABLE telemetry.incidents (
     told_to          UUID[]           NOT NULL DEFAULT '{}',
     runs             UUID[]           NOT NULL DEFAULT '{}',
     updated_at       TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    CONSTRAINT incidents_owner_check CHECK (num_nonnulls(rule_id, monitor_id) = 1),
+    CONSTRAINT incidents_cause_check
+        CHECK (cause IN ('missed', 'failed') AND monitor_id IS NOT NULL OR cause IS NULL AND rule_id IS NOT NULL),
     CONSTRAINT incidents_status_check CHECK (status IN ('open', 'acknowledged', 'resolved')),
     CONSTRAINT incidents_severity_check CHECK (severity IN ('warning', 'alert', 'no_data')),
     CONSTRAINT incidents_acknowledged_check
@@ -318,12 +398,15 @@ CREATE TABLE telemetry.incidents (
     CONSTRAINT incidents_runs_check CHECK (cardinality(runs) <= 20)
 );
 
--- One open incident an alert, acknowledged or not.
+-- One open incident an alert or a monitor, acknowledged or not.
 CREATE UNIQUE INDEX incidents_one_open_idx ON telemetry.incidents (rule_id)
+    WHERE status <> 'resolved';
+CREATE UNIQUE INDEX incidents_one_open_monitor_idx ON telemetry.incidents (monitor_id)
     WHERE status <> 'resolved';
 -- The project's incidents, newest first, and an alert's last resolved one.
 CREATE INDEX incidents_project_idx ON telemetry.incidents (project_id, opened_at DESC);
 CREATE INDEX incidents_rule_idx ON telemetry.incidents (rule_id, resolved_at DESC);
+CREATE INDEX incidents_monitor_idx ON telemetry.incidents (monitor_id, resolved_at DESC);
 -- The organization's purge, a transfer and its Overview find them by it.
 CREATE INDEX incidents_organization_idx ON telemetry.incidents (organization_id);
 
@@ -352,7 +435,8 @@ CREATE POLICY maintenance_access ON telemetry.incidents
 -- project's; the purges' deletes of alerts take theirs by the cascade. Where
 -- their notices went is kept in the project's own scope.
 GRANT SELECT ON telemetry.incidents TO telemetry_maintenance;
-GRANT INSERT (id, rule_id, project_id, organization_id, severity, value, opened_at, updated_at)
+GRANT INSERT (id, rule_id, monitor_id, project_id, organization_id, cause, severity, value,
+              opened_at, updated_at)
     ON telemetry.incidents TO telemetry_maintenance;
 GRANT UPDATE (organization_id, status, severity, value, resolved_at, resolved_by,
               acknowledged_at, acknowledged_by, reopened, updated_at)
@@ -395,12 +479,40 @@ CREATE POLICY maintenance_access ON telemetry.rule_connectors
 -- The loop reads where each alert's notices go; they go with their alert.
 GRANT SELECT ON telemetry.rule_connectors TO telemetry_maintenance;
 
+-- The same for a monitor's notices.
+CREATE TABLE telemetry.monitor_connectors (
+    monitor_id    UUID  NOT NULL REFERENCES telemetry.monitors (id) ON DELETE CASCADE,
+    connection_id UUID  NOT NULL,
+    project_id    TEXT  NOT NULL,
+    level         TEXT  NOT NULL DEFAULT 'warning',
+    hours         JSONB,
+    PRIMARY KEY (monitor_id, connection_id),
+    CONSTRAINT monitor_connectors_level_check CHECK (level IN ('warning', 'alert')),
+    CONSTRAINT monitor_connectors_hours_check CHECK (hours IS NULL OR jsonb_typeof(hours) = 'object')
+);
+
+CREATE INDEX monitor_connectors_project_idx ON telemetry.monitor_connectors (project_id);
+
+ALTER TABLE telemetry.monitor_connectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.monitor_connectors FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.monitor_connectors
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.monitor_connectors
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+GRANT SELECT ON telemetry.monitor_connectors TO telemetry_maintenance;
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 6. MAINTENANCE WINDOWS
 -- ══════════════════════════════════════════════════════════════════════════════
--- A window an alert, or every alert of a project (`rule_id` none), is muted
--- for: evaluated as ever, its incidents opened and resolved in the feed, and
+-- A window an alert or a monitor, or every alert and monitor of a project
+-- (`rule_id` and `monitor_id` none), is muted for: evaluated as ever, its incidents opened and resolved in the feed, and
 -- told to no connector from `starts_at` until `ends_at`, but a resolution to
 -- those that heard its incident. A project keeps its newest two hundred ended,
 -- one ended early keeping who ended it; the audit chain keeps the record.
@@ -408,11 +520,13 @@ CREATE TABLE telemetry.mutes (
     id              UUID        PRIMARY KEY,
     project_id      TEXT        NOT NULL,
     rule_id         UUID        REFERENCES telemetry.rules (id) ON DELETE CASCADE,
+    monitor_id      UUID        REFERENCES telemetry.monitors (id) ON DELETE CASCADE,
     starts_at       TIMESTAMPTZ NOT NULL,
     ends_at         TIMESTAMPTZ NOT NULL,
     created_by      TEXT        NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     ended_by        TEXT,
+    CONSTRAINT mutes_owner_check CHECK (num_nonnulls(rule_id, monitor_id) <= 1),
     CONSTRAINT mutes_window_check CHECK (ends_at > starts_at),
     CONSTRAINT mutes_length_check CHECK (ends_at - starts_at <= interval '30 days')
 );
@@ -420,6 +534,7 @@ CREATE TABLE telemetry.mutes (
 -- The project's mutes, newest first, and those in force at an instant.
 CREATE INDEX mutes_project_idx ON telemetry.mutes (project_id, ends_at DESC);
 CREATE INDEX mutes_rule_idx ON telemetry.mutes (rule_id) WHERE rule_id IS NOT NULL;
+CREATE INDEX mutes_monitor_idx ON telemetry.mutes (monitor_id) WHERE monitor_id IS NOT NULL;
 
 ALTER TABLE telemetry.mutes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.mutes FORCE ROW LEVEL SECURITY;
@@ -440,16 +555,16 @@ GRANT SELECT, DELETE ON telemetry.mutes TO telemetry_maintenance;
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 7. HEARTBEATS
 -- ══════════════════════════════════════════════════════════════════════════════
--- The purge sweep, the plan refusals' notices and the alerts' evaluation,
--- each as the last replica
--- to finish a tick of it left it: what the external watchdog reads through
--- `GET /heartbeat`, a loop stale once no replica has beaten it for three of
--- its periods. Names no tenant.
+-- The module's loops, each as the last replica to finish a tick of it left
+-- it: what the external watchdog reads through `GET /heartbeat`, a loop
+-- stale once no replica has beaten it for three of its periods. Names no
+-- tenant.
 CREATE TABLE telemetry.heartbeats (
     name           TEXT        PRIMARY KEY,
     period_seconds INTEGER     NOT NULL,
     beat_at        TIMESTAMPTZ NOT NULL,
-    CONSTRAINT heartbeats_name_check CHECK (name IN ('purges', 'refusals', 'alerts', 'capacity', 'usage', 'foreign')),
+    CONSTRAINT heartbeats_name_check
+        CHECK (name IN ('purges', 'refusals', 'alerts', 'monitors', 'capacity', 'usage', 'foreign')),
     CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
 );
 

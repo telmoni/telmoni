@@ -55,6 +55,7 @@ pub mod handler;
 pub mod hashing;
 pub mod ingest;
 pub mod live;
+pub mod monitors;
 pub mod notify;
 pub mod prices;
 pub mod rate_limit;
@@ -62,6 +63,7 @@ pub mod replica;
 pub mod retention;
 pub mod rollups;
 pub mod rules;
+pub mod schedule;
 pub mod schema;
 pub mod scores;
 pub mod seam;
@@ -136,6 +138,11 @@ pub struct AppState {
     /// Whether this replica's alert passes are to stop, and the one in hand
     /// ([`rules::evaluate::Stopping`]).
     pub alerts_stopping: rules::evaluate::Stopping,
+    /// Where this replica's last read of the monitors' runs reached
+    /// ([`monitors`]).
+    pub monitors_read: monitors::Read,
+    /// Whether this replica's monitor ticks are to stop, and the one in hand.
+    pub monitors_stopping: rules::evaluate::Stopping,
     /// How long an export's body may take to arrive
     /// (`handler::ingest::BODY_WAIT`); a field so a suite can wait less.
     pub body_wait: std::time::Duration,
@@ -249,6 +256,24 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/telemetry/rules/{id}/resume",
             post(handler::rules::resume_rule),
+        )
+        .route(
+            "/telemetry/monitors",
+            get(handler::monitors::list_monitors).post(handler::monitors::create_monitor),
+        )
+        .route(
+            "/telemetry/monitors/{id}",
+            get(handler::monitors::get_monitor)
+                .put(handler::monitors::update_monitor)
+                .delete(handler::monitors::delete_monitor),
+        )
+        .route(
+            "/telemetry/monitors/{id}/pause",
+            post(handler::monitors::pause_monitor),
+        )
+        .route(
+            "/telemetry/monitors/{id}/resume",
+            post(handler::monitors::resume_monitor),
         )
         .route(
             "/telemetry/mutes",

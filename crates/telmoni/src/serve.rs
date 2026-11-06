@@ -113,13 +113,15 @@ impl App {
             self.telemetry.clone(),
         ));
         let foreign = tokio::spawn(telmoni_telemetry::foreign::run(self.telemetry.clone()));
-        // Told as the shutdown comes, so a pass stops between alerts while
-        // the server drains.
+        let monitors = tokio::spawn(telmoni_telemetry::monitors::run(self.telemetry.clone()));
+        // Told as the shutdown comes, so a pass stops between alerts, and a
+        // tick between monitors, while the server drains.
         tokio::spawn({
             let telemetry = self.telemetry.clone();
             async move {
                 telmoni_shared::shutdown::shutdown_signal().await;
                 telemetry.alerts_stopping.ask();
+                telemetry.monitors_stopping.ask();
             }
         });
         if env_parse("RUN_SWEEPS", true)? {
@@ -163,9 +165,13 @@ impl App {
             ended = usage => return died("the plans' usage count", ended),
             ended = alerts => return died("the alerts' evaluation", ended),
             ended = foreign => return died("another exporter's spans landing", ended),
+            ended = monitors => return died("the monitors' watch", ended),
         }
-        // The alert in hand is settled and told before the process ends.
-        self.telemetry.alerts_stopping.stop(ALERTS_STOP_WAIT).await;
+        // The alert and monitor in hand are settled and told before the process ends.
+        tokio::join!(
+            self.telemetry.alerts_stopping.stop(ALERTS_STOP_WAIT),
+            self.telemetry.monitors_stopping.stop(ALERTS_STOP_WAIT),
+        );
         Ok(())
     }
 }

@@ -429,7 +429,7 @@ pub async fn write_links<B: HasProject>(
 /// connector's failed deliveries for it alone.
 #[must_use]
 pub fn route_key(rule_id: Uuid) -> String {
-    format!("telemetry:rule:{rule_id}")
+    crate::rules::incidents::Owner::Rule(rule_id).route_key()
 }
 
 /// One of the project's alerts paused by a person, where it ran or its plan

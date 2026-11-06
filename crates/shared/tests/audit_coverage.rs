@@ -143,7 +143,7 @@ const MUTATIONS: &[Mutation] = &[
         resource_kind: "Trace",
         actor_id: ActorPattern::Variable,
     },
-    // A member's changes to alerts, windows and incidents, filed by `chain::file`.
+    // A member's changes to alerts, monitors, windows and incidents, filed by `chain::file`.
     Mutation {
         file: "crates/telemetry/src/handler/rules.rs",
         fn_name: "save",
@@ -184,6 +184,34 @@ const MUTATIONS: &[Mutation] = &[
         fn_name: "unmute_link",
         action: "Updated",
         resource_kind: "Alert",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/monitors.rs",
+        fn_name: "save",
+        action: "Created",
+        resource_kind: "Monitor",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/monitors.rs",
+        fn_name: "update_monitor",
+        action: "Updated",
+        resource_kind: "Monitor",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/monitors.rs",
+        fn_name: "delete_monitor",
+        action: "Deleted",
+        resource_kind: "Monitor",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
+        file: "crates/telemetry/src/handler/monitors.rs",
+        fn_name: "paused",
+        action: "Updated",
+        resource_kind: "Monitor",
         actor_id: ActorPattern::Variable,
     },
     Mutation {

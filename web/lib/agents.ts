@@ -25,7 +25,7 @@ export function openIncidentsOf(
   const ruled = new Map(alerts.map((alert) => [alert.id, heldTo(alert)]));
   return incidents.filter((incident) => {
     if (incident.status === IncidentStatus.Resolved) return false;
-    const agents = ruled.get(incident.rule_id);
+    const agents = incident.rule_id === null ? undefined : ruled.get(incident.rule_id);
     if (agents === undefined) return false;
     return agent === null ? agents.length === 0 : agents.includes(agent);
   }).length;

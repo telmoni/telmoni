@@ -807,7 +807,7 @@ pub struct Held(Mutex<HashMap<OrganizationId, Instant>>);
 #[derive(Default)]
 pub struct Stopping {
     asked: AtomicBool,
-    pass: tokio::sync::Mutex<()>,
+    pub(crate) pass: tokio::sync::Mutex<()>,
 }
 
 impl Stopping {
@@ -816,7 +816,7 @@ impl Stopping {
         self.asked.store(true, Ordering::SeqCst);
     }
 
-    fn asked(&self) -> bool {
+    pub(crate) fn asked(&self) -> bool {
         self.asked.load(Ordering::SeqCst)
     }
 

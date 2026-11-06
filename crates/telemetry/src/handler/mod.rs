@@ -10,6 +10,7 @@ pub mod field_inventory;
 pub mod history;
 pub mod incidents;
 pub mod ingest;
+pub mod monitors;
 pub mod mutes;
 pub mod objectives;
 pub mod prices;

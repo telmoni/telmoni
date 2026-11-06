@@ -1,5 +1,5 @@
-//! Maintenance windows: an alert, or every alert of a project, muted from a
-//! start to an end. A muted alert is evaluated as ever and its incidents
+//! Maintenance windows: an alert or a monitor, or every alert and monitor of
+//! a project, muted from a start to an end. A muted one is judged as ever and its incidents
 //! open and resolve in the feed, but nothing is told to a connector while the
 //! window holds. Each window is kept after it ends, the record of who muted
 //! what and when, and of who ended one early.
@@ -13,6 +13,7 @@ use telmoni_shared::db::tenant_session::{HasProject, Maintenance, Scoped};
 use telmoni_shared::{ProjectId, UserId};
 
 use crate::db::TelemetryLane;
+use crate::rules::incidents::Owner;
 
 /// The longest a window runs.
 pub const MUTE_DAYS_MAX: i64 = 30;
@@ -23,8 +24,9 @@ pub struct MuteRow {
     pub id: Uuid,
     #[serde(skip)]
     pub project_id: ProjectId,
-    /// The alert muted; none, every alert of the project.
+    /// The alert or the monitor muted; neither, every one of the project.
     pub rule_id: Option<Uuid>,
+    pub monitor_id: Option<Uuid>,
     pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
     pub created_by: String,
@@ -33,7 +35,7 @@ pub struct MuteRow {
 }
 
 const MUTE_COLUMNS: &str =
-    "id, project_id, rule_id, starts_at, ends_at, created_by, created_at, ended_by";
+    "id, project_id, rule_id, monitor_id, starts_at, ends_at, created_by, created_at, ended_by";
 
 /// How many of the project's windows have not ended.
 pub async fn unended<B: HasProject>(
@@ -66,23 +68,25 @@ pub async fn mutes<B: HasProject>(
     .await
 }
 
-/// A new window of the project's, for `rule_id` or every alert.
+/// A new window of the project's, for one alert or monitor, or every one.
 pub async fn insert<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    rule_id: Option<Uuid>,
+    owner: Option<Owner>,
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
     by: &UserId,
 ) -> sqlx::Result<MuteRow> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO telemetry.mutes (id, project_id, rule_id, starts_at, ends_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        "INSERT INTO telemetry.mutes
+            (id, project_id, rule_id, monitor_id, starts_at, ends_at, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING {MUTE_COLUMNS}"
     )))
     .bind(Uuid::new_v4())
     .bind(project_id)
-    .bind(rule_id)
+    .bind(owner.and_then(|owner| owner.ids().0))
+    .bind(owner.and_then(|owner| owner.ids().1))
     .bind(starts_at)
     .bind(ends_at)
     .bind(by)
@@ -141,41 +145,47 @@ pub async fn end<B: HasProject>(
     Ok((row, ended))
 }
 
-/// Whether a window mutes the alert at `at`: its own, or its project's.
+/// Whether a window mutes the alert or monitor at `at`: its own, or its
+/// project's.
 pub async fn in_force(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     project_id: &ProjectId,
-    rule_id: Uuid,
+    owner: Owner,
     at: DateTime<Utc>,
 ) -> sqlx::Result<bool> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM telemetry.mutes
-                         WHERE project_id = $1 AND (rule_id IS NULL OR rule_id = $2)
+                         WHERE project_id = $1
+                           AND (rule_id IS NULL AND monitor_id IS NULL
+                                OR rule_id = $2 OR monitor_id = $4)
                            AND starts_at <= $3 AND ends_at > $3)",
     )
     .bind(project_id)
-    .bind(rule_id)
+    .bind(owner.ids().0)
     .bind(at)
+    .bind(owner.ids().1)
     .fetch_one(tx.conn())
     .await
 }
 
-/// The latest end of the windows muting the alert at `at`, its own or its
-/// project's; none where no window does.
+/// The latest end of the windows muting the alert or monitor at `at`, its
+/// own or its project's; none where no window does.
 pub async fn muted_until<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    rule_id: Uuid,
+    owner: Owner,
     at: DateTime<Utc>,
 ) -> sqlx::Result<Option<DateTime<Utc>>> {
     sqlx::query_scalar(
         "SELECT max(ends_at) FROM telemetry.mutes
-          WHERE project_id = $1 AND (rule_id IS NULL OR rule_id = $2)
+          WHERE project_id = $1
+            AND (rule_id IS NULL AND monitor_id IS NULL OR rule_id = $2 OR monitor_id = $4)
             AND starts_at <= $3 AND ends_at > $3",
     )
     .bind(project_id)
-    .bind(rule_id)
+    .bind(owner.ids().0)
     .bind(at)
+    .bind(owner.ids().1)
     .fetch_one(tx.conn())
     .await
 }

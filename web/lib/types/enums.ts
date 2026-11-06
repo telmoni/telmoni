@@ -239,6 +239,23 @@ export const RuleLevel = {
 } as const;
 export type RuleLevel = typeof RuleLevel[keyof typeof RuleLevel];
 
+/** Wire vocabulary of the Rust `MonitorState`: where a monitor stands. */
+export const MonitorState = {
+  New:    "new",
+  Up:     "up",
+  Late:   "late",
+  Down:   "down",
+  Paused: "paused",
+} as const;
+export type MonitorState = typeof MonitorState[keyof typeof MonitorState];
+
+/** Wire vocabulary of the Rust `MonitorCause`: why a monitor is late or down. */
+export const MonitorCause = {
+  Missed: "missed",
+  Failed: "failed",
+} as const;
+export type MonitorCause = typeof MonitorCause[keyof typeof MonitorCause];
+
 /** Wire vocabulary of the Rust `SortDirection`: which way a list is sorted. */
 export const SortDirection = {
   Asc:  "asc",
@@ -263,6 +280,7 @@ export const ResourceKind = {
   Session:           "session",
   Connector:         "connector",
   Alert:             "alert",
+  Monitor:           "monitor",
   MaintenanceWindow: "maintenance_window",
   Incident:          "incident",
   Trace:             "trace",

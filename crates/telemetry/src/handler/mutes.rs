@@ -1,12 +1,12 @@
 //! A project's maintenance windows, under [`Resource::Alert`] as its alerts
 //! are: `GET` and `POST /internal/v1/telemetry/mutes`, and `POST
 //! /mutes/{id}/end`, each open to any member of the project. A window mutes
-//! one alert, or every alert of the project, from its start — now, or a
+//! one alert or monitor, or every alert and monitor of the project, from its start — now, or a
 //! later time given; one given before now is now — to its end, at most
 //! thirty days on; ended early, it keeps who ended it. A project keeps its newest [`MUTES_ENDED_KEPT`] ended, and each
 //! window opened or ended early is filed in the organization's audit chain,
 //! the record of who muted what. A press of Mute on an incident's Slack
-//! notice makes an hour's window on its alert the same way.
+//! notice makes an hour's window on its alert or monitor the same way.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use crate::AppState;
 use crate::db;
 use crate::handler::chain::{self, Change};
 use crate::rules::db as rules;
-use crate::rules::incidents;
+use crate::rules::incidents::{self, Owner};
 use crate::rules::mutes::{self, MUTE_DAYS_MAX, MuteRow};
 
 /// The most windows the list answers.
@@ -46,9 +46,12 @@ pub const MUTES_UNENDED_MAX: i64 = 50;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MuteInput {
-    /// The alert to mute; none, every alert of the project.
+    /// The alert or the monitor to mute, never both; neither, every one of
+    /// the project.
     #[serde(default)]
     pub rule_id: Option<Uuid>,
+    #[serde(default)]
+    pub monitor_id: Option<Uuid>,
     /// When it starts; now, if none or before now.
     #[serde(default)]
     pub starts_at: Option<DateTime<Utc>>,
@@ -123,7 +126,7 @@ pub async fn create_mute(
 /// How long the window a press of an incident notice's Mute makes runs.
 const MUTE_FOR_AN_HOUR: TimeDelta = TimeDelta::hours(1);
 
-/// One of the project's incidents' alert muted for an hour by the person
+/// One of the project's incidents' alert or monitor muted for an hour by the person
 /// `acting` names, by the window the console would make: none made where a
 /// window in force mutes it already, read under the same lock as the write.
 pub(crate) async fn mute_for_an_hour(
@@ -150,17 +153,19 @@ pub(crate) async fn mute_for_an_hour(
             .await?;
             // Read once the lock is held, so a window made while it waited is in force at it.
             let now = Utc::now();
-            let rule_id = incidents::one(tx, project_id, incident_id)
+            let owner = incidents::one(tx, project_id, incident_id)
                 .await?
+                .and_then(|incident| incident.owner())
                 .ok_or_else(|| {
                     AuthError::NotFound("no incident with that id in this project".into())
-                })?
-                .rule_id;
-            if let Some(until) = mutes::muted_until(tx, project_id, rule_id, now).await? {
+                })?;
+            if let Some(until) = mutes::muted_until(tx, project_id, owner, now).await? {
                 return Ok(IncidentActed::MutedAlready { until });
             }
+            let (rule_id, monitor_id) = owner.ids();
             let input = MuteInput {
-                rule_id: Some(rule_id),
+                rule_id,
+                monitor_id,
                 starts_at: None,
                 ends_at: now + MUTE_FOR_AN_HOUR,
             };
@@ -215,15 +220,32 @@ async fn made(
         ))
         .into());
     }
-    if let Some(rule_id) = input.rule_id
+    let owner = match (input.rule_id, input.monitor_id) {
+        (Some(_), Some(_)) => {
+            return Err(TelmoniError::BadRequest(
+                "a maintenance window mutes an alert or a monitor, never both".into(),
+            ));
+        }
+        (Some(id), None) => Some(Owner::Rule(id)),
+        (None, Some(id)) => Some(Owner::Monitor(id)),
+        (None, None) => None,
+    };
+    if let Some(Owner::Rule(rule_id)) = owner
         && rules::rule(tx, project_id, rule_id).await?.is_none()
     {
         return Err(AuthError::NotFound("no alert with that id in this project".into()).into());
     }
+    if let Some(Owner::Monitor(monitor_id)) = owner
+        && crate::monitors::monitor(tx, project_id, monitor_id)
+            .await?
+            .is_none()
+    {
+        return Err(AuthError::NotFound("no monitor with that id in this project".into()).into());
+    }
     let row = mutes::insert(
         tx,
         project_id,
-        input.rule_id,
+        owner,
         starts_at,
         input.ends_at,
         &acting.user_id,
@@ -236,6 +258,7 @@ async fn made(
         id: row.id,
         metadata: json!({
             "rule_id": row.rule_id,
+            "monitor_id": row.monitor_id,
             "starts_at": row.starts_at,
             "ends_at": row.ends_at,
         }),
@@ -295,7 +318,11 @@ async fn ended(
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::MaintenanceWindow,
             id,
-            metadata: json!({ "rule_id": row.rule_id, "ended_at": row.ends_at }),
+            metadata: json!({
+                "rule_id": row.rule_id,
+                "monitor_id": row.monitor_id,
+                "ended_at": row.ends_at,
+            }),
         };
         chain::file(tx, acting, project_id, change).await?;
     }

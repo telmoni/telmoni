@@ -1,4 +1,5 @@
-//! An alert's severity and its incidents. Each evaluation sets the severity
+//! An alert's severity and its incidents, which a monitor's take too
+//! ([`Owner`]). Each evaluation sets the severity
 //! its value crosses to — `alert`, `warning` or `ok`; for a window that held
 //! no span what the alert asks, read as 0, kept, or `no_data` — and moves the
 //! alert's incident with it, in the transaction that settles the evaluation:
@@ -20,8 +21,8 @@ use telmoni_shared::db::tenant_session::{
     Binding, HasProject, Maintenance, Scoped, maintenance_scope,
 };
 use telmoni_shared::{
-    IncidentStatus, MissingData, OrganizationId, ProjectId, RuleOperator, Severity, TelmoniError,
-    UserId,
+    IncidentStatus, MissingData, MonitorCause, OrganizationId, ProjectId, RuleOperator, Severity,
+    TelmoniError, UserId,
 };
 
 use crate::AppState;
@@ -36,12 +37,45 @@ pub const REOPEN_WITHIN: TimeDelta = TimeDelta::hours(1);
 /// as the table's CHECK has it.
 pub const RUNS_KEPT: i32 = 20;
 
-/// An incident as its row keeps it, with its alert's name.
+/// Whose incident: an alert's, or a monitor's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    Rule(Uuid),
+    Monitor(Uuid),
+}
+
+impl Owner {
+    /// The owner as its two columns bind: its own id, and none for the other.
+    #[must_use]
+    pub const fn ids(self) -> (Option<Uuid>, Option<Uuid>) {
+        match self {
+            Self::Rule(id) => (Some(id), None),
+            Self::Monitor(id) => (None, Some(id)),
+        }
+    }
+
+    /// The key its notices are routed under, which counts each linked
+    /// connector's failed deliveries for it alone.
+    #[must_use]
+    pub fn route_key(self) -> String {
+        match self {
+            Self::Rule(id) => format!("telemetry:rule:{id}"),
+            Self::Monitor(id) => format!("telemetry:monitor:{id}"),
+        }
+    }
+}
+
+/// An incident as its row keeps it, with its alert's name or its monitor's
+/// agent.
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct IncidentRow {
     pub id: Uuid,
-    pub rule_id: Uuid,
-    pub rule_name: String,
+    pub rule_id: Option<Uuid>,
+    pub rule_name: Option<String>,
+    pub monitor_id: Option<Uuid>,
+    pub agent: Option<String>,
+    /// A monitor's incident's cause.
+    pub cause: Option<MonitorCause>,
     #[serde(skip)]
     pub project_id: ProjectId,
     #[serde(skip)]
@@ -61,12 +95,38 @@ pub struct IncidentRow {
     pub runs: Vec<Uuid>,
 }
 
-/// The columns an [`IncidentRow`] is read from, its alert joined as `rule`.
+impl IncidentRow {
+    /// Whose it is.
+    #[must_use]
+    pub fn owner(&self) -> Option<Owner> {
+        match (self.rule_id, self.monitor_id) {
+            (Some(id), None) => Some(Owner::Rule(id)),
+            (None, Some(id)) => Some(Owner::Monitor(id)),
+            _ => None,
+        }
+    }
+
+    /// What it is of, in words: its alert's name, or its monitor's agent.
+    #[must_use]
+    pub fn named(&self) -> &str {
+        self.rule_name
+            .as_deref()
+            .or(self.agent.as_deref())
+            .unwrap_or_default()
+    }
+}
+
+/// The columns an [`IncidentRow`] is read from, [`INCIDENT_FROM`]'s.
 const INCIDENT_COLUMNS: &str = "incident.id, incident.rule_id, rule.name AS rule_name, \
-    incident.project_id, incident.organization_id, incident.status, incident.severity, \
+    incident.monitor_id, monitor.agent AS agent, incident.cause, incident.project_id, incident.organization_id, incident.status, incident.severity, \
     incident.value, incident.opened_at, incident.acknowledged_at, incident.acknowledged_by, \
     incident.resolved_at, incident.resolved_by, incident.reopened, incident.told_to, \
     incident.runs";
+
+/// The incidents, their alert joined as `rule` and their monitor as `monitor`.
+const INCIDENT_FROM: &str = "telemetry.incidents AS incident \
+    LEFT JOIN telemetry.rules AS rule ON rule.id = incident.rule_id \
+    LEFT JOIN telemetry.monitors AS monitor ON monitor.id = incident.monitor_id";
 
 /// The severity `value` crosses to under the alert's thresholds.
 #[must_use]
@@ -156,6 +216,37 @@ pub struct Told {
     pub told_to: Vec<Uuid>,
 }
 
+/// Where an alert or a monitor stood before a move: what a move reads.
+#[derive(Debug, Clone, Copy)]
+pub struct Standing {
+    pub severity: Severity,
+    pub told_at: Option<DateTime<Utc>>,
+    pub missing_data: MissingData,
+    pub renotify_minutes: Option<i32>,
+}
+
+impl Standing {
+    /// An alert's, from its row.
+    #[must_use]
+    pub const fn of(rule: &RuleRow) -> Self {
+        Self {
+            severity: rule.severity,
+            told_at: rule.told_at,
+            missing_data: rule.definition.missing_data,
+            renotify_minutes: rule.definition.renotify_minutes,
+        }
+    }
+}
+
+/// Whose incident a move files, and the cause a monitor's keeps.
+#[derive(Debug, Clone, Copy)]
+pub struct Filed<'a> {
+    pub owner: Owner,
+    pub project_id: &'a ProjectId,
+    pub organization_id: &'a OrganizationId,
+    pub cause: Option<MonitorCause>,
+}
+
 /// An evaluation settled at the severity `next` it set: written where the
 /// lease and the definition it read still stand, with the alert's incident
 /// opened, followed or resolved in the same transaction. Answers whether it
@@ -174,8 +265,9 @@ pub async fn settle(
         now
     };
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let open = open_of(&mut tx, rule.id).await?;
-    let moved = moves(rule, next, since, open.as_ref(), now);
+    let owner = Owner::Rule(rule.id);
+    let open = open_of(&mut tx, owner).await?;
+    let moved = moves(Standing::of(rule), next, since, open.as_ref(), now);
     let told_at = if moved.iter().any(|m| m.telling != Telling::Silent) {
         Some(now)
     } else {
@@ -203,9 +295,15 @@ pub async fn settle(
         tx.rollback().await?;
         return Ok((false, Vec::new()));
     }
+    let filed = Filed {
+        owner,
+        project_id: &rule.project_id,
+        organization_id: &rule.organization_id,
+        cause: None,
+    };
     let mut written = Vec::with_capacity(moved.len());
     for one in moved {
-        written.push(write(&mut tx, rule, open.as_ref(), value, now, one).await?);
+        written.push(write(&mut tx, filed, open.as_ref(), value, now, one).await?);
     }
     tx.commit().await?;
     Ok((true, written))
@@ -220,8 +318,8 @@ pub async fn settle(
 /// `alert`, or a breach of one on no data, is told again; a fall to `warning`
 /// follows it in silence; and a severity held is told again once its
 /// re-notification is due, while nobody has taken the incident.
-fn moves(
-    rule: &RuleRow,
+pub(crate) fn moves(
+    rule: Standing,
     next: Severity,
     since: DateTime<Utc>,
     open: Option<&IncidentRow>,
@@ -244,10 +342,7 @@ fn moves(
         // A reading of no data found its whole window empty already: told
         // then, once a spell.
         let untold = rule.told_at.is_none_or(|at| at < since);
-        if next == Severity::NoData
-            && rule.definition.missing_data == MissingData::NotifyNoData
-            && untold
-        {
+        if next == Severity::NoData && rule.missing_data == MissingData::NotifyNoData && untold {
             return vec![move_to(Move::Opened, Severity::NoData)];
         }
         return Vec::new();
@@ -263,7 +358,7 @@ fn moves(
     // ever; where the alert asks to be told of no data, the incident follows.
     let next = match next {
         Severity::NoData if incident.severity != Severity::NoData => {
-            if rule.definition.missing_data == MissingData::NotifyNoData {
+            if rule.missing_data == MissingData::NotifyNoData {
                 return vec![Told {
                     telling: Telling::Again,
                     ..move_to(Move::Opened, Severity::NoData)
@@ -284,7 +379,7 @@ fn moves(
             ..move_to(Move::Opened, next)
         }];
     }
-    let due = rule.definition.renotify_minutes.is_some_and(|minutes| {
+    let due = rule.renotify_minutes.is_some_and(|minutes| {
         rule.told_at
             .is_none_or(|at| at + TimeDelta::minutes(i64::from(minutes)) <= now)
     });
@@ -299,9 +394,9 @@ fn moves(
 
 /// One move written: an incident opened, reopened, followed or resolved. One
 /// a member resolved since it was read moves no further, and is told nothing.
-async fn write(
+pub(crate) async fn write(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
-    rule: &RuleRow,
+    filed: Filed<'_>,
     open: Option<&IncidentRow>,
     value: Option<f64>,
     now: DateTime<Utc>,
@@ -359,15 +454,18 @@ async fn write(
                         resolved_by = NULL, acknowledged_at = NULL, acknowledged_by = NULL,
                         reopened = reopened + 1, updated_at = $4
                   WHERE id = (SELECT id FROM telemetry.incidents
-                               WHERE rule_id = $1 AND status = 'resolved' AND resolved_at >= $5
+                               WHERE (rule_id = $1 OR monitor_id = $6) AND status = 'resolved'
+                                 AND resolved_at >= $5 AND cause IS NOT DISTINCT FROM $7
                                ORDER BY resolved_at DESC LIMIT 1)
                  RETURNING id",
             )
-            .bind(rule.id)
+            .bind(filed.owner.ids().0)
             .bind(told.severity)
             .bind(value)
             .bind(now)
             .bind(now - REOPEN_WITHIN)
+            .bind(filed.owner.ids().1)
+            .bind(filed.cause)
             .fetch_optional(tx.conn())
             .await?;
             if let Some(id) = reopened {
@@ -379,14 +477,16 @@ async fn write(
             }
             sqlx::query(
                 "INSERT INTO telemetry.incidents
-                    (id, rule_id, project_id, organization_id, severity, value, opened_at,
-                     updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)",
+                    (id, rule_id, monitor_id, project_id, organization_id, cause, severity, value,
+                     opened_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
             )
             .bind(told.incident_id)
-            .bind(rule.id)
-            .bind(&rule.project_id)
-            .bind(&rule.organization_id)
+            .bind(filed.owner.ids().0)
+            .bind(filed.owner.ids().1)
+            .bind(filed.project_id)
+            .bind(filed.organization_id)
+            .bind(filed.cause)
             .bind(told.severity)
             .bind(value)
             .bind(now)
@@ -397,17 +497,18 @@ async fn write(
     }
 }
 
-/// The alert's open incident, acknowledged or not.
+/// The alert's or monitor's open incident, acknowledged or not.
 pub(crate) async fn open_of<S: Binding>(
     tx: &mut Scoped<'_, S>,
-    rule_id: Uuid,
+    owner: Owner,
 ) -> sqlx::Result<Option<IncidentRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents AS incident
-           JOIN telemetry.rules AS rule ON rule.id = incident.rule_id
-          WHERE incident.rule_id = $1 AND incident.status <> 'resolved'"
+        "SELECT {INCIDENT_COLUMNS} FROM {INCIDENT_FROM}
+          WHERE (incident.rule_id = $1 OR incident.monitor_id = $2)
+            AND incident.status <> 'resolved'"
     )))
-    .bind(rule_id)
+    .bind(owner.ids().0)
+    .bind(owner.ids().1)
     .fetch_optional(tx.conn())
     .await
 }
@@ -449,8 +550,7 @@ pub async fn showing<B: HasProject>(
     limit: i64,
 ) -> sqlx::Result<Vec<IncidentRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents AS incident
-           JOIN telemetry.rules AS rule ON rule.id = incident.rule_id
+        "SELECT {INCIDENT_COLUMNS} FROM {INCIDENT_FROM}
           WHERE incident.project_id = $1 AND incident.runs @> ARRAY[$2::uuid]
           ORDER BY incident.opened_at DESC, incident.id
           LIMIT $3"
@@ -469,8 +569,7 @@ pub async fn incidents<B: HasProject>(
     limit: i64,
 ) -> sqlx::Result<Vec<IncidentRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents AS incident
-           JOIN telemetry.rules AS rule ON rule.id = incident.rule_id
+        "SELECT {INCIDENT_COLUMNS} FROM {INCIDENT_FROM}
           WHERE incident.project_id = $1
           ORDER BY incident.status = 'resolved', incident.opened_at DESC, incident.id
           LIMIT $2"
@@ -536,8 +635,7 @@ pub async fn one<B: HasProject>(
     id: Uuid,
 ) -> sqlx::Result<Option<IncidentRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {INCIDENT_COLUMNS} FROM telemetry.incidents AS incident
-           JOIN telemetry.rules AS rule ON rule.id = incident.rule_id
+        "SELECT {INCIDENT_COLUMNS} FROM {INCIDENT_FROM}
           WHERE incident.project_id = $1 AND incident.id = $2"
     )))
     .bind(project_id)

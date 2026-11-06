@@ -194,6 +194,8 @@ async fn moved(
             metadata: json!({
                 "alert": row.rule_name,
                 "rule_id": row.rule_id,
+                "agent": row.agent,
+                "monitor_id": row.monitor_id,
                 "status": take.status(),
             }),
         };

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   IncidentStatus,
   MissingData,
+  MonitorCause,
   PausedBy,
   RuleAggregation,
   RuleBaseline,
@@ -96,13 +97,16 @@ const AlertSchema = z.object({
 });
 export type Alert = z.infer<typeof AlertSchema>;
 
-// One incident: its alert, where it stands, who took or resolved it, where
-// its notices went — the connections, the feed apart — and the runs they
-// showed, oldest first.
+// One incident: its alert or its monitor, where it stands, who took or
+// resolved it, where its notices went — the connections, the feed apart — and
+// the runs they showed, oldest first. A monitor's names its agent and cause.
 export const IncidentSchema = z.object({
   id: z.string(),
-  rule_id: z.string(),
-  rule_name: z.string(),
+  rule_id: z.string().nullable(),
+  rule_name: z.string().nullable(),
+  monitor_id: z.string().nullable(),
+  agent: z.string().nullable(),
+  cause: z.enum(MonitorCause).nullable(),
   status: z.enum(IncidentStatus),
   severity: z.enum(Severity),
   value: z.number().nullable(),
@@ -117,11 +121,12 @@ export const IncidentSchema = z.object({
 });
 export type Incident = z.infer<typeof IncidentSchema>;
 
-// A maintenance window: one alert's, or every alert's where `rule_id` is
-// none; one ended early names who ended it.
+// A maintenance window: one alert's or monitor's, or every one's where both
+// are none; one ended early names who ended it.
 const MuteSchema = z.object({
   id: z.string(),
   rule_id: z.string().nullable(),
+  monitor_id: z.string().nullable(),
   starts_at: z.string(),
   ends_at: z.string(),
   created_by: z.string(),

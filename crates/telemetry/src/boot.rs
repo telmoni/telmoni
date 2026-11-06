@@ -86,6 +86,8 @@ pub fn state(
         heartbeats: Heartbeats::new("telemetry", TelemetryLane),
         alerts_held: crate::rules::evaluate::Held::default(),
         alerts_stopping: crate::rules::evaluate::Stopping::default(),
+        monitors_read: crate::monitors::Read::default(),
+        monitors_stopping: crate::rules::evaluate::Stopping::default(),
         body_wait: BODY_WAIT,
         ingest_slots: Arc::new(tokio::sync::Semaphore::new(IN_FLIGHT_MAX)),
     })

@@ -16,15 +16,17 @@ use chrono::{DateTime, Utc};
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::seam::{IncidentNotice, Notice, Route};
 use telmoni_shared::{
-    IncidentStatus, NotificationKind, OrganizationId, ProjectId, RuleAggregation, RuleBaseline,
-    RuleMeasure, RuleOperator, RuleWindow, Severity, SpanKind, SpanStatus, TelmoniError,
+    IncidentStatus, MonitorCause, NotificationKind, OrganizationId, ProjectId, RuleAggregation,
+    RuleBaseline, RuleMeasure, RuleOperator, RuleWindow, Severity, SpanKind, SpanStatus,
+    TelmoniError,
 };
 
 use crate::AppState;
 use crate::db::TelemetryLane;
+use crate::monitors::{Judged, MonitorRow};
 use crate::rules::db::{self, RuleRow};
 use crate::rules::example::{self, ExampleRun, Pick, Repeated};
-use crate::rules::incidents::{self, IncidentRow, Move, Telling, Told};
+use crate::rules::incidents::{self, IncidentRow, Move, Owner, Telling, Told};
 use crate::rules::{Link, deliveries, mutes};
 use crate::spend::Unread;
 use crate::traces::Facet;
@@ -44,7 +46,8 @@ pub async fn tell_incidents(
     if told.iter().all(|one| one.telling == Telling::Silent) {
         return;
     }
-    let links = match links_of(state, rule.id).await {
+    let owner = Owner::Rule(rule.id);
+    let links = match links_of(state, owner).await {
         Ok(links) => links,
         Err(error) => {
             tracing::warn!(
@@ -55,7 +58,7 @@ pub async fn tell_incidents(
             Vec::new()
         }
     };
-    let muted = muted_at(state, &rule.project_id, rule.id, at).await;
+    let muted = muted_at(state, &rule.project_id, owner, at).await;
     let run = run_of(state, rule, told).await;
     for one in told.iter().filter(|one| one.telling != Telling::Silent) {
         // A resolution's `told_to` names who heard its incident; any other's is empty.
@@ -81,12 +84,12 @@ pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
     let now = Utc::now();
     let held = async {
         let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-        let open = incidents::open_of(&mut tx, rule.id).await?;
+        let open = incidents::open_of(&mut tx, Owner::Rule(rule.id)).await?;
         let Some(incident) = open.filter(|incident| incident.status == IncidentStatus::Open) else {
             return Ok(None);
         };
         let links = db::links_of(&mut tx, rule.id).await?;
-        let muted = mutes::in_force(&mut tx, &rule.project_id, rule.id, now).await?;
+        let muted = mutes::in_force(&mut tx, &rule.project_id, Owner::Rule(rule.id), now).await?;
         let hearers: Vec<Uuid> = links
             .into_iter()
             .map(db::LinkRow::link)
@@ -185,7 +188,7 @@ async fn tell_one(
     let of = Of {
         organization_id: &rule.organization_id,
         project_id: &rule.project_id,
-        rule_id: rule.id,
+        owner: Owner::Rule(rule.id),
     };
     let reached = told(state, of, hearers, notice, &key, one.telling.again()).await;
     match reached {
@@ -193,7 +196,11 @@ async fn tell_one(
             let run = shown.filter(|_| reached.anyone).map(|run| run.run_id);
             keep_told(
                 state,
-                (&rule.organization_id, &rule.project_id, rule.id),
+                (
+                    &rule.organization_id,
+                    &rule.project_id,
+                    Owner::Rule(rule.id),
+                ),
                 one.incident_id,
                 &reached.connections,
                 run,
@@ -264,12 +271,12 @@ async fn tell<'a>(
 }
 
 /// Where one of an incident's notices went, and the run it showed, kept on
-/// the incident, and on the alert as its last notice's hearers — a move's in
+/// the incident, and on its alert or monitor as its last notice's hearers — a move's in
 /// place of the last, a reminder's beside them; logged by its ids where it
 /// cannot be, as the notice stands.
 async fn keep_told(
     state: &AppState,
-    (organization_id, project_id, rule_id): (&OrganizationId, &ProjectId, Uuid),
+    (organization_id, project_id, owner): (&OrganizationId, &ProjectId, Owner),
     incident_id: Uuid,
     connections: &[Uuid],
     run: Option<Uuid>,
@@ -285,18 +292,28 @@ async fn keep_told(
             .bind_organization(organization_id)
             .await?;
         incidents::told(&mut tx, project_id, incident_id, connections, run).await?;
-        sqlx::query(
-            "UPDATE telemetry.rules
-                SET told_to = CASE WHEN $3 THEN $2::uuid[]
-                              ELSE ARRAY(SELECT DISTINCT unnest(told_to || $2::uuid[]) ORDER BY 1) END
-              WHERE id = $1 AND project_id = $4",
-        )
-        .bind(rule_id)
-        .bind(connections)
-        .bind(replaces)
-        .bind(project_id)
-        .execute(tx.conn())
-        .await?;
+        let sql = match owner {
+            Owner::Rule(_) => {
+                "UPDATE telemetry.rules
+                    SET told_to = CASE WHEN $3 THEN $2::uuid[]
+                                  ELSE ARRAY(SELECT DISTINCT unnest(told_to || $2::uuid[]) ORDER BY 1) END
+                  WHERE id = $1 AND project_id = $4"
+            }
+            Owner::Monitor(_) => {
+                "UPDATE telemetry.monitors
+                    SET told_to = CASE WHEN $3 THEN $2::uuid[]
+                                  ELSE ARRAY(SELECT DISTINCT unnest(told_to || $2::uuid[]) ORDER BY 1) END
+                  WHERE id = $1 AND project_id = $4"
+            }
+        };
+        let (Owner::Rule(id) | Owner::Monitor(id)) = owner;
+        sqlx::query(sql)
+            .bind(id)
+            .bind(connections)
+            .bind(replaces)
+            .bind(project_id)
+            .execute(tx.conn())
+            .await?;
         tx.commit().await?;
         Ok::<_, TelmoniError>(())
     };
@@ -309,17 +326,18 @@ async fn keep_told(
     }
 }
 
-/// Whether a maintenance window mutes the alert at `at`; none, logged, where
-/// the windows cannot be read, so a notice is told rather than lost.
+/// Whether a maintenance window mutes the alert or monitor at `at`; none,
+/// logged, where the windows cannot be read, so a notice is told rather than
+/// lost.
 async fn muted_at(
     state: &AppState,
     project_id: &ProjectId,
-    rule_id: Uuid,
+    owner: Owner,
     at: DateTime<Utc>,
 ) -> bool {
     let read = async {
         let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-        let muted = mutes::in_force(&mut tx, project_id, rule_id, at).await?;
+        let muted = mutes::in_force(&mut tx, project_id, owner, at).await?;
         tx.commit().await?;
         Ok::<_, TelmoniError>(muted)
     };
@@ -327,9 +345,9 @@ async fn muted_at(
         Ok(muted) => muted,
         Err(error) => {
             tracing::warn!(
-                rule_id = %rule_id,
+                project_id = %project_id,
                 error = %error,
-                "telemetry: an alert's maintenance windows could not be read; it is told"
+                "telemetry: a project's maintenance windows could not be read; it is told"
             );
             false
         }
@@ -440,10 +458,19 @@ const LINK_MAX: usize = 1_024;
 
 /// A run's own page in the console, spelled with ids.
 fn run_link(state: &AppState, rule: &RuleRow, run_id: Uuid) -> Option<String> {
+    run_page(state, &rule.organization_id, &rule.project_id, run_id)
+}
+
+/// A run's own page in the console, by the project's ids.
+fn run_page(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    run_id: Uuid,
+) -> Option<String> {
     let origin = state.config.app_url.as_deref()?;
     Some(format!(
-        "{origin}/{}/{}/traces/{run_id}",
-        rule.organization_id, rule.project_id
+        "{origin}/{organization_id}/{project_id}/traces/{run_id}"
     ))
 }
 
@@ -563,6 +590,7 @@ fn run_json(state: &AppState, rule: &RuleRow, run: &ExampleRun) -> serde_json::V
 fn picked(kind: SpanKind, pick: Pick) -> String {
     let one = match kind {
         SpanKind::Run => "run",
+        SpanKind::RunStart => "run opening",
         SpanKind::Step => "step",
         SpanKind::ModelCall => "model call",
         SpanKind::ToolCall => "tool call",
@@ -605,21 +633,28 @@ fn clipped(name: &str) -> String {
 /// The most of a step's name or an error's type a notice carries.
 const NAME_SHOWN: usize = 120;
 
-/// The connectors the alert links, read in the module's lane.
-async fn links_of(state: &AppState, rule_id: Uuid) -> Result<Vec<Link>, TelmoniError> {
+/// The connectors the alert or monitor links, read in the module's lane.
+async fn links_of(state: &AppState, owner: Owner) -> Result<Vec<Link>, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let links = db::links_of(&mut tx, rule_id).await?;
+    let links = match owner {
+        Owner::Rule(id) => db::links_of(&mut tx, id)
+            .await?
+            .into_iter()
+            .map(db::LinkRow::link)
+            .collect(),
+        Owner::Monitor(id) => crate::monitors::links_of(&mut tx, id).await?,
+    };
     tx.commit().await?;
-    Ok(links.into_iter().map(db::LinkRow::link).collect())
+    Ok(links)
 }
 
 /// Whose notice: the organization and project it is filed under, and the
-/// alert whose route it goes by.
+/// alert or monitor whose route it goes by.
 #[derive(Clone, Copy)]
 struct Of<'a> {
     organization_id: &'a OrganizationId,
     project_id: &'a ProjectId,
-    rule_id: Uuid,
+    owner: Owner,
 }
 
 /// `notice` told to `hearers` within the day's room, under the alert's
@@ -634,7 +669,7 @@ async fn told<'a>(
     again: bool,
 ) -> Result<Reached, TelmoniError> {
     let taken = deliveries::take(state, of.organization_id, hearers.len()).await;
-    let route_key = db::route_key(of.rule_id);
+    let route_key = of.owner.route_key();
     let route = Route {
         key: &route_key,
         connections: hearers,
@@ -884,6 +919,7 @@ fn measured(rule: &RuleRow) -> String {
     };
     let of = match rule.definition.kind {
         SpanKind::Run => "runs",
+        SpanKind::RunStart => "run openings",
         SpanKind::Step => "steps",
         SpanKind::ModelCall => "model calls",
         SpanKind::ToolCall => "tool calls",
@@ -995,11 +1031,142 @@ fn dollars(value: f64) -> String {
     format!("${whole}.{fraction}")
 }
 
+/// A monitor's moves, told after their commit as an alert's are: an opening
+/// and a resolution to the feed and its linked connectors, a rise to them
+/// alone; a failure shows the run that failed. Names the agent, the due time
+/// and the run's id alone.
+pub async fn tell_monitor(
+    state: &AppState,
+    row: &MonitorRow,
+    judged: &Judged,
+    moves: &[Told],
+    at: DateTime<Utc>,
+) {
+    if moves.iter().all(|one| one.telling == Telling::Silent) {
+        return;
+    }
+    let owner = Owner::Monitor(row.id);
+    let links = match links_of(state, owner).await {
+        Ok(links) => links,
+        Err(error) => {
+            tracing::warn!(
+                monitor_id = %row.id,
+                error = %error,
+                "telemetry: where a monitor's notices go could not be read; the feed alone hears them"
+            );
+            Vec::new()
+        }
+    };
+    let muted = muted_at(state, &row.project_id, owner, at).await;
+    for one in moves.iter().filter(|one| one.telling != Telling::Silent) {
+        let hearers: Vec<Uuid> = links
+            .iter()
+            .filter(|link| link.hears_end(one.heard_at, &one.told_to, muted, at))
+            .map(|link| link.connection_id)
+            .collect();
+        let failed = one.change == Move::Opened && judged.cause == Some(MonitorCause::Failed);
+        let run = judged
+            .last_ended
+            .filter(|_| failed)
+            .map(|ended| ended.run_id);
+        let run_url =
+            run.and_then(|run| run_page(state, &row.organization_id, &row.project_id, run));
+        let (title, body) = monitor_words(row, judged, one);
+        let body = carrying(body, [run_url.as_ref().map(|url| format!("Run: {url}"))]);
+        let metadata = json!({
+            "incident_id": one.incident_id,
+            "monitor_id": row.id,
+            "severity": one.severity,
+            "cause": (one.change == Move::Opened).then_some(judged.cause).flatten(),
+            "next_due_at": judged.next_due_at,
+            "run": run,
+        });
+        let key = incident_key(one.incident_id, one.change);
+        let incident = (one.change == Move::Opened).then_some(IncidentNotice {
+            id: one.incident_id,
+            run_url: run_url.as_deref(),
+        });
+        let notice = |dedup_key| Notice {
+            kind: kind_of(one.change),
+            subject_user_id: None,
+            title: &title,
+            body: &body,
+            metadata: metadata.clone(),
+            dedup_key,
+            incident,
+        };
+        let of = Of {
+            organization_id: &row.organization_id,
+            project_id: &row.project_id,
+            owner,
+        };
+        match told(state, of, &hearers, notice, &key, one.telling.again()).await {
+            Ok(reached) => {
+                let shown = run.filter(|_| reached.anyone);
+                keep_told(
+                    state,
+                    (&row.organization_id, &row.project_id, owner),
+                    one.incident_id,
+                    &reached.connections,
+                    shown,
+                    one.telling,
+                )
+                .await;
+            }
+            Err(error) => tracing::warn!(
+                monitor_id = %row.id,
+                incident_id = %one.incident_id,
+                error = %error,
+                "telemetry: a monitor's notice could not be told"
+            ),
+        }
+    }
+}
+
+/// A monitor's notice's title and body: its agent, where it stands and why,
+/// and when its run was due — never a span's content.
+fn monitor_words(row: &MonitorRow, judged: &Judged, one: &Told) -> (String, String) {
+    let agent = &row.agent;
+    let due = judged.next_due_at.map_or_else(String::new, |due| {
+        due.format("%Y-%m-%d %H:%M UTC").to_string()
+    });
+    let grace = minutes(row.grace_seconds);
+    let (state, body) = match (one.change, one.severity, judged.cause) {
+        (Move::Resolved, ..) => ("up", format!("{agent} is up again.")),
+        (Move::Opened, _, Some(MonitorCause::Failed)) => {
+            ("down", format!("{agent}'s last run ended in error."))
+        }
+        (Move::Opened, Severity::Warning, _) => (
+            "late",
+            format!("{agent}'s run due at {due} has not started."),
+        ),
+        (Move::Opened, ..) => (
+            "down",
+            format!("{agent}'s run due at {due} has not started within its grace of {grace}."),
+        ),
+    };
+    (format!("{agent}: {state}"), body)
+}
+
+/// A grace in words: whole minutes, hours or days where they divide it.
+fn minutes(seconds: i32) -> String {
+    let minutes = seconds / 60;
+    match minutes {
+        m if m % 1_440 == 0 => format!("{} days", m / 1_440).replace("1 days", "1 day"),
+        m if m % 60 == 0 => format!("{} hours", m / 60).replace("1 hours", "1 hour"),
+        1 => "1 minute".to_owned(),
+        m => format!("{m} minutes"),
+    }
+}
+
 /// A member's resolution of an incident, told as a recovery is: in the feed,
 /// keyed as the incident's resolution, and to the linked connectors that hear
 /// it or heard the incident; to them alone once it reopened.
 pub async fn resolved_by_hand(state: &AppState, incident: &IncidentRow) {
-    let links = match links_of(state, incident.rule_id).await {
+    let Some(owner) = incident.owner() else {
+        return;
+    };
+    let links = match links_of(state, owner).await {
         Ok(links) => links,
         Err(error) => {
             tracing::warn!(
@@ -1013,32 +1180,43 @@ pub async fn resolved_by_hand(state: &AppState, incident: &IncidentRow) {
     tell_resolved(state, incident, &links, false).await;
 }
 
-/// An open incident gone with the alert a member deleted, told as a member's
-/// resolution is, to the connectors the alert linked, `links`.
-pub async fn deleted_with_alert(state: &AppState, incident: &IncidentRow, links: Vec<Link>) {
+/// An open incident gone with the alert or monitor a member deleted, told as
+/// a member's resolution is, to the connectors it linked, `links`.
+pub async fn deleted_with(state: &AppState, incident: &IncidentRow, links: Vec<Link>) {
     tell_resolved(state, incident, &links, true).await;
 }
 
 /// A resolution by a member told to the feed and to those of `links` that
-/// hear it, its alert `deleted` with it or not.
+/// hear it, its alert or monitor `deleted` with it or not.
 async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link], deleted: bool) {
+    let Some(owner) = incident.owner() else {
+        return;
+    };
     let (organization_id, project_id) = (&incident.organization_id, &incident.project_id);
-    let (incident_id, rule_id, severity) = (incident.id, incident.rule_id, incident.severity);
-    let title = format!("{}: resolved", incident.rule_name);
+    let (incident_id, severity) = (incident.id, incident.severity);
+    let title = format!("{}: resolved", incident.named());
     let key = incident_key(incident.id, Move::Resolved);
     let mut metadata = json!({
         "incident_id": incident_id,
-        "rule_id": rule_id,
+        "rule_id": incident.rule_id,
+        "monitor_id": incident.monitor_id,
         "severity": severity,
         "by_hand": true,
     });
-    let body = if deleted {
-        if let Some(fields) = metadata.as_object_mut() {
-            fields.insert("alert_deleted".into(), json!(true));
+    let body = match (deleted, owner) {
+        (true, Owner::Rule(_)) => {
+            if let Some(fields) = metadata.as_object_mut() {
+                fields.insert("alert_deleted".into(), json!(true));
+            }
+            "A member of the project deleted this alert, and its incident with it."
         }
-        "A member of the project deleted this alert, and its incident with it."
-    } else {
-        "A member of the project resolved this incident."
+        (true, Owner::Monitor(_)) => {
+            if let Some(fields) = metadata.as_object_mut() {
+                fields.insert("monitor_deleted".into(), json!(true));
+            }
+            "A member of the project deleted this monitor, and its incident with it."
+        }
+        (false, _) => "A member of the project resolved this incident.",
     };
     let notice = |dedup_key| Notice {
         kind: NotificationKind::IncidentResolved,
@@ -1050,7 +1228,7 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
         incident: None,
     };
     let now = Utc::now();
-    let muted = muted_at(state, project_id, rule_id, now).await;
+    let muted = muted_at(state, project_id, owner, now).await;
     let hearers: Vec<Uuid> = links
         .iter()
         .filter(|link| link.hears_end(severity, &incident.told_to, muted, now))
@@ -1059,7 +1237,7 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
     let of = Of {
         organization_id,
         project_id,
-        rule_id,
+        owner,
     };
     let reached = told(state, of, &hearers, notice, &key, incident.reopened > 0).await;
     match reached {
@@ -1068,7 +1246,7 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
         Ok(reached) => {
             keep_told(
                 state,
-                (organization_id, project_id, rule_id),
+                (organization_id, project_id, owner),
                 incident_id,
                 &reached.connections,
                 None,

@@ -26,9 +26,13 @@ pub enum TelmoniResourceKind {
     /// A project's alert: made, saved over, paused, resumed, a connector
     /// muted for it heard again, or deleted.
     Alert,
-    /// A maintenance window over a project's alerts, opened or ended early.
+    /// A project's monitor of one agent's schedule: made, saved over,
+    /// paused, resumed or deleted.
+    Monitor,
+    /// A maintenance window over a project's alerts and monitors, opened or
+    /// ended early.
     MaintenanceWindow,
-    /// An alert's incident, acknowledged or resolved by a member.
+    /// An alert's or a monitor's incident, acknowledged or resolved by a member.
     Incident,
     /// One trace of a project, deleted by a person.
     Trace,
@@ -45,6 +49,7 @@ crate::wire_enum!(TelmoniResourceKind {
     Session => "session",
     Connector => "connector",
     Alert => "alert",
+    Monitor => "monitor",
     MaintenanceWindow => "maintenance_window",
     Incident => "incident",
     Trace => "trace",
@@ -94,7 +99,6 @@ mod tests {
         assert!("service".parse::<TelmoniResourceKind>().is_err());
         assert!("slo".parse::<TelmoniResourceKind>().is_err());
         assert!("alert_rule".parse::<TelmoniResourceKind>().is_err());
-        assert!("monitor".parse::<TelmoniResourceKind>().is_err());
         assert!("ping_key".parse::<TelmoniResourceKind>().is_err());
         assert!("account".parse::<TelmoniResourceKind>().is_err());
         assert!("not_a_resource".parse::<TelmoniResourceKind>().is_err());

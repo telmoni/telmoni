@@ -9,15 +9,16 @@ use uuid::Uuid;
 
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
-    ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, OrganizationId,
-    ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, Severity,
-    SortDirection, SpanKind, SpanStatus, TraceSort,
+    ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, MonitorCause,
+    MonitorState, OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator,
+    RuleWindow, Severity, SortDirection, SpanKind, SpanStatus, TraceSort,
 };
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::agents::{AGENTS_DAYS, AgentRow, Agents};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::{FieldInventory, Row};
 use telmoni_telemetry::handler::incidents::IncidentList;
+use telmoni_telemetry::handler::monitors::{MonitorAnswer, MonitorList};
 use telmoni_telemetry::handler::mutes::MuteList;
 use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
@@ -26,6 +27,7 @@ use telmoni_telemetry::handler::traces::{
     TraceSpan, UnpricedModel,
 };
 use telmoni_telemetry::handler::views::{DashboardChart, DashboardOptions, View, ViewList};
+use telmoni_telemetry::monitors::MonitorRow;
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
@@ -57,6 +59,7 @@ fn turn() -> Vec<SpanFields> {
 const RUN: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b17);
 const RULE: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b18);
 const INCIDENT: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b19);
+const MONITOR: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b29);
 const CONNECTION: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b1a);
 const VIEW: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b1b);
 const MEMBER: &str = "user_7Hq2mK9xVb4LpR3s";
@@ -110,8 +113,11 @@ fn trace() -> TraceRow {
 fn incident() -> IncidentRow {
     IncidentRow {
         id: INCIDENT,
-        rule_id: RULE,
-        rule_name: "Slow support runs".into(),
+        rule_id: Some(RULE),
+        rule_name: Some("Slow support runs".into()),
+        monitor_id: None,
+        agent: None,
+        cause: None,
         project_id: project(),
         organization_id: OrganizationId::try_new("org_9TzQ1wXe5RkN8bVc").expect("an id"),
         status: IncidentStatus::Acknowledged,
@@ -470,13 +476,74 @@ fn alerts_answer_as_the_console_reads() {
     );
 }
 
+/// The monitors lane: one agent's nightly schedule, down past its grace.
+#[test]
+fn monitors_answer_as_the_console_reads() {
+    pin(
+        "monitors",
+        &MonitorList {
+            monitors: vec![MonitorAnswer {
+                monitor: MonitorRow {
+                    id: MONITOR,
+                    project_id: project(),
+                    organization_id: OrganizationId::try_new("org_9TzQ1wXe5RkN8bVc")
+                        .expect("an id"),
+                    agent: "nightly-triage".into(),
+                    every_seconds: None,
+                    cron: Some("0 2 * * *".into()),
+                    time_zone: Some("Europe/London".into()),
+                    grace_seconds: 1_800,
+                    state: MonitorState::Down,
+                    cause: Some(MonitorCause::Missed),
+                    state_since: at(1_800),
+                    next_due_at: Some(at(0)),
+                    last_started_at: Some(at(-86_400)),
+                    last_ended_at: Some(at(-86_000)),
+                    last_status: Some(SpanStatus::Ok),
+                    last_run_id: Some(RUN),
+                    told_at: Some(at(1_800)),
+                    told_to: vec![CONNECTION],
+                    created_at: at(-604_800),
+                    updated_at: at(-604_800),
+                },
+                connectors: vec![AlertLink {
+                    link: Link {
+                        connection_id: CONNECTION,
+                        level: RuleLevel::Alert,
+                        hours: None,
+                    },
+                    muted: false,
+                }],
+            }],
+        },
+    );
+}
+
 /// The incidents lane, which a trace's page reads by run too.
 #[test]
 fn incidents_answer_as_the_console_reads() {
     pin(
         "incidents",
         &IncidentList {
-            incidents: vec![incident()],
+            incidents: vec![
+                incident(),
+                IncidentRow {
+                    id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b2a),
+                    rule_id: None,
+                    rule_name: None,
+                    monitor_id: Some(MONITOR),
+                    agent: Some("nightly-triage".into()),
+                    cause: Some(MonitorCause::Missed),
+                    status: IncidentStatus::Open,
+                    severity: Severity::Warning,
+                    value: None,
+                    acknowledged_at: None,
+                    acknowledged_by: None,
+                    reopened: 0,
+                    runs: Vec::new(),
+                    ..incident()
+                },
+            ],
         },
     );
 }
@@ -488,6 +555,7 @@ fn mutes_answer_as_the_console_reads() {
         id: Uuid::from_u128(id),
         project_id: project(),
         rule_id,
+        monitor_id: None,
         starts_at: at(0),
         ends_at: at(7_200),
         created_by: MEMBER.into(),

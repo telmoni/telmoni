@@ -10,6 +10,7 @@ pub mod grants;
 pub mod incident_status;
 pub mod metrics_group;
 pub mod missing_data;
+pub mod monitor_state;
 pub mod notification_kind;
 pub mod organization_role;
 pub mod organization_status;
@@ -47,6 +48,7 @@ pub use grants::{
 pub use incident_status::IncidentStatus;
 pub use metrics_group::MetricsGroup;
 pub use missing_data::MissingData;
+pub use monitor_state::{MonitorCause, MonitorState};
 pub use notification_kind::NotificationKind;
 pub use organization_role::{OrganizationAction, OrganizationRole};
 pub use organization_status::OrganizationStatus;

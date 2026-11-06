@@ -113,7 +113,7 @@ project's feed alone.
 | Name | 1 to 60 characters; a project holds one alert of a name, whatever its case |
 | Reads | Runs, steps, model calls or tool calls |
 | Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)); **Steps**, on runs: each run's steps; **Repeats**, on runs: the most times in a row each run called one tool; **Stalled**, on runs: the runs left open ([loops and stalls](#loops-and-stalls)); **Score**, on runs: every [score](/docs/monitoring/scores) of the name you give, 1 to 64 characters, the project holds — your code's and its members' — a number's value, a yes as 1 and a no as 0, each once as it stands, counted in the window its last change landed in — a score given again or taken back moves to then — one taken back left out and a category never read |
-| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; a run's cost as the most a run spent — a cost cap — the average a run spent, or what the runs spent in all; a run's steps as the most a run took, their p95, p99, p90, p50 or average; repeats as the most; stalled runs as how many; and scores' average, p50, p90, p95, p99, highest, or how many |
+| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; a run's cost as the most a run spent — an alert tells, and the SDKs' [guard](/docs/api/sdks#the-guard) is what stops a run at its cap — the average a run spent, or what the runs spent in all; a run's steps as the most a run took, their p95, p99, p90, p50 or average; repeats as the most; stalled runs as how many; and scores' average, p50, p90, p95, p99, highest, or how many |
 | Window | The last hour, day or week, or the calendar month so far, from its first at midnight UTC; **Stalled** takes the last hour, day or week alone |
 | Read as | Its value; or its change from the window of the same length before it, in percent of that window's value, so a drop is below 0 — the average relevance score down a fifth on the day before is −20% — and none where either window held nothing, or the one before 0; a count of an empty window is 0, so a stream that stops reads as −100%. Not on **This month**, which has no window of its length before it |
 | Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; and the status a span ended with, on all but a cost, steps, repeats and stalls, which are read before a run has a status of its own. None on a score, which names no agent, model or status of its own. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
@@ -161,7 +161,9 @@ as far as it has gone, and one that loops tells before it ends.
 An alert on **Stalled** counts the runs whose spans have landed and whose own
 span, which the SDK sends as the run ends, has not, quiet longer than the
 window: on the last hour, each run whose last span landed one to two hours ago
-and that never ended. A run is counted so for one window, then left out, so the
+and that never ended. The SDKs send a run's opening as it opens, so a run
+that stops before any step of it lands still counts. A run is counted so for
+one window, then left out, so the
 alert recovers once its stalls are that old, or as soon as their own spans
 land. A run that waits longer than the window, on a person say, counts too:
 choose a window longer than your runs wait. Runs from another exporter
@@ -210,7 +212,8 @@ alert does: one that would pass the plan's number is not made, and the
 **Mute** on an alert, or **Mute every alert** at the top of the page once the
 project has one, opens a window over it: from now or a time you set, for 30
 minutes up to 30 days. **Mute for an hour** on an incident's notice in Slack
-opens one over its alert, from now, for an hour.
+opens one over its alert, or its [monitor](/docs/monitoring/monitors), from
+now, for an hour. A window over every alert holds the project's monitors too.
 While it holds, the alert is evaluated as ever and its incidents open and
 resolve in the feed, but no connector hears them, save that a connector which
 heard an incident before the window hears it resolve. An incident still open,

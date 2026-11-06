@@ -1029,13 +1029,14 @@ export const MUTE_LENGTHS = [
 ] as const;
 
 /** The windows not yet over that mute `ruleId`, its own and the project's,
- *  the soonest to end first; with no rule, the project's alone. One a
+ *  the soonest to end first; with no rule, the project's alone. A monitor's
+ *  window mutes no alert. One a
  *  member ended is over, even one still to start, which the lane ends a
  *  moment after its start. */
 export function windowsFor(mutes: Mute[], ruleId: string | null, now: number): Mute[] {
   return mutes
     .filter((mute) => mute.ended_by === null && Date.parse(mute.ends_at) > now)
-    .filter((mute) => mute.rule_id === null || mute.rule_id === ruleId)
+    .filter((mute) => (mute.rule_id === null && mute.monitor_id === null) || mute.rule_id === ruleId)
     .sort((a, b) => Date.parse(a.ends_at) - Date.parse(b.ends_at));
 }
 

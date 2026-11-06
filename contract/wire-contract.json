@@ -130,6 +130,17 @@
       "no_data",
       "notify_no_data"
     ],
+    "MonitorCause": [
+      "missed",
+      "failed"
+    ],
+    "MonitorState": [
+      "new",
+      "up",
+      "late",
+      "down",
+      "paused"
+    ],
     "NotificationKind": [
       "organization_alert",
       "member_added",
@@ -161,6 +172,7 @@
       "session",
       "connector",
       "alert",
+      "monitor",
       "maintenance_window",
       "incident",
       "trace",

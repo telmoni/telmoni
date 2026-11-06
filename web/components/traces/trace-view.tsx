@@ -138,7 +138,7 @@ export const TraceMeta = memo(function TraceMeta({
   trace: TraceDetail;
   organization: string;
   slug: string;
-  incidents?: readonly Pick<Incident, "id" | "rule_name">[];
+  incidents?: readonly Pick<Incident, "id" | "rule_name" | "agent">[];
 }) {
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
   const { run, root } = summary;
@@ -187,9 +187,9 @@ export const TraceMeta = memo(function TraceMeta({
         <MetaLink
           key={incident.id}
           href={incidentHref(organization, slug, incident.id)}
-          title={`The incident of ${incident.rule_name} whose notice showed this run`}
+          title={`The incident of ${incident.rule_name ?? incident.agent} whose notice showed this run`}
         >
-          incident: {incident.rule_name}
+          incident: {incident.rule_name ?? incident.agent}
         </MetaLink>
       ))}
     </div>
