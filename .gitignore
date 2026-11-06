@@ -27,8 +27,6 @@ application_default_credentials.json
 .claude/
 .agents/
 .gemini/
-.aider*
-.cursor/
 skills
 
 # ── Rust ──────────────────────────────────────────────────────────────────────
