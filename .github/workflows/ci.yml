@@ -147,6 +147,13 @@ jobs:
         run: psql "$DATABASE_URL" -c "ALTER ROLE telmoni SET search_path = auth, notifications, agent, telemetry, audit, public;"
       - name: cargo test
         run: cargo test --workspace --locked --no-fail-fast -- --test-threads=4
+      # A failed mutation's reason reaches a test masked; the server's own log
+      # and system.mutations keep its code, and the container goes with the job.
+      - name: ClickHouse's errors and failed mutations (on failure)
+        if: failure()
+        run: |
+          docker compose exec -T clickhouse tail -n 400 /var/log/clickhouse-server/clickhouse-server.err.log
+          docker compose exec -T clickhouse clickhouse-client -q "SELECT database, table, mutation_id, command, create_time, is_done, latest_failed_part, latest_fail_time, latest_fail_reason FROM system.mutations WHERE latest_fail_reason != '' OR NOT is_done FORMAT Vertical"
 
   # Supply-chain gate: advisories, licenses, bans, sources (deny.toml). The
   # advisory half also runs daily on a schedule (audit.yml), since a new advisory
