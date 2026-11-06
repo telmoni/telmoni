@@ -191,13 +191,18 @@ async fn moved(
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Incident,
             id,
-            metadata: json!({
-                "alert": row.rule_name,
-                "rule_id": row.rule_id,
-                "agent": row.agent,
-                "monitor_id": row.monitor_id,
-                "status": take.status(),
-            }),
+            metadata: match row.owner() {
+                Some(incidents::Owner::Monitor(monitor_id)) => json!({
+                    "agent": row.agent,
+                    "monitor_id": monitor_id,
+                    "status": take.status(),
+                }),
+                _ => json!({
+                    "alert": row.rule_name,
+                    "rule_id": row.rule_id,
+                    "status": take.status(),
+                }),
+            },
         };
         chain::file(tx, acting, project_id, change).await?;
     }

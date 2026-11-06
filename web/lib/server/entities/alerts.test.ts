@@ -26,6 +26,9 @@ const INCIDENT_ROW = {
   id: INCIDENT,
   rule_id: RULE,
   rule_name: "Slow calls",
+  monitor_id: null,
+  agent: null,
+  cause: null,
   status: "open",
   severity: "alert",
   value: 6200,
@@ -67,6 +70,7 @@ const ALERT = {
 const MUTE = {
   id: "1e2f3a4b-0000-4000-8000-000000000005",
   rule_id: null,
+  monitor_id: null,
   starts_at: "2026-10-26T02:00:00Z",
   ends_at: "2026-10-26T04:00:00Z",
   created_by: "user_1",

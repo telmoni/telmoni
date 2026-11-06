@@ -852,7 +852,7 @@ mod tests {
         let row = MonitorRow {
             id: Uuid::nil(),
             project_id: ProjectId::from_trusted("project_a"),
-            organization_id: OrganizationId::from_trusted("organization_a"),
+            organization_id: OrganizationId::from_trusted("org_a"),
             agent: "nightly-triage".into(),
             every_seconds: None,
             cron: Some("0 2 * * *".into()),

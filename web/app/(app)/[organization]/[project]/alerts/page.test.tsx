@@ -206,6 +206,7 @@ beforeEach(() => {
       {
         id: "m-all",
         rule_id: null,
+        monitor_id: null,
         starts_at: "2026-10-26T11:00:00Z",
         ends_at: "2026-10-26T13:00:00Z",
         created_by: "user_1",
@@ -215,6 +216,7 @@ beforeEach(() => {
       {
         id: "m-slow",
         rule_id: RULE,
+        monitor_id: null,
         starts_at: "2026-10-27T09:00:00Z",
         ends_at: "2026-10-27T10:00:00Z",
         created_by: "user_2",
@@ -224,6 +226,7 @@ beforeEach(() => {
       {
         id: "m-over",
         rule_id: RULE,
+        monitor_id: null,
         starts_at: "2026-10-26T08:00:00Z",
         ends_at: "2026-10-26T09:00:00Z",
         created_by: "user_2",

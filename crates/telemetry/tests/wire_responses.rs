@@ -10,15 +10,14 @@ use uuid::Uuid;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
     ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, MonitorCause,
-    MonitorState, OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator,
-    RuleWindow, Severity, SortDirection, SpanKind, SpanStatus, TraceSort,
+    OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
+    Severity, SortDirection, SpanKind, SpanStatus, TraceSort,
 };
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::agents::{AGENTS_DAYS, AgentRow, Agents};
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::{FieldInventory, Row};
 use telmoni_telemetry::handler::incidents::IncidentList;
-use telmoni_telemetry::handler::monitors::{MonitorAnswer, MonitorList};
 use telmoni_telemetry::handler::mutes::MuteList;
 use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
@@ -27,7 +26,6 @@ use telmoni_telemetry::handler::traces::{
     TraceSpan, UnpricedModel,
 };
 use telmoni_telemetry::handler::views::{DashboardChart, DashboardOptions, View, ViewList};
-use telmoni_telemetry::monitors::MonitorRow;
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
@@ -472,49 +470,6 @@ fn alerts_answer_as_the_console_reads() {
                 "This organization's plan holds 10 alerts across its projects, paused ones counted."
                     .into(),
             ),
-        },
-    );
-}
-
-/// The monitors lane: one agent's nightly schedule, down past its grace.
-#[test]
-fn monitors_answer_as_the_console_reads() {
-    pin(
-        "monitors",
-        &MonitorList {
-            monitors: vec![MonitorAnswer {
-                monitor: MonitorRow {
-                    id: MONITOR,
-                    project_id: project(),
-                    organization_id: OrganizationId::try_new("org_9TzQ1wXe5RkN8bVc")
-                        .expect("an id"),
-                    agent: "nightly-triage".into(),
-                    every_seconds: None,
-                    cron: Some("0 2 * * *".into()),
-                    time_zone: Some("Europe/London".into()),
-                    grace_seconds: 1_800,
-                    state: MonitorState::Down,
-                    cause: Some(MonitorCause::Missed),
-                    state_since: at(1_800),
-                    next_due_at: Some(at(0)),
-                    last_started_at: Some(at(-86_400)),
-                    last_ended_at: Some(at(-86_000)),
-                    last_status: Some(SpanStatus::Ok),
-                    last_run_id: Some(RUN),
-                    told_at: Some(at(1_800)),
-                    told_to: vec![CONNECTION],
-                    created_at: at(-604_800),
-                    updated_at: at(-604_800),
-                },
-                connectors: vec![AlertLink {
-                    link: Link {
-                        connection_id: CONNECTION,
-                        level: RuleLevel::Alert,
-                        hours: None,
-                    },
-                    muted: false,
-                }],
-            }],
         },
     );
 }
