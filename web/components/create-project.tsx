@@ -115,7 +115,7 @@ export function CreateProjectPanel({
   const confirmed = flow.step.step === "done";
   useEffect(() => {
     if (!confirmed || !made) return;
-    open(made);
+    open({ ...made, content_mode: ContentMode.On });
     toast.success("Project created, keeping content.");
     // Once, as the owner's code is spent.
     // eslint-disable-next-line react-hooks/exhaustive-deps

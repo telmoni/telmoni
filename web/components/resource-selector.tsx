@@ -3,7 +3,7 @@
 import { useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Check, ChevronDown, Plus, Settings } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, Plus, Settings } from "lucide-react";
 
 import { type CreateKind, useConsoleUi } from "@/components/console-ui-context";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
 } from "@/lib/store";
 import { organizationRows, projectRows, type SwitcherRow } from "@/lib/switcher";
 import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
+import { ContentMode } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 // The header's two triggers: the one control in the header that gives way
@@ -75,6 +76,7 @@ function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: 
           {row.active && <Check className="shrink-0" />}
         </Link>
       </DropdownMenuItem>
+      {row.contentMode && <ContentCue mode={row.contentMode} />}
       {row.settingsHref && (
         <DropdownMenuItem
           asChild
@@ -95,6 +97,25 @@ function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: 
         </DropdownMenuItem>
       )}
     </div>
+  );
+}
+
+// Whether a project keeps its spans' content, read at a glance from the
+// menu: an eye when it does, a muted struck eye when it does not.
+function ContentCue({ mode }: { mode: ContentMode }) {
+  const on = mode === ContentMode.On;
+  const label = on ? "Content on" : "Content off";
+  return (
+    <span
+      title={label}
+      className={cn(
+        "flex size-5 shrink-0 items-center justify-center [&_svg]:size-3.5",
+        on ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      {on ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 

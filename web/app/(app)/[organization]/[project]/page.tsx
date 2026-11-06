@@ -48,7 +48,8 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
         title="Agents"
         info={`Every agent that ran in the last ${days} days: its last run, what that cost against what its runs usually cost, the alerts that watch it, and their open incidents.`}
       />
-      <section className="grid gap-gutter">
+      <div className="grid gap-page">
+        <section className="grid gap-gutter">
         {everyAgents > 0 && (
           <NoticeCard
             title={`${plural(everyAgents, "incident is", "incidents are")} open on alerts over every agent.`}
@@ -148,7 +149,8 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
             </tbody>
           </DataTable>
         )}
-      </section>
+        </section>
+      </div>
     </>
   );
 }

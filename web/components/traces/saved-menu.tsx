@@ -133,10 +133,7 @@ export function SavedMenu<T extends Saved>({
           {/* Never disabled while a save is on its way: the trigger holds
               the focus the menu hands back on closing, and a disabled
               control drops it to the page. */}
-          <Button
-            variant="outline"
-            aria-label={current ? `Saved ${noun}: ${current.name}` : `Saved ${noun}s`}
-          >
+          <Button variant="outline">
             <BookmarkIcon />
             <span className="max-w-40 truncate">{current ? current.name : plural}</span>
             {current && edited && (

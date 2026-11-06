@@ -239,6 +239,7 @@ impl Entitlements for PausedEntitlements {
                 limit,
                 entitlement: "pro".into(),
                 detail: holds_projects(limit),
+                page: None,
             }))
     }
 }
@@ -1255,10 +1256,44 @@ async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
     let deployment = Deployment::default();
     let organization = deployment.sign_in(&pool, OWNER).await;
     let held = projects_in(&pool, &organization).await;
+    let limit = u32::try_from(held + 1).unwrap();
+    deployment.entitlements.hold_projects(&organization, limit);
+    let ceiling = |reached: bool| {
+        json!({
+            "limit": limit,
+            "held": if reached { held + 1 } else { held },
+            "reached": reached,
+            "detail": holds_projects(limit),
+            "page": null,
+        })
+    };
+
+    // The listing answers the ceiling, so the console sends a New project
+    // at it elsewhere rather than to a panel that would be refused.
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "GET",
+            "/internal/v1/projects",
+            OWNER,
+            Some(&organization),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ceiling"], ceiling(false));
     deployment.project(&pool, &organization, "Payments").await;
-    deployment
-        .entitlements
-        .hold_projects(&organization, u32::try_from(held + 1).unwrap());
+    let (_, body) = deployment
+        .call(
+            &pool,
+            "GET",
+            "/internal/v1/projects",
+            OWNER,
+            Some(&organization),
+            None,
+        )
+        .await;
+    assert_eq!(body["ceiling"], ceiling(true));
 
     let (status, body) = deployment
         .call(

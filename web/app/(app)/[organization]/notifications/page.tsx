@@ -53,9 +53,11 @@ export default async function OrganizationNotificationsPage() {
           ) : undefined
         }
       />
-      <section className="grid gap-gutter" aria-label="The organization's notices">
-        <NoticeRows feed={feed} place={{ organization: organization.slug }} />
-      </section>
+      <div className="grid gap-page">
+        <section className="grid gap-gutter" aria-label="The organization's notices">
+          <NoticeRows feed={feed} place={{ organization: organization.slug }} />
+        </section>
+      </div>
     </>
   );
 }

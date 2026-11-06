@@ -101,13 +101,22 @@ pub struct ProjectCeiling {
     pub entitlement: String,
     /// The sentence a person reads, which names nobody.
     pub detail: String,
+    /// Where what lifts it is bought, an address on the console's origin: a
+    /// console at the ceiling sends whoever asks for a project there.
+    pub page: Option<String>,
 }
 
 impl ProjectCeiling {
+    /// Whether one more project would be refused, with `held` already held.
+    #[must_use]
+    pub fn reached(&self, held: u64) -> bool {
+        held >= u64::from(self.limit)
+    }
+
     /// Whether one more project may arrive, with `held` already held.
     /// Refused, as a 402, at the ceiling.
     pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
-        if held < u64::from(self.limit) {
+        if !self.reached(held) {
             return Ok(());
         }
         Err(limit_reached(&self.entitlement, &self.detail))

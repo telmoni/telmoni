@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { z } from "zod";
 
+import { pathOf } from "@/lib/console-nav";
 import { env } from "@/lib/env";
 import { NotificationKind } from "@/lib/types/enums";
 
@@ -20,17 +21,6 @@ const INCIDENT_KINDS: ReadonlySet<string> = new Set([
 // An organization's notice may name the page it is about (`billing_url`, the
 // hosted service's billing page), an address on this console's own origin.
 const PageMetadataSchema = z.object({ billing_url: z.string() });
-
-/** The path of `url` where it is one this console can route, else none. */
-function pathOf(url: string): string | null {
-  if (url.startsWith("/") && !url.startsWith("//")) return url;
-  try {
-    const { pathname } = new URL(url);
-    return pathname.startsWith("/") ? pathname : null;
-  } catch {
-    return null;
-  }
-}
 
 // Only an incident's notice keeps its metadata, checked, and an organization's
 // the page it names: one that names neither stays on the feed, linking where

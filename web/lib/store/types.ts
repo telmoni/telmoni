@@ -2,7 +2,11 @@ import type { FlagSet } from "@/lib/flags";
 import type { AuditExport } from "@/lib/types/audit-export";
 import type { AuthUser } from "@/lib/types/domain";
 import type { GivenSeat } from "@/lib/types/given-seat";
-import type { Project, ProjectEverywhere } from "@/lib/server/entities/projects";
+import type {
+  Project,
+  ProjectCeiling,
+  ProjectEverywhere,
+} from "@/lib/server/entities/projects";
 import type {
   IncomingInvite,
   OrganizationEntry,
@@ -31,6 +35,9 @@ export interface Seed {
   flags: FlagSet;
   projects: readonly Project[];
   projectsElsewhere: readonly ProjectEverywhere[];
+  /// The plan's ceiling on the organization's projects, where one is held:
+  /// at it, New project goes where it is lifted instead of to its panel.
+  projectCeiling: ProjectCeiling | null;
 }
 
 export interface IdentitySlice extends Seed {
@@ -104,4 +111,5 @@ export interface StoreInitial {
   flags: FlagSet;
   projects: readonly Project[];
   projectsElsewhere?: readonly ProjectEverywhere[];
+  projectCeiling?: ProjectCeiling | null;
 }

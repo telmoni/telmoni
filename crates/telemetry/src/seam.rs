@@ -10,6 +10,7 @@
 //! projects are the ones its settings rows name, since neither a span nor a
 //! view names an organization.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,7 +23,8 @@ use telmoni_shared::audit::requested_by;
 use telmoni_shared::db::tenant_session::{maintenance_scope, organization_scope};
 use telmoni_shared::seam::{IncidentAct, IncidentActed, Receipt, Telemetry};
 use telmoni_shared::{
-    AuditAction, OrganizationId, ProjectId, TelemetryError, TelmoniError, TelmoniResourceKind,
+    AuditAction, ContentMode, OrganizationId, ProjectId, TelemetryError, TelmoniError,
+    TelmoniResourceKind,
 };
 
 use crate::AppState;
@@ -184,6 +186,16 @@ impl Telemetry for TelemetrySeam {
 
     async fn spend_data_out(&self, organization_id: &OrganizationId, bytes: u64) {
         crate::ceilings::spend_data_out(&self.0, organization_id, bytes).await;
+    }
+
+    async fn content_modes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<HashMap<ProjectId, ContentMode>, TelmoniError> {
+        let mut tx = maintenance_scope(&self.0.db, TelemetryLane).await?;
+        let modes = db::content_modes(&mut tx, projects).await?;
+        tx.commit().await?;
+        Ok(modes.into_iter().collect())
     }
 
     async fn move_project(

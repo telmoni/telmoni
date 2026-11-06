@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 
 import { env } from "@/lib/env";
+import { pathOf } from "@/lib/console-nav";
 import { compareProjects, compareProjectsByOrganization } from "@/lib/projects";
-import { Role } from "@/lib/types/enums";
+import { ContentMode, Role } from "@/lib/types/enums";
 
 import { organizationHeaders, identityContext } from "./identity-context";
 import { getServerContext } from "./organization";
@@ -16,6 +17,8 @@ export const ProjectSchema = z.object({
   slug: z.string(),
   name: z.string(),
   role: z.enum(Role),
+  /// Whether its spans' content is kept, as its menu row shows.
+  content_mode: z.enum(ContentMode),
 });
 
 export type Project = z.infer<typeof ProjectSchema>;
@@ -23,13 +26,30 @@ export type Project = z.infer<typeof ProjectSchema>;
 // A project renamed: the slug its pages go by now.
 export const ProjectRenamedSchema = z.object({ slug: z.string() });
 
+// How many projects the organization may hold, as the deployment that sells
+// plans answers it, how many it holds, whether one more would be refused now,
+// the sentence it is refused with, and where what lifts it is bought, read as
+// the path the router takes; `null` where none is held, as on a self-hosted
+// installation.
+export const ProjectCeilingSchema = z.object({
+  limit: z.number().int().min(0),
+  held: z.number().int().min(0),
+  reached: z.boolean(),
+  detail: z.string(),
+  page: z.string().nullable(),
+});
+export type ProjectCeiling = z.infer<typeof ProjectCeilingSchema>;
+
 export type ProjectListing =
-  | { kind: "ok"; projects: Project[] }
+  | { kind: "ok"; projects: Project[]; ceiling: ProjectCeiling | null }
   | { kind: "unavailable" };
 
 // The envelope is the schema's: an answer without its list is unreadable,
 // never an organization with no projects.
-export const ProjectListSchema = z.object({ projects: z.array(ProjectSchema) });
+export const ProjectListSchema = z.object({
+  projects: z.array(ProjectSchema),
+  ceiling: ProjectCeilingSchema.nullable(),
+});
 
 export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
   const ctx = await identityContext();
@@ -41,7 +61,14 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
     ProjectListSchema,
   );
   if (read.kind !== "ok") return { kind: "unavailable" };
-  return { kind: "ok", projects: read.value.projects.sort(compareProjects) };
+  return {
+    kind: "ok",
+    projects: read.value.projects.sort(compareProjects),
+    ceiling: read.value.ceiling && {
+      ...read.value.ceiling,
+      page: read.value.ceiling.page === null ? null : pathOf(read.value.ceiling.page),
+    },
+  };
 });
 
 export const fetchProjects = cache(async (): Promise<Project[]> => {
@@ -76,7 +103,7 @@ export const fetchProjectBySlug = cache(
   },
 );
 
-const ProjectEverywhereSchema = ProjectSchema.extend({
+const ProjectEverywhereSchema = ProjectSchema.omit({ content_mode: true }).extend({
   organizationId: z.string(),
   organizationSlug: z.string(),
   organizationName: z.string(),
@@ -84,7 +111,7 @@ const ProjectEverywhereSchema = ProjectSchema.extend({
 
 /// A project in any organization the person can open, with where its
 /// organization's paths begin and what labels it: the name it was given.
-export type ProjectEverywhere = Project & {
+export type ProjectEverywhere = Omit<Project, "content_mode"> & {
   organizationId: string;
   organizationSlug: string;
   organizationName: string;

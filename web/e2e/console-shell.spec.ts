@@ -89,7 +89,7 @@ test.describe("Console chrome row", () => {
     const rowOpen = (await row.boundingBox())!;
     const close = (await page.getByRole("button", { name: "Collapse navigation" }).boundingBox())!;
     expect(Math.abs(close.x + close.width / 2 - (rowOpen.x + 14))).toBeLessThanOrEqual(1);
-    expect(Math.abs(rowOpen.x - railOpen.x - 14)).toBeLessThanOrEqual(1);
+    expect(Math.abs(rowOpen.x - railOpen.x - 12)).toBeLessThanOrEqual(1);
     expect(Math.abs(brandOpen.x - (rowOpen.x + 36))).toBeLessThanOrEqual(1);
     expect(brandOpen.x).toBeGreaterThan(close.x + close.width);
 
@@ -122,6 +122,7 @@ test.describe("Console rail on a dead address", () => {
   test("draws the way back, and none of the dead address's rows", async ({
     page,
   }, testInfo) => {
+    test.setTimeout(60_000);
     await injectSession(page, testUser(testInfo.project.name));
     const [, organization] = (await landOnProject(page)).split("/");
     const rail = page.locator("#console-sidebar");

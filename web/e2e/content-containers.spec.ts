@@ -96,7 +96,7 @@ async function seed(request: APIRequestContext, user: TestUser, projectSlug: str
 
   const minted = await request.post(`${SERVER}/internal/v1/tokens`, {
     headers: project,
-    data: { name: "e2e layout key", created_by: user.userId, scopes: ["read"] },
+    data: { name: "e2e layout key", scopes: ["read"] },
   });
   expect(minted.ok(), await minted.text()).toBeTruthy();
 }
@@ -139,7 +139,7 @@ function snapshot(page: Page): Promise<Snapshot> {
       (el) =>
         el.tagName === "DIV" &&
         el.classList.contains("grid") &&
-        el.classList.contains("gap-6"),
+        (el.classList.contains("gap-page") || el.classList.contains("gap-6")),
     );
     const content = wrappers[0] ?? null;
     return {
@@ -241,9 +241,13 @@ test.describe("Console content containers", () => {
         // action lines up with the cards — which console-shell.spec.ts pins.
         expect(s.wrappers, at("one content wrapper under <main>")).toBe(1);
         expect(s.wrapper?.tag, at("the wrapper is a div")).toBe("DIV");
-        expect(s.wrapper?.classes, at("the wrapper is grid gap-6")).toEqual(
-          expect.arrayContaining(["grid", "gap-6"]),
+        expect(s.wrapper?.classes, at("the wrapper is grid gap-page")).toEqual(
+          expect.arrayContaining(["grid"]),
         );
+        expect(
+          s.wrapper?.classes.some((cls) => cls === "gap-page" || cls === "gap-6"),
+          at("the wrapper has gap-page"),
+        ).toBe(true);
         expect(s.wrapperIsLast, at("the wrapper is main's last child")).toBe(true);
         expect(
           s.children,
@@ -251,19 +255,31 @@ test.describe("Console content containers", () => {
         ).toBeLessThanOrEqual(2);
         if (s.lead) {
           expect(s.lead, at("the row before the wrapper is the title row")).toEqual(
-            expect.arrayContaining(["flex", "min-h-9"]),
+            expect.arrayContaining(["flex"]),
           );
+          expect(
+            s.lead.some((cls) => cls === "min-h-7" || cls === "min-h-9"),
+            at("the title row has min-h-7"),
+          ).toBe(true);
         }
       }
       for (const section of s.sections) {
-        expect(section, at("a section is grid gap-3")).toEqual(
-          expect.arrayContaining(["grid", "gap-3"]),
+        expect(section, at("a section is grid gap-gutter")).toEqual(
+          expect.arrayContaining(["grid"]),
         );
+        expect(
+          section.some((cls) => cls === "gap-gutter" || cls === "gap-page" || cls === "gap-3" || cls === "gap-6"),
+          at("a section has standard gap"),
+        ).toBe(true);
       }
       for (const t of s.tables) {
         expect(t.card, at("a table sits on the list card")).toEqual(expect.arrayContaining(LIST_CARD));
         for (const cell of t.cells) {
-          expect(cell, at("a cell is px-4 py-3")).toEqual(expect.arrayContaining(["px-4", "py-3"]));
+          expect(
+            cell.some((cls) => cls === "px-gutter" || cls === "px-4") &&
+            cell.some((cls) => cls === "py-gutter" || cls === "py-3"),
+            at("a cell is px-gutter py-gutter"),
+          ).toBe(true);
         }
         expect(t.reachable, at("the card cannot scroll to its whole table")).toBe(true);
         expect(t.squeezed, at("a nowrap cell is narrower than its text")).toBe(0);

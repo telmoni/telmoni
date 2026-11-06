@@ -27,6 +27,18 @@ import {
   withLeadingSegments,
 } from "@/lib/slug";
 
+/** The path of `url` where it is one this console can route, else none: an
+ *  address the server names on this console's own origin. */
+export function pathOf(url: string): string | null {
+  if (url.startsWith("/") && !url.startsWith("//")) return url;
+  try {
+    const { pathname } = new URL(url);
+    return pathname.startsWith("/") ? pathname : null;
+  } catch {
+    return null;
+  }
+}
+
 export const NAV_COLLAPSED_COOKIE = "telmoni-nav-collapsed";
 
 export const ACCOUNT_SEGMENT = "settings";

@@ -4,7 +4,7 @@ import type { StoreInitial } from "@/lib/store/types";
 
 import { identityContext } from "./entities/identity-context";
 import { getServerContext } from "./entities/organization";
-import { fetchProjects, fetchProjectsEverywhere } from "./entities/projects";
+import { fetchProjectListing, fetchProjectsEverywhere } from "./entities/projects";
 import { getServerSession } from "./session";
 
 /// What the console's store holds for the organization this request acts in;
@@ -15,11 +15,11 @@ import { getServerSession } from "./session";
 /// organization to another and its seed goes stale; `[organization]`'s
 /// re-renders on that move, and hands over the seed for the one arrived in.
 export const storeSeed = cache(async (): Promise<StoreInitial | null> => {
-  const [session, ctx, ident, projects, everywhere] = await Promise.all([
+  const [session, ctx, ident, listing, everywhere] = await Promise.all([
     getServerSession(),
     getServerContext(),
     identityContext(),
-    fetchProjects(),
+    fetchProjectListing(),
     fetchProjectsEverywhere(),
   ]);
   if (!session) return null;
@@ -38,7 +38,8 @@ export const storeSeed = cache(async (): Promise<StoreInitial | null> => {
     projectOffers: ctx?.projectOffers ?? [],
     activeOrganizationId,
     flags: ctx?.flags ?? {},
-    projects,
+    projects: listing.kind === "ok" ? listing.projects : [],
+    projectCeiling: listing.kind === "ok" ? listing.ceiling : null,
     projectsElsewhere:
       everywhere.kind === "ok" && activeOrganizationId
         ? everywhere.projects.filter((p) => p.organizationId !== activeOrganizationId)

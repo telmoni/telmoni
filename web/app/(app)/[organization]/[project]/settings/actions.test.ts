@@ -83,7 +83,13 @@ const renamed = (slug: string) =>
   });
 
 function wentBy(slug: string) {
-  vi.mocked(fetchProject).mockResolvedValue({ id: PROJECT, slug, name: "Web", role: Role.Owner });
+  vi.mocked(fetchProject).mockResolvedValue({
+    id: PROJECT,
+    slug,
+    name: "Web",
+    role: Role.Owner,
+    content_mode: "off",
+  });
 }
 
 beforeEach(() => {
@@ -283,7 +289,7 @@ describe("updateContentModeAction", () => {
         body: JSON.stringify({ content_mode: "off" }),
       }),
     );
-    expect(mockRevalidate).toHaveBeenCalledWith("/(app)/[organization]/[project]/settings", "page");
+    expect(mockRevalidate).toHaveBeenCalledWith("/", "layout");
   });
 
   // Who may, and which modes are open, are the server's to say: an admin, or

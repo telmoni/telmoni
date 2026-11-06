@@ -69,7 +69,8 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
         info="Each promises a share of one agent's runs succeed, or end inside a time, over its days. The runs that miss it spend its error budget; it pages when its last hour spends the budget 14.4× as fast as it lasts, and warns at 6× over its last six hours. Each counts as one of the plan's alerts, and its incidents stand under it on the Alerts page."
         action={<NewObjective projectId={project.id} connections={connections} history={history} />}
       />
-      <section className="grid gap-gutter">
+      <div className="grid gap-page">
+        <section className="grid gap-gutter">
         {objectives.length === 0 ? (
           <NoticeCard
             title="No objective yet."
@@ -154,7 +155,8 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
             </DataTable>
           </>
         )}
-      </section>
+        </section>
+      </div>
     </>
   );
 }

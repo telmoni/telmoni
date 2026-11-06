@@ -33,9 +33,11 @@ export default async function ProjectNotificationsPage({
           ) : undefined
         }
       />
-      <section className="grid gap-gutter" aria-label="The project's notices">
-        <NoticeRows feed={feed} place={{ organization, project: slug }} />
-      </section>
+      <div className="grid gap-page">
+        <section className="grid gap-gutter" aria-label="The project's notices">
+          <NoticeRows feed={feed} place={{ organization, project: slug }} />
+        </section>
+      </div>
     </>
   );
 }

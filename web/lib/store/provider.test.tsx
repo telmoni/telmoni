@@ -43,7 +43,7 @@ function ActiveOrganization() {
 }
 
 function project(id: string, name: string): Project {
-  return { id, slug: name.toLowerCase(), name, role: "owner" };
+  return { id, slug: name.toLowerCase(), name, role: "owner", content_mode: "off" };
 }
 
 function ProjectNames() {

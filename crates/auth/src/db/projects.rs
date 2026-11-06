@@ -10,7 +10,7 @@ use telmoni_shared::rbac;
 use telmoni_shared::seam::ProjectHome;
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
-    OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId,
+    ContentMode, OrganizationId, OrganizationRole, OrganizationStatus, ProjectId, Role, UserId,
     derive_shard_key, slug,
 };
 
@@ -77,6 +77,9 @@ pub struct ProjectSummary {
     /// The caller's role on it, as `telmoni_shared::rbac::project_role`
     /// decides it.
     pub role: Role,
+    /// Whether its content is kept: telemetry's to say, so `off` until the
+    /// listing asks it.
+    pub content_mode: ContentMode,
 }
 
 /// A project a list read, beside the two rows the caller's role on it comes
@@ -98,6 +101,7 @@ impl Reached {
             slug: self.slug,
             name: self.name,
             role,
+            content_mode: ContentMode::Off,
         })
     }
 }

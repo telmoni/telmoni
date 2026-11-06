@@ -16,11 +16,11 @@ use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
-    AuditAction, AuthError, OrganizationId, ProjectCeiling, ProjectId, TelmoniError,
+    AuditAction, AuthError, ContentMode, OrganizationId, ProjectCeiling, ProjectId, TelmoniError,
     TelmoniResourceKind,
 };
 
-use super::answer::Projects;
+use super::answer::{OrganizationProjects, Projects, ProjectsCeiling};
 use super::authorize_organization;
 use crate::AppState;
 use crate::db::{AuthLane, projects};
@@ -53,7 +53,8 @@ fn name_taken(e: sqlx::Error, name: &str) -> TelmoniError {
 }
 
 /// `GET /internal/v1/projects` — the projects the caller can open in the
-/// organization named by `x-organization-id`, by name.
+/// organization named by `x-organization-id`, by name, and its plan's ceiling
+/// on them.
 pub async fn list_projects(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -64,12 +65,37 @@ pub async fn list_projects(
 
     // ⚠ **An empty list stays empty.** Projects are created only when
     // explicitly requested, so an organization with no projects remains empty.
+    let ceiling = project_ceiling_of(&state, &organization_id).await;
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
-    let project_list =
+    let mut project_list =
         projects::list_for_organization_user(&mut tx, &organization_id, &user_id).await?;
+    let ceiling = match ceiling {
+        Some(ceiling) => {
+            let held = u64::try_from(projects::count_in(&mut tx, &organization_id).await?)
+                .unwrap_or(u64::MAX);
+            Some(ProjectsCeiling {
+                limit: ceiling.limit,
+                held,
+                reached: ceiling.reached(held),
+                detail: ceiling.detail,
+                page: ceiling.page,
+            })
+        }
+        None => None,
+    };
     tx.commit().await?;
-    Ok(Json(Projects {
+    if let Some(telemetry) = &state.siblings.telemetry {
+        let ids: Vec<ProjectId> = project_list.iter().map(|p| p.id.clone()).collect();
+        let modes = telemetry.content_modes(&ids).await?;
+        for project in &mut project_list {
+            if let Some(mode) = modes.get(&project.id) {
+                project.content_mode = *mode;
+            }
+        }
+    }
+    Ok(Json(OrganizationProjects {
         projects: project_list,
+        ceiling,
     }))
 }
 
@@ -184,6 +210,7 @@ pub async fn create_project(
             slug,
             name,
             role,
+            content_mode: ContentMode::Off,
         }),
     ))
 }

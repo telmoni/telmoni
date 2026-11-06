@@ -32,7 +32,7 @@ function organization(slug: string, role: OrganizationEntry["role"]): Organizati
 }
 
 function project(id: string, name: string): Project {
-  return { id, slug: name.toLowerCase(), name, role: "member" };
+  return { id, slug: name.toLowerCase(), name, role: "member", content_mode: "off" };
 }
 
 const elsewhere: ProjectEverywhere = {
@@ -161,6 +161,23 @@ describe("the switcher", () => {
       "/acme/beacon/settings",
     );
     expect(within(menu).getByRole("menuitem", { name: "New project" })).toBeInTheDocument();
+  });
+
+  it("shows each project's content mode between its name and its settings", () => {
+    pathname = "/acme/atlas";
+    renderSelector(undefined, [
+      { ...project("p1", "Atlas"), content_mode: "on" },
+      project("p2", "Beacon"),
+    ]);
+    const menu = open(screen.getByRole("button", { name: "Project: Atlas" }));
+    const on = within(menu).getByTitle("Content on");
+    const off = within(menu).getByTitle("Content off");
+    expect(on.previousElementSibling).toBe(within(menu).getByRole("menuitem", { name: "Atlas" }));
+    expect(on.nextElementSibling).toBe(
+      within(menu).getByRole("menuitem", { name: "Atlas settings" }),
+    );
+    expect(on).toHaveClass("text-foreground");
+    expect(off).toHaveClass("text-muted-foreground");
   });
 
   it("offers no new project to somebody who may create none", () => {

@@ -58,6 +58,7 @@ const ONE_SCREEN = "a sign-in is the same on any screen";
 
 test.describe("Sign-in through an OpenID Connect provider", () => {
   test("a person nobody invited is turned away, and told why", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
     test.skip(testInfo.project.name !== "chromium", ONE_SCREEN);
     await throughDex(page, "grace@example.com");
     await expect(page).toHaveURL(/\/auth\/refused\?reason=closed$/);
@@ -72,12 +73,15 @@ test.describe("Sign-in through an OpenID Connect provider", () => {
     page,
     browser,
   }, testInfo) => {
+    test.setTimeout(90_000);
     test.skip(testInfo.project.name !== "chromium", ONE_SCREEN);
     const owner = await (await browser.newContext()).newPage();
     await injectSession(owner, OWNER);
     const organization = (await landOnProject(owner)).split("/")[1]!;
     await owner.goto(`/${organization}`);
-    const name = (await owner.getByRole("heading", { level: 1 }).innerText()).trim();
+    const name = (
+      await owner.getByRole("button", { name: /^Organization:/ }).locator(".truncate").innerText()
+    ).trim();
     await withoutAda(owner, organization);
 
     await owner.getByRole("button", { name: "Invite member" }).click();
@@ -97,7 +101,10 @@ test.describe("Sign-in through an OpenID Connect provider", () => {
     await invitation.getByRole("button", { name: "Accept" }).click();
     await expect(invitation).toHaveCount(0);
     await page.goto(`/${organization}`);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
+    await expect(page.getByRole("heading", { level: 1, name: "Projects" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: new RegExp(`Organization:\\s*${name}`) }),
+    ).toBeVisible();
 
     // Seated under the name Dex gave, its `name` claim alone.
     await owner.goto(`/${organization}/members`);

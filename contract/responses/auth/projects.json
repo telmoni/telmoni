@@ -1,6 +1,14 @@
 {
+  "ceiling": {
+    "detail": "This organization holds 10 projects.",
+    "held": 10,
+    "limit": 10,
+    "page": "https://console.example/acme/billing",
+    "reached": true
+  },
   "projects": [
     {
+      "content_mode": "on",
       "id": "project_4kRrX0bQhYd2LmZp",
       "name": "Support bot",
       "role": "admin",

@@ -10,7 +10,10 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
+
+import { useProjectCeiling } from "@/lib/store";
 
 /** What a create panel makes (`components/create-panels.tsx`). */
 export type CreateKind = "project" | "organization";
@@ -55,6 +58,11 @@ export function ConsoleUiProvider({ children }: { children: ReactNode }) {
     setCreating(null);
   }
 
+  // At the plan's ceiling a New project goes where the ceiling is lifted,
+  // its sentence said, rather than to a panel whose name would be refused.
+  const ceiling = useProjectCeiling();
+  const router = useRouter();
+
   const openings = useRef(0);
   // One value until a flag moves: the provider renders at every navigation,
   // and its consumers need not.
@@ -67,11 +75,17 @@ export function ConsoleUiProvider({ children }: { children: ReactNode }) {
       shortcutsOpen,
       setShortcutsOpen,
       creating,
-      openCreate: (kind, returnTo = null) =>
-        setCreating({ kind, returnTo, opened: ++openings.current }),
+      openCreate: (kind, returnTo = null) => {
+        if (kind === "project" && ceiling?.reached) {
+          toast.info(ceiling.detail);
+          if (ceiling.page) router.push(ceiling.page);
+          return;
+        }
+        setCreating({ kind, returnTo, opened: ++openings.current });
+      },
       closeCreate: () => setCreating(null),
     }),
-    [searchOpen, agentOpen, shortcutsOpen, creating],
+    [searchOpen, agentOpen, shortcutsOpen, creating, ceiling, router],
   );
 
   return <ConsoleUiContext value={value}>{children}</ConsoleUiContext>;

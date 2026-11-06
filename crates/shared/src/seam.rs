@@ -19,9 +19,9 @@ use uuid::Uuid;
 use crate::acting::{Acting, ActingKey};
 use crate::slug::Slug;
 use crate::{
-    AlertCeilings, AuditAction, AuthError, AuthzError, Capacity, FlagSet, Grants, LaneCeilings,
-    MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus, ProjectCeiling, ProjectId,
-    Role, TelmoniError, UserId,
+    AlertCeilings, AuditAction, AuthError, AuthzError, Capacity, ContentMode, FlagSet, Grants,
+    LaneCeilings, MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus,
+    ProjectCeiling, ProjectId, Role, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -947,6 +947,16 @@ pub trait Telemetry: Send + Sync {
     /// its exports, counted against its day. Nothing by default.
     async fn spend_data_out(&self, organization_id: &OrganizationId, bytes: u64) {
         let _ = (organization_id, bytes);
+    }
+
+    /// The content mode of each of `projects` that has settings of its own;
+    /// one left out reads as `off`. None by default.
+    async fn content_modes(
+        &self,
+        projects: &[ProjectId],
+    ) -> Result<HashMap<ProjectId, ContentMode>, TelmoniError> {
+        let _ = projects;
+        Ok(HashMap::new())
     }
 
     /// A project handed to another organization: its settings — its content

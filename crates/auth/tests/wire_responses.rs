@@ -19,7 +19,8 @@ use telmoni_auth::db::projects::{ProjectEverywhere, ProjectSummary};
 use telmoni_auth::db::sessions::SessionRow;
 use telmoni_auth::handler::account::EmailChanged;
 use telmoni_auth::handler::answer::{
-    Declined, InviteCreated, InviteRevoked, Invites, Projects, Roster,
+    Declined, InviteCreated, InviteRevoked, Invites, OrganizationProjects, Projects,
+    ProjectsCeiling, Roster,
 };
 use telmoni_auth::handler::audit::{AuditPage, ExportList};
 use telmoni_auth::handler::deletion::{AccountDeleted, OrganizationDeleted};
@@ -42,7 +43,7 @@ use telmoni_shared::Email;
 use telmoni_shared::slug::Slug;
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
-    ApiKeyScope, FlagSet, OrganizationId, OrganizationRole, ProjectId, Role, UserId,
+    ApiKeyScope, ContentMode, FlagSet, OrganizationId, OrganizationRole, ProjectId, Role, UserId,
 };
 
 const INVITE: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2f01);
@@ -322,6 +323,7 @@ fn summary() -> ProjectSummary {
         slug: Slug::from_trusted("support-bot"),
         name: "Support bot".into(),
         role: Role::Admin,
+        content_mode: ContentMode::On,
     }
 }
 
@@ -330,8 +332,15 @@ fn summary() -> ProjectSummary {
 fn the_projects_answer_as_the_console_reads() {
     pin(
         "projects",
-        &Projects {
+        &OrganizationProjects {
             projects: vec![summary()],
+            ceiling: Some(ProjectsCeiling {
+                limit: 10,
+                held: 10,
+                reached: true,
+                detail: "This organization holds 10 projects.".into(),
+                page: Some("https://console.example/acme/billing".into()),
+            }),
         },
     );
     pin("project", &summary());

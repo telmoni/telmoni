@@ -128,7 +128,7 @@ export function ListPage<L extends ListWindow>({
     return (
       <>
         <PageHeader title={title} info={info} />
-        <div className="grid gap-gutter">
+        <div className="grid gap-page">
           {before}
           {firstRun}
         </div>
@@ -143,7 +143,7 @@ export function ListPage<L extends ListWindow>({
     <TooltipProvider>
       <div className="group/list contents">
         <PageHeader title={title} info={info} toolbar={toolbar(listed, days)} />
-        <div className="grid gap-gutter">
+        <div className="grid gap-page">
           <section className="grid gap-gutter">
             <div className="flex flex-col gap-gutter md:flex-row md:items-start">
               <FacetsPanel

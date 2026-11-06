@@ -18,13 +18,13 @@ vi.mock("next/navigation", () => ({
     throw new Error("NOT_FOUND");
   },
 }));
-import { fetchProjectAnywhere, fetchProjectBySlug } from "./projects";
+import { fetchProjectAnywhere, fetchProjectBySlug, fetchProjectListing } from "./projects";
 
-const WEB = { id: "project_1", slug: "web", name: "Web", role: "owner" };
-const API = { id: "project_2", slug: "api", name: "API", role: "member" };
+const WEB = { id: "project_1", slug: "web", name: "Web", role: "owner", content_mode: "off" };
+const API = { id: "project_2", slug: "api", name: "API", role: "member", content_mode: "on" };
 
 function listing(projects: unknown[]) {
-  fetchWithTimeout.mockResolvedValue({ ok: true, json: async () => ({ projects }) });
+  fetchWithTimeout.mockResolvedValue({ ok: true, json: async () => ({ projects, ceiling: null }) });
 }
 
 beforeEach(() => {
@@ -32,6 +32,29 @@ beforeEach(() => {
   identityContext.mockResolvedValue({ userId: "user_1", organizationId: "org_1" });
   getServerContext.mockResolvedValue({ organizationNotFound: false });
   listing([WEB, API]);
+});
+
+describe("fetchProjectListing", () => {
+  it("reads the ceiling's page as the path the router takes", async () => {
+    fetchWithTimeout.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        projects: [WEB],
+        ceiling: {
+          limit: 10,
+          held: 10,
+          reached: true,
+          detail: "This organization holds 10 projects.",
+          page: "https://console.example/acme/billing",
+        },
+      }),
+    });
+    const listing = await fetchProjectListing();
+    expect(listing).toMatchObject({
+      kind: "ok",
+      ceiling: { reached: true, page: "/acme/billing" },
+    });
+  });
 });
 
 describe("fetchProjectBySlug", () => {

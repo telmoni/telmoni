@@ -136,7 +136,8 @@ export async function updateContentModeAction(
     return refused((await extractProblem(res)).message);
   }
 
-  revalidatePath("/(app)/[organization]/[project]/settings", "page");
+  // The whole console, since the header's project menu shows the mode too.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 

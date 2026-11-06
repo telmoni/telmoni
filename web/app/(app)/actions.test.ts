@@ -240,7 +240,13 @@ describe("createProjectAction — what the dialog is handed to follow the projec
     vi.mocked(getServerContext).mockResolvedValue(me(STANDING, "org_seat"));
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ id: "project_1", slug: "platform-2", name: "Platform", role: "owner" }),
+      json: async () => ({
+        id: "project_1",
+        slug: "platform-2",
+        name: "Platform",
+        role: "owner",
+        content_mode: "off",
+      }),
     });
   });
 
@@ -250,7 +256,13 @@ describe("createProjectAction — what the dialog is handed to follow the projec
     const r = await createProjectAction("Platform", "org_admin");
     expect(r).toEqual({
       ok: true,
-      project: { id: "project_1", slug: "platform-2", name: "Platform", role: "owner" },
+      project: {
+        id: "project_1",
+        slug: "platform-2",
+        name: "Platform",
+        role: "owner",
+        content_mode: "off",
+      },
     });
   });
 

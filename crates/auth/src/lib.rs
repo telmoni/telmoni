@@ -85,7 +85,8 @@ pub struct Siblings {
     /// organization, a project or a person before their rows go.
     pub notifications: Option<Arc<dyn telmoni_shared::seam::Notifications>>,
     /// Telemetry: each project's settings, purged with its organization or
-    /// after the project is deleted, and moved with a project transferred.
+    /// after the project is deleted, moved with a project transferred, and
+    /// each content mode the project listing shows.
     pub telemetry: Option<Arc<dyn telmoni_shared::seam::Telemetry>>,
     /// The agent: the conversations and the index it holds of a person or an
     /// organization, forgotten when they go. A project that moves or goes
