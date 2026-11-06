@@ -133,6 +133,9 @@ pub const EVENTS: &str = "telmoni.events";
 pub const EXCEPTION_EVENT: &str = "exception";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
+/// The span our SDKs send as a run opens, under [`SCOPE`] with no operation,
+/// so the run is seen before its own span ends it.
+pub const RUN_START: &str = "telmoni.run.start";
 /// The resource attribute our SDKs name themselves by.
 pub const DISTRO_NAME: &str = "telemetry.distro.name";
 /// Its value.

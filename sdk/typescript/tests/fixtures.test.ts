@@ -199,6 +199,60 @@ describe('run.json', () => {
   });
 });
 
+interface RunStartFixture {
+  scenario: {
+    run: { agent: string; user_id: string; session_id: string; tags: Record<string, string> };
+    environment: string;
+    release: string;
+    schedule_delay_ms: number;
+    sent_within_ms: number;
+  };
+  first_export: ExportBody;
+}
+
+describe('run-start.json', () => {
+  it('a run is sent from its start', async () => {
+    const fixture = loadFixture<RunStartFixture>('run-start.json');
+    const { scenario } = fixture;
+    const spec = scenario.run;
+    const { telmoni, transport } = harness(
+      { environment: scenario.environment, release: scenario.release },
+      { processor: { scheduleDelaySeconds: scenario.schedule_delay_ms / 1000 } },
+    );
+    let start: JsonSpan | undefined;
+    let parent: string | undefined;
+    try {
+      await telmoni.run(spec.agent, { userId: spec.user_id, sessionId: spec.session_id, tags: spec.tags }, async () => {
+        expect(await transport.waitFor(1, scenario.sent_within_ms)).toBe(true);
+        const first = structuredClone(transport.bodies());
+        expect(first, 'one body, before the run ends').toHaveLength(1);
+        const spans = first[0]!.resourceSpans[0]!.scopeSpans[0]!.spans;
+        expect(spans).toHaveLength(1);
+        start = structuredClone(spans[0]!);
+        expect(start.startTimeUnixNano).toBe(start.endTimeUnixNano);
+        parent = spans[0]!.parentSpanId;
+        delete spans[0]!.parentSpanId;
+        const normalized = normalize(first[0]!);
+        normalized.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.parentSpanId = '<span:run>';
+        expect(normalized).toEqual(fixture.first_export);
+      });
+      expect(await telmoni.flush()).toBe(true);
+    } finally {
+      await telmoni.shutdown();
+    }
+    const runs = transport.spans().filter((span) => span.name === `invoke_agent ${spec.agent}`);
+    expect(runs).toHaveLength(1);
+    const run = runs[0]!;
+    expect(parent).toBeDefined();
+    expect(run.spanId).toBe(parent);
+    expect(run.startTimeUnixNano).toBe(start!.startTimeUnixNano);
+    const ids = new Set(
+      [run, start!].flatMap((span) => span.attributes.filter((a) => a.key === 'telmoni.run_id').map((a) => a.value['stringValue'])),
+    );
+    expect(ids.size).toBe(1);
+  });
+});
+
 /** One empty run, sent in an export of its own. */
 async function aRun({ telmoni }: Harness): Promise<void> {
   telmoni.run('bot', () => {});

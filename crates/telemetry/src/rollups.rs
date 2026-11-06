@@ -74,7 +74,9 @@ const METRICS_SQL: &str = concat!(
     "CAST(quantilesTDigestMergeIf(0.5, 0.95, 0.99)(h.duration_ms, h.kind = 'run') ",
     "AS Array(Float64)) AS run_quantiles ",
     "FROM telemetry.spans_hourly AS h ",
+    // A run's opening is the run's, counted by its own span.
     "WHERE h.project_id IN {projects:Array(String)} AND h.hour >= {from:DateTime('UTC')} ",
+    "AND h.kind != 'run_start' ",
     // Newest first, so a window past the limit loses its oldest points.
     "GROUP BY at, key ORDER BY at DESC, key DESC LIMIT {max:UInt32}"
 );
@@ -132,6 +134,7 @@ const SPANS_METRICS_SQL: &str = concat!(
     "AND received_at >= {keys_from:DateTime('UTC')} GROUP BY run_id",
     ") AS k ON s.run_id = k.run_id ",
     "WHERE s.project_id IN {projects:Array(String)} AND s.received_at >= {from:DateTime('UTC')} ",
+    "AND s.kind != 'run_start' ",
     "GROUP BY at, group_key))) ",
     "GROUP BY at, folded, key ORDER BY at DESC, folded DESC, key DESC LIMIT {max:UInt32}"
 );

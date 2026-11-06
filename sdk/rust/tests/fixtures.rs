@@ -8,19 +8,19 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use common::{
-    Collected, Failure, Harness, Outcome, Sleeps, Warnings, answer, answer_names, attributes_of,
-    field, fields_of, float, int, is_hex, is_uuid_v4, keyed, load_fixture, name_of, spans_of, text,
-    warning_of,
+    Collected, Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, answer, answer_names,
+    attributes_of, field, fields_of, float, hooks, int, is_hex, is_uuid_v4, keyed, load_fixture,
+    name_of, spans_of, text, warning_of,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
-    Config, ContentMode, Hooks, ModelCallOptions, Reply, RunOptions, RunRecord, Telmoni,
+    Batching, Config, ContentMode, Hooks, ModelCallOptions, Reply, RunOptions, RunRecord, Telmoni,
     ToolCallOptions, ToolCallRecord, Usage,
 };
 
@@ -255,6 +255,106 @@ fn the_run_matches_the_golden_export() -> Outcome {
     Ok(())
 }
 
+#[test]
+fn a_run_is_sent_from_its_start() -> Outcome {
+    let fixture = load_fixture("run-start.json")?;
+    let scenario = field(&fixture, "scenario")?;
+    let spec = field(scenario, "run")?;
+    let agent = text(spec, "agent")?;
+    let transport = FakeTransport::new([])?;
+    let mut hooks = hooks(&transport, &Warnings::default(), &Sleeps::default());
+    hooks.batching = Batching {
+        schedule_delay: Duration::from_millis(
+            field(scenario, "schedule_delay_ms")?
+                .as_u64()
+                .ok_or("schedule_delay_ms")?,
+        ),
+        ..Batching::default()
+    };
+    let telmoni = Telmoni::with_hooks(
+        Config {
+            environment: Some(text(scenario, "environment")?.to_owned()),
+            release: Some(text(scenario, "release")?.to_owned()),
+            ..keyed()
+        },
+        hooks,
+    );
+    let tags = field(spec, "tags")?
+        .as_object()
+        .ok_or("tags")?
+        .iter()
+        .map(|(key, value)| Ok((key.clone(), value.as_str().ok_or("a tag")?.to_owned())))
+        .collect::<Result<BTreeMap<_, _>, Failure>>()?;
+    let run = telmoni.run(
+        agent,
+        RunOptions {
+            user_id: Some(text(spec, "user_id")?.to_owned()),
+            session_id: Some(text(spec, "session_id")?.to_owned()),
+            tags,
+            ..RunOptions::default()
+        },
+    )?;
+    let within = Duration::from_millis(
+        field(scenario, "sent_within_ms")?
+            .as_u64()
+            .ok_or("sent_within_ms")?,
+    );
+    let deadline = Instant::now() + within;
+    while transport.count() == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    let first = transport.bodies()?;
+    assert_eq!(first.len(), 1, "one body, before the run ends");
+    let mut body = first.first().ok_or("the opening was not sent")?.clone();
+    let [start] = spans_of(&body).try_into().map_err(|_| "one span")?;
+    assert_eq!(
+        text(&start, "startTimeUnixNano")?,
+        text(&start, "endTimeUnixNano")?,
+        "of no length"
+    );
+    let parent = text(&start, "parentSpanId")?.to_owned();
+    let spans = "/resourceSpans/0/scopeSpans/0/spans/0";
+    // Its parent is not in the export, which normalization would refuse.
+    body.pointer_mut(spans)
+        .and_then(Value::as_object_mut)
+        .ok_or("the one span")?
+        .remove("parentSpanId");
+    let mut normalized = normalize(&body)?;
+    normalized
+        .pointer_mut(spans)
+        .and_then(Value::as_object_mut)
+        .ok_or("the one span")?
+        .insert("parentSpanId".to_owned(), json!("<span:run>"));
+    let expected = field(&fixture, "first_export")?;
+    assert!(
+        normalized == *expected,
+        "sent:\n{}\nexpected:\n{}",
+        serde_json::to_string_pretty(&normalized)?,
+        serde_json::to_string_pretty(expected)?
+    );
+
+    run.end();
+    assert!(telmoni.flush(), "the flush timed out");
+    let name = format!("invoke_agent {agent}");
+    let runs: Vec<Value> = transport
+        .spans()?
+        .into_iter()
+        .filter(|span| name_of(span) == name)
+        .collect();
+    let [own] = runs.try_into().map_err(|_| "one run span")?;
+    assert_eq!(text(&own, "spanId")?, parent);
+    assert_eq!(
+        text(&own, "startTimeUnixNano")?,
+        text(&start, "startTimeUnixNano")?
+    );
+    let run_id = |span: &Value| -> Result<Value, Failure> {
+        Ok(field(&attributes_of(span)?, "telmoni.run_id")?.clone())
+    };
+    assert_eq!(run_id(&own)?, run_id(&start)?);
+    telmoni.shutdown();
+    Ok(())
+}
+
 /// `failure.json`'s error, its type named as Rust names one.
 #[derive(Debug)]
 struct RateLimited(String);
@@ -340,11 +440,15 @@ fn a_failure_leaves_in_full_only_under_both_locks() -> Outcome {
                     .ok_or("capture_content")?,
                 ..keyed()
             },
-            [Ok(Answer::new(
-                200,
-                vec![("Telmoni-Content-Mode".to_owned(), mode.to_owned())],
-                b"{}".to_vec(),
-            ))],
+            // The mode to each export, a run's opening its own among them.
+            std::iter::repeat_n(
+                Ok(Answer::new(
+                    200,
+                    vec![("Telmoni-Content-Mode".to_owned(), mode.to_owned())],
+                    b"{}".to_vec(),
+                )),
+                4,
+            ),
         )?;
         harness.telmoni.run(agent, RunOptions::default())?.end();
         harness.flush()?;
@@ -425,6 +529,12 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
                 }
             })
             .collect::<Result<Vec<_>, Failure>>()?;
+        // Each run's opening, waited for so it goes alone, is answered naming
+        // no mode; the case's answers are the first run's other exports.
+        let neutral = || Ok(Answer::new(200, Vec::new(), b"{}".to_vec()));
+        let answers = std::iter::once(neutral())
+            .chain(answers)
+            .chain(std::iter::once(neutral()));
         let harness = Harness::answering(
             Config {
                 capture_content: flag("capture_content")?,
@@ -434,9 +544,11 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
             answers,
         )?;
         for _ in 0..2 {
+            let sent = harness.transport.count();
             let run = harness
                 .telmoni
                 .run(text(&fixture, "agent")?, RunOptions::default())?;
+            assert!(harness.transport.wait_for(sent + 1), "the run's opening");
             let options = if flag("content")? {
                 ModelCallOptions {
                     input_messages: Some(field(&fixture, "input_messages")?.clone().into()),
@@ -449,7 +561,16 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
             run.end();
             harness.flush()?;
         }
-        let bodies = harness.transport.bodies()?;
+        let opening = |body: &Value| {
+            let spans = spans_of(body);
+            !spans.is_empty()
+                && spans
+                    .iter()
+                    .all(|span| name_of(span) == "telmoni.run.start")
+        };
+        let (openings, bodies): (Vec<Value>, Vec<Value>) =
+            harness.transport.bodies()?.into_iter().partition(opening);
+        assert_eq!(openings.len(), 2, "{case}");
         assert_eq!(
             Some(u64::try_from(bodies.len())?),
             field(case, "requests")?.as_u64(),
@@ -461,7 +582,12 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
             assert_eq!(asks, [field(&fixture, "body")?], "{case}");
             assert_eq!(bodies.first(), Some(field(&fixture, "body")?), "{case}");
             let requests = harness.transport.requests();
-            let ask = requests.first().ok_or("the ask")?;
+            let ask = requests
+                .iter()
+                .find(|request| {
+                    serde_json::from_slice::<Value>(&request.body).is_ok_and(|body| !opening(&body))
+                })
+                .ok_or("the ask")?;
             assert_eq!(ask.header("Authorization"), Some("Bearer k"), "{case}");
         } else {
             assert!(asks.is_empty(), "{case}");
@@ -500,7 +626,8 @@ fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
                 api_key: Some("k".to_owned()),
                 ..keyed()
             },
-            std::iter::repeat_n(Ok(mode), 3),
+            // The mode to each export, a run's opening its own among them.
+            std::iter::repeat_n(Ok(mode), 6),
         )?;
         harness.telmoni.run("bot", RunOptions::default())?.end();
         harness.flush()?;
@@ -766,7 +893,8 @@ fn a_mask_that_panics_is_warned_of_once_and_asked_each_export() -> Outcome {
             })),
             ..keyed()
         },
-        std::iter::repeat_n(Ok(on), 3),
+        // On to each export, a run's opening its own among them.
+        std::iter::repeat_n(Ok(on), 5),
     )?;
     a_run(&harness)?;
     for _ in 0..2 {
@@ -979,8 +1107,16 @@ fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
 }
 
 /// One empty run, sent in an export of its own.
+/// One run, recorded, so it goes in exactly one export: a live run's opening
+/// may go in one of its own.
 fn a_run(harness: &Harness) -> Outcome {
-    harness.telmoni.run("bot", RunOptions::default())?.end();
+    let at = std::time::SystemTime::now();
+    harness.telmoni.record_run(RunRecord::new(
+        "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+        "bot",
+        at,
+        at,
+    ))?;
     harness.flush()
 }
 

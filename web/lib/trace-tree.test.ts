@@ -56,6 +56,25 @@ describe("a trace's spans as a tree", () => {
     expect(treeRows(tree, new Set()).map((r) => r.depth)).toEqual([0, 1, 2, 2, 1]);
   });
 
+  it("draws a run's opening until the run's own span lands, then never", () => {
+    const opening = span({
+      span_id: "opening",
+      parent_span_id: "run",
+      kind: SpanKind.RunStart,
+      name: "telmoni.run.start",
+      started_at: at(0),
+      ended_at: at(0),
+    });
+    expect(ids(spanTree([opening]))).toEqual(["opening"]);
+    expect(ids(treeRows(spanTree([...SPANS, opening]), new Set()))).toEqual([
+      "run",
+      "step-1",
+      "model",
+      "tool",
+      "step-2",
+    ]);
+  });
+
   it("stands a span whose parent never arrived at the top, beside the run", () => {
     const orphan = span({ span_id: "late", parent_span_id: "sampled-out", started_at: at(8) });
     expect(ids(spanTree([...SPANS, orphan]))).toEqual(["run", "late"]);

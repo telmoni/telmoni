@@ -309,7 +309,8 @@ describe('a recorded run', () => {
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
-      h.telmoni.run('bot', (run) => {
+      await h.telmoni.run('bot', async (run) => {
+        expect(await h.transport.waitFor(1), "the run's opening, at once").toBe(true);
         run.step('s0', () => {});
         run.step('s1', () => {});
         h.telmoni.recordRun({ ...golden, inside: [call, call, call] });
@@ -319,6 +320,7 @@ describe('a recorded run', () => {
       await h.telmoni.shutdown();
     }
     expect(h.transport.bodies().map((body) => body.resourceSpans[0]!.scopeSpans[0]!.spans.map((s) => s.name))).toEqual([
+      ['telmoni.run.start'],
       ['s0', 's1'],
       ['execute_tool t', 'execute_tool t', 'execute_tool t'],
       ['invoke_agent claude-code'],
@@ -350,6 +352,7 @@ describe('a recorded run', () => {
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
       await h.telmoni.run('live', async (run) => {
+        expect(await h.transport.waitFor(1), "the run's opening, out of the queue").toBe(true);
         // Room for one step beside the record's three spans.
         sampler.hook = () => {
           run.step('s0', () => {});

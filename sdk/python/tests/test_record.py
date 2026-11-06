@@ -222,6 +222,7 @@ def test_a_record_larger_than_a_batch_is_cut_from_its_own_start(
     record = dataclasses.replace(golden, inside=[call, call, call])
     try:
         with client.run("bot"):
+            assert transport.wait_for_openings(1), "the run's opening, at once"
             for n in range(2):
                 with client.step(f"s{n}"):
                     pass
@@ -382,6 +383,7 @@ def test_a_records_room_is_kept_while_it_is_built(
     call = ToolCallRecord(name="t", start=golden.start, end=golden.start)
     try:
         with client.run("live") as live:
+            assert transport.wait_for_openings(1), "the run's opening, out of the queue"
 
             def steps() -> None:
                 for n in range(2):
@@ -937,6 +939,7 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
     )
     try:
         with client.run("bot"):
+            assert transport.wait_for_openings(1), "the run's opening, out of the queue"
             # Two steps hold two of the four slots.
             for n in range(2):
                 with client.step(f"s{n}"):

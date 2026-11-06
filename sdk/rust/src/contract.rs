@@ -9,6 +9,9 @@
 
 /// The instrumentation scope every span the SDK opens is under.
 pub(crate) const SCOPE: &str = "telmoni";
+/// The span of no length a run sends as it opens, exported at once, so the
+/// run is seen before it ends.
+pub(crate) const RUN_START: &str = "telmoni.run.start";
 pub(crate) const DISTRO_NAME: &str = "telemetry.distro.name";
 pub(crate) const DISTRO: &str = "telmoni";
 pub(crate) const RUN_ID: &str = "telmoni.run_id";

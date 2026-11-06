@@ -17,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -294,6 +295,13 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(attrs...),
 	)
+	// The run's opening, under it and at its start: the processor sends it at
+	// once, so the run is seen open before it ends.
+	if opened, ok := span.(sdktrace.ReadOnlySpan); ok {
+		at := trace.WithTimestamp(opened.StartTime())
+		_, start := c.tracer.Start(ctx, runStart, trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(inherited...), at)
+		start.End(at)
+	}
 	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, guard: caps, displaced: displaced}
 	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, displaced}), run), run
 }

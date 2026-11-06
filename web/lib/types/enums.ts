@@ -57,6 +57,7 @@ export type Role = typeof Role[keyof typeof Role];
 /** Wire vocabulary of the Rust `SpanKind`: what one span of a run is. */
 export const SpanKind = {
   Run:       "run",
+  RunStart:  "run_start",
   Step:      "step",
   ModelCall: "model_call",
   ToolCall:  "tool_call",

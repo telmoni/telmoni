@@ -3,6 +3,7 @@
 
 mod common;
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -25,6 +26,8 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
     let run = telmoni.run("bot", RunOptions::default())?;
+    // The run's opening goes at once; the queue is filled after it.
+    assert!(transport.wait_for(1), "the run's opening");
     for n in 0..5 {
         let step = run.step(&format!("s{n}"))?;
         step.end();
@@ -65,10 +68,15 @@ fn a_delay_of_nothing_sends_at_once() -> Outcome {
         ..Batching::default()
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
-    telmoni.run("bot", RunOptions::default())?.end();
-    assert!(transport.wait_for(1), "the run's span was not sent at once");
-    telmoni.run("bot", RunOptions::default())?.end();
-    assert!(transport.wait_for(2), "an idle worker missed the next span");
+    // Each run's opening goes first, at once, whatever the delay.
+    let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening");
+    run.end();
+    assert!(transport.wait_for(2), "the run's span was not sent at once");
+    let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(3), "the run's opening");
+    run.end();
+    assert!(transport.wait_for(4), "an idle worker missed the next span");
     telmoni.shutdown();
     Ok(())
 }
@@ -118,11 +126,12 @@ fn a_batch_fills_and_goes_without_a_flush() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
     let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening");
     for n in 0..3 {
         let step = run.step(&format!("s{n}"))?;
         step.end();
     }
-    assert!(transport.wait_for(1), "three steps fill a batch of three");
+    assert!(transport.wait_for(2), "three steps fill a batch of three");
     run.end();
     telmoni.shutdown();
     assert!(warnings.all().is_empty());
@@ -149,6 +158,7 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     // The steps overflow the queue before the worker wakes, so the batch the
     // flush takes carries a drop count and the hook panics on its warning.
     let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening, out of the queue");
     for n in 0..3 {
         let step = run.step(&format!("s{n}"))?;
         step.end();
@@ -160,7 +170,9 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
     );
 
     // The worker is alive: a run after the panic is sent.
+    let sent = transport.count();
     let again = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(sent + 1), "the run's opening");
     again.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
@@ -181,8 +193,8 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
 /// ⚠ A transport that panics loses that batch alone: a flush returns and the next run goes.
 #[test]
 fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
-    /// Panics on its first export, then hands each to the fake.
-    struct PanicsOnce(AtomicBool, FakeTransport);
+    /// Panics on its first export once armed, then hands each to the fake.
+    struct PanicsOnce(Arc<AtomicBool>, FakeTransport);
 
     impl Transport for PanicsOnce {
         fn send(
@@ -192,7 +204,7 @@ fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
             headers: &[(String, String)],
             body: &[u8],
         ) -> Result<Answer, TransportError> {
-            if !self.0.swap(true, Ordering::SeqCst) {
+            if self.0.swap(false, Ordering::SeqCst) {
                 std::panic::panic_any("a transport of the application's");
             }
             self.1.send(method, url, headers, body)
@@ -203,10 +215,15 @@ fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
     let warnings = Warnings::default();
     let sleeps = Sleeps::default();
     let mut hooks = hooks(&transport, &warnings, &sleeps);
-    hooks.transport = Box::new(PanicsOnce(AtomicBool::new(false), transport.clone()));
+    let armed = Arc::new(AtomicBool::new(false));
+    hooks.transport = Box::new(PanicsOnce(Arc::clone(&armed), transport.clone()));
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
-    telmoni.run("lost", RunOptions::default())?.end();
+    // Armed past the run's opening, so the batch lost is the run's own.
+    let lost = telmoni.run("lost", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening");
+    armed.store(true, Ordering::SeqCst);
+    lost.end();
     assert!(
         telmoni.flush(),
         "the flush waited on a worker that was gone"

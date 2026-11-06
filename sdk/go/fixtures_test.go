@@ -11,6 +11,7 @@ import (
 	"errors"
 	"maps"
 	"net"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"reflect"
@@ -279,7 +280,7 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	}
 	gathered := deepCopy(t, bodies[0])
 	var spans []any
-	for _, body := range bodies {
+	for _, body := range append(bodies, decoded(t, h.transport.allOpenings())...) {
 		for _, span := range spansIn(body) {
 			spans = append(spans, span)
 		}
@@ -305,6 +306,84 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 		if got := req.header.Get("Telmoni-Sent-At"); got == "" || strings.Trim(got, "0123456789") != "" {
 			t.Errorf("Telmoni-Sent-At = %q", got)
 		}
+	}
+}
+
+type runStartFixture struct {
+	Scenario struct {
+		Run struct {
+			Agent     string            `json:"agent"`
+			UserID    string            `json:"user_id"`
+			SessionID string            `json:"session_id"`
+			Tags      map[string]string `json:"tags"`
+		} `json:"run"`
+		Environment     string `json:"environment"`
+		Release         string `json:"release"`
+		ScheduleDelayMS int    `json:"schedule_delay_ms"`
+		SentWithinMS    int    `json:"sent_within_ms"`
+	} `json:"scenario"`
+	FirstExport map[string]any `json:"first_export"`
+}
+
+func TestARunIsSentFromItsStart(t *testing.T) {
+	var fixture runStartFixture
+	if err := json.Unmarshal(loadFixture(t, "run-start.json"), &fixture); err != nil {
+		t.Fatalf("decoding run-start.json: %v", err)
+	}
+	scenario, spec := fixture.Scenario, fixture.Scenario.Run
+	h := newHarness(t, telmoni.Config{
+		APIKey:      telmoni.NewSecret(testKey),
+		Environment: scenario.Environment,
+		Release:     scenario.Release,
+	}, nil, telmoni.WithBatching(2048, 512, time.Duration(scenario.ScheduleDelayMS)*time.Millisecond))
+	runCtx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{UserID: spec.UserID, SessionID: spec.SessionID, Tags: spec.Tags})
+	if !h.transport.waitForOpenings(1, time.Duration(scenario.SentWithinMS)*time.Millisecond) {
+		t.Fatal("nothing was sent before the run ended")
+	}
+	first := decoded(t, h.transport.allOpenings())
+	if len(first) != 1 || len(h.transport.all()) != 0 {
+		t.Fatalf("%d bodies before the run ended, want one", len(first)+len(h.transport.all()))
+	}
+	spans := spansIn(first[0])
+	if len(spans) != 1 {
+		t.Fatalf("the first body holds %d spans, want one", len(spans))
+	}
+	start := deepCopy(t, spans[0])
+	if start["startTimeUnixNano"] != start["endTimeUnixNano"] {
+		t.Errorf("the start runs %v to %v, want no length", start["startTimeUnixNano"], start["endTimeUnixNano"])
+	}
+	parent, _ := spans[0]["parentSpanId"].(string)
+	delete(spans[0], "parentSpanId")
+	got := normalize(t, first[0])
+	got["resourceSpans"].([]any)[0].(map[string]any)["scopeSpans"].([]any)[0].(map[string]any)["spans"].([]any)[0].(map[string]any)["parentSpanId"] = "<span:run>"
+	if !reflect.DeepEqual(got, fixture.FirstExport) {
+		t.Errorf("the first body differs from run-start.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.FirstExport))
+	}
+	run.End()
+	h.flush()
+	runs := byName(h.transport.spans(t))
+	own, ok := runs["invoke_agent "+spec.Agent]
+	if !ok || len(h.transport.spans(t)) != 1 {
+		t.Fatalf("sent %v after the run ended, want its own span alone", names(h.transport.spans(t)))
+	}
+	if own["spanId"] != parent {
+		t.Errorf("the run's span is %v, the start's parent %v", own["spanId"], parent)
+	}
+	if own["startTimeUnixNano"] != start["startTimeUnixNano"] {
+		t.Errorf("the run starts at %v, its start at %v", own["startTimeUnixNano"], start["startTimeUnixNano"])
+	}
+	if a, b := attributesOf(t, own)["telmoni.run_id"], attributesOf(t, start)["telmoni.run_id"]; a == nil || a != b {
+		t.Errorf("the run's id is %v, its start's %v", a, b)
+	}
+	// A run continued from another service's headers sends no opening.
+	header := http.Header{}
+	h.client.Inject(runCtx, header)
+	ctx := h.client.Extract(context.Background(), header)
+	_, work := telmoni.RunFromContext(ctx).Step(ctx, "work")
+	work.End()
+	h.flush()
+	if n := len(h.transport.allOpenings()); n != 1 || strings.Contains(h.transport.text(), "telmoni.run.start") {
+		t.Errorf("%d openings sent alone and %q among the rest, want the first run's alone", n, "telmoni.run.start")
 	}
 }
 
@@ -466,8 +545,12 @@ func TestTheModeIsAskedBeforeTheFirstContentItWouldSend(t *testing.T) {
 			}
 		}
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, answers...))
-		for range 2 {
+		for n := range 2 {
 			ctx, run := h.client.Run(context.Background(), fixture.Agent, telmoni.RunOptions{})
+			// The opening alone and apart, so each run is one export.
+			if !h.transport.waitForOpenings(n+1, waitTimeout) {
+				t.Fatal("the run's opening was not sent at once")
+			}
 			var opts telmoni.ModelCallOptions
 			if each.Content {
 				opts.InputMessages = fixture.InputMessages
@@ -651,7 +734,10 @@ func TestTheMaskAnswersEachContentFieldOnlyUnderBothLocks(t *testing.T) {
 			return *rule.Replace, true
 		}
 		mode := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
-		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent, Mask: mask}, newFakeTransport(t, mode))
+		transport := newFakeTransport(t)
+		// The mode to each export, the opening sharing one with a call or not.
+		transport.fallback = mode
+		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent, Mask: mask}, transport)
 		aRun(t, h)
 		ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{UserID: scenario.User, SessionID: scenario.Session, Tags: scenario.Tags})
 		_, call := run.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{

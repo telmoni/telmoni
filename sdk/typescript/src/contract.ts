@@ -11,6 +11,8 @@
 
 /** The instrumentation scope every span the SDK opens is under. */
 export const SCOPE = 'telmoni';
+/** The span of no length a run sends as it opens, exported at once, so the run is seen before it ends. */
+export const RUN_START = 'telmoni.run.start';
 export const DISTRO_NAME = 'telemetry.distro.name';
 export const DISTRO = 'telmoni';
 export const RUN_ID = 'telmoni.run_id';

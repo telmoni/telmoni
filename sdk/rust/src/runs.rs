@@ -11,9 +11,11 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use opentelemetry::trace::{SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _};
+use opentelemetry::trace::{
+    Span as _, SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _,
+};
 use opentelemetry::{Context, ContextGuard, KeyValue, Value};
 use serde::Serialize;
 use uuid::Uuid;
@@ -855,15 +857,26 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
 
     let parent = Context::current();
     let tracer = &inner.tracer;
+    let opened_at = SystemTime::now();
     let span = tracer
         .span_builder(format!("{} {agent}", contract::RUN_OPERATION))
         .with_kind(SpanKind::Internal)
         .with_attributes(attributes)
+        .with_start_time(opened_at)
         .start_with_context(tracer, &parent);
     let cx = parent.with_span(span).with_value(RunInfo {
         run_id: run_id.clone(),
         agent: agent.clone(),
     });
+    // The run's opening, under it and at its start: the processor sends it at
+    // once, so the run is seen open before it ends.
+    let mut start = tracer
+        .span_builder(contract::RUN_START)
+        .with_kind(SpanKind::Internal)
+        .with_attributes(inherited.clone())
+        .with_start_time(opened_at)
+        .start_with_context(tracer, &cx);
+    start.end_with_timestamp(opened_at);
 
     Ok(Run {
         handle: Handle {

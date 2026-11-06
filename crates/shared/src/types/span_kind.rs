@@ -12,6 +12,9 @@ pub enum SpanKind {
     /// One execution of an agent: `invoke_agent`, or `invoke_workflow` for a
     /// run of several agents.
     Run,
+    /// A run's opening, `telmoni.run.start`, sent as the run opens so it is
+    /// seen before it ends: of no length, never a step, costing no unit.
+    RunStart,
     /// A unit of work the SDKs, the CLI or a hook opened as one, under their
     /// instrumentation scope, that is no model or tool call. What the step
     /// cap counts.
@@ -28,6 +31,7 @@ pub enum SpanKind {
 
 crate::wire_enum!(SpanKind {
     Run => "run",
+    RunStart => "run_start",
     Step => "step",
     ModelCall => "model_call",
     ToolCall => "tool_call",
@@ -36,10 +40,11 @@ crate::wire_enum!(SpanKind {
 
 impl SpanKind {
     /// Whether an alert watches spans of this kind: the run and its parts;
-    /// a plain span is none of an agent's doings.
+    /// a plain span is none of an agent's doings, and a run's opening is the
+    /// run's, which its own span answers for.
     #[must_use]
     pub const fn alertable(self) -> bool {
-        !matches!(self, Self::Span)
+        !matches!(self, Self::Span | Self::RunStart)
     }
 }
 

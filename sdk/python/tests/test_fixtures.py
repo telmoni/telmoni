@@ -25,6 +25,7 @@ from conftest import (
 )
 from telmoni import Config, Telmoni, Usage, contract
 from telmoni.exporter import Answer
+from telmoni.processor import Batching
 
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -126,7 +127,7 @@ def test_the_run_matches_the_golden_export(
     gathered = copy.deepcopy(bodies[0])
     gathered["resourceSpans"][0]["scopeSpans"][0]["spans"] = [
         span
-        for body in bodies
+        for body in [*bodies, *transport.openings]
         for span in body["resourceSpans"][0]["scopeSpans"][0]["spans"]
     ]
     assert normalize(gathered) == fixture["export"]
@@ -135,6 +136,58 @@ def test_the_run_matches_the_golden_export(
         assert headers["Content-Type"] == "application/json"
         assert headers["User-Agent"].startswith("telmoni-python/")
         assert headers["Telmoni-Sent-At"].isdigit()
+
+
+def test_a_run_is_sent_from_its_start(transport: FakeTransport) -> None:
+    fixture = load_fixture("run-start.json")
+    scenario = fixture["scenario"]
+    spec = scenario["run"]
+    telmoni = Telmoni(
+        Config(
+            api_key="telmoni_test_key",
+            environment=scenario["environment"],
+            release=scenario["release"],
+        ),
+        transport=transport,
+        sleep=lambda _: None,
+        batching=Batching(schedule_delay_s=scenario["schedule_delay_ms"] / 1000),
+    )
+    try:
+        with telmoni.run(
+            spec["agent"],
+            user_id=spec["user_id"],
+            session_id=spec["session_id"],
+            tags=spec["tags"],
+        ):
+            assert transport.wait_for_openings(1, scenario["sent_within_ms"] / 1000)
+            assert not transport.requests, "nothing else before the run ends"
+            first = copy.deepcopy(transport.openings)
+            assert len(first) == 1, "one body, before the run ends"
+            (start,) = first[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
+            assert start["startTimeUnixNano"] == start["endTimeUnixNano"]
+            parent = start.pop("parentSpanId")
+            normalized = normalize(first[0])
+            normalized["resourceSpans"][0]["scopeSpans"][0]["spans"][0][
+                "parentSpanId"
+            ] = "<span:run>"
+            assert normalized == fixture["first_export"]
+        assert telmoni.flush()
+    finally:
+        telmoni.shutdown()
+    runs = [
+        s for s in transport.spans() if s["name"] == f"invoke_agent {spec['agent']}"
+    ]
+    assert len(runs) == 1
+    (run,) = runs
+    assert run["spanId"] == parent
+    assert run["startTimeUnixNano"] == start["startTimeUnixNano"]
+    ids = {
+        a["value"]["stringValue"]
+        for s in (run, start)
+        for a in s["attributes"]
+        if a["key"] == contract.RUN_ID
+    }
+    assert len(ids) == 1
 
 
 def normalize_failure(span: dict[str, Any]) -> dict[str, Any]:
@@ -175,7 +228,8 @@ def test_a_failure_leaves_in_full_only_under_both_locks(
     fixture = load_fixture("failure.json")
     scenario = fixture["scenario"]
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
-    transport.answers = [mode]
+    # The mode to each export: a run's spans may leave in more than one.
+    transport.answers = [mode] * 4
     client = Telmoni(
         Config(api_key="k", capture_content=case["capture_content"]),
         transport=transport,
@@ -334,7 +388,8 @@ def test_the_mask_answers_each_content_field_only_under_both_locks(
         return str(rule["replace"])
 
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
-    transport.answers = [mode]
+    # The mode to each export: a run's spans may leave in more than one.
+    transport.answers = [mode] * 4
     client = Telmoni(
         Config(api_key="k", capture_content=case["capture_content"], mask=mask),
         transport=transport,

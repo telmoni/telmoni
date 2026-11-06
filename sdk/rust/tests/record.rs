@@ -1194,8 +1194,9 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         ..golden
     };
 
-    // Two steps hold two of the four slots.
+    // Two steps hold two of the four slots, the run's opening gone first.
     let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening, out of the queue");
     for n in 0..2 {
         let step = run.step(&format!("s{n}"))?;
         step.end();
@@ -1355,6 +1356,7 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
         ..golden
     };
     let run = telmoni.run("bot", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening, at once");
     for n in 0..2 {
         run.step(&format!("s{n}"))?.end();
     }
@@ -1376,6 +1378,7 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
     assert_eq!(
         exports,
         [
+            vec!["telmoni.run.start"],
             vec!["s0", "s1"],
             vec!["execute_tool t", "execute_tool t", "execute_tool t"],
             vec!["invoke_agent claude-code"],
@@ -1491,6 +1494,7 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
         ..golden
     };
     let live = Arc::new(telmoni.run("live", RunOptions::default())?);
+    assert!(transport.wait_for(1), "the run's opening, out of the queue");
     // Room for one step beside the record's three spans.
     let stepping = Arc::clone(&live);
     *lock(&sampler.0) = Some(Box::new(move || {
@@ -1545,9 +1549,10 @@ fn a_record_goes_at_once() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let live = telmoni.run("live", RunOptions::default())?;
+    assert!(transport.wait_for(1), "the run's opening, at once");
     live.step("live step")?.end();
     telmoni.record_run(the_record()?)?;
-    assert!(transport.wait_for(2), "the record waited for the delay");
+    assert!(transport.wait_for(3), "the record waited for the delay");
     live.end();
     telmoni.shutdown();
     Ok(())

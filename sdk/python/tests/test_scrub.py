@@ -34,7 +34,8 @@ def content_on(
     mask: Callable[[str, str], str | None] | None = None,
 ) -> Telmoni:
     """A client sending content, its project's mode heard as on from an empty run."""
-    transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")]
+    # On to each export: a run's spans may leave in more than one.
+    transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 4
     client = Telmoni(
         Config(
             api_key="k",

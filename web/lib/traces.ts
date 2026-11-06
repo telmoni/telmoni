@@ -825,6 +825,7 @@ export const STATUS_LABEL: Record<SpanStatus, string> = {
 /** The word the console gives each kind of span. */
 export const KIND_LABEL: Record<SpanKind, string> = {
   [SpanKind.Run]: "Run",
+  [SpanKind.RunStart]: "Run opened",
   [SpanKind.Step]: "Step",
   [SpanKind.ModelCall]: "Model call",
   [SpanKind.ToolCall]: "Tool call",

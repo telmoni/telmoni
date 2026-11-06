@@ -1067,6 +1067,67 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
     );
 }
 
+/// A run that sent its opening and nothing more, quiet past the window, is
+/// counted open, no step needed; one whose own span followed its opening is
+/// not.
+#[sqlx::test]
+async fn a_run_with_only_its_opening_counts_as_left_open(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, project, _) = seated();
+    let state = common::state_with_console(&pool, auth, common::NoticeLog::new());
+    let app = router(state.clone());
+    let quiet = Utc::now() - TimeDelta::minutes(90);
+    let (opened, ended) = (Uuid::new_v4(), Uuid::new_v4());
+    let agent = "nightly-triage";
+    let at = |run, kind, name, when| telmoni_telemetry::store::SpanRow {
+        units: 0,
+        ..of_run(&project, run, agent, kind, name, when)
+    };
+    ch.store
+        .insert_spans(&[
+            at(opened, SpanKind::RunStart, "telmoni.run.start", quiet),
+            at(ended, SpanKind::RunStart, "telmoni.run.start", quiet),
+            of_run(
+                &project,
+                ended,
+                agent,
+                SpanKind::Run,
+                agent,
+                quiet + TimeDelta::minutes(5),
+            ),
+        ])
+        .await
+        .expect("the spans are kept");
+    let body = json!({ "name": "Stalls", "kind": "run", "measure": "stalled",
+        "aggregation": "count", "window": "hour", "operator": "gte", "alert_threshold": 1 });
+    let (status, made) = answer(
+        &app,
+        request(
+            "POST",
+            LANE,
+            "user_member",
+            &organization,
+            &project,
+            Some(&body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let rule = format!("{LANE}/{}", made["id"].as_str().expect("an id"));
+
+    assert_eq!(evaluate::pass(&state).await.expect("a pass"), 1);
+    let (_, stalls) = answer(
+        &app,
+        request("GET", &rule, "user_member", &organization, &project, None),
+    )
+    .await;
+    assert_eq!(stalls["value"], json!(1.0), "{stalls}");
+    assert_eq!(shown_by(&pool, "Stalls").await, [opened]);
+}
+
 /// ⚠ A run whose spans landed and whose own has not, quiet past the window,
 /// opens an incident showing it; one that ended, or is still going, does
 /// not; and its own span landing resolves it.

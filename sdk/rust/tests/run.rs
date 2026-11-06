@@ -493,7 +493,8 @@ fn a_failure_leaves_with_its_message_only_when_asked_and_the_project_allows() ->
                 capture_content,
                 ..keyed()
             },
-            std::iter::repeat_n(Ok(mode_on()), 2),
+            // On to each export, a run's opening its own among them.
+            std::iter::repeat_n(Ok(mode_on()), 4),
         )?;
         harness.telmoni.run("warm", RunOptions::default())?.end();
         harness.flush()?;
@@ -549,7 +550,8 @@ fn an_applications_event_leaves_only_when_asked_and_the_project_allows() -> Outc
                 capture_content,
                 ..keyed()
             },
-            std::iter::repeat_n(Ok(mode_on()), 2),
+            // On to each export, a run's opening its own among them.
+            std::iter::repeat_n(Ok(mode_on()), 4),
         )?;
         harness.telmoni.run("warm", RunOptions::default())?.end();
         harness.flush()?;
@@ -579,7 +581,8 @@ fn a_runs_own_messages_leave_only_when_asked_and_the_project_allows() -> Outcome
                 capture_content,
                 ..keyed()
             },
-            std::iter::repeat_n(Ok(mode_on()), 2),
+            // On to each export, a run's opening its own among them.
+            std::iter::repeat_n(Ok(mode_on()), 4),
         )?;
         harness.telmoni.run("warm", RunOptions::default())?.end();
         harness.flush()?;

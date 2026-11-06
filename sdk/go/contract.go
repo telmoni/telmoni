@@ -7,7 +7,10 @@ package telmoni
 
 const (
 	// scope is the instrumentation scope every span the SDK opens is under.
-	scope      = "telmoni"
+	scope = "telmoni"
+	// runStart is the span of no length a run sends as it opens, exported at
+	// once, so the run is seen before it ends.
+	runStart   = "telmoni.run.start"
 	distroName = "telemetry.distro.name"
 	distro     = "telmoni"
 

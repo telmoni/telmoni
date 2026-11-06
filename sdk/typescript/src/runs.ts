@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, createContextKey, trace } from '@opentelemetry/api';
 import type { Attributes, Context, HrTime, Span, SpanContext, Tracer } from '@opentelemetry/api';
+import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
 import { errorType, isAbort } from './errors.js';
@@ -423,6 +424,13 @@ export class Opener {
     }
     const parent = context.active();
     const span = this.#start(runSpanName(agent), parent, attributes, SpanKind.INTERNAL);
+    // The run's opening, under it and at its start: the processor sends it at
+    // once, so the run is seen open before it ends; a span not recording has none.
+    const openedAt = (span as Partial<ReadableSpan>).startTime;
+    if (openedAt !== undefined) {
+      const options = { kind: SpanKind.INTERNAL, attributes: inherited, startTime: openedAt };
+      this.#tracer.startSpan(contract.RUN_START, options, trace.setSpan(parent, span)).end(openedAt);
+    }
     return new Run(this, span, parent, runId, agent, inherited, guard);
   }
 

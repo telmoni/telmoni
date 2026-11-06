@@ -108,13 +108,15 @@ type request struct {
 
 // fakeTransport records every export and answers from a script, then with
 // kept; each upload, a PUT, apart, answered from its own script, then with a
-// 204.
+// 204. An export of run openings alone is kept apart too, answered with a bare
+// 200: whether one goes alone or with its run is a race the worker runs.
 type fakeTransport struct {
 	mu            sync.Mutex
 	received      *sync.Cond
 	fallback      scripted
 	answers       []any
 	requests      []request
+	openings      []request
 	uploadAnswers []any
 	uploads       []request
 }
@@ -131,6 +133,7 @@ func (f *fakeTransport) send(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	alone := openingsAlone(body)
 	f.mu.Lock()
 	seen := request{url: req.URL.String(), header: req.Header.Clone(), body: body}
 	var next any
@@ -140,6 +143,9 @@ func (f *fakeTransport) send(req *http.Request) (*http.Response, error) {
 		if len(f.uploadAnswers) > 0 {
 			next, f.uploadAnswers = f.uploadAnswers[0], f.uploadAnswers[1:]
 		}
+	} else if alone {
+		f.openings = append(f.openings, seen)
+		next = scripted{status: http.StatusOK, body: []byte("{}")}
 	} else {
 		f.requests = append(f.requests, seen)
 		next = f.fallback
@@ -166,9 +172,35 @@ func (f *fakeTransport) send(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
+// openingsAlone is whether an export holds spans and each is a run's opening.
+func openingsAlone(body []byte) bool {
+	var export map[string]any
+	if json.Unmarshal(body, &export) != nil {
+		return false
+	}
+	if _, traces := export["resourceSpans"].([]any); !traces {
+		return false
+	}
+	spans := spansIn(export)
+	return len(spans) > 0 && !slices.ContainsFunc(spans, func(span map[string]any) bool {
+		return span["name"] != "telmoni.run.start"
+	})
+}
+
 // waitFor is true once count requests have been received, false after
 // timeout.
 func (f *fakeTransport) waitFor(count int, timeout time.Duration) bool {
+	return f.waitUntil(func() bool { return len(f.requests) >= count }, timeout)
+}
+
+// waitForOpenings is true once count exports of openings alone have been
+// received, false after timeout.
+func (f *fakeTransport) waitForOpenings(count int, timeout time.Duration) bool {
+	return f.waitUntil(func() bool { return len(f.openings) >= count }, timeout)
+}
+
+// waitUntil is true once done, read under the lock, false after timeout.
+func (f *fakeTransport) waitUntil(done func() bool, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	// Cond has no timed wait; a broadcast at the deadline ends this one.
 	timer := time.AfterFunc(timeout, func() {
@@ -179,7 +211,7 @@ func (f *fakeTransport) waitFor(count int, timeout time.Duration) bool {
 	defer timer.Stop()
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for len(f.requests) < count {
+	for !done() {
 		if !time.Now().Before(deadline) {
 			return false
 		}
@@ -194,6 +226,12 @@ func (f *fakeTransport) all() []request {
 	return append([]request(nil), f.requests...)
 }
 
+func (f *fakeTransport) allOpenings() []request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]request(nil), f.openings...)
+}
+
 func (f *fakeTransport) allUploads() []request {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -202,8 +240,13 @@ func (f *fakeTransport) allUploads() []request {
 
 func (f *fakeTransport) bodies(t *testing.T) []map[string]any {
 	t.Helper()
+	return decoded(t, f.all())
+}
+
+func decoded(t *testing.T, requests []request) []map[string]any {
+	t.Helper()
 	var out []map[string]any
-	for _, req := range f.all() {
+	for _, req := range requests {
 		var body map[string]any
 		if err := json.Unmarshal(req.body, &body); err != nil {
 			t.Fatalf("decoding an export: %v", err)
@@ -213,11 +256,17 @@ func (f *fakeTransport) bodies(t *testing.T) []map[string]any {
 	return out
 }
 
+// spans is every span sent but each run's opening, which run-start.json's
+// test reads.
 func (f *fakeTransport) spans(t *testing.T) []map[string]any {
 	t.Helper()
 	var out []map[string]any
 	for _, body := range f.bodies(t) {
-		out = append(out, spansIn(body)...)
+		for _, span := range spansIn(body) {
+			if span["name"] != "telmoni.run.start" {
+				out = append(out, span)
+			}
+		}
 	}
 	return out
 }

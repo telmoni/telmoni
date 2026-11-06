@@ -9,6 +9,7 @@
 import type { Context } from '@opentelemetry/api';
 import type { ReadableSpan, Span, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 
+import * as contract from './contract.js';
 import { QueueFullError, ShutdownError, errorName } from './errors.js';
 import type { Exporter } from './exporter.js';
 import type { ProcessorOptions } from './types.js';
@@ -48,6 +49,8 @@ export class Processor implements SpanProcessor {
   #stage: { traceId: string; spans: ReadableSpan[] } | undefined;
   #reserved = 0;
   #dropped = 0;
+  /** A run's opening queued, which goes without waiting for the delay. */
+  #opening = false;
   #flushers: Array<() => void> = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
   #inFlight: Promise<void> | undefined;
@@ -115,6 +118,7 @@ export class Processor implements SpanProcessor {
       return;
     }
     this.#queue.push(span);
+    if (span.name === contract.RUN_START && span.parentSpanContext !== undefined) this.#opening = true;
     this.#wake(this.#due() ? 0 : this.#delayMs);
   }
 
@@ -168,11 +172,12 @@ export class Processor implements SpanProcessor {
     return this.#queue.length === 0 && this.#inFlight === undefined;
   }
 
-  /** Whether the worker should export without waiting; a record queued goes at once. */
+  /** Whether the worker should export without waiting; a record queued, or a run's opening, goes at once. */
   #due(): boolean {
     return (
       this.#down ||
       this.#flushers.length > 0 ||
+      this.#opening ||
       this.#fences.length > 0 ||
       this.#queue.length >= this.#maxBatchSize
     );
@@ -199,6 +204,8 @@ export class Processor implements SpanProcessor {
     if (this.#inFlight !== undefined || this.#givenUp) return;
     const fence = this.#fences[0];
     const batch = this.#queue.splice(0, Math.min(this.#maxBatchSize, (fence ?? Infinity) - this.#taken));
+    // One left behind by a fence or a full batch goes next.
+    this.#opening &&= this.#queue.length > 0;
     this.#taken += batch.length;
     while ((this.#fences[0] ?? Infinity) <= this.#taken) this.#fences.shift();
     const dropped = this.#dropped;

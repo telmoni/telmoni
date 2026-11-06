@@ -22,6 +22,7 @@ from multiprocessing import util as multiprocessing_util
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 
+from . import contract
 from .exporter import Exporter, warn
 from .models import WarningInfo
 
@@ -78,6 +79,8 @@ class Processor(SpanProcessor):
         self._reserved = 0
         self._dropped = 0
         self._flushing = 0
+        # A run's opening queued, which goes without waiting for the delay.
+        self._opening = False
         self._shutdown = False
         self._exporting = False
         self._thread = threading.Thread(
@@ -118,6 +121,7 @@ class Processor(SpanProcessor):
         self._reserved = 0
         self._dropped = 0
         self._flushing = 0
+        self._opening = False
         self._exporting = False
         if not self._shutdown:
             self._thread = threading.Thread(
@@ -187,7 +191,10 @@ class Processor(SpanProcessor):
                 self._dropped += 1
                 return
             self._queue.append(span)
-            if len(self._queue) >= self._max_batch_size:
+            if span.name == contract.RUN_START and span.parent is not None:
+                self._opening = True
+                self._wake.notify_all()
+            elif len(self._queue) >= self._max_batch_size:
                 self._wake.notify_all()
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
@@ -234,6 +241,8 @@ class Processor(SpanProcessor):
                 if self._fences:
                     size = min(size, self._fences[0] - self._taken)
                 batch = [self._queue.popleft() for _ in range(size)]
+                # One left behind by a fence or a full batch goes next.
+                self._opening = self._opening and bool(self._queue)
                 self._taken += size
                 while self._fences and self._fences[0] <= self._taken:
                     self._fences.popleft()
@@ -253,10 +262,11 @@ class Processor(SpanProcessor):
 
     def _due(self) -> bool:
         """Under the lock: whether the worker should export without waiting; a
-        record queued goes at once."""
+        record queued, or a run's opening, goes at once."""
         return (
             self._shutdown
             or self._flushing > 0
+            or self._opening
             or bool(self._fences)
             or len(self._queue) >= self._max_batch_size
         )

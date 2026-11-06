@@ -5,8 +5,8 @@ description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust:
 
 The SDKs record an agent's **runs**, and the **steps**, **model calls** and
 **tool calls** inside each, as OpenTelemetry spans, and send them to
-[ingest](/docs/api/ingest), and the images and files their messages carry to
-the platform beside them ([content](#content)). Each one runs a tracer provider of its own beside
+[ingest](/docs/api/ingest), and, where content is sent, the images and files
+their messages carry to the platform beside them ([content](#content)). Each one runs a tracer provider of its own beside
 whatever OpenTelemetry your application already has, sends nothing outside a
 run, and takes prompts, completions and tool payloads off every span before it
 leaves the process unless you ask and the project's content mode allows.
@@ -893,7 +893,13 @@ and session you named (`user.id`, `gen_ai.conversation.id`), the first 32
 of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`.
 Every span inside the run carries the run's id, agent, user and session, so
 Telmoni knows each span's run without waiting
-for the trace's tree. The resource every span of an export shares names the
+for the trace's tree. As the run opens, the SDK also sends its opening,
+`telmoni.run.start`, a span of no length under the run's own carrying the
+same four, at once rather than with the next batch: the trace list shows the
+run **Running** from its start, and a run that stops sending with no end is
+[left open](/docs/monitoring/alerts#loops-and-stalls) rather than unseen. It counts against no
+plan. A run continued from another service's headers sends none, nor does a
+recorded run. The resource every span of an export shares names the
 SDK (`telemetry.distro.name` `telmoni`, its version, and the OpenTelemetry
 SDK's name, language and version) and, where you set them, the deployment:
 `deployment.environment.name` from the `environment` option or
@@ -985,11 +991,12 @@ uploaded, and must answer at once, never waiting on the network. A mask that
 fails — Python's raise, TypeScript's throw, Go's and Rust's panic, or in Python
 and TypeScript an answer that is no string — sends the span without that field,
 warned once (`mask_failed`) by the key alone, never its words, which may hold
-what it was handed. It sees the content the SDK records, never a name, an id, a
-tag or an attribute your code sets on a span itself through OpenTelemetry, which
-a project keeping content keeps as [metadata
-content](/docs/monitoring/content#what-is-kept): keep a person out of those in
-your own code. No variable sets one: give it in code.
+what it was handed. It sees the content the SDK records, never a span's name, a
+tag or a user id, which are metadata kept on every project, nor an attribute
+your code sets on a span itself through OpenTelemetry, which leaves the process
+whatever `capture_content` says and which a project keeping content keeps as
+[metadata content](/docs/monitoring/content#what-is-kept): keep a person out of
+those in your own code. No variable sets one: give it in code.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">

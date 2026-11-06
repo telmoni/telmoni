@@ -46,10 +46,12 @@ type processor struct {
 	taken  int64
 	fences []int64
 	// The record being built, its trace's spans as they end, and its room.
-	stage     *stage
-	reserved  int
-	dropped   int
-	flushing  int
+	stage    *stage
+	reserved int
+	dropped  int
+	flushing int
+	// opening is a run's opening queued, which goes without waiting.
+	opening   bool
 	exporting bool
 	stopped   bool
 	// drained is closed for each Flush waiting, once the queue is empty.
@@ -137,7 +139,10 @@ func (p *processor) OnEnd(span sdktrace.ReadOnlySpan) {
 		return
 	}
 	p.queue = append(p.queue, span)
-	if len(p.queue) >= p.limits.maxBatch {
+	if span.Name() == runStart && span.Parent().IsValid() {
+		p.opening = true
+		p.signal()
+	} else if len(p.queue) >= p.limits.maxBatch {
 		p.signal()
 	}
 }
@@ -258,6 +263,8 @@ func (p *processor) work() {
 		rest := copy(p.queue, p.queue[n:])
 		clear(p.queue[rest:])
 		p.queue = p.queue[:rest]
+		// One left behind by a fence or a full batch goes next.
+		p.opening = p.opening && rest > 0
 		p.taken += int64(n)
 		for len(p.fences) > 0 && p.fences[0] <= p.taken {
 			p.fences = p.fences[1:]
@@ -295,9 +302,9 @@ func (p *processor) export(batch []sdktrace.ReadOnlySpan) {
 }
 
 // due is whether the worker should export without waiting; under the lock. A
-// record queued goes at once.
+// record queued, or a run's opening, goes at once.
 func (p *processor) due() bool {
-	return p.stopped || p.flushing > 0 || len(p.fences) > 0 || len(p.queue) >= p.limits.maxBatch
+	return p.stopped || p.flushing > 0 || p.opening || len(p.fences) > 0 || len(p.queue) >= p.limits.maxBatch
 }
 
 // release lets every Flush waiting go; under the lock.

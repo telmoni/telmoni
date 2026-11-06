@@ -445,6 +445,201 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
     assert_eq!(list(EMAIL).await["total"], 0);
 }
 
+/// A run's opening, sent alone, lists the run open with nothing counted and
+/// costs no unit; its own span closes it, and an opening sent again, or after
+/// the run ended, changes neither.
+#[sqlx::test]
+async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool) {
+    const OPENED: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f21";
+    const LATE: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f22";
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    auth.seat(
+        "user_member",
+        &organization,
+        &project,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    );
+    let app = lanes(common::state_with_stores_under(
+        &pool,
+        auth,
+        Arc::new(NoLimits),
+    ));
+    let started = Utc::now() - chrono::Duration::minutes(5);
+    let nanos = |at: chrono::DateTime<Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
+    let trace_of = |run: &str| {
+        format!(
+            "4bf92f3577b34da6a3ce929d0e0e{}",
+            run.get(32..).expect("a run id's last four")
+        )
+    };
+    let opening = |run: &str| {
+        json!({
+            "traceId": trace_of(run), "spanId": "00f067aa0ba902b8",
+            "parentSpanId": "00f067aa0ba902b7", "name": contract::RUN_START, "kind": 1,
+            "startTimeUnixNano": nanos(started), "endTimeUnixNano": nanos(started),
+            "attributes": [
+                { "key": contract::RUN_ID, "value": { "stringValue": run } },
+                { "key": contract::AGENT, "value": { "stringValue": "nightly-triage" } }
+            ]
+        })
+    };
+    let own = |run: &str| {
+        json!({
+            "traceId": trace_of(run), "spanId": "00f067aa0ba902b7",
+            "name": "invoke_agent nightly-triage", "kind": 1,
+            "startTimeUnixNano": nanos(started),
+            "endTimeUnixNano": nanos(started + chrono::Duration::seconds(2)),
+            "attributes": [
+                { "key": contract::RUN_ID, "value": { "stringValue": run } },
+                { "key": contract::AGENT, "value": { "stringValue": "nightly-triage" } },
+                { "key": contract::OPERATION, "value": { "stringValue": "invoke_agent" } }
+            ]
+        })
+    };
+    let send = |spans: Vec<Value>| {
+        let app = app.clone();
+        async move {
+            let body = json!({ "resourceSpans": [{ "scopeSpans": [{
+                "scope": { "name": contract::SCOPE }, "spans": spans
+            }]}]});
+            let answer = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(LANE)
+                        .header(header::AUTHORIZATION, format!("Bearer {INGEST_KEY}"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(body.to_string()))
+                        .expect("a request"),
+                )
+                .await
+                .expect("an answer");
+            assert_eq!(answer.status(), StatusCode::OK);
+        }
+    };
+    let listed = |run: &'static str| {
+        let app = app.clone();
+        let (organization, project) = (organization.clone(), project.clone());
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/internal/v1/telemetry/traces")
+                        .header(SERVICE_SECRET_HEADER, SECRET)
+                        .header(header::AUTHORIZATION, "Bearer tok_user_member")
+                        .header("x-organization-id", organization.as_str())
+                        .header("x-project-id", project.as_str())
+                        .body(Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("an answer");
+            assert_eq!(response.status(), StatusCode::OK);
+            let all = json_body(
+                &response
+                    .into_body()
+                    .collect()
+                    .await
+                    .expect("a body")
+                    .to_bytes(),
+            );
+            all["traces"]
+                .as_array()
+                .expect("traces")
+                .iter()
+                .find(|trace| trace["run_id"] == run)
+                .cloned()
+                .unwrap_or_else(|| panic!("{run} listed: {all}"))
+        }
+    };
+
+    send(vec![opening(OPENED)]).await;
+    let open = listed(OPENED).await;
+    assert_eq!(open["ended"], false, "{open}");
+    assert_eq!(
+        (open["spans"].as_u64(), open["steps"].as_u64()),
+        (Some(0), Some(0))
+    );
+    let only = Projects::one(project.clone());
+    let (kind, units): (String, u32) = ch
+        .store
+        .read(
+            &only,
+            "SELECT kind, units FROM telemetry.spans \
+             WHERE project_id IN {projects:Array(String)} AND name = {name:String}",
+        )
+        .param("name", contract::RUN_START)
+        .fetch_one()
+        .await
+        .expect("the opening's row");
+    assert_eq!((kind.as_str(), units), ("run_start", 0));
+
+    // The run's own span with its opening again, in a body of their own.
+    send(vec![opening(OPENED), own(OPENED)]).await;
+    let closed = listed(OPENED).await;
+    assert_eq!(closed["ended"], true, "{closed}");
+    assert_eq!(closed["status"], "ok");
+    assert_eq!(
+        (closed["spans"].as_u64(), closed["steps"].as_u64()),
+        (Some(1), Some(0))
+    );
+
+    // An opening that lands after its run ended leaves it ended.
+    send(vec![own(LATE)]).await;
+    send(vec![opening(LATE)]).await;
+    let late = listed(LATE).await;
+    assert_eq!(late["ended"], true, "{late}");
+
+    // The dashboards count the two runs' own spans and none of their three
+    // openings, from the hourly totals and from the spans alike.
+    for uri in ["/rollups?days=1", "/rollups?days=1&group=user"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/internal/v1/telemetry{uri}"))
+                    .header(SERVICE_SECRET_HEADER, SECRET)
+                    .header(header::AUTHORIZATION, "Bearer tok_user_member")
+                    .header("x-organization-id", organization.as_str())
+                    .header("x-project-id", project.as_str())
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("an answer");
+        assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        let points = json_body(
+            &response
+                .into_body()
+                .collect()
+                .await
+                .expect("a body")
+                .to_bytes(),
+        );
+        let sum = |field: &str| -> u64 {
+            points["points"]
+                .as_array()
+                .expect("points")
+                .iter()
+                .map(|point| point[field].as_u64().expect("a count"))
+                .sum()
+        };
+        assert_eq!((sum("spans"), sum("runs")), (2, 2), "{uri}: {points}");
+    }
+    assert_eq!(
+        (late["spans"].as_u64(), late["steps"].as_u64()),
+        (Some(1), Some(0))
+    );
+}
+
 #[sqlx::test]
 async fn a_key_without_the_ingest_scope_or_no_key_is_refused_in_otlp_status(pool: PgPool) {
     let lane = lane(&pool, false);

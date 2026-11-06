@@ -370,7 +370,7 @@ macro_rules! run_sums {
             "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
             "greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0) AS duration_ms, ",
             "argMinIf(time_to_first_token, started_at, kind = 'model_call') * 1000 AS time_to_first_token_ms, ",
-            "count() AS spans, countIf(kind = 'step') AS steps, ",
+            "countIf(kind != 'run_start') AS spans, countIf(kind = 'step') AS steps, ",
             "countIf(kind = 'model_call') AS model_calls, ",
             "countIf(kind = 'tool_call') AS tool_calls, ",
             "countIf(status = 'error') AS errors, ",

@@ -45,9 +45,11 @@ content dropped at the door among them.
   keep at most 2 KiB together, keys and values; one past that is dropped
   without a word.
 
-One thing on the wire is not an attribute: the instrumentation scope
+Two things on the wire are not attributes: the instrumentation scope
 `telmoni`, under which a span the conventions give no operation is a step
-rather than a plain span.
+rather than a plain span; and, under it, a span named `telmoni.run.start`, a
+run's opening, which lists the run as running until its own span lands, is
+never a step and counts against no plan.
 
 ## Telmoni's own
 

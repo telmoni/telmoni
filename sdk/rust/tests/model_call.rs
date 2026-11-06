@@ -401,7 +401,8 @@ fn a_mode_ingest_does_not_send_keeps_content_home() -> Outcome {
             capture_content: true,
             ..keyed()
         },
-        [Ok(mode_on()), Ok(sealed.clone()), Ok(sealed)],
+        // Sealed to each export after the first, a run's opening its own among them.
+        std::iter::once(Ok(mode_on())).chain(std::iter::repeat_n(Ok(sealed), 5)),
     )?;
     for _ in 0..2 {
         harness.telmoni.run("bot", RunOptions::default())?.end();
@@ -581,7 +582,8 @@ fn media_harness() -> Result<Harness, Failure> {
             api_key: Some("k".to_owned()),
             ..keyed()
         },
-        std::iter::repeat_n(Ok(mode_on()), 4),
+        // On to each export, a run's opening its own among them.
+        std::iter::repeat_n(Ok(mode_on()), 6),
     )?;
     harness.telmoni.run("warm", RunOptions::default())?.end();
     harness.flush()?;

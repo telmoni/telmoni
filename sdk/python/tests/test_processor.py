@@ -28,6 +28,8 @@ def test_the_queue_is_bounded_and_drops_are_counted_once(
     processor = client.processor
     try:
         with client.run("bot"):
+            # The run's opening goes at once; the queue is filled after it.
+            assert transport.wait_for_openings(1)
             for n in range(5):
                 with client.step(f"s{n}"):
                     pass
@@ -196,9 +198,10 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
     def transport(
         method: str, url: str, headers: Mapping[str, str], body: bytes
     ) -> Answer:
-        # The child's export, seen by the parent through a file.
+        # The child's exports, seen by the parent through a file; its run's
+        # opening may leave in one of its own.
         with sent.open("ab") as file:
-            file.write(b"export\n")
+            file.write(body)
         return kept()
 
     parent = Telmoni(Config(api_key="k"), transport=transport)
@@ -218,7 +221,7 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
         child.join(60)
         assert child.exitcode == 0
         assert sent.is_file(), "the child's queue was lost as it exited"
-        assert sent.read_bytes() == b"export\n"
+        assert sent.read_bytes().count(b'"invoke_agent bot"') == 1
     finally:
         parent.shutdown()
 

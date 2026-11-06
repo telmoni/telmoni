@@ -124,9 +124,15 @@ impl FakeTransport {
             .collect()
     }
 
-    /// Every span received, in the order it was sent.
+    /// Every span received, in the order it was sent, but each run's opening,
+    /// which `run-start.json`'s test reads from the bodies.
     pub(crate) fn spans(&self) -> Result<Vec<Value>, Failure> {
-        Ok(self.bodies()?.iter().flat_map(spans_of).collect())
+        Ok(self
+            .bodies()?
+            .iter()
+            .flat_map(spans_of)
+            .filter(|span| name_of(span) != "telmoni.run.start")
+            .collect())
     }
 
     /// Everything received, as text: what a "never sent" check looks through.

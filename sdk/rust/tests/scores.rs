@@ -418,7 +418,8 @@ fn an_evaluation_events_explanation_stays_content() -> Outcome {
         keys,
         ["gen_ai.evaluation.name", "gen_ai.evaluation.score.value"]
     );
-    assert!(!harness.transport.text().contains("4242"));
+    // With its space, so no id's or clock's digits match it.
+    assert!(!harness.transport.text().contains("4242 "));
     Ok(())
 }
 

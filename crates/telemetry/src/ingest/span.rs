@@ -273,6 +273,9 @@ pub fn map(
         .and_then(contract::kind_of_operation)
     {
         Some(kind) => kind,
+        None if context.scope == contract::SCOPE && span.name == contract::RUN_START => {
+            SpanKind::RunStart
+        }
         None if context.scope == contract::SCOPE => SpanKind::Step,
         None => SpanKind::Span,
     };
@@ -289,7 +292,9 @@ pub fn map(
                 }
             }),
         SpanKind::ToolCall => fields.tool_name.take().unwrap_or_else(|| span.name.clone()),
-        SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => span.name.clone(),
+        SpanKind::RunStart | SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => {
+            span.name.clone()
+        }
     };
     if name.is_empty() {
         return Err(refuse(Refusal::Invalid("name")));
@@ -365,9 +370,13 @@ pub fn map(
 
 /// What a row counts against its plan: one unit per started KiB of its text
 /// as kept, and [`SPAN_FIXED_BYTES`] for its ids, times and counts — the ids
-/// counted there alone, never again as text.
+/// counted there alone, never again as text. A run's opening costs none: its
+/// run's own span is what the run costs.
 #[must_use]
 pub fn units_of(row: &SpanRow) -> u32 {
+    if row.kind == SpanKind::RunStart {
+        return 0;
+    }
     let text = [
         &row.agent,
         &row.name,

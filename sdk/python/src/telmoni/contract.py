@@ -12,6 +12,9 @@ from __future__ import annotations
 
 SCOPE = "telmoni"
 """The instrumentation scope every span the SDK opens is under."""
+RUN_START = "telmoni.run.start"
+"""The span of no length a run sends as it opens, exported at once, so the
+run is seen before it ends."""
 DISTRO_NAME = "telemetry.distro.name"
 DISTRO = "telmoni"
 RUN_ID = "telmoni.run_id"

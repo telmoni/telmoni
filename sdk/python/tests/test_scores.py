@@ -48,7 +48,7 @@ def posted(transport: FakeTransport) -> list[tuple[dict[str, str], dict[str, Any
 
 
 def exported(transport: FakeTransport) -> list[dict[str, Any]]:
-    """Every span of every OTLP export."""
+    """Every span of every OTLP export but a run's opening."""
     return [
         span
         for url, _headers, body in transport.requests
@@ -56,6 +56,7 @@ def exported(transport: FakeTransport) -> list[dict[str, Any]]:
         for resource_spans in json.loads(body)["resourceSpans"]
         for scope_spans in resource_spans["scopeSpans"]
         for span in scope_spans["spans"]
+        if span["name"] != "telmoni.run.start"
     ]
 
 
@@ -237,7 +238,8 @@ def test_an_evaluation_events_other_attributes_are_content() -> None:
         contract.EVALUATION_NAME,
         contract.EVALUATION_VALUE,
     }
-    assert "4242" not in str(transport.requests)
+    # With its space: the bare digits can fall in an id or a time by chance.
+    assert "4242 " not in str(transport.requests)
 
 
 def test_a_refused_post_is_warned_once_and_never_retried(

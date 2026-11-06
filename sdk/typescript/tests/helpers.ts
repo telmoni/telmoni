@@ -176,9 +176,12 @@ export class FakeTransport {
     return this.requests.map((request) => JSON.parse(request.body) as ExportBody);
   }
 
+  /** Every span sent but each run's opening, which `run-start.json`'s test reads from the bodies. */
   spans(): JsonSpan[] {
     return this.bodies().flatMap((body) =>
-      body.resourceSpans.flatMap((resourceSpans) => resourceSpans.scopeSpans.flatMap((scopeSpans) => scopeSpans.spans)),
+      body.resourceSpans.flatMap((resourceSpans) =>
+        resourceSpans.scopeSpans.flatMap((scopeSpans) => scopeSpans.spans.filter((span) => span.name !== 'telmoni.run.start')),
+      ),
     );
   }
 

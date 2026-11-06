@@ -33,6 +33,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar
 
 from opentelemetry import context, trace
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import (
     NonRecordingSpan,
     Span,
@@ -542,6 +543,13 @@ class Opener:
         parent = context.get_current()
         span = self._start(name, parent, attributes, SpanKind.INTERNAL)
         ctx = trace.set_span_in_context(span, parent)
+        # The run's opening, under it and at its start: the processor sends
+        # it at once, so the run is seen open before it ends.
+        opened_at = span.start_time if isinstance(span, ReadableSpan) else None
+        start = self._start(
+            contract.RUN_START, ctx, inherited, SpanKind.INTERNAL, opened_at
+        )
+        start.end(end_time=opened_at)
         run = Run(
             self._client,
             span,

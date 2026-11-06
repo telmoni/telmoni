@@ -13,10 +13,11 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use opentelemetry::Context;
-use opentelemetry::trace::TraceId;
+use opentelemetry::trace::{SpanId, TraceId};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{Span, SpanData, SpanProcessor};
 
+use crate::contract;
 use crate::error::Error;
 use crate::exporter::Exporter;
 use crate::lock;
@@ -73,6 +74,8 @@ struct State {
     stage: Option<Stage>,
     dropped: usize,
     flushing: usize,
+    /// A run's opening queued, which goes without waiting for the delay.
+    opening: bool,
     exporting: bool,
     life: Life,
 }
@@ -199,9 +202,15 @@ impl SpanProcessor for Processor {
             state.dropped += 1;
             return;
         }
+        let opening = span.name == contract::RUN_START && span.parent_span_id != SpanId::INVALID;
         state.queue.push_back(span);
-        // The first span wakes the idle worker, a full batch a waiting one.
-        if state.queue.len() == 1 || state.queue.len() >= self.shared.batching.max_batch_size {
+        state.opening |= opening;
+        // The first span wakes the idle worker, a full batch or an opening a
+        // waiting one.
+        if opening
+            || state.queue.len() == 1
+            || state.queue.len() >= self.shared.batching.max_batch_size
+        {
             self.shared.wake.notify_all();
         }
     }
@@ -268,6 +277,8 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
                 size = size.min(usize::try_from(room).unwrap_or(usize::MAX));
             }
             let batch: Vec<SpanData> = state.queue.drain(..size).collect();
+            // One left behind by a fence or a full batch goes next.
+            state.opening &= !state.queue.is_empty();
             state.taken += count(size);
             while state
                 .fences
@@ -304,10 +315,11 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
 }
 
 /// Under the lock: whether the worker should export without waiting; a
-/// record queued goes at once.
+/// record queued, or a run's opening, goes at once.
 fn due(state: &State, batching: &Batching) -> bool {
     state.life != Life::Running
         || state.flushing > 0
+        || state.opening
         || !state.fences.is_empty()
         || state.queue.len() >= batching.max_batch_size
 }

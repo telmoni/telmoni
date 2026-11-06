@@ -764,7 +764,11 @@ func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// Two steps hold two of the four slots.
+	// The run's opening leaves the queue at once; two steps hold two of the
+	// four slots.
+	if !h.transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	for n := range 2 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
@@ -858,6 +862,10 @@ func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// The run's opening goes alone, before the steps.
+	if !h.transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	for n := range 2 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
@@ -933,7 +941,11 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
 	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
-	// Room for one step beside the record's three spans.
+	// The run's opening out of the queue: room for one step beside the
+	// record's three spans.
+	if !h.transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	sampler.hook = func() {
 		for n := range 2 {
 			_, step := live.Step(ctx, fmt.Sprintf("s%d", n))

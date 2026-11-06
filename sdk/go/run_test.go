@@ -416,7 +416,7 @@ func TestNothingIsSentOutsideARun(t *testing.T) {
 	none.Cancel()
 	none.End()
 	h.flush()
-	if sent := len(h.transport.all()); sent != 0 {
+	if sent := len(h.transport.all()) + len(h.transport.allOpenings()); sent != 0 {
 		t.Errorf("sent %d exports outside a run", sent)
 	}
 }
@@ -434,7 +434,7 @@ func TestABlankAgentOpensNoRunAndNeverPanics(t *testing.T) {
 	run.Fail(errors.New("x"))
 	run.End()
 	h.flush()
-	if sent := len(h.transport.all()); sent != 0 {
+	if sent := len(h.transport.all()) + len(h.transport.allOpenings()); sent != 0 {
 		t.Errorf("a run that did not open sent %d exports", sent)
 	}
 	if run.ID() != "" || telmoni.RunFromContext(ctx) != nil {

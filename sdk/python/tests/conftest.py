@@ -43,12 +43,30 @@ def kept() -> Answer:
     return answer_from(load_fixture("answers/kept.json"))
 
 
+def _openings_alone(body: bytes) -> bool:
+    """Whether an export holds spans, and every one a run's opening."""
+    try:
+        names = [
+            span["name"]
+            for resource_spans in json.loads(body)["resourceSpans"]
+            for scope_spans in resource_spans["scopeSpans"]
+            for span in scope_spans["spans"]
+        ]
+    except (ValueError, KeyError, TypeError):
+        return False
+    return bool(names) and all(name == "telmoni.run.start" for name in names)
+
+
 class FakeTransport:
     """Records every export and answers from a script, then with `kept`; each
-    upload, a `PUT`, apart, answered from its own script, then with a 204."""
+    upload, a `PUT`, apart, answered from its own script, then with a 204. An
+    export of runs' openings alone, which goes whenever the worker wakes, is
+    kept apart too and answered naming no mode, so the counts and scripts
+    hold however the openings travel."""
 
     def __init__(self, answers: list[Answer | Exception] | None = None) -> None:
         self.requests: list[tuple[str, dict[str, str], bytes]] = []
+        self.openings: list[dict[str, Any]] = []
         self.answers = list(answers or [])
         self.uploads: list[tuple[str, dict[str, str], bytes]] = []
         self.upload_answers: list[Answer | Exception] = []
@@ -66,6 +84,9 @@ class FakeTransport:
                     if self.upload_answers
                     else Answer(204, {}, b"")
                 )
+            elif _openings_alone(body):
+                self.openings.append(json.loads(body))
+                answer = Answer(200, {}, b"{}")
             else:
                 assert method == "POST"
                 self.requests.append((url, dict(headers), body))
@@ -79,17 +100,24 @@ class FakeTransport:
         with self._lock:
             return self._received.wait_for(lambda: len(self.requests) >= count, timeout)
 
+    def wait_for_openings(self, count: int, timeout: float = 5.0) -> bool:
+        with self._lock:
+            return self._received.wait_for(lambda: len(self.openings) >= count, timeout)
+
     def bodies(self) -> list[dict[str, Any]]:
         with self._lock:
             return [json.loads(body) for _, _, body in self.requests]
 
     def spans(self) -> list[dict[str, Any]]:
+        """Every span sent but each run's opening, which ``run-start.json``'s
+        test reads from the bodies."""
         return [
             span
             for body in self.bodies()
             for resource_spans in body["resourceSpans"]
             for scope_spans in resource_spans["scopeSpans"]
             for span in scope_spans["spans"]
+            if span["name"] != "telmoni.run.start"
         ]
 
 

@@ -330,6 +330,10 @@ func TestScoresPastAHundredGoInBodiesOfAHundred(t *testing.T) {
 		h.client.Score(telmoni.ScoreTarget{SessionID: "conv-1"}, "relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
 	}
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// The opening apart, the run's own export holds no carrier.
+	if !h.transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	run.End()
 	h.flush()
 	var sizes []int

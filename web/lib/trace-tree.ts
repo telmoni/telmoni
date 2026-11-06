@@ -29,7 +29,12 @@ export type SpanNode = {
  *  sampled out or still on its way — stands at the top, as does one caught
  *  in a cycle, which only a hand-written export can draw: it would otherwise
  *  be under nothing and drawn nowhere. */
-export function spanTree(spans: readonly TraceSpan[]): SpanNode[] {
+export function spanTree(all: readonly TraceSpan[]): SpanNode[] {
+  // A run's opening stands in for it until its own span lands, then is the
+  // run's and drawn no more.
+  const spans = all.some((s) => s.kind === SpanKind.Run)
+    ? all.filter((s) => s.kind !== SpanKind.RunStart)
+    : all;
   // Each start read once, not at every comparison: a run holds thousands.
   const start = new Map(spans.map((s) => [s.span_id, Date.parse(s.started_at)]));
   const byStart = (a: TraceSpan, b: TraceSpan) =>

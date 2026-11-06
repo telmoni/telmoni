@@ -20,6 +20,14 @@ The content the scenario hands the model call (`gen_ai.input.messages`, `gen_ai.
 
 Every request carries `Telmoni-Sent-At`, the SDK's clock as the attempt leaves, in decimal nanoseconds since the Unix epoch, stamped anew on each attempt, by which ingest moves an export from a clock a zone or a date out.
 
+## `run-start.json`
+
+A run is seen from its start, not only from its end. `scenario` opens a run of `run` and holds it open, on a client whose batch waits `schedule_delay_ms`, far past the test, and that names its deployment by `environment` and `release`. Before the run ends, within `sent_within_ms`, exactly one body has been sent, holding one span: `first_export`, after `run.json`'s normalization, but for its parent, `<span:run>`, the run's own span, which is not in it. The span is of no length: its start and end are the same instant.
+
+The suite then ends the run, flushes, and checks the run's own span, `invoke_agent <agent>`: its `spanId` is the start's `parentSpanId`, its `startTimeUnixNano` the start's, and its `telmoni.run_id` the start's.
+
+No other run sends one: a run continued from another service's headers sends nothing of its own, and a recorded run sends exactly `recorded.json`.
+
 ## `recorded.json`
 
 `scenario.record` is a run that has already ended, handed whole to `record_run` (`recordRun`, `RecordRun`): its id, its agent, user, session and tags, its times, and what ran inside it, a step holding its own calls and a step of its own, whose model call names its reasoning effort, sent as `gen_ai.request.reasoning.level` whatever the content mode, and holds its input messages, content the export lacks, as `capture_content` is off. Times are RFC 3339 in UTC, to the millisecond, which every language holds exactly. `export` is the one body the SDK must send for it: a record travels in a single export when it holds no more spans than a batch, each span as it ended — a step after what it holds — and the run's own last.

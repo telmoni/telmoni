@@ -122,6 +122,21 @@
                   { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:telmoni.run.start>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "telmoni.run.start",
+                "kind": 1,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
               }
             ]
           }

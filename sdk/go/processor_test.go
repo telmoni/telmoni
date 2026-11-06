@@ -21,6 +21,10 @@ func TestTheQueueIsBoundedAndDropsAreCountedOnce(t *testing.T) {
 	// A queue of two, and a worker that will not wake until flushed.
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2, 100, time.Minute))
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// The run's opening goes at once; the queue is filled after it.
+	if !h.transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	for n := range 5 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
@@ -138,6 +142,9 @@ func TestAClientDroppedWithoutShutdownSendsWhatItQueued(t *testing.T) {
 func TestABatchFillsAndGoesWithoutAFlush(t *testing.T) {
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2048, 3, time.Minute))
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	if !h.transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	for n := range 3 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
@@ -221,6 +228,10 @@ func TestAHookThatPanicsDoesNotStopTheExporter(t *testing.T) {
 		telmoni.WithBatching(1, 100, time.Minute),
 	)
 	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// Each run's opening leaves the queue of one before anything else ends.
+	if !transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	for n := range 3 {
 		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
@@ -229,6 +240,9 @@ func TestAHookThatPanicsDoesNotStopTheExporter(t *testing.T) {
 	h.flush()
 	// The worker is alive: a run after the panic is sent.
 	_, again := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	if !transport.waitForOpenings(2, waitTimeout) {
+		t.Fatal("the second run's opening was not sent at once")
+	}
 	again.End()
 	h.flush()
 	want := []string{"invoke_agent bot", "s0"}
@@ -243,12 +257,16 @@ func TestATransportThatPanicsLosesOnlyItsBatch(t *testing.T) {
 	transport := newFakeTransport(t)
 	var sends atomic.Int32
 	h := newHarness(t, testConfig(), transport, telmoni.WithTransport(func(req *http.Request) (*http.Response, error) {
-		if sends.Add(1) == 1 {
+		if sends.Add(1) == 2 {
 			panic("the transport broke")
 		}
 		return transport.send(req)
 	}))
 	_, lost := h.client.Run(context.Background(), "lost", telmoni.RunOptions{})
+	// The opening goes first, so the panic meets the run's own export.
+	if !transport.waitForOpenings(1, waitTimeout) {
+		t.Fatal("the run's opening was not sent at once")
+	}
 	lost.End()
 	h.flush()
 	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})

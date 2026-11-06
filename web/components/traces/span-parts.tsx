@@ -1,4 +1,4 @@
-import { Footprints, ListTree, MoveHorizontal, Sparkles, Wrench, type LucideIcon } from "lucide-react";
+import { Footprints, ListTree, MoveHorizontal, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 
 import type { TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
  *  call as the sparkle every AI surface uses, a tool as its wrench. */
 const KIND_ICON: Record<SpanKind, LucideIcon> = {
   [SpanKind.Run]: ListTree,
+  [SpanKind.RunStart]: Play,
   [SpanKind.Step]: Footprints,
   [SpanKind.ModelCall]: Sparkles,
   [SpanKind.ToolCall]: Wrench,

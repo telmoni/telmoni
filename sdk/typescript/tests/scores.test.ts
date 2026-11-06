@@ -405,7 +405,7 @@ describe('a late score', () => {
       await h.telmoni.shutdown();
     }
     expect(h.transport.requests.map((request) => new URL(request.url).pathname)).toEqual(['/v1/scores', '/otlp/v1/traces']);
-    expect(exportsIn(h).map((span) => span.name)).toEqual(['invoke_agent bot']);
+    expect(exportsIn(h).map((span) => span.name), 'no carrier among them').toEqual(['telmoni.run.start', 'invoke_agent bot']);
     expect(h.transport.requests[1]!.body).not.toContain('telmoni.score');
   });
 

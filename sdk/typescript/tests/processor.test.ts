@@ -7,8 +7,9 @@ describe('the processor', () => {
     // A tiny queue, and a worker that will not wake until flushed.
     const h = harness({}, { processor: { maxQueueSize: 2, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
     try {
-      // Nothing yields inside the run, so the worker cannot run before the queue fills.
-      h.telmoni.run('bot', (run) => {
+      await h.telmoni.run('bot', async (run) => {
+        // The run's opening goes at once; nothing yields after it, so the queue fills before the worker runs.
+        expect(await h.transport.waitFor(1)).toBe(true);
         for (let n = 0; n < 5; n++) run.step(`s${n}`, () => {});
       });
       expect(await h.telmoni.flush()).toBe(true);
@@ -59,8 +60,9 @@ describe('the processor', () => {
     const h = harness({}, { processor: { maxBatchSize: 3, scheduleDelaySeconds: 60 } });
     try {
       await h.telmoni.run('bot', async (run) => {
+        expect(await h.transport.waitFor(1), "the run's opening, at once").toBe(true);
         for (let n = 0; n < 3; n++) run.step(`s${n}`, () => {});
-        expect(await h.transport.waitFor(1), 'three steps fill a batch of three').toBe(true);
+        expect(await h.transport.waitFor(2), 'three steps fill a batch of three').toBe(true);
         expect(h.transport.spans().map((span) => span.name)).toEqual(['s0', 's1', 's2']);
       });
     } finally {
