@@ -176,21 +176,22 @@ async fn stored_slug(pool: &PgPool, organization: &str) -> String {
         .expect("read the slug back")
 }
 
-/// An organization is provisioned at the first free slug its name reads as,
-/// never another organization's: two people who gave no name are both "My
-/// organization", and the second takes the next number.
+/// An organization is provisioned at its name, or once that is taken at the
+/// name with a random tail, never a number: two people whose addresses begin
+/// alike each get a URL of their own.
 #[sqlx::test]
 async fn provisioning_gives_the_organization_its_url(pool: PgPool) {
     apply_audit_migrations(&pool).await;
 
-    let first = sign_in(&pool, "usr_slug_first", "first@example.test").await;
-    let second = sign_in(&pool, "usr_slug_second", "second@example.test").await;
-    assert_eq!(stored_slug(&pool, &first).await, "my-organization");
-    assert_eq!(
+    let first = sign_in(&pool, "usr_slug_first", "ada@example.test").await;
+    let second = sign_in(&pool, "usr_slug_second", "ada@elsewhere.test").await;
+    let (first, second) = (
+        stored_slug(&pool, &first).await,
         stored_slug(&pool, &second).await,
-        "my-organization-2",
-        "took the first organization's slug"
     );
+    assert_eq!(first, "ada");
+    let tail = second.strip_prefix("ada-").unwrap_or_default();
+    assert_eq!(tail.len(), 6, "{second}");
 }
 
 /// ⚠ **A rename moves no URL.** The name and the URL are two settings: every
@@ -396,7 +397,7 @@ async fn a_stranger_cannot_rename_an_organization_they_have_no_row_in(pool: PgPo
         "Untouched",
         "a stranger's forged x-organization-id renamed somebody else's organization",
     );
-    assert_eq!(stored_name(&pool, &strangers_own).await, "My organization");
+    assert_eq!(stored_name(&pool, &strangers_own).await, "stranger");
 }
 
 /// The header pair decides: a stranger naming their OWN organization renames
@@ -413,7 +414,7 @@ async fn the_refusals_are_the_membership_check_and_not_a_dead_fixture(pool: PgPo
     let (status, _) = rename(&pool, other, &others, "Their Own").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(stored_name(&pool, &others).await, "Their Own");
-    assert_eq!(stored_name(&pool, &owners).await, "My organization");
+    assert_eq!(stored_name(&pool, &owners).await, "ctl-owner");
 }
 
 /// An organization on its way out takes no new name: a 404, not a silent no-op.

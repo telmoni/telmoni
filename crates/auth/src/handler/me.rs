@@ -192,7 +192,7 @@ pub(crate) async fn answer(
         false
     } else {
         matches!(
-            provision_first_organization(state, &user_id, person.display_name.as_deref()).await?,
+            provision_first_organization(state, &user_id, &person.email).await?,
             Provisioning::Provisioned
         )
     };
@@ -342,10 +342,10 @@ enum Provisioning {
 /// Give a person who belongs to no active organization one of their own: the
 /// organization and their owner row, audited, in one transaction
 /// ([`found_organization`], as an organization asked for is made). It is named
-/// after them ([`crate::identity::default_organization`]), from the
-/// `display_name` `/me` has just read, and goes by the first free slug that
-/// name gives, so the console opens straight onto it; the owner renames it, or
-/// moves its URL, on Settings. It has no project until somebody makes one.
+/// after the part of their address before the `@`
+/// ([`crate::identity::default_organization`]), and goes by the first free slug
+/// that name gives, so the console opens straight onto it; the owner renames
+/// it, or moves its URL, on Settings. It has no project until somebody makes one.
 ///
 /// ⚠ **Serialised on the person, and re-checked under the lock.** Two
 /// concurrent first renders would otherwise each see "no organization" and
@@ -355,7 +355,7 @@ enum Provisioning {
 async fn provision_first_organization(
     state: &AppState,
     user_id: &UserId,
-    display_name: Option<&str>,
+    email: &Email,
 ) -> Result<Provisioning, TelmoniError> {
     // Off is not a refusal here — the person still signs in, to an answer
     // with no organization — because their invitations and their account's
@@ -365,7 +365,7 @@ async fn provision_first_organization(
     }
     // ⚠ MINTED: an organization is nobody's id.
     let organization = OrganizationId::new();
-    let (name, candidates) = crate::identity::default_organization(display_name);
+    let (name, candidates) = crate::identity::default_organization(email);
     let url = NewUrl::Derived(free_url(state, &organization, &candidates).await?);
 
     let mut tx = person_scope(&state.db, user_id).await?;

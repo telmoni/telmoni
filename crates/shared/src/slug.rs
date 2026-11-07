@@ -311,8 +311,12 @@ fn reads_as(word: &str, blocked: &str) -> bool {
 /// "Web_App"), so a handful is plenty for its projects.
 const NUMBERED: u32 = 20;
 
-/// How long the random tail is on an organization's last candidate.
+/// How long the random tail is on an organization's candidates.
 const TAIL_LEN: usize = 6;
+
+/// How many tails an organization's name is tried with once the name itself
+/// is taken: one is free all but always, the rest cover the odd collision.
+const TAILS: usize = 3;
 
 /// The namespace a slug is minted in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -551,14 +555,16 @@ pub fn slugify(name: &str) -> Option<Slug> {
     (!slug.is_empty()).then(|| Slug::from_trusted(slug))
 }
 
-/// The slugs a row called `name` may take, best first: the name's own, then
-/// numbered from `-2`. The caller writes the first no other row in `scope`
-/// holds. Empty when the name gives no slug, or only one that [`offends`]:
-/// numbering a blocked word does not unblock it.
+/// The slugs a row called `name` may take, best first; the caller writes the
+/// first no other row in `scope` holds. Empty when the name gives no slug, or
+/// only one that [`offends`]: suffixing a blocked word does not unblock it.
 ///
-/// An organization's end with the name and a random tail. Its namespace is
-/// everybody's, so the numbers of a common name ("Personal", "Test") run out,
-/// and the slug should still read as the name it follows.
+/// A project's are the name's own, then numbered from `-2`: its namespace is
+/// its organization's, whose members see every project anyway.
+///
+/// An organization's are the name's own, then the name with a random tail,
+/// never a number. Its namespace is everybody's: a `-2` would tell a stranger
+/// how many others hold the name.
 #[must_use]
 pub fn candidates(scope: Scope, name: &str) -> Vec<Slug> {
     let Some(base) = slugify(name) else {
@@ -571,13 +577,15 @@ pub fn candidates(scope: Scope, name: &str) -> Vec<Slug> {
         return Vec::new();
     }
     let base = base.into_inner();
-    let tail = match scope {
-        Scope::Organization => Some(suffixed(&base, &random(TAIL_LEN))),
-        Scope::Project => None,
+    let all: Vec<String> = match scope {
+        Scope::Organization => std::iter::once(base.clone())
+            .chain((0..TAILS).map(|_| suffixed(&base, &random(TAIL_LEN))))
+            .collect(),
+        Scope::Project => std::iter::once(base.clone())
+            .chain((2..=NUMBERED).map(|n| suffixed(&base, &n.to_string())))
+            .collect(),
     };
-    std::iter::once(base.clone())
-        .chain((2..=NUMBERED).map(|n| suffixed(&base, &n.to_string())))
-        .chain(tail)
+    all.into_iter()
         .filter(|slug| !scope.reserves(slug) && !offends(slug))
         .map(Slug::from_trusted)
         .collect()
@@ -777,9 +785,12 @@ mod tests {
     }
 
     #[test]
-    fn an_organization_skips_a_reserved_word_but_not_its_numbers() {
+    fn a_reserved_word_is_never_an_organizations_slug() {
         let all = candidates(Scope::Organization, "Account");
-        assert_eq!(all.first().map(Slug::as_str), Some("account-2"));
+        assert!(
+            all.iter().all(|s| s.as_str().starts_with("account-")),
+            "{all:?}"
+        );
         assert_eq!(
             candidates(Scope::Project, "Account")
                 .first()
@@ -803,23 +814,24 @@ mod tests {
         );
     }
 
-    // Twenty organizations called "Personal" is a Tuesday. The twenty-first
-    // still gets a slug that reads as its name.
+    // After the name itself, each reads as the name with a random tail, so
+    // none says how many others hold the name.
     #[test]
-    fn an_organizations_candidates_end_with_the_name_and_a_random_tail() {
+    fn an_organizations_candidates_are_the_name_then_random_tails() {
         let all = candidates(Scope::Organization, "Personal");
-        assert_eq!(all.len(), 21);
-        assert_eq!(all.get(19).map(Slug::as_str), Some("personal-20"));
-        let last = all.last().unwrap();
-        let tail = last.as_str().strip_prefix("personal-").unwrap();
-        assert_eq!(tail.len(), TAIL_LEN);
-        assert!(
-            is_slug(last.as_str()) && !Scope::Organization.reserves(last.as_str()),
-            "{last}"
-        );
+        assert_eq!(all.len(), TAILS + 1);
+        assert_eq!(all.first().map(Slug::as_str), Some("personal"));
+        let tails = all.get(1..).unwrap();
+        for slug in tails {
+            let tail = slug.as_str().strip_prefix("personal-").unwrap();
+            assert_eq!(tail.len(), TAIL_LEN, "{slug}");
+            assert!(is_slug(slug.as_str()), "{slug}");
+        }
         assert_ne!(
-            candidates(Scope::Organization, "Personal").last(),
-            Some(last)
+            candidates(Scope::Organization, "Personal")
+                .get(1..)
+                .unwrap(),
+            tails
         );
 
         let long = candidates(Scope::Organization, &"c".repeat(90));

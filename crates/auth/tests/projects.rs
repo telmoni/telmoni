@@ -1217,7 +1217,7 @@ async fn every_everywhere_row_names_its_organization(pool: PgPool) {
     assert_eq!(rows[0]["organizationId"], organization);
     assert_eq!(rows[0]["organizationName"], "Acme");
     // The slug it was provisioned at, which a rename does not move.
-    assert_eq!(rows[0]["organizationSlug"], "my-organization");
+    assert_eq!(rows[0]["organizationSlug"], "everywhere-named");
     assert_eq!(rows[0]["role"], "owner");
     assert!(
         !body.to_string().contains("everywhere-named@example.test"),

@@ -19,9 +19,9 @@ member and a project, or one with many members across multiple projects.
 
 When you first sign in, Telmoni provisions **an Organization**, with you as
 its **Owner** (see [Signing in](/docs/getting-started/sign-in) for the switch an
-operator can turn this off with). It arrives named after the first word of
-your name ("Ada's organization"), or "My organization" when your account has
-no name; [Signing in](/docs/getting-started/sign-in#what-your-first-sign-in-creates)
+operator can turn this off with). It arrives named the part of your email
+address before the `@` ("ada" for `ada@acme.com`);
+[Signing in](/docs/getting-started/sign-in#what-your-first-sign-in-creates)
 says where the name comes from. The name is what everyone in it sees, and its
 URL follows from it (see [Name and URL](#name-and-url)). Nothing is asked
 first: you can change both in **Settings** whenever you like.
@@ -107,12 +107,12 @@ slug its addresses begin with. They are two settings.
   most 48 characters long.
 - **A new organization starts with a URL.** You can give one when you [create
   the organization](#creating-an-organization); otherwise it is derived from
-  the name it is created with: accents fold and apostrophes
-  drop, so "Zoë's organization" becomes `zoes-organization`, and "My
-  organization" `my-organization`. A URL already in use gets a number, up to `-20`
-  (`zoes-organization-2`); past that it ends in six random characters
-  (`zoes-organization-k3x9qz`). When the first word of your name has no Latin
-  letter or digit ("李明's organization"), the organization gets a placeholder
+  the name it is created with: accents fold and apostrophes drop, so "Zoë's
+  organization" becomes `zoes-organization`. When another organization
+  already holds that, or it is a word the console uses, six random characters
+  go on the end (`zoes-organization-k3x9qz`), never a number, so a URL never
+  says how many others hold the name. When the part of your address before the `@` has no Latin letter or
+  digit ("李明"), the organization gets a placeholder
   (`org-` and ten random characters) until you choose a URL. So does a name
   whose URL would hold profanity or a slur, which no URL may: the name itself
   is kept as given.
@@ -254,10 +254,13 @@ An organization Owner or Admin can create a new project from the organization's
 
 A self-hosted organization holds as many projects as you make. A deployment
 that sells plans may hold each organization to a number of projects, its
-plan's: past it the panel says how many the plan holds and, where the
-deployment names a support address, who to write to for more. A project
-moved or transferred into an organization is held to the same number, and an
-organization already past it keeps every project it holds.
+plan's. At it, the panel offers the plans that hold more: you choose one, pay
+on the next step where the plan needs a card, and the project, with content
+off, is created once the payment is confirmed. Where no plan holds more, the
+panel says how many the plan holds, and creates nothing. A project moved or
+transferred into an organization is held to the same number, and an
+organization already past it keeps every project it holds. On the hosted
+service, see [Projects](https://telmoni.com/docs/workspace/billing#projects).
 
 ### Renaming a project
 

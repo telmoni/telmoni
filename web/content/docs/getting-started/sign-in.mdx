@@ -119,11 +119,12 @@ See the [Telmoni CLI guide](/docs/api/cli) for full command reference and headle
 
 The first time you sign in, Telmoni provisions **an Organization**, seating
 your account as its **Owner** (unless the operator has switched new
-organizations off; see below). It is named after the first word of your name,
-"Ada's organization" for Ada Lovelace, or "My organization" when your account
-has no name; nothing is taken from your email address. The name is what
-everyone in the organization sees, and its URL is derived from it once
-(`adas-organization`; see [Name and
+organizations off; see below). It is named the part of your email address
+before the `@`, less any `+tag`: "ada" for `ada@acme.com`, and the same for
+`ada+test@gmail.com`. The domain is never used. The name is what
+everyone in the organization sees, and its URL is derived from it once:
+`/ada`, or with six random characters after it when another organization
+already holds that (`/ada-k3x9qz`; see [Name and
 URL](/docs/workspace/organizations-and-projects#name-and-url)). Nothing is asked
 first: you can rename the organization, or change its URL, on its
 **Settings** page whenever you like.
@@ -133,10 +134,11 @@ first and last name on your profile at its identity provider. On a self-hosted
 deployment, it is the first and last name you gave the sign-up form, or the
 given and family names your OpenID Connect provider sends, or its `name` claim
 when it sends neither (as Microsoft Entra ID does until its optional claims are
-configured). The administrator
-a deployment seeds from `ADMIN_EMAIL` has no name, so their organization is
-"My organization", at `/my-organization` unless another organization already
-holds that URL.
+configured). It is what members see beside your address; your first
+organization is not named from it.
+
+The administrator a deployment seeds from `ADMIN_EMAIL` gets an organization
+the same way: "admin" for `admin@acme.com`, at `/admin`.
 
 Telmoni provisions an organization the same way whenever it finds you in no
 active organization, such as after you leave or delete your last one.

@@ -69,32 +69,24 @@ pub fn display_for(display_name: Option<&str>, email: &Email) -> String {
         .to_string()
 }
 
-/// What a person's first organization is called when it is provisioned —
-/// named after its holder, the first word of their name, "Ada's organization"
-/// — and the slugs it may go by, best first. Somebody who gave no name gets
-/// "My organization". Nothing is read
-/// off their address: the name is shown to everyone the owner invites, and
-/// the slug that follows it is in every path. The owner renames it, and moves
-/// its URL, on Settings.
+/// What a person's first organization is called when it is provisioned, and
+/// the slugs it may go by, best first: the part of their address before the
+/// `@`, less any `+tag`, as `khe4r6` for `khe4r6+test@gmail.com`. The owner
+/// renames it, and moves its URL, on Settings.
 ///
-/// No slugs when the holder's own name gives none: "李明's organization"
-/// would read as `s-organization`, so it takes a placeholder instead.
+/// No slugs when that part gives none (`李明`): it takes a placeholder.
 #[must_use]
-pub fn default_organization(display_name: Option<&str>) -> (String, Vec<slug::Slug>) {
-    const POSSESSIVE: &str = "'s organization";
-    let room = crate::db::organizations::MAX_ORGANIZATION_NAME - POSSESSIVE.chars().count();
-    let Some(first) = display_name.and_then(|name| name.split_whitespace().next()) else {
-        let name = "My organization".to_owned();
-        let slugs = slug::candidates(slug::Scope::Organization, &name);
-        return (name, slugs);
-    };
-    let first: String = first.chars().take(room).collect();
-    let name = format!("{first}{POSSESSIVE}");
-    let slugs = if slug::slugify(&first).is_some() {
-        slug::candidates(slug::Scope::Organization, &name)
-    } else {
-        Vec::new()
-    };
+pub fn default_organization(email: &Email) -> (String, Vec<slug::Slug>) {
+    let local = email
+        .as_str()
+        .rsplit_once('@')
+        .map_or(email.as_str(), |(local, _)| local);
+    let local = local.split_once('+').map_or(local, |(before, _)| before);
+    let name: String = local
+        .chars()
+        .take(crate::db::organizations::MAX_ORGANIZATION_NAME)
+        .collect();
+    let slugs = slug::candidates(slug::Scope::Organization, &name);
     (name, slugs)
 }
 
@@ -166,37 +158,35 @@ mod tests {
         assert_eq!(display_for(Some("  "), &dana()), "dana@example.com");
     }
 
+    /// Named the part of the address before the `@`, less any `+tag`, and
+    /// nothing else: no domain, and no word added.
     #[test]
-    fn a_first_organization_is_named_after_its_holder_not_their_address() {
-        let (name, slugs) = default_organization(Some("Ada Lovelace"));
-        assert_eq!(name, "Ada's organization");
-        assert_eq!(
-            slugs.first().map(telmoni_shared::slug::Slug::as_str),
-            Some("adas-organization")
-        );
-
-        for nobody in [None, Some("   ")] {
-            let (name, slugs) = default_organization(nobody);
-            assert_eq!(name, "My organization");
-            assert_eq!(
-                slugs.first().map(telmoni_shared::slug::Slug::as_str),
-                Some("my-organization")
-            );
+    fn the_first_organization_is_named_the_address_before_its_at() {
+        let named = |address: &str| default_organization(&Email::from_trusted(address));
+        for (address, name) in [
+            ("khe4r6@gmail.com", "khe4r6"),
+            ("kendrick@acme.com", "kendrick"),
+            ("khe4r6+test@gmail.com", "khe4r6"),
+            ("ada.lovelace@example.com", "ada.lovelace"),
+        ] {
+            assert_eq!(named(address).0, name, "{address}");
         }
-
-        let (long, _) = default_organization(Some(&"a".repeat(300)));
-        assert_eq!(
-            long.chars().count(),
-            crate::db::organizations::MAX_ORGANIZATION_NAME
+        let (_, slugs) = named("khe4r6@gmail.com");
+        assert!(
+            slugs.iter().all(|s| s
+                .as_str()
+                .strip_prefix("khe4r6-")
+                .is_some_and(|tail| tail.len() == 6)),
+            "{slugs:?}"
         );
-        assert!(long.ends_with("'s organization"), "{long}");
     }
 
-    // The possessive alone would read `s-organization` for every such name.
+    /// One that gives no slug leaves the URL to a placeholder, and keeps its
+    /// name.
     #[test]
     fn a_name_with_no_latin_letter_leaves_the_slug_to_a_placeholder() {
-        let (name, slugs) = default_organization(Some("李明"));
-        assert_eq!(name, "李明's organization");
-        assert!(slugs.is_empty(), "{slugs:?}");
+        let (name, slugs) = default_organization(&Email::from_trusted("李明@example.com"));
+        assert_eq!(name, "李明");
+        assert!(slugs.is_empty());
     }
 }

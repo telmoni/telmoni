@@ -280,8 +280,8 @@ async fn a_live_token_reads_the_organization_it_belongs_to(pool: PgPool) {
     assert!(telmoni_shared::slug::is_slug(&fixture.slug), "{body}");
     assert_eq!(body["slug"], fixture.slug.as_str(), "{body}");
     assert_eq!(
-        body["name"], "My organization",
-        "named after an owner who gave no name: {body}"
+        body["name"], "lane",
+        "named its owner's address before the @: {body}"
     );
     assert_eq!(
         body["owner"]["email"], EMAIL,

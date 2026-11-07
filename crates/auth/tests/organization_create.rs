@@ -244,6 +244,14 @@ async fn until_blocked_by(pool: &PgPool, blocker: i32) {
     );
 }
 
+/// Whether `slug` is `name` with the random tail a taken name's URL carries.
+fn tailed(slug: &serde_json::Value, name: &str) -> bool {
+    slug.as_str()
+        .and_then(|slug| slug.strip_prefix(name))
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|tail| tail.len() == 6)
+}
+
 /// The creator owns what they made, `/me` lists it beside the rest, and the
 /// organization a sign-in opens in stays the one it was: making an
 /// organization is not choosing it.
@@ -258,6 +266,7 @@ async fn a_created_organization_is_its_creators_and_moves_no_default(pool: PgPoo
     assert!(created.starts_with("org_") && created != own, "{body}");
     assert_eq!(body["name"], "Acme Robotics", "{body}");
     assert_eq!(body["slug"], "acme-robotics", "{body}");
+    let slug = body["slug"].clone();
     assert_eq!(
         owned_by(&pool, "user_new_org").await,
         sorted(vec![own.clone(), created.clone()])
@@ -273,7 +282,7 @@ async fn a_created_organization_is_its_creators_and_moves_no_default(pool: PgPoo
         .unwrap_or_else(|| panic!("the new organization is not listed: {body}"));
     assert_eq!(listed["role"], "owner", "{body}");
     assert_eq!(listed["name"], "Acme Robotics", "{body}");
-    assert_eq!(listed["slug"], "acme-robotics", "{body}");
+    assert_eq!(listed["slug"], slug, "{body}");
     assert_eq!(
         body["defaultOrganizationId"],
         own.as_str(),
@@ -285,9 +294,9 @@ async fn a_created_organization_is_its_creators_and_moves_no_default(pool: PgPoo
 
 /// With no URL asked for — the field absent, or blank, as a client that sends
 /// every field leaves it — the name gives one as it gives a first
-/// organization's: the name's own slug, then the next number, a console word
-/// passed over, and a placeholder for a name with nothing Latin in it. A URL
-/// asked for is taken as given.
+/// organization's: the name, or the name with a random tail once it is taken
+/// or a console word, and a placeholder for a name with nothing Latin in it.
+/// A URL asked for is taken as given.
 #[sqlx::test]
 async fn the_url_is_derived_from_the_name_unless_one_is_asked_for(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -299,11 +308,11 @@ async fn the_url_is_derived_from_the_name_unless_one_is_asked_for(pool: PgPool) 
     assert_eq!(body["slug"], "zoes-lab", "{body}");
     let (status, body) = create(&pool, "user_url_second", json!({ "name": "Zoë's Lab" })).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(body["slug"], "zoes-lab-2", "{body}");
+    assert!(tailed(&body["slug"], "zoes-lab"), "{body}");
 
     let (status, body) = create(&pool, "user_url_first", json!({ "name": "Settings" })).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(body["slug"], "settings-2", "{body}");
+    assert!(tailed(&body["slug"], "settings"), "{body}");
 
     let (status, body) = create(&pool, "user_url_first", json!({ "name": "株式会社" })).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
@@ -616,8 +625,8 @@ async fn there_is_no_cap_on_how_many_a_person_creates(pool: PgPool) {
 
 /// Creations at once are taken one at a time on the person's lock. Each reads
 /// the URL it wants before that lock, so one that read it before another took
-/// it is given a placeholder at the write: every one is made, the first under
-/// the name's own URL, and no two share one.
+/// it is given a placeholder at the write: every one is made, each under
+/// a URL of the name's own, and no two share one.
 #[sqlx::test]
 async fn creations_at_once_each_get_their_own_url(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -640,7 +649,6 @@ async fn creations_at_once_each_get_their_own_url(pool: PgPool) {
     slugs.sort();
     slugs.dedup();
     assert_eq!(slugs.len(), 4, "two creations share a URL: {slugs:?}");
-    assert!(slugs.iter().any(|slug| slug == "twin"), "{slugs:?}");
     assert!(
         slugs
             .iter()

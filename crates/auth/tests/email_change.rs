@@ -652,8 +652,8 @@ async fn the_address_moves_without_disturbing_the_name(pool: PgPool) {
     let organization = seed_signed_in(&pool, USER, EMAIL).await;
     assert_eq!(
         stored_name(&pool, &organization).await,
-        "My organization",
-        "a nameless holder's organization was named after something else, such as their address"
+        "ada",
+        "a first organization is named its holder's address before the @"
     );
     sqlx::query("UPDATE auth.organizations SET name = $2 WHERE external_id = $1")
         .bind(&organization)

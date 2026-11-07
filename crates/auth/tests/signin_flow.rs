@@ -743,11 +743,9 @@ async fn a_sign_in_records_the_session_its_bearer_names(pool: PgPool) {
     assert_eq!(sid, "ses_456");
 }
 
-/// ⚠ AN ORGANIZATION IS BORN NAMED AFTER ITS HOLDER, at the slug that name
-/// reads as, so the console opens
-/// straight onto it. Nothing is read off the address, which travels beside it
-/// for the console to name whom to ask: read from the person, never copied
-/// onto the organization.
+/// ⚠ AN ORGANIZATION IS BORN NAMED AFTER THE ADDRESS BEFORE ITS `@`, at
+/// that name's slug, or with a random tail once another holds it, so the
+/// console opens straight onto it.
 #[sqlx::test]
 async fn provisioning_names_the_organization_after_its_holder(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;
@@ -759,19 +757,14 @@ async fn provisioning_names_the_organization_after_its_holder(pool: PgPool) {
         },
     );
 
-    for (user, names, expected_name, expected_slug) in [
+    for (user, names, expected_name, bare) in [
         (
             "user_named_at_birth",
             serde_json::json!({ "firstName": "Ada", "lastName": "Lovelace" }),
-            "Ada's organization",
-            "adas-organization",
+            "ada",
+            true,
         ),
-        (
-            "user_with_no_name",
-            serde_json::json!({}),
-            "My organization",
-            "my-organization",
-        ),
+        ("user_with_no_name", serde_json::json!({}), "ada", false),
     ] {
         // Through the writer the exchange uses, so the lowercasing is the
         // service's own rather than the fixture's.
@@ -809,7 +802,15 @@ async fn provisioning_names_the_organization_after_its_holder(pool: PgPool) {
                 .expect("the organization row");
 
         assert_eq!(name, expected_name, "{user}");
-        assert_eq!(slug, expected_slug, "{user}");
+        if bare {
+            assert_eq!(slug, "ada", "{user}");
+        } else {
+            assert!(
+                slug.strip_prefix("ada-")
+                    .is_some_and(|tail| tail.len() == 6),
+                "{user}: {slug}"
+            );
+        }
         assert_eq!(body["organizations"][0]["name"], expected_name, "{user}");
         assert_eq!(body["organizations"][0]["ownerEmail"], "ada@example.com");
     }
