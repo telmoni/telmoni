@@ -5,7 +5,10 @@ import { CopyButton } from "@/components/copy-button";
 import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { CAP_FIELDS } from "@/lib/limits";
 import { fetchContentMode, fetchModelPrices, fetchPrivacyPosture } from "@/lib/server/data";
+import { fetchLimits } from "@/lib/server/entities/limits";
+import { formatCount } from "@/lib/traces";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
 import { getServerSession } from "@/lib/server/session";
@@ -31,12 +34,14 @@ export default async function SettingsPage({
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { project } = resolved;
-  const [contentMode, prices, posture, session] = await Promise.all([
+  const [contentMode, prices, posture, session, limits] = await Promise.all([
     fetchContentMode(project.id),
     fetchModelPrices(project.id),
     fetchPrivacyPosture(project.id),
     getServerSession(),
+    fetchLimits(),
   ]);
+  const caps = limits?.projects.find((share) => share.id === project.id)?.caps;
 
   // A project's Owner is its organization's: no seat makes anyone else one.
   const isOwner = project.role === Role.Owner;
@@ -158,6 +163,48 @@ export default async function SettingsPage({
               days={posture.retention.span_days}
               max={posture.retention.max_span_days}
             />
+          )}
+        </Section>
+
+        <Section card
+          title="Limits"
+          description={
+            <>
+              What this project may use of the organization&apos;s pool, as its owner and admins
+              set it on the organization&apos;s{" "}
+              <Link href={`/${organization}/limits`} className="underline underline-offset-4">
+                Limits
+              </Link>{" "}
+              page. A limit with no cap shares the pool with the organization&apos;s other projects.
+            </>
+          }
+        >
+          {caps ? (
+            <DataTable>
+              <THead>
+                <Th>Limit</Th>
+                <Th>Cap</Th>
+              </THead>
+              <tbody>
+                {CAP_FIELDS.map(({ key, label, unit }) => {
+                  const cap = caps[key];
+                  return (
+                    <tr key={key}>
+                      <Td className="text-xs">{label}</Td>
+                      <Td className="whitespace-nowrap text-xs">
+                        {cap === null
+                          ? "Shares the pool"
+                          : unit
+                            ? (cap / unit).toLocaleString("en-US", { maximumFractionDigits: 1 })
+                            : formatCount(cap)}
+                      </Td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </DataTable>
+          ) : (
+            <p className="text-muted-foreground">The limits could not be read. Reload to try again.</p>
           )}
         </Section>
 

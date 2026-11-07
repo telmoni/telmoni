@@ -89,39 +89,34 @@ impl MemberCeiling {
     }
 }
 
-/// How many projects an organization may hold, as the deployment that sells
-/// plans answers it ([`crate::seam::Entitlements::project_ceiling`]): held
-/// where a project is made and where one moves in, never over those it
-/// already holds, so an organization past it keeps every one.
+/// A deployment's hard number on what a person or an organization holds,
+/// whatever its plan: the organizations a person owns
+/// ([`crate::seam::Entitlements::organization_ceiling`]) and the projects an
+/// organization holds ([`crate::seam::Entitlements::project_ceiling`]). Held
+/// where one more arrives, never over those already held; raised for one
+/// customer at a time by the deployment's operator.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectCeiling {
-    /// How many projects the organization may hold.
+pub struct CountCeiling {
+    /// How many may be held.
     pub limit: u32,
-    /// The one thing that lifts it, the 402's `entitlement`.
-    pub entitlement: String,
     /// The sentence a person reads, which names nobody.
     pub detail: String,
-    /// Whether a plan the deployment sells holds more: a console at the
-    /// ceiling offers it in New project, and otherwise says this is the most.
-    pub liftable: bool,
 }
 
-impl ProjectCeiling {
-    /// Whether one more project would be refused, with `held` already held.
-    #[must_use]
-    pub fn reached(&self, held: u64) -> bool {
-        held >= u64::from(self.limit)
-    }
-
-    /// Whether one more project may arrive, with `held` already held.
-    /// Refused, as a 402, at the ceiling.
+impl CountCeiling {
+    /// Whether one more may arrive, with `held` already held. Refused at the
+    /// ceiling as a 402 whose `entitlement` is `support`: asking lifts it,
+    /// never a plan.
     pub fn admit(&self, held: u64) -> Result<(), TelmoniError> {
-        if !self.reached(held) {
+        if held < u64::from(self.limit) {
             return Ok(());
         }
-        Err(limit_reached(&self.entitlement, &self.detail))
+        Err(limit_reached(SUPPORT, &self.detail))
     }
 }
+
+/// The `entitlement` of a refusal that only asking the deployment lifts.
+pub const SUPPORT: &str = "support";
 
 /// An organization's alerts and their deliveries, as the deployment that
 /// sells plans answers them ([`crate::seam::Entitlements::alert_ceilings`]):

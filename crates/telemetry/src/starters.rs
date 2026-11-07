@@ -158,6 +158,10 @@ pub async fn make(
     lock_chain_in_time(tx.conn(), organization_id).await?;
     let mut held =
         u64::try_from(rules::organization_count(&mut tx, organization_id).await?).unwrap_or(0);
+    // The project's own cap on its alerts, which a starter counts in too.
+    let caps = crate::project_limits::caps_of(&mut tx, project_id).await?;
+    let mut project_held =
+        u64::try_from(rules::project_count(&mut tx, project_id, false).await?).unwrap_or(0);
     let taken: Vec<String> =
         sqlx::query_scalar("SELECT lower(name) FROM telemetry.rules WHERE project_id = $1")
             .bind(project_id)
@@ -174,6 +178,15 @@ pub async fn make(
         {
             made.withheld.push(input.measure);
             made.detail = Some(ceilings.detail.clone());
+            continue;
+        }
+        if let Err(refused) = crate::project_limits::admit(
+            &caps,
+            crate::project_limits::Counted::Alerts,
+            project_held,
+        ) {
+            made.withheld.push(input.measure);
+            made.detail = refused.to_problem_details().detail;
             continue;
         }
         let mut rule = input.checked()?;
@@ -204,6 +217,7 @@ pub async fn make(
         )
         .await?;
         held += 1;
+        project_held += 1;
         made.names.push(row.definition.name);
     }
     if !made.withheld.is_empty() {

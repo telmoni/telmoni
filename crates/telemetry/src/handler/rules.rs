@@ -253,7 +253,7 @@ pub async fn create_rule(
 /// The save itself, under the organization's chain lock: the role checked
 /// on auth's second answer, the settings row made or re-filed, the
 /// organization's alerts counted against its plan, and the alert written
-/// and filed.
+/// and filed, the project's own cap on its alerts or objectives held too.
 async fn save(
     state: &AppState,
     acting: &Acting,
@@ -267,6 +267,16 @@ async fn save(
         let held = rules::organization_count(tx, &acting.organization_id).await?;
         ceilings.admit(u64::try_from(held).unwrap_or(0))?;
     }
+    // The project's own share, read under the lock as its owners set it.
+    let objective = rule.definition.objective.is_some();
+    let caps = crate::project_limits::caps_of(tx, project_id).await?;
+    let held = rules::project_count(tx, project_id, objective).await?;
+    let counted = if objective {
+        crate::project_limits::Counted::Objectives
+    } else {
+        crate::project_limits::Counted::Alerts
+    };
+    crate::project_limits::admit(&caps, counted, u64::try_from(held).unwrap_or(0))?;
     let row = rules::insert(
         tx,
         project_id,

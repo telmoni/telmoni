@@ -25,29 +25,13 @@ export type Project = z.infer<typeof ProjectSchema>;
 // A project renamed: the slug its pages go by now.
 export const ProjectRenamedSchema = z.object({ slug: z.string() });
 
-// How many projects the organization may hold, as the deployment that sells
-// plans answers it, how many it holds, whether one more would be refused now,
-// the sentence it is refused with, and whether a plan it sells holds more;
-// `null` where none is held, as on a self-hosted installation.
-export const ProjectCeilingSchema = z.object({
-  limit: z.number().int().min(0),
-  held: z.number().int().min(0),
-  reached: z.boolean(),
-  detail: z.string(),
-  liftable: z.boolean(),
-});
-export type ProjectCeiling = z.infer<typeof ProjectCeilingSchema>;
-
 export type ProjectListing =
-  | { kind: "ok"; projects: Project[]; ceiling: ProjectCeiling | null }
+  | { kind: "ok"; projects: Project[] }
   | { kind: "unavailable" };
 
 // The envelope is the schema's: an answer without its list is unreadable,
 // never an organization with no projects.
-export const ProjectListSchema = z.object({
-  projects: z.array(ProjectSchema),
-  ceiling: ProjectCeilingSchema.nullable(),
-});
+export const ProjectListSchema = z.object({ projects: z.array(ProjectSchema) });
 
 export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
   const ctx = await identityContext();
@@ -59,11 +43,7 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
     ProjectListSchema,
   );
   if (read.kind !== "ok") return { kind: "unavailable" };
-  return {
-    kind: "ok",
-    projects: read.value.projects.sort(compareProjects),
-    ceiling: read.value.ceiling,
-  };
+  return { kind: "ok", projects: read.value.projects.sort(compareProjects) };
 });
 
 export const fetchProjects = cache(async (): Promise<Project[]> => {

@@ -122,6 +122,13 @@ const MUTATIONS: &[Mutation] = &[
         actor_id: ActorPattern::Variable,
     },
     Mutation {
+        file: "crates/telemetry/src/handler/limits.rs",
+        fn_name: "put_limits",
+        action: "Updated",
+        resource_kind: "Project",
+        actor_id: ActorPattern::Variable,
+    },
+    Mutation {
         file: "crates/telemetry/src/handler/prices.rs",
         fn_name: "put_prices",
         action: "Updated",
@@ -486,7 +493,7 @@ const MUTATIONS: &[Mutation] = &[
     },
     Mutation {
         file: "crates/auth/src/handler/projects.rs",
-        fn_name: "make",
+        fn_name: "create_project",
         action: "Created",
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,

@@ -20,7 +20,6 @@ export function normalizeSeed(initial: StoreInitial): Seed {
     flags: initial.flags,
     projects: initial.projects,
     projectsElsewhere: initial.projectsElsewhere ?? NONE,
-    projectCeiling: initial.projectCeiling ?? null,
   };
 }
 
@@ -123,9 +122,6 @@ export const createIdentitySlice = (
           if (!same(was.projects, seed.projects)) patch.projects = seed.projects;
           if (!same(was.projectsElsewhere, seed.projectsElsewhere)) {
             patch.projectsElsewhere = seed.projectsElsewhere;
-          }
-          if (!same(was.projectCeiling, seed.projectCeiling)) {
-            patch.projectCeiling = seed.projectCeiling;
           }
           return patch;
         }),

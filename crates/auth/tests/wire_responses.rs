@@ -19,8 +19,7 @@ use telmoni_auth::db::projects::{ProjectEverywhere, ProjectSummary};
 use telmoni_auth::db::sessions::SessionRow;
 use telmoni_auth::handler::account::EmailChanged;
 use telmoni_auth::handler::answer::{
-    Declined, InviteCreated, InviteRevoked, Invites, OrganizationProjects, Projects,
-    ProjectsCeiling, Roster,
+    Declined, InviteCreated, InviteRevoked, Invites, Projects, Roster,
 };
 use telmoni_auth::handler::audit::{AuditPage, ExportList};
 use telmoni_auth::handler::deletion::{AccountDeleted, OrganizationDeleted};
@@ -332,15 +331,8 @@ fn summary() -> ProjectSummary {
 fn the_projects_answer_as_the_console_reads() {
     pin(
         "projects",
-        &OrganizationProjects {
+        &Projects {
             projects: vec![summary()],
-            ceiling: Some(ProjectsCeiling {
-                limit: 10,
-                held: 10,
-                reached: true,
-                detail: "This organization holds 10 projects.".into(),
-                liftable: true,
-            }),
         },
     );
     pin("project", &summary());

@@ -131,6 +131,23 @@ pub async fn organization_count(
         .await
 }
 
+/// How many alerts the project holds — its objectives, where `objectives`,
+/// else the rest — as its own caps count them, paused ones among them.
+pub async fn project_count(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    objectives: bool,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.rules
+          WHERE project_id = $1 AND (objective IS NOT NULL) = $2",
+    )
+    .bind(project_id)
+    .bind(objectives)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// How many of the organization's alerts were made before `id`, the oldest
 /// first as [`hold_to`] ranks them: what its plan holds ahead of it.
 pub async fn organization_ahead(

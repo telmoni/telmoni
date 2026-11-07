@@ -265,6 +265,7 @@ pub async fn create_organization(
     // The deployment's say on a second organization at the person's asking:
     // one that has it paid for first refuses here, and founds it itself.
     crate::handler::ownership::may_found(&state, &founder).await?;
+    let ceiling = crate::handler::ownership::organization_ceiling_of(&state, &founder).await;
     // ⚠ MINTED: an organization is nobody's id.
     let organization = OrganizationId::new();
     let url = match asked {
@@ -278,6 +279,7 @@ pub async fn create_organization(
     let mut tx = person_scope(&state.db, &founder).await?;
     locks::lock_person(&mut tx, &founder).await?;
     let person = founder_under_lock(&state, &mut tx, &founder).await?;
+    crate::handler::ownership::owns_to(ceiling.as_ref(), &mut tx, &founder).await?;
     if person.default_organization_id.is_none()
         && let Some(current) =
             organization_members::default_while_owning_none(&mut tx, &founder).await?
@@ -368,9 +370,11 @@ pub(crate) async fn found_for_deployment(
     let url = NewUrl::Derived(free_url(state, organization, &candidates).await?);
 
     let founder = &founding.founder;
+    let ceiling = crate::handler::ownership::organization_ceiling_of(state, founder).await;
     let mut tx = person_scope(&state.db, founder).await?;
     locks::lock_person(&mut tx, founder).await?;
     let person = founder_under_lock(state, &mut tx, founder).await?;
+    crate::handler::ownership::owns_to(ceiling.as_ref(), &mut tx, founder).await?;
     if person.default_organization_id.is_none()
         && let Some(current) =
             organization_members::default_while_owning_none(&mut tx, founder).await?

@@ -2197,6 +2197,100 @@ async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool
     assert_eq!(told(), 1, "told once a month");
 }
 
+/// A project its organization capped at fewer spans a month than the plan
+/// holds is sampled past its cap with no grace, in words naming the cap and
+/// who may raise it, its owners told once; the organization's month, with
+/// room to spare and a grace besides, holds back nothing.
+#[sqlx::test]
+async fn a_project_past_its_own_cap_is_sampled_with_no_grace(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let notices = common::NoticeLog::new();
+    let month = common::PlanMonth {
+        spans: 1_000_000,
+        grace_days: 7,
+        content_bytes: 25_000_000,
+    };
+    let state =
+        common::state_with_stores_noticed(&pool, auth.clone(), Arc::new(month), notices.clone());
+    let lane = Lane {
+        app: lanes(state.clone()),
+        project: project.clone(),
+        other: ProjectId::new(),
+        state,
+        auth,
+    };
+    sqlx::query(
+        "INSERT INTO telemetry.project_limits (project_id, organization_id, spans)
+         VALUES ($1, $2, 1)",
+    )
+    .bind(project.as_str())
+    .bind(organization.as_str())
+    .execute(&pool)
+    .await
+    .expect("the project's cap");
+
+    let any = [RUN.to_owned(), RUN.to_owned()];
+    let (status, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(1, &any),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let answer = json_body(&answer);
+    assert_eq!(
+        answer["partialSuccess"]["rejectedSpans"], 0,
+        "under the cap: {answer}"
+    );
+
+    let runs = picked(&lane).await;
+    let (status, _, past) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(2, &runs),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let answer = json_body(&past);
+    assert_eq!(answer["partialSuccess"]["rejectedSpans"], 1, "{answer}");
+    let message = answer["partialSuccess"]["errorMessage"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message.starts_with("1 spans sampled out: This project's cap is 1 spans a month"),
+        "{message}"
+    );
+    let told = || {
+        notices
+            .notices()
+            .into_iter()
+            .filter(|n| n.title == "A project past its cap")
+            .count()
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while told() == 0 && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    lane.send(
+        Some(INGEST_KEY),
+        "application/json",
+        None,
+        two_runs(3, &runs),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(told(), 1, "told once a month");
+}
+
 /// Past a month with a grace, every span is kept while it lasts.
 #[sqlx::test]
 async fn spans_past_the_month_are_kept_whole_through_the_grace(pool: PgPool) {

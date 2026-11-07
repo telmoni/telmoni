@@ -51,7 +51,6 @@ export const useActiveOrganization = () =>
 export const useFlags = () => useStore((s) => s.flags);
 export const useProjects = () => useStore((s) => s.projects);
 export const useProjectsElsewhere = () => useStore((s) => s.projectsElsewhere);
-export const useProjectCeiling = () => useStore((s) => s.projectCeiling);
 
 export const useRenameProject = () => useStore((s) => s.renameProject);
 

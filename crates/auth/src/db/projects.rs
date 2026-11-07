@@ -265,22 +265,6 @@ pub async fn count_in<B: Binding>(
         .await
 }
 
-/// The slug of the organization's project `project_id`; `None` when it holds
-/// no such project.
-pub async fn slug_in(
-    tx: &mut Scoped<'_, Maintenance<AuthLane>>,
-    organization_id: &OrganizationId,
-    project_id: &ProjectId,
-) -> sqlx::Result<Option<Slug>> {
-    sqlx::query_scalar(
-        "SELECT slug FROM auth.projects WHERE external_id = $1 AND organization_id = $2",
-    )
-    .bind(project_id)
-    .bind(organization_id)
-    .fetch_optional(tx.conn())
-    .await
-}
-
 /// Whether a project in the organization is called `name`, compared as
 /// `projects_organization_name_key` compares.
 pub async fn holds_name(

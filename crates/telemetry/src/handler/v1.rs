@@ -527,9 +527,11 @@ pub async fn put_media(
         .and_then(|v| v.to_str().ok())
         .filter(|v| is_mime_type(v))
         .unwrap_or("application/octet-stream");
-    // Past the organization's content ceiling a file is not kept, as its
-    // span's content is not.
-    if crate::capacity::has_room_for_content(&state, &key.organization_id).await {
+    // Past the organization's content ceiling, or the project's own cap, a
+    // file is not kept, as its span's content is not.
+    if crate::capacity::has_room_for_content(&state, &key.organization_id).await
+        && crate::project_limits::has_room_for_content(&state, &key.project_id).await
+    {
         content::keep_media(&state, &key.project_id, (&sha256, mime_type), &body).await?;
     }
     Ok(StatusCode::NO_CONTENT)

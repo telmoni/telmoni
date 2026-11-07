@@ -137,6 +137,7 @@ describe("buildConsoleNav", () => {
       "/acme/members",
       "/acme/audit-log",
       "/acme/notifications",
+      "/acme/limits",
       "/acme/settings",
     ]);
 
@@ -256,7 +257,7 @@ describe("the blocks of a run", () => {
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
     expect(navBlocks(organization?.items ?? []).map((b) => b.map((i) => i.title))).toEqual([
-      ["Projects", "Members", "Audit log", "Notifications", "Settings"],
+      ["Projects", "Members", "Audit log", "Notifications", "Limits", "Settings"],
     ]);
     const [account] = buildConsoleNav("/settings/account");
     expect(navBlocks(account?.items ?? []).map((b) => b.length)).toEqual([5]);
@@ -313,6 +314,7 @@ describe("the whole destination set", () => {
       "/acme/members",
       "/acme/audit-log",
       "/acme/notifications",
+      "/acme/limits",
       "/acme/settings",
       "/settings/general",
       "/settings/account",

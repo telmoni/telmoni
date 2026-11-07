@@ -64,27 +64,3 @@ pub struct Invites<T> {
 pub struct Projects<T> {
     pub projects: Vec<T>,
 }
-
-/// An organization's projects, and the plan's ceiling on them where one is
-/// held.
-#[derive(Debug, Serialize)]
-pub struct OrganizationProjects<T> {
-    pub projects: Vec<T>,
-    pub ceiling: Option<ProjectsCeiling>,
-}
-
-/// The project ceiling as the console reads it, whose New project at it
-/// offers what lifts it, or says nothing does.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ProjectsCeiling {
-    /// How many projects the organization may hold.
-    pub limit: u32,
-    /// How many it holds, every one counted, the caller's or not.
-    pub held: u64,
-    /// Whether one more would be refused now: the seam's own rule.
-    pub reached: bool,
-    /// The sentence one more is refused with.
-    pub detail: String,
-    /// Whether a plan the deployment sells holds more.
-    pub liftable: bool,
-}

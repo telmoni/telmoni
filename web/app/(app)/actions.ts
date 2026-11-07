@@ -4,11 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { type ActionResult, type Refused, SESSION_EXPIRED, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
-import { ProblemType } from "@/lib/api/problem";
+import { type Problem, ProblemType } from "@/lib/api/problem";
 import { env } from "@/lib/env";
 import { publishEvent, userChannel } from "@/lib/events/publisher";
 import { createOrganizationElsewhere } from "@/lib/extension/create-organization";
-import { createProjectElsewhere } from "@/lib/extension/create-project";
 import { createdOrganizationHref } from "@/lib/extension/created-organization";
 import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
@@ -21,20 +20,18 @@ import {
   personHeaders,
 } from "@/lib/server/entities/identity-context";
 import { CreatedOrganizationSchema, getServerContext } from "@/lib/server/entities/organization";
-import { type Project, ProjectSchema, fetchProjectListing } from "@/lib/server/entities/projects";
+import { type Project, ProjectSchema } from "@/lib/server/entities/projects";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { organizationPath } from "@/lib/slug";
 
 /** Done with the project as listed, or with none where its answer could not
- *  be read: it was still made; or, at the plan's ceiling, where a console
- *  built on this one sends the person first. */
-export type CreateProjectResult = ActionResult<{ project?: Project; href?: string }>;
+ *  be read: it was still made. */
+export type CreateProjectResult = ActionResult<{ project?: Project }>;
 
 export async function createProjectAction(
   name: string,
   organizationId?: string,
-  extras: Record<string, string> = {},
 ): Promise<CreateProjectResult> {
   const gate = await admit({ call: "project:create", limit: 10 });
   if (!gate.ok) return refused(gate.error);
@@ -67,15 +64,6 @@ export async function createProjectAction(
     target = organizationId;
   }
 
-  // At the plan's ceiling a console built on this one may take the project
-  // elsewhere first — one that sells plans has the plan that holds it paid
-  // for — and answers where to send the person, or what refused it.
-  const listing = await fetchProjectListing();
-  if (listing.kind === "ok" && listing.ceiling?.reached && target === ctx.organizationId) {
-    const elsewhere = await createProjectElsewhere({ organizationId: target, name: trimmed, extras });
-    if (elsewhere) return "href" in elsewhere ? { ok: true, href: elsewhere.href } : refused(elsewhere.error);
-  }
-
   const res = await tryFetchWithTimeout(
     `${env.SERVER_URL}/internal/v1/projects`,
     {
@@ -89,12 +77,9 @@ export async function createProjectAction(
   );
 
   if (!res || !res.ok) {
-    const error = res
-      ? (await extractProblem(res)).message
-      : "Failed to create the project. Please try again.";
-    // A plan's project ceiling is lifted by asking, where the deployment says who.
-    const ask = res?.status === 402 && env.SUPPORT_EMAIL ? ` To hold more, write to ${env.SUPPORT_EMAIL}.` : "";
-    return refused(`${error}${ask}`);
+    if (!res) return refused("Failed to create the project. Please try again.");
+    const { message, problem } = await extractProblem(res);
+    return refused(askingLifts(message, problem));
   }
 
   revalidatePath("/", "layout");
@@ -109,6 +94,13 @@ export async function createProjectAction(
   }
 
   return { ok: true, project: parsed.data };
+}
+
+/** A refusal only asking the deployment lifts — a hard number on what a
+ *  person or an organization holds — names who to ask, where it says. */
+function askingLifts(message: string, problem: Problem | null): string {
+  const lifted = (problem as { entitlement?: unknown } | null)?.entitlement === "support";
+  return lifted && env.SUPPORT_EMAIL ? `${message} Write to ${env.SUPPORT_EMAIL} to raise it.` : message;
 }
 
 /// The panel's field a refusal belongs under; none for one about neither.
@@ -183,7 +175,7 @@ export async function createOrganizationAction(
         field: problem?.type === ProblemType.BadUrl ? "slug" : "name",
       };
     }
-    return refused(message);
+    return refused(askingLifts(message, problem));
   }
 
   const created = CreatedOrganizationSchema.safeParse(await res.json().catch(() => null));

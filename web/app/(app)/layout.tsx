@@ -16,7 +16,6 @@ import { SidebarProvider } from "@/components/sidebar-context";
 import { ProjectBanner } from "@/components/project-banner";
 import { ExtensionBanner } from "@/components/extension/banner";
 import { ExtensionCreateOrganizationNotice } from "@/components/extension/create-organization-notice";
-import { ExtensionCreateProjectNotice } from "@/components/extension/create-project-notice";
 import { ExtensionOrganizationBadge } from "@/components/extension/organization-badge";
 import { InviteToastNotifier } from "@/components/invite-toast-notifier";
 import { LocalTimeReader } from "@/components/local-time";
@@ -141,11 +140,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                         notice={
                           <Suspense fallback={null}>
                             <ExtensionCreateOrganizationNotice />
-                          </Suspense>
-                        }
-                        projectNotice={
-                          <Suspense fallback={null}>
-                            <ExtensionCreateProjectNotice />
                           </Suspense>
                         }
                       />

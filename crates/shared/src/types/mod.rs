@@ -42,8 +42,8 @@ pub use content_mode::ContentMode;
 pub use email::{Email, EmailError};
 pub use flag::{Flag, FlagSet};
 pub use grants::{
-    AlertCeilings, Allowance, CONNECTION_BYTES, Capacity, Grants, LaneCeilings, MemberCeiling,
-    Paused, ProjectCeiling, share_told,
+    AlertCeilings, Allowance, CONNECTION_BYTES, Capacity, CountCeiling, Grants, LaneCeilings,
+    MemberCeiling, Paused, SUPPORT, share_told,
 };
 pub use incident_status::IncidentStatus;
 pub use metrics_group::MetricsGroup;

@@ -35,7 +35,6 @@ export function StoreSeed({
   flags,
   projects,
   projectsElsewhere,
-  projectCeiling,
 }: StoreInitial) {
   const store = useContext(StoreContext);
 
@@ -67,13 +66,11 @@ export function StoreSeed({
       flags,
       projects,
       projectsElsewhere,
-      projectCeiling,
     });
   }, [
     store,
     projects,
     projectsElsewhere,
-    projectCeiling,
     incomingInvites,
     givenSeats,
     projectOffers,

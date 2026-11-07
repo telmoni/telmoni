@@ -219,8 +219,8 @@ pub async fn create_monitor(
 }
 
 /// The save itself, under the organization's chain lock: the role checked
-/// on auth's second answer, the settings row made or re-filed, and the
-/// monitor written and filed.
+/// on auth's second answer, the settings row made or re-filed, the
+/// project's own cap on its monitors held, and the monitor written and filed.
 async fn save(
     state: &AppState,
     acting: &Acting,
@@ -229,6 +229,17 @@ async fn save(
 ) -> Result<MonitorRow, TelmoniError> {
     let project_id = &held(state, acting, tx, Verb::Create).await?;
     db::ensure_settings(tx, project_id, &acting.organization_id).await?;
+    let caps = crate::project_limits::caps_of(tx, project_id).await?;
+    let held: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM telemetry.monitors WHERE project_id = $1")
+            .bind(project_id)
+            .fetch_one(tx.conn())
+            .await?;
+    crate::project_limits::admit(
+        &caps,
+        crate::project_limits::Counted::Monitors,
+        u64::try_from(held).unwrap_or(0),
+    )?;
     let row = monitors::insert(tx, project_id, &acting.organization_id, monitor)
         .await
         .map_err(agent_taken)?;

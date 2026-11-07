@@ -1,11 +1,4 @@
 {
-  "ceiling": {
-    "detail": "This organization holds 10 projects.",
-    "held": 10,
-    "liftable": true,
-    "limit": 10,
-    "reached": true
-  },
   "projects": [
     {
       "content_mode": "on",

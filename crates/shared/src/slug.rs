@@ -134,6 +134,7 @@ pub const PROJECT_RESERVED: &[&str] = &[
     "connectors",
     "data-sheet",
     "integrations",
+    "limits",
     "members",
     "new",
     "notifications",

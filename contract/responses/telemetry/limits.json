@@ -1,0 +1,50 @@
+{
+  "plan": {
+    "alert_deliveries_per_day": 2000,
+    "alerts": 50,
+    "content_bytes": 1000000000,
+    "spans": 1000000
+  },
+  "projects": [
+    {
+      "caps": {
+        "alert_deliveries_per_day": 100,
+        "alerts": 10,
+        "content_bytes": null,
+        "monitors": null,
+        "objectives": null,
+        "spans": 200000
+      },
+      "id": "project_4kRrX0bQhYd2LmZp",
+      "name": "Support bot",
+      "used": {
+        "alert_deliveries_today": 7,
+        "alerts": 3,
+        "content_bytes": 4096,
+        "monitors": 1,
+        "objectives": 0,
+        "spans": 12500
+      }
+    },
+    {
+      "caps": {
+        "alert_deliveries_per_day": null,
+        "alerts": null,
+        "content_bytes": null,
+        "monitors": null,
+        "objectives": null,
+        "spans": null
+      },
+      "id": "project_9tQwE2rYuI8oPaSd",
+      "name": "Research",
+      "used": {
+        "alert_deliveries_today": null,
+        "alerts": 0,
+        "content_bytes": 0,
+        "monitors": 0,
+        "objectives": 0,
+        "spans": null
+      }
+    }
+  ]
+}

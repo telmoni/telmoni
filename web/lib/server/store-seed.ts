@@ -39,7 +39,6 @@ export const storeSeed = cache(async (): Promise<StoreInitial | null> => {
     activeOrganizationId,
     flags: ctx?.flags ?? {},
     projects: listing.kind === "ok" ? listing.projects : [],
-    projectCeiling: listing.kind === "ok" ? listing.ceiling : null,
     projectsElsewhere:
       everywhere.kind === "ok" && activeOrganizationId
         ? everywhere.projects.filter((p) => p.organizationId !== activeOrganizationId)

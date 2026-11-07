@@ -645,3 +645,51 @@ fn the_rollups_answer_as_the_console_reads() {
         },
     );
 }
+
+/// How the organization divides its pool, as the Limits page reads it: the
+/// plan's numbers, and a project capped beside one sharing the pool whole.
+#[test]
+fn the_limits_answer_as_the_console_reads() {
+    use telmoni_telemetry::handler::limits::{Limits, PlanLimits, ProjectShare, Used};
+    use telmoni_telemetry::project_limits::Caps;
+    pin(
+        "limits",
+        &Limits {
+            plan: PlanLimits {
+                spans: Some(1_000_000),
+                content_bytes: Some(1_000_000_000),
+                alerts: Some(50),
+                alert_deliveries_per_day: Some(2_000),
+            },
+            projects: vec![
+                ProjectShare {
+                    id: project().to_string(),
+                    name: "Support bot".into(),
+                    caps: Caps {
+                        spans: Some(200_000),
+                        alerts: Some(10),
+                        alert_deliveries_per_day: Some(100),
+                        ..Caps::default()
+                    },
+                    used: Used {
+                        spans: Some(12_500),
+                        content_bytes: 4_096,
+                        alerts: 3,
+                        monitors: 1,
+                        objectives: 0,
+                        alert_deliveries_today: Some(7),
+                    },
+                },
+                ProjectShare {
+                    id: "project_9tQwE2rYuI8oPaSd".into(),
+                    name: "Research".into(),
+                    caps: Caps::default(),
+                    used: Used {
+                        spans: None,
+                        ..Used::default()
+                    },
+                },
+            ],
+        },
+    );
+}

@@ -314,11 +314,19 @@ pub(crate) async fn land(
     }
     // Past the plan's month, what is not kept is counted in the answer, and
     // past its content, the spans keep their metadata alone.
-    let (month, sampled) =
-        crate::capacity::hold_spans(state, organization_id, batch, storage, received_at).await;
+    let (month, sampled) = crate::capacity::hold_spans(
+        state,
+        organization_id,
+        project_id,
+        batch,
+        storage,
+        received_at,
+    )
+    .await;
     let held = crate::capacity::Held {
         sampled,
-        content_full: crate::capacity::hold_content(state, organization_id, batch).await,
+        content_full: crate::capacity::hold_content(state, organization_id, project_id, batch)
+            .await,
     };
     if let Err(error) = state.store.insert_spans_once(&batch.rows, token).await {
         // ClickHouse may finish an insert the client stopped waiting for, as

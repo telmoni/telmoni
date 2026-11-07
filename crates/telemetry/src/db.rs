@@ -226,7 +226,12 @@ pub async fn purge_organization(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + monitors + mutes + views + prices + content + held + settings)
+    let limits = sqlx::query("DELETE FROM telemetry.project_limits WHERE organization_id = $1")
+        .bind(organization_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(rules + monitors + mutes + views + prices + content + held + settings + limits)
 }
 
 /// How long a purge waits for any lock: one left queued for a project's lock
@@ -285,7 +290,12 @@ pub async fn purge_project(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(rules + monitors + mutes + views + prices + content + settings)
+    let limits = sqlx::query("DELETE FROM telemetry.project_limits WHERE project_id = $1")
+        .bind(project_id)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(rules + monitors + mutes + views + prices + content + settings + limits)
 }
 
 /// A saved dashboard as its row keeps it: its query is the JSON the lane
@@ -422,6 +432,11 @@ pub async fn move_project(
     sqlx::query("UPDATE telemetry.incidents SET organization_id = $2 WHERE project_id = $1")
         .bind(project_id)
         .bind(organization_id)
+        .execute(tx.conn())
+        .await?;
+    // Its caps divided the pool it left; the one it joins divides its own.
+    sqlx::query("DELETE FROM telemetry.project_limits WHERE project_id = $1")
+        .bind(project_id)
         .execute(tx.conn())
         .await?;
     // The content's bytes follow it to the organization that now holds it,

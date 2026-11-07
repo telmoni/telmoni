@@ -57,6 +57,7 @@ import {
 import { ContentModeSettingSchema } from "./content-mode";
 import { RollupsSchema } from "./dashboards";
 import { FieldInventorySchema } from "./field-inventory";
+import { LimitsSchema } from "./limits";
 import { FeedSchema } from "./notification-feed";
 import { PrivacyPostureSchema } from "./privacy";
 import {
@@ -132,6 +133,7 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/field-inventory.json": FieldInventorySchema,
   "telemetry/histogram.json": TraceHistogramSchema,
   "telemetry/incidents.json": IncidentListSchema,
+  "telemetry/limits.json": LimitsSchema,
   "telemetry/mutes.json": MuteListSchema,
   "telemetry/privacy.json": PrivacyPostureSchema,
   "telemetry/rollups.json": RollupsSchema,

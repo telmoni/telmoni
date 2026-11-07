@@ -83,6 +83,11 @@ vi.mock("@/lib/server/data", () => ({
   fetchPrivacyPosture: async () => mockPosture,
 }));
 
+let mockLimits: unknown = null;
+vi.mock("@/lib/server/entities/limits", () => ({
+  fetchLimits: async () => mockLimits,
+}));
+
 vi.mock("@/lib/server/session", () => ({
   getServerSession: async () => ({
     userId: "user_1",
@@ -122,6 +127,39 @@ beforeEach(() => {
   };
   mockContentMode = { content_mode: "off", offered: ["off"] };
   mockPosture = { retention: { span_days: 90, max_span_days: 360, rollup_months: 13 } };
+  mockLimits = null;
+});
+
+// The project's own caps, read where its members work, set where its
+// organization's owners and admins divide the pool.
+describe("SettingsPage: the project's limits", () => {
+  const page = async () => render(await SettingsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+  const none = { spans: null, content_bytes: null, alerts: null, monitors: null, objectives: null, alert_deliveries_per_day: null };
+
+  it("shows each cap, a limit with none sharing the pool, and where they are set", async () => {
+    mockLimits = {
+      plan: { spans: null, content_bytes: null, alerts: null, alert_deliveries_per_day: null },
+      projects: [
+        {
+          id: "project_7bQx2mNv9BcK4dLp",
+          name: "My Project",
+          caps: { ...none, spans: 200_000, content_bytes: 5_000_000 },
+          used: { spans: 1, content_bytes: 0, alerts: 0, monitors: 0, objectives: 0, alert_deliveries_today: null },
+        },
+      ],
+    };
+    await page();
+    const row = (name: string) => screen.getByRole("cell", { name }).closest("tr");
+    expect(row("Spans a month")).toHaveTextContent("200,000");
+    expect(row("Content held, MB")).toHaveTextContent("5");
+    expect(row("Alerts")).toHaveTextContent("Shares the pool");
+    expect(screen.getByRole("link", { name: "Limits" })).toHaveAttribute("href", "/acme/limits");
+  });
+
+  it("says when the limits could not be read", async () => {
+    await page();
+    expect(screen.getByText("The limits could not be read. Reload to try again.")).toBeInTheDocument();
+  });
 });
 
 describe("SettingsPage: the end user's data and its retention", () => {

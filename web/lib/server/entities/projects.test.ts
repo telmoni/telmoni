@@ -18,13 +18,13 @@ vi.mock("next/navigation", () => ({
     throw new Error("NOT_FOUND");
   },
 }));
-import { fetchProjectAnywhere, fetchProjectBySlug, fetchProjectListing } from "./projects";
+import { fetchProjectAnywhere, fetchProjectBySlug } from "./projects";
 
 const WEB = { id: "project_1", slug: "web", name: "Web", role: "owner", content_mode: "off" };
 const API = { id: "project_2", slug: "api", name: "API", role: "member", content_mode: "on" };
 
 function listing(projects: unknown[]) {
-  fetchWithTimeout.mockResolvedValue({ ok: true, json: async () => ({ projects, ceiling: null }) });
+  fetchWithTimeout.mockResolvedValue({ ok: true, json: async () => ({ projects }) });
 }
 
 beforeEach(() => {
@@ -32,29 +32,6 @@ beforeEach(() => {
   identityContext.mockResolvedValue({ userId: "user_1", organizationId: "org_1" });
   getServerContext.mockResolvedValue({ organizationNotFound: false });
   listing([WEB, API]);
-});
-
-describe("fetchProjectListing", () => {
-  it("reads the ceiling, and whether a plan holds more", async () => {
-    fetchWithTimeout.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        projects: [WEB],
-        ceiling: {
-          limit: 10,
-          held: 10,
-          reached: true,
-          detail: "This organization holds 10 projects.",
-          liftable: true,
-        },
-      }),
-    });
-    const listing = await fetchProjectListing();
-    expect(listing).toMatchObject({
-      kind: "ok",
-      ceiling: { reached: true, liftable: true },
-    });
-  });
 });
 
 describe("fetchProjectBySlug", () => {

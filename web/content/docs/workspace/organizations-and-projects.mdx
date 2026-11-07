@@ -252,15 +252,12 @@ An organization Owner or Admin can create a new project from the organization's
    content once it is typed in the panel; **Keep it off** opens the project
    with content off instead.
 
-A self-hosted organization holds as many projects as you make. A deployment
-that sells plans may hold each organization to a number of projects, its
-plan's. At it, the panel offers the plans that hold more: you choose one, pay
-on the next step where the plan needs a card, and the project, with content
-off, is created once the payment is confirmed. Where no plan holds more, the
-panel says how many the plan holds, and creates nothing. A project moved or
-transferred into an organization is held to the same number, and an
-organization already past it keeps every project it holds. On the hosted
-service, see [Projects](https://telmoni.com/docs/workspace/billing#projects).
+A deployment may hold each organization to a number of projects, whatever its
+plan: past it, creating a project, accepting one in a transfer or moving one
+in is refused, the organization keeps every project it already holds, and the
+console names who to write to for more. On the hosted service the number is 50
+([Limits](https://telmoni.com/docs/workspace/billing#limits)); a self-hosted
+deployment sets none.
 
 ### Renaming a project
 
@@ -392,8 +389,8 @@ its **Owner**:
 2. Give it a **Name**: up to 80 characters, the name everyone in it sees.
 3. Give it a **URL**, or leave the field blank to have one derived from the
    name, as [Name and URL](#name-and-url) describes: "Acme Robotics" becomes
-   `acme-robotics`, with a number on the end when another organization holds
-   that, and a name with no Latin letter or digit gets a placeholder (`org-`
+   `acme-robotics`, with six random characters on the end when another
+   organization holds that, and a name with no Latin letter or digit gets a placeholder (`org-`
    and ten random characters) until you choose a URL. A URL you give must be
    a slug no other organization holds, not one of the console's own words, and
    holding no profanity or slur.
@@ -404,8 +401,13 @@ its **Owner**:
    sends you to the payment page, and the organization opens once the
    payment is confirmed.
 
-There is no limit on how many organizations you create or own. Creating one
-leaves your [default organization](/docs/settings/account#default-organization),
+A deployment may hold each person to a number of organizations they own,
+whatever their plans: past it, creating one, or accepting an organization's
+ownership, is refused, and the console names who to write to for more. On the
+hosted service the number is 10
+([Limits](https://telmoni.com/docs/workspace/billing#limits)); a self-hosted
+deployment sets none. Being a member of other people's organizations is never
+limited. Creating one leaves your [default organization](/docs/settings/account#default-organization),
 the one a sign-in opens, as it was. An operator who has [closed new
 organizations](/docs/self-host/production#closing-new-organizations) closes this
 too: the switcher offers no **New organization**. On the hosted service, one you
@@ -447,6 +449,34 @@ Admin who owns no organization on it
      leave it.
    - All projects, API keys, connectors, and audit histories stay intact. The
      handover, and each removed seat, is written to the audit log.
+
+### Dividing its limits among its projects
+
+Where a deployment sells plans, a plan's spans, content, alerts and alert
+deliveries are the organization's, one pool every project draws on. Its
+**Limits** page, in the organization's rail, shows each project you can open
+beside what it has used this month: spans, content held, alerts, monitors,
+objectives, and alert deliveries today where capped. Every member reads it.
+
+The organization's Owner and Admins may cap a project at less than the plan
+holds, so one busy project cannot use what the others need: **Set caps** on
+its row takes a number for each, at most the plan's, and an empty one shares
+the pool. Every change is in the [audit log](/docs/workspace/audit-log). Past
+its cap, that project alone is held as the organization is past its plan:
+
+- **Spans** past the month's cap are sampled, one run in ten kept and flagged,
+  with no grace, since the cap is the team's own.
+- **Content** past its cap is dropped as it arrives, its spans keeping their
+  metadata.
+- **A new alert, monitor or objective** is refused, naming the cap and who may
+  raise it, and a [starter alert](/docs/monitoring/alerts) is not made.
+- **Alert deliveries** past the day's cap reach the feed alone until midnight
+  UTC.
+
+The organization's Owner and Admins are told once in the feed when a project
+passes a cap, and its other projects carry on. A project's own **Settings**
+page shows its caps to its members. A project moved to another organization
+leaves its caps behind.
 
 ### Deleting an organization
 

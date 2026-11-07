@@ -351,6 +351,24 @@ pub async fn owned_by(
     .await
 }
 
+/// How many ACTIVE organizations this person owns, as their organization
+/// ceiling counts them; read under the person's lock where one more becomes
+/// theirs.
+pub async fn owned_count<B: Binding>(
+    tx: &mut Scoped<'_, B>,
+    user_id: &UserId,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM auth.organization_members m
+           JOIN auth.organizations o
+             ON o.external_id = m.organization_id AND o.status = 'active'
+          WHERE m.user_id = $1 AND m.role = 'owner'",
+    )
+    .bind(user_id)
+    .fetch_one(tx.conn())
+    .await
+}
+
 /// The ACTIVE organizations this person owns, in id order — where a project
 /// offered to them may land. The lane the project transfer's accept runs in.
 pub async fn active_organizations_owned_by(

@@ -131,10 +131,10 @@ pub async fn visible_days(state: &AppState, project_id: &ProjectId, days: u16) -
     }
 }
 
-/// The month's count an export's kept spans go on once written, by
-/// [`count_spans`].
+/// The month's counts an export's kept spans go on once written, by
+/// [`count_spans`]: the organization's, and its project's where capped.
 pub struct Month {
-    key: String,
+    keys: Vec<String>,
 }
 
 /// What of the batch the organization's month has room for, the rest
@@ -145,6 +145,7 @@ pub struct Month {
 pub async fn hold_spans(
     state: &Arc<AppState>,
     organization_id: &OrganizationId,
+    project_id: &ProjectId,
     batch: &mut Batch,
     storage: &UserIdStorage,
     now: DateTime<Utc>,
@@ -152,6 +153,32 @@ pub async fn hold_spans(
     if batch.rows.is_empty() {
         return (None, None);
     }
+    let (organization_key, mut sampled) =
+        hold_organization_spans(state, organization_id, batch, storage, now).await;
+    let (project_key, project_sampled) = hold_project_spans(
+        state,
+        organization_id,
+        project_id,
+        batch,
+        storage,
+        now,
+        sampled.is_some(),
+    )
+    .await;
+    sampled = sampled.or(project_sampled);
+    let keys: Vec<String> = organization_key.into_iter().chain(project_key).collect();
+    ((!keys.is_empty()).then_some(Month { keys }), sampled)
+}
+
+/// What of the batch the organization's month has room for: the key its
+/// month is counted under, and the sentence the rest were sampled out with.
+async fn hold_organization_spans(
+    state: &Arc<AppState>,
+    organization_id: &OrganizationId,
+    batch: &mut Batch,
+    storage: &UserIdStorage,
+    now: DateTime<Utc>,
+) -> (Option<String>, Option<String>) {
     let Some(capacity) = state
         .capacities
         .of(state.entitlements.as_ref(), organization_id)
@@ -177,7 +204,7 @@ pub async fn hold_spans(
             return (None, None);
         }
     };
-    let month = Some(Month { key: used_key });
+    let month = Some(used_key);
     if capacity.spans.has_room(used) {
         return (month, None);
     }
@@ -218,6 +245,86 @@ pub async fn hold_spans(
     (month, Some(capacity.spans.detail))
 }
 
+/// What of the batch the project's own cap on spans a month has room for,
+/// where its owners and admins set one: past it, sampled with no grace,
+/// since the cap is theirs, and the owner and admins told once. Answers the
+/// key its month is counted under, and the sentence of any it sampled out.
+/// A batch the organization's month already sampled is counted, not sampled
+/// again.
+async fn hold_project_spans(
+    state: &Arc<AppState>,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+    batch: &mut Batch,
+    storage: &UserIdStorage,
+    now: DateTime<Utc>,
+    sampled: bool,
+) -> (Option<String>, Option<String>) {
+    let Some(cap) = state.project_caps.of(state, project_id).await.spans() else {
+        return (None, None);
+    };
+    let period = project_period(state, organization_id, now).await;
+    let Some(mut connection) = state.redis.connection().await else {
+        return (None, None);
+    };
+    let used_key = format!("telemetry:project-spans:{project_id}:{period}");
+    let used: Result<Option<u64>, redis::RedisError> = connection.get(&used_key).await;
+    let used = match used {
+        Ok(used) => used.unwrap_or(0),
+        Err(error) => {
+            state.redis.stood_in("a project's month of spans", &error);
+            return (None, None);
+        }
+    };
+    if used < cap || sampled {
+        return (Some(used_key), None);
+    }
+    let told_key = format!("telemetry:project-spans-told:{project_id}:{period}:{cap}");
+    let claimed: Result<(bool,), redis::RedisError> = redis::pipe()
+        .atomic()
+        .set_nx(&told_key, 1)
+        .expire(&told_key, COUNTS_KEPT_S)
+        .ignore()
+        .query_async(&mut connection)
+        .await;
+    if let Ok((true,)) = claimed {
+        crate::project_limits::tell(
+            Arc::clone(state),
+            organization_id,
+            project_id,
+            "spans a month",
+            cap,
+            period.to_string(),
+            Some(told_key),
+        );
+    }
+    let detail = crate::project_limits::detail("spans a month", cap);
+    sample(batch, &detail, storage);
+    (Some(used_key), Some(detail))
+}
+
+/// When the month a project's spans are counted over began, as a timestamp:
+/// its organization's own month where a plan answers one, else the UTC
+/// calendar month.
+pub async fn project_period(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    now: DateTime<Utc>,
+) -> i64 {
+    if let Some(capacity) = state
+        .capacities
+        .of(state.entitlements.as_ref(), organization_id)
+        .await
+    {
+        return capacity.period_start.timestamp();
+    }
+    use chrono::Datelike as _;
+    now.date_naive()
+        .with_day(1)
+        .and_then(|day| day.and_hms_opt(0, 0, 0))
+        .map_or(now.timestamp(), |start| start.and_utc().timestamp())
+}
+
 /// The units of `rows`, written and kept, counted against the month.
 pub async fn count_spans(state: &AppState, month: Month, rows: &[crate::store::SpanRow]) {
     let units: u64 = rows.iter().map(|row| u64::from(row.units)).sum();
@@ -227,14 +334,16 @@ pub async fn count_spans(state: &AppState, month: Month, rows: &[crate::store::S
     let Some(mut connection) = state.redis.connection().await else {
         return;
     };
-    let counted: Result<(), redis::RedisError> = redis::pipe()
-        .atomic()
-        .incr(&month.key, units)
-        .ignore()
-        .expire(&month.key, COUNTS_KEPT_S)
-        .ignore()
-        .query_async(&mut connection)
-        .await;
+    let mut counting = redis::pipe();
+    counting.atomic();
+    for key in &month.keys {
+        counting
+            .incr(key, units)
+            .ignore()
+            .expire(key, COUNTS_KEPT_S)
+            .ignore();
+    }
+    let counted: Result<(), redis::RedisError> = counting.query_async(&mut connection).await;
     if let Err(error) = counted {
         state.redis.stood_in("the month's spans", &error);
     }
@@ -263,19 +372,48 @@ pub async fn has_room_for_content(state: &AppState, organization_id: &Organizati
 }
 
 /// The content an export brings, kept while the organization holds less than
-/// its plan's ceiling; past it, every field is dropped, named `content_full`
+/// its plan's ceiling and the project less than its own cap; past either,
+/// every field is dropped, named `content_full`
 /// in the answer, and the spans keep their metadata alone. Answers whether it
 /// was past.
 pub async fn hold_content(
-    state: &AppState,
+    state: &Arc<AppState>,
     organization_id: &OrganizationId,
+    project_id: &ProjectId,
     batch: &mut Batch,
 ) -> bool {
-    if batch.content.is_empty() || has_room_for_content(state, organization_id).await {
+    if batch.content.is_empty() {
         return false;
     }
-    drop_content(batch);
-    true
+    if !has_room_for_content(state, organization_id).await {
+        drop_content(batch);
+        return true;
+    }
+    // Past the project's own cap, its owners and admins told once a cap.
+    if !crate::project_limits::has_room_for_content(state, project_id).await {
+        if let Some(cap) = state
+            .project_caps
+            .of(state, project_id)
+            .await
+            .content_bytes()
+            && let Some(told_key) =
+                crate::project_limits::claim(state, project_id, "bytes of content", cap, "held")
+                    .await
+        {
+            crate::project_limits::tell(
+                Arc::clone(state),
+                organization_id,
+                project_id,
+                "bytes of content",
+                cap,
+                "held".to_owned(),
+                Some(told_key),
+            );
+        }
+        drop_content(batch);
+        return true;
+    }
+    false
 }
 
 /// Every field of the batch's content dropped, each named `content_full`.

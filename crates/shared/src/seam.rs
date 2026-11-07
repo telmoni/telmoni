@@ -19,9 +19,9 @@ use uuid::Uuid;
 use crate::acting::{Acting, ActingKey};
 use crate::slug::Slug;
 use crate::{
-    AlertCeilings, AuditAction, AuthError, AuthzError, Capacity, ContentMode, FlagSet, Grants,
-    LaneCeilings, MemberCeiling, NotificationKind, OrganizationId, OrganizationStatus,
-    ProjectCeiling, ProjectId, Role, TelmoniError, UserId,
+    AlertCeilings, AuditAction, AuthError, AuthzError, Capacity, ContentMode, CountCeiling,
+    FlagSet, Grants, LaneCeilings, MemberCeiling, NotificationKind, OrganizationId,
+    OrganizationStatus, ProjectId, Role, TelmoniError, UserId,
 };
 
 /// Who may read a document the agent indexes, beyond the tenant its keys
@@ -192,31 +192,6 @@ pub struct OrganizationFounding {
     /// The URL the founder asked for, if any. One no longer free, or none,
     /// is derived from the name, never refused: the founding is owed.
     pub slug: Option<Slug>,
-}
-
-/// A project a deployment makes for a person once it has what it asks for
-/// first — the plan that holds it, say — rather than at their asking: what
-/// [`Auth::make_ordered_project`] is handed. The deployment mints the id, so
-/// an order tried again makes the same project once.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectOrder {
-    /// The id the deployment minted for it.
-    pub project_id: ProjectId,
-    /// The organization it is made in.
-    pub organization_id: OrganizationId,
-    /// Who asked for it, whose act it is recorded as.
-    pub orderer: UserId,
-    /// Its name, as checked by [`Auth::check_project`].
-    pub name: String,
-}
-
-/// A project made for a deployment, as its orderer is sent to it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OrderedProject {
-    /// The project, under the id the deployment minted.
-    pub project_id: ProjectId,
-    /// The segment its pages go by, under its organization's.
-    pub slug: Slug,
 }
 
 /// An organization founded for a deployment, as its founder is sent to it.
@@ -406,33 +381,6 @@ pub trait Auth: Send + Sync {
     ) -> Result<FoundedOrganization, TelmoniError> {
         let _ = founding;
         Err(not_linked("founding an organization"))
-    }
-
-    /// Whether `user` could make a project called `name` in `organization`
-    /// now, the plan's ceiling aside: their role may, and the name, cleaned
-    /// as theirs would be, is free. Answers the cleaned name, for a deployment
-    /// that takes something first and must refuse before it does.
-    async fn check_project(
-        &self,
-        organization: &OrganizationId,
-        user: &UserId,
-        name: &str,
-    ) -> Result<String, TelmoniError> {
-        let _ = (organization, user, name);
-        Err(not_linked("a project's check"))
-    }
-
-    /// Make a project for a deployment that has what it asks for first
-    /// ([`ProjectOrder`]), as the orderer's own asking would make it: held to
-    /// their role, the plan's ceiling and the name's, and audited as theirs.
-    /// Idempotent by the id: one already made in the organization is
-    /// answered as it stands.
-    async fn make_ordered_project(
-        &self,
-        order: &ProjectOrder,
-    ) -> Result<OrderedProject, TelmoniError> {
-        let _ = order;
-        Err(not_linked("making an ordered project"))
     }
 
     /// Move `project_id` into `into`, both held by organizations the person
@@ -1142,13 +1090,25 @@ pub trait Entitlements: Send + Sync {
         Ok(None)
     }
 
-    /// How many projects the organization may hold; `None` is as many as it
-    /// makes. Asked where one is made or moved in, before the organization's
-    /// lock, and it may read the deployment's own rows.
+    /// How many organizations `user` may own, whatever their plans; `None`
+    /// is as many as they found. Asked where one more becomes theirs —
+    /// founded or handed over — before the person's lock, and it may read the
+    /// deployment's own rows.
+    async fn organization_ceiling(
+        &self,
+        user: &UserId,
+    ) -> Result<Option<CountCeiling>, TelmoniError> {
+        let _ = user;
+        Ok(None)
+    }
+
+    /// How many projects the organization may hold, whatever its plan; `None`
+    /// is as many as it makes. Asked where one is made or moved in, before
+    /// the organization's lock, and it may read the deployment's own rows.
     async fn project_ceiling(
         &self,
         organization_id: &OrganizationId,
-    ) -> Result<Option<ProjectCeiling>, TelmoniError> {
+    ) -> Result<Option<CountCeiling>, TelmoniError> {
         let _ = organization_id;
         Ok(None)
     }
@@ -1263,13 +1223,31 @@ pub async fn member_ceiling(
 pub async fn project_ceiling(
     entitlements: &dyn Entitlements,
     organization_id: &OrganizationId,
-) -> Option<ProjectCeiling> {
+) -> Option<CountCeiling> {
     or_none(
         organization_id,
         "the project ceiling",
         entitlements.project_ceiling(organization_id),
     )
     .await
+}
+
+/// What an organization's arrival asks of the person it becomes theirs,
+/// founded or handed over: how many they may own, which the door holds their
+/// count to under the person's lock. An answer that cannot be had is no
+/// ceiling, logged.
+pub async fn organization_ceiling(
+    entitlements: &dyn Entitlements,
+    user: &UserId,
+) -> Option<CountCeiling> {
+    match entitlements.organization_ceiling(user).await {
+        Ok(ceiling) => ceiling,
+        Err(e) => {
+            tracing::warn!(user_id = %user, error = %e,
+                "the organization ceiling could not be read; none is held");
+            None
+        }
+    }
 }
 
 /// What an alert is held to, made or evaluated: the organization's alert

@@ -27,13 +27,13 @@ use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::acting::Acting;
 use telmoni_shared::seam::{
-    Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook, ProjectOrder,
+    Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook,
 };
 use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{
-    Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, ProjectCeiling, ProjectId,
-    TelmoniError, UserId,
+    CountCeiling, Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, TelmoniError,
+    UserId,
 };
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -156,13 +156,14 @@ impl OwnershipHook for RecordingOwnership {
 }
 
 /// Entitlements under which the organizations in `paused` take nothing new,
-/// each in `ceilings` holds at most so many people, and each in `projects`
-/// so many projects.
+/// each in `ceilings` holds at most so many people, each in `projects` so
+/// many projects, and each person in `organizations` owns so many.
 #[derive(Default)]
 struct PausedEntitlements {
     paused: Mutex<HashSet<String>>,
     ceilings: Mutex<HashMap<String, u32>>,
     projects: Mutex<HashMap<String, u32>>,
+    organizations: Mutex<HashMap<String, u32>>,
 }
 
 impl PausedEntitlements {
@@ -179,11 +180,23 @@ impl PausedEntitlements {
             .unwrap()
             .insert(organization.to_owned(), limit);
     }
+
+    fn hold_organizations(&self, user: &str, limit: u32) {
+        self.organizations
+            .lock()
+            .unwrap()
+            .insert(user.to_owned(), limit);
+    }
 }
 
 /// The sentence the double refuses a project with.
 fn holds_projects(limit: u32) -> String {
-    format!("Hobby holds {limit} projects.")
+    format!("This organization holds {limit} projects, the most it may.")
+}
+
+/// The sentence the double refuses an organization with.
+fn owns_organizations(limit: u32) -> String {
+    format!("You own {limit} organizations, the most you may.")
 }
 
 /// The sentence the double refuses a seat with.
@@ -229,17 +242,30 @@ impl Entitlements for PausedEntitlements {
     async fn project_ceiling(
         &self,
         organization_id: &OrganizationId,
-    ) -> Result<Option<ProjectCeiling>, TelmoniError> {
+    ) -> Result<Option<CountCeiling>, TelmoniError> {
         Ok(self
             .projects
             .lock()
             .unwrap()
             .get(organization_id.as_str())
-            .map(|&limit| ProjectCeiling {
+            .map(|&limit| CountCeiling {
                 limit,
-                entitlement: "pro".into(),
                 detail: holds_projects(limit),
-                liftable: true,
+            }))
+    }
+
+    async fn organization_ceiling(
+        &self,
+        user: &UserId,
+    ) -> Result<Option<CountCeiling>, TelmoniError> {
+        Ok(self
+            .organizations
+            .lock()
+            .unwrap()
+            .get(user.as_str())
+            .map(|&limit| CountCeiling {
+                limit,
+                detail: owns_organizations(limit),
             }))
     }
 }
@@ -1248,52 +1274,18 @@ async fn projects_in(pool: &PgPool, organization: &str) -> i64 {
 }
 
 /// At its project ceiling an organization makes no project and keeps every
-/// one it holds, the refusal the deployment's 402; one past it, held before
-/// the ceiling came down, keeps them all as well.
+/// one it holds, the refusal a 402 that asking the deployment lifts; one past
+/// it, held before the ceiling came down, keeps them all as well.
 #[sqlx::test]
 async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let deployment = Deployment::default();
     let organization = deployment.sign_in(&pool, OWNER).await;
     let held = projects_in(&pool, &organization).await;
-    let limit = u32::try_from(held + 1).unwrap();
-    deployment.entitlements.hold_projects(&organization, limit);
-    let ceiling = |reached: bool| {
-        json!({
-            "limit": limit,
-            "held": if reached { held + 1 } else { held },
-            "reached": reached,
-            "detail": holds_projects(limit),
-            "liftable": true,
-        })
-    };
-
-    // The listing answers the ceiling, so the console's New project at it
-    // offers what lifts it rather than a name that would be refused.
-    let (status, body) = deployment
-        .call(
-            &pool,
-            "GET",
-            "/internal/v1/projects",
-            OWNER,
-            Some(&organization),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["ceiling"], ceiling(false));
     deployment.project(&pool, &organization, "Payments").await;
-    let (_, body) = deployment
-        .call(
-            &pool,
-            "GET",
-            "/internal/v1/projects",
-            OWNER,
-            Some(&organization),
-            None,
-        )
-        .await;
-    assert_eq!(body["ceiling"], ceiling(true));
+    deployment
+        .entitlements
+        .hold_projects(&organization, u32::try_from(held + 1).unwrap());
 
     let (status, body) = deployment
         .call(
@@ -1307,7 +1299,7 @@ async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
     assert_eq!(body["type"], "/errors/plan/limit-reached");
-    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(body["entitlement"], "support");
     assert_eq!(
         body["detail"],
         holds_projects(u32::try_from(held + 1).unwrap())
@@ -1331,53 +1323,6 @@ async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
         )
         .await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
-    assert_eq!(projects_in(&pool, &organization).await, held + 1);
-}
-
-/// A project a deployment orders is checked before it takes anything, held
-/// to the ceiling until the plan lifts it, then made once under its id.
-#[sqlx::test]
-async fn an_ordered_project_is_made_once_its_ceiling_lifts(pool: PgPool) {
-    apply_audit_migrations(&pool).await;
-    let deployment = Deployment::default();
-    let organization = deployment.sign_in(&pool, OWNER).await;
-    deployment.project(&pool, &organization, "Payments").await;
-    let held = projects_in(&pool, &organization).await;
-    deployment
-        .entitlements
-        .hold_projects(&organization, u32::try_from(held).unwrap());
-    let state = deployment.state(&pool);
-    let org = OrganizationId::try_new(organization.clone()).unwrap();
-    let owner = UserId::try_new(OWNER).unwrap();
-
-    assert_eq!(
-        state.check_project(&org, &owner, " Search ").await.unwrap(),
-        "Search"
-    );
-    let taken = state
-        .check_project(&org, &owner, "payments")
-        .await
-        .unwrap_err();
-    assert_eq!(taken.to_problem_details().status, 409);
-
-    let order = ProjectOrder {
-        project_id: ProjectId::new(),
-        organization_id: org.clone(),
-        orderer: owner,
-        name: "Search".into(),
-    };
-    let refused = state.make_ordered_project(&order).await.unwrap_err();
-    assert_eq!(refused.to_problem_details().status, 402);
-    assert_eq!(projects_in(&pool, &organization).await, held);
-
-    deployment
-        .entitlements
-        .hold_projects(&organization, u32::try_from(held + 1).unwrap());
-    let made = state.make_ordered_project(&order).await.unwrap();
-    assert_eq!(made.project_id, order.project_id);
-    assert_eq!(made.slug.as_str(), "search");
-    let again = state.make_ordered_project(&order).await.unwrap();
-    assert_eq!(again, made, "made once, answered as it stands");
     assert_eq!(projects_in(&pool, &organization).await, held + 1);
 }
 
@@ -1567,4 +1512,96 @@ async fn a_project_is_accepted_into_no_organization_at_its_ceiling(pool: PgPool)
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(projects_in(&pool, &theirs).await, held + 1);
+}
+
+/// How many organizations a person owns, active ones.
+async fn owned_by(pool: &PgPool, user: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM auth.organization_members m
+           JOIN auth.organizations o ON o.external_id = m.organization_id AND o.status = 'active'
+          WHERE m.user_id = $1 AND m.role = 'owner'",
+    )
+    .bind(user)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// At their organization ceiling a person founds none, at their own asking or
+/// the deployment's, and is handed none; each refusal a 402 that asking the
+/// deployment lifts, and nothing changes hands.
+#[sqlx::test]
+async fn a_person_at_their_organization_ceiling_takes_no_more(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let state = deployment.state(&pool);
+    let theirs = deployment.sign_in(&pool, OWNER).await;
+    deployment.sign_in(&pool, ADMIN).await;
+    deployment.admit_admin(&pool, &theirs, ADMIN).await;
+    deployment.entitlements.hold_organizations(ADMIN, 1);
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/organizations",
+            ADMIN,
+            None,
+            Some(json!({ "name": "Second" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["type"], "/errors/plan/limit-reached");
+    assert_eq!(body["entitlement"], "support");
+    assert_eq!(body["detail"], owns_organizations(1));
+
+    let founding = OrganizationFounding {
+        organization_id: OrganizationId::new(),
+        founder: UserId::try_new(ADMIN).unwrap(),
+        name: "Paid Labs".into(),
+        slug: None,
+    };
+    let refused = state.found_organization(&founding).await.unwrap_err();
+    assert_eq!(refused.to_problem_details().status, 402);
+
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/organization/owner-transfer",
+            OWNER,
+            Some(&theirs),
+            Some(json!({ "memberId": ADMIN })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/organization/owner-transfer/accept",
+            ADMIN,
+            Some(&theirs),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    assert_eq!(body["entitlement"], "support");
+    assert_eq!(owner_of(&pool, &theirs).await, OWNER);
+    assert_eq!(owned_by(&pool, ADMIN).await, 1);
+
+    // Raised, the same founding goes through.
+    deployment.entitlements.hold_organizations(ADMIN, 2);
+    let (status, body) = deployment
+        .call(
+            &pool,
+            "POST",
+            "/internal/v1/organizations",
+            ADMIN,
+            None,
+            Some(json!({ "name": "Second" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(owned_by(&pool, ADMIN).await, 2);
 }

@@ -204,6 +204,12 @@ pub async fn put_score(
                     .into(),
             ));
         }
+        if !crate::project_limits::has_room_for_content(&state, &project_id).await {
+            return Err(TelmoniError::BadRequest(
+                "this project holds the content its cap does, and a score's comment is content:                  score it without one, or ask an owner or admin of the organization to raise its                  cap on its Limits page"
+                    .into(),
+            ));
+        }
     }
     let (run, span, session) = target.ids();
     let projects = Projects::one(project_id.clone());

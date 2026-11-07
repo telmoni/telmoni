@@ -110,6 +110,55 @@ GRANT SELECT, DELETE ON telemetry.project_settings TO telemetry_maintenance;
 -- A transfer moves a row to the organization that now holds its project.
 GRANT UPDATE (organization_id) ON telemetry.project_settings TO telemetry_maintenance;
 
+-- What an organization's owners and admins hold one project to of the pool
+-- its plan gives them all (`src/project_limits.rs`): a column a limit, each
+-- at most the plan's, and none — or no row — sharing the pool whole. Past
+-- one, the project alone is held as the organization is past its plan.
+CREATE TABLE telemetry.project_limits (
+    project_id               TEXT        PRIMARY KEY,
+    organization_id          TEXT        NOT NULL,
+    spans                    BIGINT,
+    content_bytes            BIGINT,
+    alerts                   INTEGER,
+    monitors                 INTEGER,
+    objectives               INTEGER,
+    alert_deliveries_per_day INTEGER,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT project_limits_spans_check CHECK (spans >= 0),
+    CONSTRAINT project_limits_content_bytes_check CHECK (content_bytes >= 0),
+    CONSTRAINT project_limits_alerts_check CHECK (alerts >= 0),
+    CONSTRAINT project_limits_monitors_check CHECK (monitors >= 0),
+    CONSTRAINT project_limits_objectives_check CHECK (objectives >= 0),
+    CONSTRAINT project_limits_alert_deliveries_check CHECK (alert_deliveries_per_day >= 0)
+);
+
+CREATE INDEX project_limits_organization_idx ON telemetry.project_limits (organization_id);
+
+ALTER TABLE telemetry.project_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.project_limits FORCE ROW LEVEL SECURITY;
+
+-- Written on its project's scope, which binds the organization too, as a
+-- settings row is.
+CREATE POLICY tenant_isolation ON telemetry.project_limits
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true)
+                AND organization_id = current_setting('app.organization_id', true));
+
+-- Every member reads the organization's division of its pool.
+CREATE POLICY organization_read ON telemetry.project_limits
+    FOR SELECT
+    USING (organization_id = current_setting('app.organization_id', true));
+
+CREATE POLICY maintenance_access ON telemetry.project_limits
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The purges delete an organization's or a deleted project's caps, and a
+-- move drops a project's, set against the pool it left.
+GRANT SELECT, DELETE ON telemetry.project_limits TO telemetry_maintenance;
+
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 2. SAVED DASHBOARDS

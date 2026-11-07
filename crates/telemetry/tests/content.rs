@@ -579,6 +579,53 @@ async fn content_past_the_organizations_ceiling_is_dropped_and_named(pool: PgPoo
     assert!(door.kept(&pool).await.is_empty(), "nothing sealed");
 }
 
+/// Past its project's own content cap, set by its organization's owners
+/// and admins, an export's spans keep their metadata alone as they do past
+/// the plan's, while the organization's ceiling has room to spare.
+#[sqlx::test]
+async fn content_past_the_projects_own_cap_is_dropped_and_named(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let mut door = door(&pool, ContentMode::On).await;
+    let state = common::state_with_stores_under(
+        &pool,
+        door.auth.clone(),
+        Arc::new(common::PlanMonth {
+            spans: 1_000_000,
+            grace_days: 0,
+            content_bytes: 25_000_000,
+        }),
+    );
+    door.app = router(state.clone()).nest("/otlp", otlp_router(state.clone()));
+    door.state = state;
+    sqlx::query(
+        "INSERT INTO telemetry.project_limits (project_id, organization_id, content_bytes)
+         VALUES ($1, $2, 0)",
+    )
+    .bind(&door.project)
+    .bind(&door.organization)
+    .execute(&pool)
+    .await
+    .expect("the project's cap");
+
+    let (_, answer) = door.send(export("short")).await;
+    let message = answer["partialSuccess"]["errorMessage"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message.contains(&format!(
+            "span {SPAN} dropped gen_ai.input.messages: content_full;"
+        )),
+        "{message}"
+    );
+    assert_eq!(
+        answer["partialSuccess"]["rejectedSpans"], 0,
+        "the span is kept: {answer}"
+    );
+    assert!(door.kept(&pool).await.is_empty(), "nothing sealed");
+}
+
 /// Each night an organization past its content ceiling loses its oldest
 /// content, a day at a time, until a tenth of the ceiling is free, its bytes
 /// taken off the count; what its retention keeps of its spans stays.

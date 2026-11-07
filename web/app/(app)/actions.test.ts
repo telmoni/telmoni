@@ -66,20 +66,6 @@ vi.mock("@/lib/extension/create-organization", () => ({
   createOrganizationElsewhere: (input: { name: string; slug: string; extras: Record<string, string> }) =>
     mockElsewhere(input),
 }));
-const mockProjectElsewhere = vi.fn<
-  (input: { organizationId: string; name: string; extras: Record<string, string> }) => Promise<
-    { href: string } | { error: string } | null
-  >
->(async () => null);
-vi.mock("@/lib/extension/create-project", () => ({
-  createProjectElsewhere: (input: { organizationId: string; name: string; extras: Record<string, string> }) =>
-    mockProjectElsewhere(input),
-}));
-let mockListing: unknown = { kind: "ok", projects: [], ceiling: null };
-vi.mock("@/lib/server/entities/projects", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/server/entities/projects")>()),
-  fetchProjectListing: async () => mockListing,
-}));
 let mockIdentity: IdentityContext | null = null;
 
 import { revalidatePath } from "next/cache";
@@ -181,49 +167,32 @@ describe("createProjectAction — which organization the project lands in", () =
     expect(mockOrganizationHeaders).not.toHaveBeenCalled();
   });
 
-  it("at the plan's ceiling, goes where a console built on this one sends it, asking auth nothing", async () => {
-    mockListing = {
-      kind: "ok",
-      projects: [],
-      ceiling: { limit: 2, held: 2, reached: true, detail: "Hobby holds 2 projects.", liftable: true },
-    };
-    mockProjectElsewhere.mockResolvedValueOnce({ href: "https://pay.example/session" });
-    try {
-      const r = await createProjectAction("Platform", undefined, { plan: "pro" });
-      expect(r).toEqual({ ok: true, href: "https://pay.example/session" });
-      expect(mockProjectElsewhere).toHaveBeenCalledWith({
-        organizationId: "org_seat",
-        name: "Platform",
-        extras: { plan: "pro" },
-      });
-      expect(mockFetch).not.toHaveBeenCalled();
-    } finally {
-      mockListing = { kind: "ok", projects: [], ceiling: null };
-    }
-  });
-
-  it("below the ceiling, never asks a console built on this one", async () => {
-    await createProjectAction("Platform");
-    expect(mockProjectElsewhere).not.toHaveBeenCalled();
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("names who to ask for more where the plan's project ceiling refuses it", async () => {
+  // A hard number on what an organization holds is lifted only by asking.
+  it("names who to ask where only asking lifts the refusal", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 402 });
-    mockExtractProblem.mockResolvedValueOnce({ message: "Hobby holds 10 projects.", problem: null });
     mockEnv.SUPPORT_EMAIL = "support@example.test";
     try {
+      mockExtractProblem.mockResolvedValueOnce({
+        message: "This organization holds 50 projects, the most it may.",
+        problem: { title: "plan limit reached", status: 402, entitlement: "support" },
+      });
       expect(errorOf(await createProjectAction("Platform"))).toBe(
-        "Hobby holds 10 projects. To hold more, write to support@example.test.",
+        "This organization holds 50 projects, the most it may. Write to support@example.test to raise it.",
       );
-      // Any other refusal, or a deployment that names nobody, is said as it came.
-      mockFetch.mockResolvedValue({ ok: false, status: 409 });
-      mockExtractProblem.mockResolvedValueOnce({ message: "That name is taken.", problem: null });
-      expect(errorOf(await createProjectAction("Platform"))).toBe("That name is taken.");
+      // One a plan lifts, or a deployment that names nobody, is said as it came.
+      mockExtractProblem.mockResolvedValueOnce({
+        message: "This organization is paused.",
+        problem: { title: "plan limit reached", status: 402, entitlement: "pro" },
+      });
+      expect(errorOf(await createProjectAction("Platform"))).toBe("This organization is paused.");
       mockEnv.SUPPORT_EMAIL = undefined;
-      mockFetch.mockResolvedValue({ ok: false, status: 402 });
-      mockExtractProblem.mockResolvedValueOnce({ message: "Hobby holds 10 projects.", problem: null });
-      expect(errorOf(await createProjectAction("Platform"))).toBe("Hobby holds 10 projects.");
+      mockExtractProblem.mockResolvedValueOnce({
+        message: "This organization holds 50 projects, the most it may.",
+        problem: { title: "plan limit reached", status: 402, entitlement: "support" },
+      });
+      expect(errorOf(await createProjectAction("Platform"))).toBe(
+        "This organization holds 50 projects, the most it may.",
+      );
     } finally {
       mockEnv.SUPPORT_EMAIL = undefined;
     }

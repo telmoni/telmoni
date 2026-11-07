@@ -130,6 +130,7 @@ export const RESERVED_PROJECT_SLUGS: ReadonlySet<string> = new Set([
   "connectors",
   "data-sheet",
   "integrations",
+  "limits",
   "members",
   "new",
   "notifications",

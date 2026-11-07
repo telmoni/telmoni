@@ -668,7 +668,7 @@ async fn told<'a>(
     key: &'a str,
     again: bool,
 ) -> Result<Reached, TelmoniError> {
-    let taken = deliveries::take(state, of.organization_id, hearers.len()).await;
+    let taken = deliveries::take(state, of.organization_id, of.project_id, hearers.len()).await;
     let route_key = of.owner.route_key();
     let route = Route {
         key: &route_key,

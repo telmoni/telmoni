@@ -35,13 +35,13 @@ use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::{Organization, Scoped, organization_scope};
+use telmoni_shared::db::tenant_session::{Binding, Organization, Scoped, organization_scope};
 use telmoni_shared::extract::Json;
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::seam::OwnershipChange;
 use telmoni_shared::{
-    AuditAction, AuthError, OrganizationId, OrganizationRole, TelmoniError, TelmoniResourceKind,
-    UserId,
+    AuditAction, AuthError, CountCeiling, OrganizationId, OrganizationRole, TelmoniError,
+    TelmoniResourceKind, UserId,
 };
 
 use super::answer::Declined;
@@ -108,6 +108,30 @@ pub(crate) async fn may_found(state: &AppState, founder: &UserId) -> Result<(), 
             Ok(())
         }
     }
+}
+
+/// How many organizations `user` may own, read before the person's lock is
+/// taken, never under it: the deployment answers on its own pool.
+pub(crate) async fn organization_ceiling_of(
+    state: &AppState,
+    user: &UserId,
+) -> Option<CountCeiling> {
+    let entitlements = state.siblings.entitlements.as_deref()?;
+    telmoni_shared::seam::organization_ceiling(entitlements, user).await
+}
+
+/// One more organization of `user`'s held to `ceiling`, counted under the
+/// person's lock so two foundings at once cannot both take the last place.
+pub(crate) async fn owns_to<B: Binding>(
+    ceiling: Option<&CountCeiling>,
+    tx: &mut Scoped<'_, B>,
+    user: &UserId,
+) -> Result<(), TelmoniError> {
+    let Some(ceiling) = ceiling else {
+        return Ok(());
+    };
+    let owned = organization_members::owned_count(tx, user).await?;
+    ceiling.admit(u64::try_from(owned).unwrap_or(u64::MAX))
 }
 
 /// Tell the deployment's ownership hook of a change that has committed. It
@@ -474,6 +498,8 @@ pub async fn accept(
         may_take_ownership(&state, &organization, &user_id).await?;
     }
 
+    let ceiling = organization_ceiling_of(&state, &user_id).await;
+
     let (tx, role) = locked(
         &state,
         &organization,
@@ -500,6 +526,7 @@ pub async fn accept(
         )
         .into());
     }
+    owns_to(ceiling.as_ref(), &mut tx, &user_id).await?;
 
     let previous = organization_members::demote_owner(&mut tx, &organization, &user_id).await?;
     if !organization_members::promote_offer_holder(&mut tx, &organization, &user_id).await? {

@@ -21,12 +21,10 @@ vi.mock("@/components/console-ui-context", () => ({
 }));
 
 let role = "owner";
-let ceiling: ProjectCeiling | null = null;
 const addProject = vi.fn();
 vi.mock("@/lib/store", () => ({
   useActiveOrganization: () => ({ organizationId: "org_acme", slug: "acme", name: "Acme", role }),
   useAddProject: () => addProject,
-  useProjectCeiling: () => ceiling,
   useUser: () => ({ id: "u1", email: "owner@acme.test" }),
 }));
 
@@ -46,18 +44,14 @@ vi.mock("@/app/(app)/actions", () => ({
 
 import type { Creating } from "@/components/console-ui-context";
 import { CreatePanels } from "@/components/create-panels";
-import type { ProjectCeiling } from "@/lib/server/entities/projects";
 
-function panels(notice?: React.ReactNode, projectNotice?: React.ReactNode) {
-  return render(<CreatePanels host="console.test" notice={notice} projectNotice={projectNotice} />);
+function panels(notice?: React.ReactNode) {
+  return render(<CreatePanels host="console.test" notice={notice} />);
 }
-
-const AT_CEILING = { limit: 2, held: 2, reached: true, detail: "Hobby holds 2 projects." };
 
 beforeEach(() => {
   vi.clearAllMocks();
   role = "owner";
-  ceiling = null;
   creating = null;
 });
 
@@ -94,7 +88,7 @@ describe("New project", () => {
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: " Support agent " } });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/support-agent"));
-    expect(createProjectAction).toHaveBeenCalledWith("Support agent", "org_acme", {});
+    expect(createProjectAction).toHaveBeenCalledWith("Support agent", "org_acme");
     expect(addProject).toHaveBeenCalledTimes(1);
     expect(closeCreate).toHaveBeenCalledTimes(1);
   });
@@ -150,49 +144,6 @@ describe("New project", () => {
     unmount();
     expect(document.activeElement).toBe(opener);
     opener.remove();
-  });
-
-  // `components/extension/create-project-notice.tsx`: what lifts the ceiling.
-  it("at the ceiling, opens with the notice, content off, and hands its fields on", async () => {
-    ceiling = { ...AT_CEILING, liftable: true };
-    createProjectAction.mockResolvedValue({ ok: true, href: "https://pay.example/session" });
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign });
-    panels(undefined, <input type="hidden" name="plan" value="pro" data-testid="project-notice" />);
-    expect(screen.getByTestId("project-notice")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "On" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Web" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://pay.example/session"));
-    expect(createProjectAction).toHaveBeenCalledWith("Web", "org_acme", { plan: "pro" });
-    expect(addProject).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
-  });
-
-  it("follows a path the action answers at the ceiling, shutting the panel", async () => {
-    ceiling = { ...AT_CEILING, liftable: true };
-    createProjectAction.mockResolvedValue({ ok: true, href: "/acme/billing/projects/o1" });
-    panels(undefined, <span />);
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Web" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/billing/projects/o1"));
-    expect(closeCreate).toHaveBeenCalledTimes(1);
-  });
-
-  it("where no plan holds more, says the ceiling and makes nothing", () => {
-    ceiling = { ...AT_CEILING, liftable: false };
-    panels(undefined, <span data-testid="project-notice" />);
-    expect(screen.getByTestId("project-ceiling")).toHaveTextContent("Hobby holds 2 projects.");
-    expect(screen.queryByTestId("project-notice")).toBeNull();
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Web" } });
-    expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
-  });
-
-  it("below the ceiling, says nothing of it", () => {
-    ceiling = { ...AT_CEILING, held: 1, reached: false, liftable: true };
-    panels(undefined, <span data-testid="project-notice" />);
-    expect(screen.queryByTestId("project-notice")).toBeNull();
-    expect(screen.queryByTestId("project-ceiling")).toBeNull();
   });
 
   // Asked for again over an open one — New project in the menu, or `c` —

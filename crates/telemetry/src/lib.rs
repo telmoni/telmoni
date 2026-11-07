@@ -58,6 +58,7 @@ pub mod live;
 pub mod monitors;
 pub mod notify;
 pub mod prices;
+pub mod project_limits;
 pub mod rate_limit;
 pub mod replica;
 pub mod retention;
@@ -129,6 +130,9 @@ pub struct AppState {
     /// What each organization's plan holds of what it spends, kept a minute
     /// ([`capacity`]).
     pub capacities: capacity::Capacities,
+    /// What each project is held to of its organization's pool, kept a
+    /// minute ([`project_limits`]).
+    pub project_caps: project_limits::Known,
     /// The module's loops this replica runs, and their beats, which the
     /// external watchdog reads ([`AppState::stale`]).
     pub heartbeats: telmoni_shared::heartbeat::Heartbeats<db::TelemetryLane>,
@@ -205,6 +209,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/telemetry/privacy", get(handler::privacy::get_privacy))
         .route("/telemetry/usage", get(handler::usage::get_usage))
+        .route(
+            "/telemetry/limits",
+            get(handler::limits::get_limits).put(handler::limits::put_limits),
+        )
         .route("/telemetry/traces", get(handler::traces::list_traces))
         .route("/telemetry/rollups", get(handler::traces::get_rollups))
         .route("/telemetry/traces/facets", get(handler::traces::get_facets))

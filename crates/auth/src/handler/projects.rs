@@ -10,17 +10,16 @@ use serde_json::json;
 
 use telmoni_shared::OrganizationAction;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit};
-use telmoni_shared::db::tenant_session::maintenance_scope;
-use telmoni_shared::db::tenant_session::{Binding, Scoped};
+use telmoni_shared::db::tenant_session::{Binding, Scoped, maintenance_scope};
 use telmoni_shared::extract::{Json, Path};
 use telmoni_shared::person_token::Principal;
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
-    AuditAction, AuthError, ContentMode, OrganizationId, ProjectCeiling, ProjectId, TelmoniError,
-    TelmoniResourceKind, UserId,
+    AuditAction, AuthError, ContentMode, CountCeiling, OrganizationId, ProjectId, TelmoniError,
+    TelmoniResourceKind,
 };
 
-use super::answer::{OrganizationProjects, Projects, ProjectsCeiling};
+use super::answer::Projects;
 use super::authorize_organization;
 use crate::AppState;
 use crate::db::{AuthLane, projects};
@@ -32,7 +31,7 @@ pub const MAX_PROJECT_NAME: usize = 100;
 /// A submitted project name as a project carries it: shared by create and
 /// rename so the two cannot drift. It is printed in mail subjects, so it is
 /// held to what an organization's name is.
-pub(crate) fn validate_project_name(raw: &str) -> Result<String, TelmoniError> {
+fn validate_project_name(raw: &str) -> Result<String, TelmoniError> {
     crate::identity::name(raw, "project", MAX_PROJECT_NAME)
 }
 
@@ -53,8 +52,7 @@ fn name_taken(e: sqlx::Error, name: &str) -> TelmoniError {
 }
 
 /// `GET /internal/v1/projects` — the projects the caller can open in the
-/// organization named by `x-organization-id`, by name, and its plan's ceiling
-/// on them.
+/// organization named by `x-organization-id`, by name.
 pub async fn list_projects(
     State(state): State<Arc<AppState>>,
     principal: Principal,
@@ -65,24 +63,9 @@ pub async fn list_projects(
 
     // ⚠ **An empty list stays empty.** Projects are created only when
     // explicitly requested, so an organization with no projects remains empty.
-    let ceiling = project_ceiling_of(&state, &organization_id).await;
     let mut tx = maintenance_scope(&state.db, AuthLane).await?;
     let mut project_list =
         projects::list_for_organization_user(&mut tx, &organization_id, &user_id).await?;
-    let ceiling = match ceiling {
-        Some(ceiling) => {
-            let held = u64::try_from(projects::count_in(&mut tx, &organization_id).await?)
-                .unwrap_or(u64::MAX);
-            Some(ProjectsCeiling {
-                limit: ceiling.limit,
-                held,
-                reached: ceiling.reached(held),
-                detail: ceiling.detail,
-                liftable: ceiling.liftable,
-            })
-        }
-        None => None,
-    };
     tx.commit().await?;
     if let Some(telemetry) = &state.siblings.telemetry {
         let ids: Vec<ProjectId> = project_list.iter().map(|p| p.id.clone()).collect();
@@ -93,9 +76,8 @@ pub async fn list_projects(
             }
         }
     }
-    Ok(Json(OrganizationProjects {
+    Ok(Json(Projects {
         projects: project_list,
-        ceiling,
     }))
 }
 
@@ -129,7 +111,7 @@ pub struct CreateProjectRequest {
 pub(crate) async fn project_ceiling_of(
     state: &AppState,
     organization: &OrganizationId,
-) -> Option<ProjectCeiling> {
+) -> Option<CountCeiling> {
     let entitlements = state.siblings.entitlements.as_deref()?;
     telmoni_shared::seam::project_ceiling(entitlements, organization).await
 }
@@ -137,7 +119,7 @@ pub(crate) async fn project_ceiling_of(
 /// One more project held to `ceiling`, counted under the organization's lock
 /// so two arriving at once cannot both take the last place.
 pub(crate) async fn held_to<B: Binding>(
-    ceiling: Option<&ProjectCeiling>,
+    ceiling: Option<&CountCeiling>,
     tx: &mut Scoped<'_, B>,
     organization: &OrganizationId,
 ) -> Result<(), TelmoniError> {
@@ -156,35 +138,15 @@ pub async fn create_project(
     Json(req): Json<CreateProjectRequest>,
 ) -> Result<impl IntoResponse, TelmoniError> {
     let organization_id = super::organization_of(&headers)?;
+    let user_id = principal.user_id;
     let name = validate_project_name(&req.name)?;
-    let made = make(
-        &state,
-        &organization_id,
-        &principal.user_id,
-        &ProjectId::new(),
-        &name,
-    )
-    .await?;
-    Ok((StatusCode::CREATED, Json(made)))
-}
-
-/// One project made in `organization_id` by `user_id` under `project_id`, as
-/// their own asking makes it: their role may create one, the plan's ceiling
-/// admits it, its name is free, and it is audited as theirs.
-pub(crate) async fn make(
-    state: &AppState,
-    organization_id: &OrganizationId,
-    user_id: &UserId,
-    project_id: &ProjectId,
-    name: &str,
-) -> Result<projects::ProjectSummary, TelmoniError> {
-    let mut acting = super::acting_organization(state, organization_id, user_id).await?;
+    let mut acting = super::acting_organization(&state, &organization_id, &user_id).await?;
     if let Err(refused) = authorize_organization(acting.role, OrganizationAction::CreateProjects) {
         acting.tx.commit().await?;
         return Err(refused);
     }
     // Asked once the caller may make one, as an invitation asks its ceiling.
-    let ceiling = project_ceiling_of(state, organization_id).await;
+    let ceiling = project_ceiling_of(&state, &organization_id).await;
     // The creator's role on the new project is the one their organization role
     // gives them on every project in it. The gate above admits only roles that
     // give one, so a `None` is a broken rule, refused before anything is written.
@@ -196,11 +158,12 @@ pub(crate) async fn make(
 
     // On the organization's lock, as a project landing here by transfer
     // takes it to pick a free name.
-    crate::db::locks::lock_organization(&mut acting.tx, organization_id).await?;
-    held_to(ceiling.as_ref(), &mut acting.tx, organization_id).await?;
-    let Some(slug) = projects::create(&mut acting.tx, project_id, organization_id, name)
+    crate::db::locks::lock_organization(&mut acting.tx, &organization_id).await?;
+    held_to(ceiling.as_ref(), &mut acting.tx, &organization_id).await?;
+    let project_id = ProjectId::new();
+    let Some(slug) = projects::create(&mut acting.tx, &project_id, &organization_id, &name)
         .await
-        .map_err(|e| name_taken(e, name))?
+        .map_err(|e| name_taken(e, &name))?
     else {
         return Err(AuthError::Conflict("project id collision — retry".into()).into());
     };
@@ -208,12 +171,12 @@ pub(crate) async fn make(
     emit_audit(
         &mut acting.tx,
         AuditEvent::new(
-            organization_id,
+            &organization_id,
             Actor::User(user_id.as_str()),
             AuditAction::Created,
             TelmoniResourceKind::Project,
         )
-        .in_project(project_id)
+        .in_project(&project_id)
         .on(project_id.as_str())
         .details(json!({ "name": name })),
     )
@@ -221,13 +184,16 @@ pub(crate) async fn make(
 
     acting.tx.commit().await?;
 
-    Ok(projects::ProjectSummary {
-        id: project_id.clone(),
-        slug,
-        name: name.to_owned(),
-        role,
-        content_mode: ContentMode::Off,
-    })
+    Ok((
+        StatusCode::CREATED,
+        Json(projects::ProjectSummary {
+            id: project_id,
+            slug,
+            name,
+            role,
+            content_mode: ContentMode::Off,
+        }),
+    ))
 }
 
 /// `DELETE /internal/v1/projects/{project_id}` — destroy a project and everything that

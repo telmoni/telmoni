@@ -674,7 +674,7 @@ async fn room_given_back_to_a_day_whose_count_is_gone_writes_nothing(pool: PgPoo
         eprintln!("skipping {}: Redis is not reachable", module_path!());
         return;
     };
-    let taken = deliveries::take(&project.state, &project.organization, 3).await;
+    let taken = deliveries::take(&project.state, &project.organization, &project.project, 3).await;
     assert_eq!(taken.room(), 3);
     let key = format!(
         "telemetry:alert-deliveries:{}:{}",
