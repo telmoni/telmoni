@@ -350,6 +350,11 @@ fn hook_purge(organization: &str) -> SiblingCall {
     SiblingCall::HookPurge(organization.to_owned())
 }
 
+/// The purge hook's call for `user`'s erasure, as the timeline records it.
+fn hook_purge_person(user: &str) -> SiblingCall {
+    SiblingCall::HookPurgePerson(user.to_owned())
+}
+
 /// Notifications' organization purge, as the timeline records it.
 fn notifications_purge(organization: &str) -> SiblingCall {
     SiblingCall::PurgeOrganization(organization.to_owned())
@@ -1957,6 +1962,38 @@ async fn an_account_that_owns_nothing_is_erased_in_the_request(pool: PgPool) {
     assert_eq!(codes, 0, "the person's codes outlived them");
 }
 
+/// The purge hook is told of an erasure before the identity goes, and one it
+/// refuses keeps the identity until the sweep's retry lands.
+#[sqlx::test]
+async fn an_erasure_waits_on_the_purge_hook(pool: PgPool) {
+    seed_account_deletion_owning_nothing(&pool).await;
+    let (calls, hook, _) = siblings();
+    hook.on_purge_person(Err(TelmoniError::Internal("the purge hook is down".into())));
+    let (router, _provider) = app(pool.clone(), Some(hook), 8_000);
+    let app = || router.clone();
+    let person_purges = || calls.count(|c| *c == hook_purge_person(USER));
+
+    let resp = app()
+        .oneshot(delete_account(&pool, USER, CODE).await)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    assert_eq!(person(&pool, USER).await, Person::Pending);
+    assert_eq!(person_purges(), 1);
+
+    let resp = app()
+        .oneshot(service(
+            "POST",
+            &format!("/internal/v1/people/{USER}/erase"),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    assert_eq!(person(&pool, USER).await, Person::Erased);
+    assert_eq!(person_purges(), 2, "the retry told the hook again");
+}
+
 /// ⚠ **An owned organization's row waits out the grace window, and its owner
 /// waits for the row.** The request purges it and answers 202; the people
 /// listing leaves the person off while they still own it, so the sweep never
@@ -3062,8 +3099,12 @@ async fn erasing_a_person_redacts_the_notices_that_named_them(pool: PgPool) {
     assert_eq!(provider_deletes(&provider), 1);
     assert_eq!(
         calls.calls(),
-        [notifications_redact(USER), notifications_redact(USER)],
-        "before the agent's first erase, and after the memberships"
+        [
+            notifications_redact(USER),
+            notifications_redact(USER),
+            hook_purge_person(USER),
+        ],
+        "before the agent's first erase, after the memberships, then the hook"
     );
     assert_eq!(
         deletes_before_redact.load(Ordering::SeqCst),
@@ -3121,8 +3162,9 @@ async fn a_failed_redaction_leaves_the_person_pending_for_the_sweep(pool: PgPool
             notifications_redact(USER),
             notifications_redact(USER),
             notifications_redact(USER),
+            hook_purge_person(USER),
         ],
-        "the first pass, the second that failed, and the retry's two"
+        "the first pass, the second that failed, the retry's two, then the hook"
     );
 }
 

@@ -991,18 +991,22 @@ pub trait Telemetry: Send + Sync {
 }
 
 /// A module of the deployment's own that holds something of an
-/// organization's outside auth's tables — a subscription, say — and must
-/// drop it before the organization goes.
+/// organization's or a person's outside auth's tables — a subscription, say —
+/// and must drop it before the row goes.
 ///
-/// Auth calls it when a deletion is confirmed and again before the row
-/// goes, and keeps the row until it answers `Ok`. Idempotent, then.
+/// Auth keeps the row until it answers `Ok`, so each call is idempotent.
 #[async_trait]
 pub trait PurgeHook: Send + Sync {
-    /// Drop what is held for the organization.
+    /// Drop what is held for the organization: called when its deletion is
+    /// confirmed and again before its row goes.
     async fn purge_organization(
         &self,
         organization_id: &OrganizationId,
     ) -> Result<(), TelmoniError>;
+
+    /// Drop what is held for the person: called as their erasure ends,
+    /// before their identity goes.
+    async fn purge_person(&self, user_id: &UserId) -> Result<(), TelmoniError>;
 }
 
 /// A change in who owns which organization, as auth tells an

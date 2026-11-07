@@ -76,6 +76,8 @@ pub enum SiblingCall {
     },
     /// `PurgeHook::purge_organization`.
     HookPurge(String),
+    /// `PurgeHook::purge_person`.
+    HookPurgePerson(String),
 }
 
 /// The order every call landed in, across both recorders when they share
@@ -526,6 +528,7 @@ impl Telemetry for RecordingTelemetry {
 pub struct RecordingHook {
     calls: SiblingCalls,
     purge: Answers<()>,
+    purge_person: Answers<()>,
     down: std::sync::atomic::AtomicBool,
     delay: Mutex<Option<Duration>>,
 }
@@ -537,6 +540,7 @@ impl RecordingHook {
         Self {
             calls,
             purge: Answers::default(),
+            purge_person: Answers::default(),
             down: std::sync::atomic::AtomicBool::new(false),
             delay: Mutex::new(None),
         }
@@ -551,6 +555,12 @@ impl RecordingHook {
     /// Script the next purge's answer.
     pub fn on_purge(&self, answer: Result<(), TelmoniError>) -> &Self {
         self.purge.push(answer);
+        self
+    }
+
+    /// Script the next person purge's answer; unscripted, it lands.
+    pub fn on_purge_person(&self, answer: Result<(), TelmoniError>) -> &Self {
+        self.purge_person.push(answer);
         self
     }
 
@@ -594,6 +604,12 @@ impl PurgeHook for RecordingHook {
                 Ok(())
             }
         })
+    }
+
+    async fn purge_person(&self, user_id: &UserId) -> Result<(), TelmoniError> {
+        self.calls
+            .record(SiblingCall::HookPurgePerson(user_id.to_string()));
+        self.purge_person.take().unwrap_or(Ok(()))
     }
 }
 

@@ -594,7 +594,7 @@ enum Removed {
 /// upstream), then the notices that named them, then what the agent holds
 /// of them, then every membership they hold, each audited on that
 /// organization's chain, then the notices and the agent once more, then the
-/// identity. Shared by the inline tail and the sweep, so the two cannot drift.
+/// purge hook, then the identity. Shared by the inline tail and the sweep, so the two cannot drift.
 ///
 /// ⚠ **Refuses a person who has not asked to go** — the sweep reaches it for
 /// anybody its listing names, and a bug there must not erase a live person —
@@ -772,6 +772,11 @@ pub async fn erase_person(
         }
     }
     erase_in_agent(state, user_id, &person, &organizations).await?;
+    // What the deployment holds of them outside this database; a failure
+    // keeps the identity, and the sweep retries.
+    if let Some(hook) = state.siblings.purge_hook.as_ref() {
+        hook.purge_person(user_id).await?;
+    }
 
     // The identity last. Sessions and codes cascade; a membership that landed
     // since the removals above makes this fail (RESTRICT), and the sweep
