@@ -486,7 +486,7 @@ const MUTATIONS: &[Mutation] = &[
     },
     Mutation {
         file: "crates/auth/src/handler/projects.rs",
-        fn_name: "create_project",
+        fn_name: "make",
         action: "Created",
         resource_kind: "Project",
         actor_id: ActorPattern::Variable,

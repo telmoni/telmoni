@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FolderPlus } from "lucide-react";
-import { startTransition, useEffect, useId, useRef, useState } from "react";
+import { startTransition, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { CodeField, CodeSentTo } from "@/components/code-field";
@@ -26,7 +26,7 @@ import {
 import { CONTENT_MODE_LABEL } from "@/lib/content-mode";
 import { organizationLabel } from "@/lib/identity";
 import { projectPath } from "@/lib/slug";
-import { useActiveOrganization, useAddProject, useUser } from "@/lib/store";
+import { useActiveOrganization, useAddProject, useProjectCeiling, useUser } from "@/lib/store";
 import { MAX_PROJECT_NAME, typedBound } from "@/lib/names";
 import { administers } from "@/lib/roles";
 import type { Project } from "@/lib/server/entities/projects";
@@ -43,9 +43,13 @@ export function useCanCreateProjects(): boolean {
 
 /** New project, in the console's side panel (`create-panels.tsx`). */
 export function CreateProjectPanel({
+  notice,
   onClose,
   returnFocus,
 }: {
+  /// What a console built on this one says at the plan's ceiling
+  /// (`components/extension/create-project-notice.tsx`).
+  notice?: ReactNode;
   onClose: () => void;
   returnFocus?: () => HTMLElement | null;
 }) {
@@ -74,7 +78,14 @@ export function CreateProjectPanel({
     (code) => updateContentModeAction(madeId.current, ContentMode.On, { code }),
   );
 
-  const canSubmit = name.trim().length > 0 && organization !== null && !pending;
+  // At the plan's ceiling the project waits on what lifts it, which the
+  // notice offers and the deployment makes it after, content off; where no
+  // plan holds more, the ceiling's own sentence says so and nothing is made.
+  const ceiling = useProjectCeiling();
+  const lifting = ceiling?.reached === true && ceiling.liftable;
+  const capped = ceiling?.reached === true && !ceiling.liftable;
+
+  const canSubmit = name.trim().length > 0 && organization !== null && !pending && !capped;
 
   /** On to the project, the panel shutting as the page it leaves for lands. */
   function open(project: Project | undefined) {
@@ -88,7 +99,7 @@ export function CreateProjectPanel({
     });
   }
 
-  function submit() {
+  function submit(extras: Record<string, string>) {
     if (!organization) return;
     if (made) {
       if (flow.step.step !== "code") flow.sendCode();
@@ -96,8 +107,22 @@ export function CreateProjectPanel({
       return;
     }
     run(
-      () => createProjectAction(name.trim(), organization.organizationId),
+      () => createProjectAction(name.trim(), organization.organizationId, extras),
       (res) => {
+        // At the ceiling a console built on this one sends the person on
+        // first — to pay for the plan that holds it — and makes it after.
+        if (res.href) {
+          if (/^https?:\/\//.test(res.href)) {
+            window.location.assign(res.href);
+            return;
+          }
+          const href = res.href;
+          startTransition(() => {
+            onClose();
+            router.push(href);
+          });
+          return;
+        }
         // A project to keep content waits here for the owner's code; an
         // answer that could not be read leaves it off, the page drawn again.
         if (mode === ContentMode.On && res.project) {
@@ -134,7 +159,14 @@ export function CreateProjectPanel({
         className="flex min-h-0 flex-1 flex-col"
         onSubmit={(e) => {
           e.preventDefault();
-          if (canSubmit) submit();
+          if (!canSubmit) return;
+          // What the notice's own fields say, by name: the panel's own carry
+          // none, so they are not among them.
+          const extras: Record<string, string> = {};
+          for (const [key, value] of new FormData(e.currentTarget).entries()) {
+            if (typeof value === "string") extras[key] = value;
+          }
+          submit(extras);
         }}
       >
         <SidePanelHeader icon={FolderPlus} titleId={titleId} title="New project" onClose={onClose}>
@@ -143,6 +175,14 @@ export function CreateProjectPanel({
           </p>
         </SidePanelHeader>
         <SidePanelBody>
+          {lifting && notice}
+          {capped && (
+            <SidePanelRow label="Plan">
+              <p className="text-muted-foreground" data-testid="project-ceiling">
+                {ceiling?.detail}
+              </p>
+            </SidePanelRow>
+          )}
           <SidePanelRow label="Project name" htmlFor="project-name">
             <Input
               ref={field}
@@ -180,7 +220,7 @@ export function CreateProjectPanel({
               // A press on the chosen one would choose none: it stays chosen.
               onValueChange={(next) => next && setMode(next as ContentMode)}
               aria-labelledby={modeId}
-              disabled={pending || made !== null}
+              disabled={pending || made !== null || lifting}
             >
               {[ContentMode.Off, ContentMode.On].map((m) => (
                 <ToggleGroupItem
@@ -197,7 +237,8 @@ export function CreateProjectPanel({
               {mode === ContentMode.Off
                 ? "The content its spans carry — prompts, answers, tool inputs and outputs — is dropped as they arrive, and only metadata is kept."
                 : "The content its spans carry is kept, sealed under the project's own key, wherever the code asks the SDK to send it; every read is recorded. You confirm it with a code mailed to you."}
-              {!isOwner && " Only the organization's owner can make a project that keeps content."}{" "}
+              {lifting && " One made with a move to a bigger plan starts with content off: turn it on in its settings."}
+              {!lifting && !isOwner && " Only the organization's owner can make a project that keeps content."}{" "}
               You can change it later in its settings.
             </p>
             {made && flow.step.step === "code" && (

@@ -101,9 +101,9 @@ pub struct ProjectCeiling {
     pub entitlement: String,
     /// The sentence a person reads, which names nobody.
     pub detail: String,
-    /// Where what lifts it is bought, an address on the console's origin: a
-    /// console at the ceiling sends whoever asks for a project there.
-    pub page: Option<String>,
+    /// Whether a plan the deployment sells holds more: a console at the
+    /// ceiling offers it in New project, and otherwise says this is the most.
+    pub liftable: bool,
 }
 
 impl ProjectCeiling {

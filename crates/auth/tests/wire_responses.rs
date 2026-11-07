@@ -339,7 +339,7 @@ fn the_projects_answer_as_the_console_reads() {
                 held: 10,
                 reached: true,
                 detail: "This organization holds 10 projects.".into(),
-                page: Some("https://console.example/acme/billing".into()),
+                liftable: true,
             }),
         },
     );

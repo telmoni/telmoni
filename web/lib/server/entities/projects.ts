@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 
 import { env } from "@/lib/env";
-import { pathOf } from "@/lib/console-nav";
 import { compareProjects, compareProjectsByOrganization } from "@/lib/projects";
 import { ContentMode, Role } from "@/lib/types/enums";
 
@@ -28,15 +27,14 @@ export const ProjectRenamedSchema = z.object({ slug: z.string() });
 
 // How many projects the organization may hold, as the deployment that sells
 // plans answers it, how many it holds, whether one more would be refused now,
-// the sentence it is refused with, and where what lifts it is bought, read as
-// the path the router takes; `null` where none is held, as on a self-hosted
-// installation.
+// the sentence it is refused with, and whether a plan it sells holds more;
+// `null` where none is held, as on a self-hosted installation.
 export const ProjectCeilingSchema = z.object({
   limit: z.number().int().min(0),
   held: z.number().int().min(0),
   reached: z.boolean(),
   detail: z.string(),
-  page: z.string().nullable(),
+  liftable: z.boolean(),
 });
 export type ProjectCeiling = z.infer<typeof ProjectCeilingSchema>;
 
@@ -64,10 +62,7 @@ export const fetchProjectListing = cache(async (): Promise<ProjectListing> => {
   return {
     kind: "ok",
     projects: read.value.projects.sort(compareProjects),
-    ceiling: read.value.ceiling && {
-      ...read.value.ceiling,
-      page: read.value.ceiling.page === null ? null : pathOf(read.value.ceiling.page),
-    },
+    ceiling: read.value.ceiling,
   };
 });
 

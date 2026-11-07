@@ -27,13 +27,13 @@ use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, Siblings, router};
 use telmoni_shared::acting::Acting;
 use telmoni_shared::seam::{
-    Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook,
+    Auth, Entitlements, OrganizationFounding, OwnershipChange, OwnershipHook, ProjectOrder,
 };
 use telmoni_shared::slug::{self, Slug};
 use telmoni_shared::test_util::{ServiceRole, apply_audit_migrations, seed_identity, service_pool};
 use telmoni_shared::{
-    Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, ProjectCeiling, TelmoniError,
-    UserId,
+    Flag, Grants, MemberCeiling, OrganizationId, Paused, PlanError, ProjectCeiling, ProjectId,
+    TelmoniError, UserId,
 };
 
 const SERVICE_SECRET: &str = "test-service-secret";
@@ -239,7 +239,7 @@ impl Entitlements for PausedEntitlements {
                 limit,
                 entitlement: "pro".into(),
                 detail: holds_projects(limit),
-                page: None,
+                liftable: true,
             }))
     }
 }
@@ -1264,12 +1264,12 @@ async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
             "held": if reached { held + 1 } else { held },
             "reached": reached,
             "detail": holds_projects(limit),
-            "page": null,
+            "liftable": true,
         })
     };
 
-    // The listing answers the ceiling, so the console sends a New project
-    // at it elsewhere rather than to a panel that would be refused.
+    // The listing answers the ceiling, so the console's New project at it
+    // offers what lifts it rather than a name that would be refused.
     let (status, body) = deployment
         .call(
             &pool,
@@ -1331,6 +1331,53 @@ async fn an_organization_at_its_project_ceiling_makes_no_project(pool: PgPool) {
         )
         .await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(projects_in(&pool, &organization).await, held + 1);
+}
+
+/// A project a deployment orders is checked before it takes anything, held
+/// to the ceiling until the plan lifts it, then made once under its id.
+#[sqlx::test]
+async fn an_ordered_project_is_made_once_its_ceiling_lifts(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let organization = deployment.sign_in(&pool, OWNER).await;
+    deployment.project(&pool, &organization, "Payments").await;
+    let held = projects_in(&pool, &organization).await;
+    deployment
+        .entitlements
+        .hold_projects(&organization, u32::try_from(held).unwrap());
+    let state = deployment.state(&pool);
+    let org = OrganizationId::try_new(organization.clone()).unwrap();
+    let owner = UserId::try_new(OWNER).unwrap();
+
+    assert_eq!(
+        state.check_project(&org, &owner, " Search ").await.unwrap(),
+        "Search"
+    );
+    let taken = state
+        .check_project(&org, &owner, "payments")
+        .await
+        .unwrap_err();
+    assert_eq!(taken.to_problem_details().status, 409);
+
+    let order = ProjectOrder {
+        project_id: ProjectId::new(),
+        organization_id: org.clone(),
+        orderer: owner,
+        name: "Search".into(),
+    };
+    let refused = state.make_ordered_project(&order).await.unwrap_err();
+    assert_eq!(refused.to_problem_details().status, 402);
+    assert_eq!(projects_in(&pool, &organization).await, held);
+
+    deployment
+        .entitlements
+        .hold_projects(&organization, u32::try_from(held + 1).unwrap());
+    let made = state.make_ordered_project(&order).await.unwrap();
+    assert_eq!(made.project_id, order.project_id);
+    assert_eq!(made.slug.as_str(), "search");
+    let again = state.make_ordered_project(&order).await.unwrap();
+    assert_eq!(again, made, "made once, answered as it stands");
     assert_eq!(projects_in(&pool, &organization).await, held + 1);
 }
 

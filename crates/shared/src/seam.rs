@@ -194,6 +194,31 @@ pub struct OrganizationFounding {
     pub slug: Option<Slug>,
 }
 
+/// A project a deployment makes for a person once it has what it asks for
+/// first — the plan that holds it, say — rather than at their asking: what
+/// [`Auth::make_ordered_project`] is handed. The deployment mints the id, so
+/// an order tried again makes the same project once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectOrder {
+    /// The id the deployment minted for it.
+    pub project_id: ProjectId,
+    /// The organization it is made in.
+    pub organization_id: OrganizationId,
+    /// Who asked for it, whose act it is recorded as.
+    pub orderer: UserId,
+    /// Its name, as checked by [`Auth::check_project`].
+    pub name: String,
+}
+
+/// A project made for a deployment, as its orderer is sent to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderedProject {
+    /// The project, under the id the deployment minted.
+    pub project_id: ProjectId,
+    /// The segment its pages go by, under its organization's.
+    pub slug: Slug,
+}
+
 /// An organization founded for a deployment, as its founder is sent to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundedOrganization {
@@ -381,6 +406,33 @@ pub trait Auth: Send + Sync {
     ) -> Result<FoundedOrganization, TelmoniError> {
         let _ = founding;
         Err(not_linked("founding an organization"))
+    }
+
+    /// Whether `user` could make a project called `name` in `organization`
+    /// now, the plan's ceiling aside: their role may, and the name, cleaned
+    /// as theirs would be, is free. Answers the cleaned name, for a deployment
+    /// that takes something first and must refuse before it does.
+    async fn check_project(
+        &self,
+        organization: &OrganizationId,
+        user: &UserId,
+        name: &str,
+    ) -> Result<String, TelmoniError> {
+        let _ = (organization, user, name);
+        Err(not_linked("a project's check"))
+    }
+
+    /// Make a project for a deployment that has what it asks for first
+    /// ([`ProjectOrder`]), as the orderer's own asking would make it: held to
+    /// their role, the plan's ceiling and the name's, and audited as theirs.
+    /// Idempotent by the id: one already made in the organization is
+    /// answered as it stands.
+    async fn make_ordered_project(
+        &self,
+        order: &ProjectOrder,
+    ) -> Result<OrderedProject, TelmoniError> {
+        let _ = order;
+        Err(not_linked("making an ordered project"))
     }
 
     /// Move `project_id` into `into`, both held by organizations the person

@@ -73,8 +73,8 @@ pub struct OrganizationProjects<T> {
     pub ceiling: Option<ProjectsCeiling>,
 }
 
-/// The project ceiling as the console reads it, which sends a New project
-/// past it to `page` rather than to a panel that would be refused.
+/// The project ceiling as the console reads it, whose New project at it
+/// offers what lifts it, or says nothing does.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProjectsCeiling {
     /// How many projects the organization may hold.
@@ -85,6 +85,6 @@ pub struct ProjectsCeiling {
     pub reached: bool,
     /// The sentence one more is refused with.
     pub detail: String,
-    /// Where what lifts it is bought.
-    pub page: Option<String>,
+    /// Whether a plan the deployment sells holds more.
+    pub liftable: bool,
 }

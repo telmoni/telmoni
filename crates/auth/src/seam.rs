@@ -18,8 +18,8 @@ use telmoni_shared::extract::header;
 use telmoni_shared::rbac::{Resource, Verb};
 use telmoni_shared::seam::{
     Audience, AuditEventsQuery, Auth, Closing, Confirmation, DocumentCursor, FoundedOrganization,
-    MovedProject, OrganizationFounding, OwnedOrganization, OwnerNotice, ProjectHome,
-    ReadableProject, Receipt, SourceDocument,
+    MovedProject, OrderedProject, OrganizationFounding, OwnedOrganization, OwnerNotice,
+    ProjectHome, ProjectOrder, ReadableProject, Receipt, SourceDocument,
 };
 use telmoni_shared::slug::Slug;
 use telmoni_shared::{
@@ -35,7 +35,8 @@ use crate::db::{
     flags, identities, members, organization_members, organizations, projects, tokens,
 };
 use crate::handler::{
-    acting_organization, acting_project, authorize, parse_organization_id, parse_project_id,
+    acting_organization, acting_project, authorize, authorize_organization, parse_organization_id,
+    parse_project_id,
 };
 use crate::mailer::AuthMail;
 use crate::model::InviteScope;
@@ -254,6 +255,58 @@ impl Auth for AppState {
         founding: &OrganizationFounding,
     ) -> Result<FoundedOrganization, TelmoniError> {
         crate::handler::organization::found_for_deployment(self, founding).await
+    }
+
+    async fn check_project(
+        &self,
+        organization: &OrganizationId,
+        user: &UserId,
+        name: &str,
+    ) -> Result<String, TelmoniError> {
+        let name = crate::handler::projects::validate_project_name(name)?;
+        let acting = acting_organization(self, organization, user).await?;
+        let refused = authorize_organization(acting.role, OrganizationAction::CreateProjects);
+        acting.tx.commit().await?;
+        refused?;
+        let taken = crate::db::lane(&self.db, async |tx| {
+            projects::holds_name(tx, organization, &name).await
+        })
+        .await?;
+        if taken {
+            return Err(AuthError::Conflict(format!(
+                "a project named \"{name}\" already exists in this organization"
+            ))
+            .into());
+        }
+        Ok(name)
+    }
+
+    async fn make_ordered_project(
+        &self,
+        order: &ProjectOrder,
+    ) -> Result<OrderedProject, TelmoniError> {
+        let made = crate::db::lane(&self.db, async |tx| {
+            projects::slug_in(tx, &order.organization_id, &order.project_id).await
+        })
+        .await?;
+        let slug = match made {
+            Some(slug) => slug,
+            None => {
+                crate::handler::projects::make(
+                    self,
+                    &order.organization_id,
+                    &order.orderer,
+                    &order.project_id,
+                    &order.name,
+                )
+                .await?
+                .slug
+            }
+        };
+        Ok(OrderedProject {
+            project_id: order.project_id.clone(),
+            slug,
+        })
     }
 
     async fn move_project(

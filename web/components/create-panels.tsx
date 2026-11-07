@@ -14,12 +14,16 @@ import { CreateProjectPanel, useCanCreateProjects } from "@/components/create-pr
 export function CreatePanels({
   host,
   notice,
+  projectNotice,
 }: {
   /// The console's host, ahead of a new organization's URL.
   host: string;
   /// What a console built on this one says in New organization
   /// (`components/extension/create-organization-notice.tsx`).
   notice?: ReactNode;
+  /// What it says in New project at the plan's ceiling, where a plan it sells
+  /// holds more (`components/extension/create-project-notice.tsx`).
+  projectNotice?: ReactNode;
 }) {
   const { element } = useConsoleShell();
   const { creating, closeCreate } = useConsoleUi();
@@ -32,7 +36,12 @@ export function CreatePanels({
   if (creating.kind === "project") {
     return canCreateProjects
       ? createPortal(
-          <CreateProjectPanel key={creating.opened} onClose={closeCreate} returnFocus={returnFocus} />,
+          <CreateProjectPanel
+            key={creating.opened}
+            notice={projectNotice}
+            onClose={closeCreate}
+            returnFocus={returnFocus}
+          />,
           element,
         )
       : null;

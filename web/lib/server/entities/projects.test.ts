@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe("fetchProjectListing", () => {
-  it("reads the ceiling's page as the path the router takes", async () => {
+  it("reads the ceiling, and whether a plan holds more", async () => {
     fetchWithTimeout.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -45,14 +45,14 @@ describe("fetchProjectListing", () => {
           held: 10,
           reached: true,
           detail: "This organization holds 10 projects.",
-          page: "https://console.example/acme/billing",
+          liftable: true,
         },
       }),
     });
     const listing = await fetchProjectListing();
     expect(listing).toMatchObject({
       kind: "ok",
-      ceiling: { reached: true, page: "/acme/billing" },
+      ceiling: { reached: true, liftable: true },
     });
   });
 });

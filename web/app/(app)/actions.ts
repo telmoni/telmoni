@@ -8,6 +8,7 @@ import { ProblemType } from "@/lib/api/problem";
 import { env } from "@/lib/env";
 import { publishEvent, userChannel } from "@/lib/events/publisher";
 import { createOrganizationElsewhere } from "@/lib/extension/create-organization";
+import { createProjectElsewhere } from "@/lib/extension/create-project";
 import { createdOrganizationHref } from "@/lib/extension/created-organization";
 import { FlagOffDetail } from "@/lib/flags";
 import { logger } from "@/lib/logger";
@@ -20,18 +21,20 @@ import {
   personHeaders,
 } from "@/lib/server/entities/identity-context";
 import { CreatedOrganizationSchema, getServerContext } from "@/lib/server/entities/organization";
-import { type Project, ProjectSchema } from "@/lib/server/entities/projects";
+import { type Project, ProjectSchema, fetchProjectListing } from "@/lib/server/entities/projects";
 import { FeatureOffProblemSchema } from "@/lib/server/flags";
 import { unplacedOrganization } from "@/lib/server/identity";
 import { organizationPath } from "@/lib/slug";
 
 /** Done with the project as listed, or with none where its answer could not
- *  be read: it was still made. */
-export type CreateProjectResult = ActionResult<{ project?: Project }>;
+ *  be read: it was still made; or, at the plan's ceiling, where a console
+ *  built on this one sends the person first. */
+export type CreateProjectResult = ActionResult<{ project?: Project; href?: string }>;
 
 export async function createProjectAction(
   name: string,
   organizationId?: string,
+  extras: Record<string, string> = {},
 ): Promise<CreateProjectResult> {
   const gate = await admit({ call: "project:create", limit: 10 });
   if (!gate.ok) return refused(gate.error);
@@ -62,6 +65,15 @@ export async function createProjectAction(
       return refused("You cannot create a project in that organization.");
     }
     target = organizationId;
+  }
+
+  // At the plan's ceiling a console built on this one may take the project
+  // elsewhere first — one that sells plans has the plan that holds it paid
+  // for — and answers where to send the person, or what refused it.
+  const listing = await fetchProjectListing();
+  if (listing.kind === "ok" && listing.ceiling?.reached && target === ctx.organizationId) {
+    const elsewhere = await createProjectElsewhere({ organizationId: target, name: trimmed, extras });
+    if (elsewhere) return "href" in elsewhere ? { ok: true, href: elsewhere.href } : refused(elsewhere.error);
   }
 
   const res = await tryFetchWithTimeout(
