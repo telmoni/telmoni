@@ -6,7 +6,6 @@ import { Row, Rows } from "@/components/rows";
 import { Section } from "@/components/section";
 import { SettingsRow } from "@/components/settings-row";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { type LinkRefusal, identityStartPath, linkOutcome } from "@/lib/connect";
 import { organizationLabel } from "@/lib/identity";
 import {
@@ -63,11 +62,11 @@ export default async function AccountPage({
     <>
       <PageHeader title="Account" />
       <div className="grid gap-page">
-        <Section
+        <Section card
           title="Profile"
           description="Your name and photo are managed by your identity provider during sign-in, and sync back here the next time you sign in."
         >
-          <Rows>
+          <Rows flush>
             <SettingsRow label="Name">{displayName(session)}</SettingsRow>
             <SettingsRow label="Email">
               {session.email}
@@ -90,24 +89,20 @@ export default async function AccountPage({
             themselves. Email sits between Profile and Password on purpose: who
             you are, then how you get in. */}
         {canChangeEmail(session.authMethod) && (
-          <Section
+          <Section card
             title="Email"
             description="The address you sign in with, and where every notice about this account goes."
           >
-            <Card className="text-sm">
-              <ChangeEmail method={session.authMethod} email={session.email} />
-            </Card>
+            <ChangeEmail method={session.authMethod} email={session.email} />
           </Section>
         )}
 
         {canResetPassword(session.authMethod) && (
-          <Section
+          <Section card
             title="Password"
             description="We email you a one-time link, and you choose the new password on the page it opens."
           >
-            <Card className="text-sm">
-              <PasswordReset method={session.authMethod} />
-            </Card>
+            <PasswordReset method={session.authMethod} />
           </Section>
         )}
 
@@ -115,20 +110,18 @@ export default async function AccountPage({
             auth answers, so a choice saved — or one picked for you after you
             left yours — starts the control from it. */}
         {ctx && opening && (
-          <Section
+          <Section card
             title="Default organization"
             description="The organization the console opens in when you sign in. If you leave it, the console opens in another of yours."
           >
-            <Card className="text-sm">
-              <DefaultOrganization
-                key={opening.organizationId}
-                organizations={ctx.organizations.map((o) => ({
-                  organizationId: o.organizationId,
-                  label: organizationLabel(o),
-                }))}
-                current={opening.organizationId}
-              />
-            </Card>
+            <DefaultOrganization
+              key={opening.organizationId}
+              organizations={ctx.organizations.map((o) => ({
+                organizationId: o.organizationId,
+                label: organizationLabel(o),
+              }))}
+              current={opening.organizationId}
+            />
           </Section>
         )}
 
@@ -136,7 +129,7 @@ export default async function AccountPage({
             refused press in Slack sends the presser. */}
         {slack?.offered && (
           <div id="slack" className="grid">
-            <Section
+            <Section card
               title="Slack"
               description="Link your Slack account, and the buttons on an incident's notice in Slack act as you, with the role you hold on its project. Only your Slack workspace and user are kept, never your address."
             >
@@ -151,7 +144,7 @@ export default async function AccountPage({
                 </p>
               )}
               {slack.identities.length > 0 && (
-                <Rows>
+                <Rows flush>
                   {slack.identities.map((identity) => {
                     const workspace = identity.team_name ?? identity.team_id;
                     return (

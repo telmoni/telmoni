@@ -1,13 +1,10 @@
 import Link from "next/link";
 
 import { DataTable, THead, Th, Td } from "@/components/data-table";
-import { NoticeCard } from "@/components/notice-card";
+import { CopyButton } from "@/components/copy-button";
 import { PageHeader } from "@/components/page-header";
-import { Rows } from "@/components/rows";
 import { Section } from "@/components/section";
-import { SettingsRow } from "@/components/settings-row";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Card } from "@/components/ui/card";
 import { fetchContentMode, fetchModelPrices, fetchPrivacyPosture } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { administers } from "@/lib/roles";
@@ -50,76 +47,70 @@ export default async function SettingsPage({
       <PageHeader title="Settings" />
 
       <div className="grid gap-page">
-        <Section
+        <Section card
           title="Project ID"
           description="This project's identifier, which never changes when its name or URL does; the audit log names the project by it."
         >
-          <Rows>
-            <SettingsRow label="Project ID" copy={project.id}>
-              {project.id}
-            </SettingsRow>
-          </Rows>
+          {/* The card's title names it; the body is the value alone. */}
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 break-all font-mono">{project.id}</code>
+            <CopyButton value={project.id} label="Project ID" />
+          </div>
         </Section>
 
-        <Section
+        <Section card
           title="Project name"
           description="Used to identify this project across the console and notifications. Its address follows the name: a rename moves every link to its pages, and a name with no Latin letters or digits keeps the address it has."
         >
-          <Card>
-            {/* A name changed elsewhere draws a fresh form; the same name keeps what is typed. */}
-            <RenameProjectForm
-              key={project.name}
-              projectId={project.id}
-              slug={project.slug}
-              initialName={project.name}
-              canEdit={canEdit}
-            />
-          </Card>
+          {/* A name changed elsewhere draws a fresh form; the same name keeps what is typed. */}
+          <RenameProjectForm
+            key={project.name}
+            projectId={project.id}
+            slug={project.slug}
+            initialName={project.name}
+            canEdit={canEdit}
+          />
         </Section>
 
-        <Section
+        <Section card
           title="Content"
           description="What this project keeps of the content its spans carry: prompts and completions, tool inputs and outputs, error messages, a person's name or email address, and anything else a person or a model wrote. Off keeps none of it: content is dropped as each span arrives, and the span is kept without it. On keeps it as sent, for as long as its span, wherever the code asks the SDK to send it."
         >
-          <Card>
-            {contentMode ? (
-              <ContentModeForm
-                key={`${contentMode.content_mode}:${contentMode.offered.join()}`}
-                projectId={project.id}
-                mode={contentMode.content_mode}
-                offered={contentMode.offered}
-                canEdit={isOwner}
-                email={session?.email ?? ""}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                This project&apos;s content mode could not be read. Reload to try again.
-              </p>
-            )}
-          </Card>
+          {contentMode ? (
+            <ContentModeForm
+              key={`${contentMode.content_mode}:${contentMode.offered.join()}`}
+              projectId={project.id}
+              mode={contentMode.content_mode}
+              offered={contentMode.offered}
+              canEdit={isOwner}
+              email={session?.email ?? ""}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              This project&apos;s content mode could not be read. Reload to try again.
+            </p>
+          )}
         </Section>
 
-        <Section
+        <Section card
           title="Model prices"
           description="This project's own prices for the models it calls, which spend reads before the price table's: private pricing, a model it serves itself, or a fine-tune the table does not list. A call that reports its own cost keeps it. Each price is US dollars per million tokens, for a provider's model by every name it answers with, from the day it takes effect, or always."
         >
-          <Card>
-            {prices ? (
-              <ModelPricesForm
-                key={JSON.stringify(prices)}
-                projectId={project.id}
-                prices={prices}
-                canEdit={canEdit}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                This project&apos;s prices could not be read. Reload to try again.
-              </p>
-            )}
-          </Card>
+          {prices ? (
+            <ModelPricesForm
+              key={JSON.stringify(prices)}
+              projectId={project.id}
+              prices={prices}
+              canEdit={canEdit}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              This project&apos;s prices could not be read. Reload to try again.
+            </p>
+          )}
         </Section>
 
-        <Section
+        <Section card
           title="Retention"
           description={
             <>
@@ -158,37 +149,33 @@ export default async function SettingsPage({
               </tbody>
             </DataTable>
           ) : (
-            <NoticeCard title="Retention could not be read." body="Reload to try again." />
+            <p className="text-muted-foreground">Retention could not be read. Reload to try again.</p>
           )}
           {posture && canEdit && (
-            <Card>
-              <RetentionForm
-                key={posture.retention.span_days}
-                projectId={project.id}
-                days={posture.retention.span_days}
-                max={posture.retention.max_span_days}
-              />
-            </Card>
+            <RetentionForm
+              key={posture.retention.span_days}
+              projectId={project.id}
+              days={posture.retention.span_days}
+              max={posture.retention.max_span_days}
+            />
           )}
         </Section>
 
-        <Section
+        <Section card
           title="Give an end user their data"
           description="What the project keeps about one end user, for them to have."
         >
-          <Card className="text-sm">
-            <p>
-              Filter{" "}
-              <Link href={projectPath(organization, slug, "/traces")} className="underline underline-offset-4">
-                Traces
-              </Link>{" "}
-              by their id under <span className="font-medium">User</span>, then download every trace of
-              theirs the project keeps, with any content kept, as JSON or CSV.
-            </p>
-          </Card>
+          <p>
+            Filter{" "}
+            <Link href={projectPath(organization, slug, "/traces")} className="underline underline-offset-4">
+              Traces
+            </Link>{" "}
+            by their id under <span className="font-medium">User</span>, then download every trace of
+            theirs the project keeps, with any content kept, as JSON or CSV.
+          </p>
         </Section>
 
-        <Section
+        <Section card
           title="Erase an end user"
           description={
             <>
@@ -202,24 +189,22 @@ export default async function SettingsPage({
             </>
           }
         >
-          <Card className="grid gap-1 text-sm">
+          <div className="grid gap-1">
             {canEdit ? (
               <EraseEndUserForm projectId={project.id} />
             ) : (
               <p className="text-muted-foreground">A project admin or the organization owner erases an end user.</p>
             )}
-          </Card>
+          </div>
         </Section>
 
         {isOwner && (
-          <Section
+          <Section card
             title="Danger zone"
             danger
             description="Permanently deletes this project and everything inside it. Immediate and irreversible; no grace period or undo."
           >
-            <Card className="grid gap-gutter bg-destructive/5 text-sm">
-              <DeleteProjectForm projectId={project.id} projectName={project.name} />
-            </Card>
+            <DeleteProjectForm projectId={project.id} projectName={project.name} />
           </Section>
         )}
       </div>

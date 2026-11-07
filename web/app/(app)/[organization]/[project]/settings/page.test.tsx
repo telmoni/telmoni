@@ -165,7 +165,7 @@ describe("SettingsPage: the end user's data and its retention", () => {
   it("says so when the retention cannot be read, and keeps the rest", async () => {
     mockPosture = null;
     await page();
-    expect(screen.getByText("Retention could not be read.")).toBeInTheDocument();
+    expect(screen.getByText(/^Retention could not be read\./)).toBeInTheDocument();
     expect(screen.getByTestId("rename-form")).toBeInTheDocument();
   });
 });

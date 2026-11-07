@@ -65,13 +65,6 @@ vi.mock("./_organization-url", () => ({
     />
   ),
 }));
-vi.mock("@/components/settings-row", () => ({
-  SettingsRow: ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div data-testid="settings-row" data-label={label}>
-      {children}
-    </div>
-  ),
-}));
 
 vi.mock("next/navigation", () => ({
   notFound: () => {
@@ -173,7 +166,8 @@ describe("OrganizationSettingsPage", () => {
     expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "My Own Workspace");
     expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "mine");
     expect(screen.getByTestId("url-form")).toHaveAttribute("data-host", "console.example");
-    expect(screen.getByTestId("settings-row")).toHaveTextContent("org_mine");
+    expect(screen.getByText("org_mine")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Organization ID" })).toBeInTheDocument();
     expect(screen.getByTestId("delete-form")).toHaveAttribute(
       "data-organization",
       "My Own Workspace",
@@ -226,7 +220,8 @@ describe("OrganizationSettingsPage", () => {
       render(await OrganizationSettingsPage());
       expect(screen.getByTestId("name-form")).toHaveAttribute("data-initial", "Analytical Engines");
       expect(screen.getByTestId("url-form")).toHaveAttribute("data-slug", "theirs");
-      expect(screen.getByTestId("settings-row")).toHaveTextContent("org_theirs");
+      expect(screen.getByText("org_theirs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Organization ID" })).toBeInTheDocument();
       expect(document.body.innerHTML).not.toContain("My Own Workspace");
       expect(document.body.innerHTML).not.toContain("mine");
       // The organization's name, never its owner's.

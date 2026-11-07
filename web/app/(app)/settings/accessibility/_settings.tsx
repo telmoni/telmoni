@@ -46,8 +46,8 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
 
   return (
     <div className="grid gap-page">
-      <Section title="Keyboard" description="How the console answers the keyboard.">
-        <Rows>
+      <Section card title="Keyboard" description="How the console answers the keyboard.">
+        <Rows flush>
           <Row
             label={<Label htmlFor="a11y-letter-keys">Letter-key shortcuts</Label>}
             hint="Single keys such as g, c and / move around and act. Turn them off if you use voice control or a screen reader, so a dictated word never opens a page; shortcuts held with ⌘ or Ctrl keep working."
@@ -68,8 +68,8 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
         </Rows>
       </Section>
 
-      <Section title="Display" description="How the interface moves, and how much it stands out.">
-        <Rows>
+      <Section card title="Display" description="How the interface moves, and how much it stands out.">
+        <Rows flush>
           <Row
             label={<span id="a11y-motion-label">Reduce motion</span>}
             hint={

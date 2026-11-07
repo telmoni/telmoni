@@ -6,7 +6,6 @@ import { DataTable, THead, Th, Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import type { ActiveSession } from "@/lib/server/data";
 import { useToastAction } from "@/lib/use-action";
 
@@ -87,11 +86,9 @@ export function ActiveSessions({
 
   if (sessions === null) {
     return (
-      <Card>
-        <p className="text-sm text-muted-foreground">
-          Couldn&rsquo;t load your sessions. Reload to try again.
-        </p>
-      </Card>
+      <p className="text-muted-foreground">
+        Couldn&rsquo;t load your sessions. Reload to try again.
+      </p>
     );
   }
 

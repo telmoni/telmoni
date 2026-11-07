@@ -51,8 +51,8 @@ export function GeneralSettings() {
 
   return (
     <div className="grid gap-page">
-      <Section title="Appearance" description="How the console looks. Saved in this browser.">
-        <Rows>
+      <Section card title="Appearance" description="How the console looks. Saved in this browser.">
+        <Rows flush>
           <Row
             label={<span id="general-theme-label">Theme</span>}
             hint="System follows your device's light or dark setting."
@@ -79,11 +79,11 @@ export function GeneralSettings() {
           </Row>
         </Rows>
       </Section>
-      <Section
+      <Section card
         title="Lists"
         description="How the Traces, Sessions and Users lists look. Saved in this browser."
       >
-        <Rows>
+        <Rows flush>
           <Row
             label={<span id="general-density-label">Row density</span>}
             hint="Compact fits more rows on the screen."

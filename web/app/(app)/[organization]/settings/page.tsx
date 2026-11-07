@@ -1,12 +1,10 @@
 import { notFound } from "next/navigation";
 
 import { AccessDenied } from "@/components/access-denied";
+import { CopyButton } from "@/components/copy-button";
 import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Rows } from "@/components/rows";
-import { SettingsRow } from "@/components/settings-row";
-import { Card } from "@/components/ui/card";
 import { env } from "@/lib/env";
 import { organizationLabel, ownerContact } from "@/lib/identity";
 import { administers, owns } from "@/lib/roles";
@@ -59,7 +57,7 @@ export default async function OrganizationSettingsPage() {
     <>
       <PageHeader title="Settings" />
       <div className="grid gap-page">
-        <Section
+        <Section card
           title="Name"
           description="Your organization's visible name within Telmoni — your company or group, not a person's name. Everyone in it sees it: the rail, the resource selector and every invitation it sends. Renaming moves nothing: its address stays as it is."
         >
@@ -71,7 +69,7 @@ export default async function OrganizationSettingsPage() {
           />
         </Section>
 
-        <Section
+        <Section card
           title="URL"
           description="Your organization's address on Telmoni, where its pages and every project in it live. Lowercase letters and digits, in words joined by hyphens. Changing it moves every link to those pages: the old address stops working."
         >
@@ -83,30 +81,28 @@ export default async function OrganizationSettingsPage() {
           />
         </Section>
 
-        <Section
+        <Section card
           title="Organization ID"
           description="Your organization's identifier within Telmoni, for the API and the CLI. It never changes."
         >
-          <Rows>
-            <SettingsRow label="Organization ID" copy={organization.organizationId}>
-              {organization.organizationId}
-            </SettingsRow>
-          </Rows>
+          {/* The card's title names it; the body is the value alone. */}
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 break-all font-mono">{organization.organizationId}</code>
+            <CopyButton value={organization.organizationId} label="Organization ID" />
+          </div>
         </Section>
 
         {isOwner && (
-          <Section
+          <Section card
             title="Danger zone"
             danger
             description="Closes this organization for everyone in it the moment you confirm: access ends, its API keys stop working, and its projects, keys and everything else it held are erased for good within the hour. There is no undo. Your account stays."
           >
-            <Card className="grid gap-gutter bg-destructive/5 text-sm">
-              <DeleteOrganizationForm
-                organizationId={organization.organizationId}
-                organization={label}
-                email={session.email}
-              />
-            </Card>
+            <DeleteOrganizationForm
+              organizationId={organization.organizationId}
+              organization={label}
+              email={session.email}
+            />
           </Section>
         )}
       </div>

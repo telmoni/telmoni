@@ -3,7 +3,20 @@ import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-export function Rows({ children, className }: { children: ReactNode; className?: string }) {
+export function Rows({
+  children,
+  className,
+  flush,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Inside a card already, a settings `Section`'s: the rows alone, ruled
+   *  apart, with no card of their own. */
+  flush?: boolean;
+}) {
+  if (flush) {
+    return <div className={cn("-my-gutter divide-y divide-border", className)}>{children}</div>;
+  }
   return (
     <Card className={cn("gap-0 divide-y divide-border py-0 text-sm", className)}>
       {children}
