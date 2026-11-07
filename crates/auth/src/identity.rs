@@ -172,8 +172,9 @@ mod tests {
             assert_eq!(named(address).0, name, "{address}");
         }
         let (_, slugs) = named("khe4r6@gmail.com");
+        assert_eq!(slugs.first().map(slug::Slug::as_str), Some("khe4r6"));
         assert!(
-            slugs.iter().all(|s| s
+            slugs.iter().skip(1).all(|s| s
                 .as_str()
                 .strip_prefix("khe4r6-")
                 .is_some_and(|tail| tail.len() == 6)),

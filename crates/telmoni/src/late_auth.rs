@@ -8,8 +8,8 @@ use axum::http::HeaderMap;
 use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::seam::{
     AuditEventsQuery, Auth, Closing, Confirmation, DocumentCursor, FoundedOrganization,
-    MovedProject, OrganizationFounding, OwnedOrganization, OwnerNotice, ProjectHome,
-    ReadableProject, Receipt, SourceDocument,
+    MovedProject, OrderedProject, OrganizationFounding, OwnedOrganization, OwnerNotice,
+    ProjectHome, ProjectOrder, ReadableProject, Receipt, SourceDocument,
 };
 use telmoni_shared::{
     AuthError, FlagSet, OrganizationId, OrganizationStatus, ProjectId, TelmoniError, UserId,
@@ -161,6 +161,22 @@ impl Auth for LateAuth {
         founding: &OrganizationFounding,
     ) -> Result<FoundedOrganization, TelmoniError> {
         self.get()?.found_organization(founding).await
+    }
+
+    async fn check_project(
+        &self,
+        organization: &OrganizationId,
+        user: &UserId,
+        name: &str,
+    ) -> Result<String, TelmoniError> {
+        self.get()?.check_project(organization, user, name).await
+    }
+
+    async fn make_ordered_project(
+        &self,
+        order: &ProjectOrder,
+    ) -> Result<OrderedProject, TelmoniError> {
+        self.get()?.make_ordered_project(order).await
     }
 
     async fn close_if_empty(&self, acting: &Acting, code: &str) -> Result<Closing, TelmoniError> {
