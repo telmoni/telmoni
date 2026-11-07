@@ -58,7 +58,7 @@ export function ProjectBanner({
           type="button"
           onClick={() => setDismissed(true)}
           aria-label="Close notification"
-          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex size-control shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           <X className="size-4" />
         </button>

@@ -46,6 +46,28 @@ describe("pricesOf", () => {
 });
 
 describe("ModelPricesForm", () => {
+  it.each([{ prices: [] }, { prices: [PRICE] }])("disables Save for an unchanged list: $prices.length prices", ({ prices }) => {
+    render(<ModelPricesForm projectId="project_1" prices={prices} canEdit />);
+    const submit = screen.getByRole("button", { name: "Save" });
+    expect(submit).toBeDisabled();
+    fireEvent.submit(submit.closest("form")!);
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Add a price" }));
+    expect(submit).toBeEnabled();
+    const added = screen.getByRole("group", { name: `Price ${prices.length + 1}` });
+    fireEvent.click(within(added).getByRole("button", { name: "Remove" }));
+    expect(submit).toBeDisabled();
+  });
+
+  it("disables Save again when an edit is reverted", () => {
+    render(<ModelPricesForm projectId="project_1" prices={[PRICE]} canEdit />);
+    const input = screen.getByLabelText(/^Input/);
+    fireEvent.change(input, { target: { value: "2" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    fireEvent.change(input, { target: { value: "1.25" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("shows a member the prices and no way to change them", () => {
     render(<ModelPricesForm projectId="project_1" prices={[PRICE]} canEdit={false} />);
     expect(screen.getByLabelText("Provider")).toHaveValue("openai");
@@ -99,6 +121,7 @@ describe("ModelPricesForm", () => {
     );
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("says why a list cannot be sent, and sends nothing", async () => {

@@ -103,7 +103,6 @@ function ScoreBadge({
   return (
     <Badge
       variant="outline"
-      className="gap-0.5 pr-0.5 text-xs font-normal"
       title={`${score.name}${span ? ` of ${span}` : ""}, ${SCORE_SOURCE[score.source]}`}
     >
       {span && <span className="text-muted-foreground">{span} · </span>}

@@ -201,7 +201,7 @@ export function SidePanelHeader({
   return (
     <div className={cn("shrink-0 px-gutter", flush && "border-b border-border")}>
       <div className={cn("grid gap-1.5 py-gutter", !flush && "border-b border-border")}>
-        <div className="flex min-h-7 min-w-0 items-center gap-2">
+        <div className="flex min-h-control min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
             {title}
@@ -229,7 +229,7 @@ export function SidePanelBody({ children }: { children: ReactNode }) {
  *  and the header, so its rule runs on from the rail's. */
 export function SidePanelFooter({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-13 shrink-0 items-center justify-end gap-gutter border-t border-border px-gutter">
+    <div className="flex h-console-header shrink-0 items-center justify-end gap-gutter border-t border-border px-gutter">
       {children}
     </div>
   );
@@ -254,13 +254,13 @@ export function SidePanelRow({
   children: ReactNode;
 }) {
   return (
-    <div className="grid gap-1.5 border-t border-border py-gutter first:border-t-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-3">
+    <div className="grid gap-1.5 border-t border-border py-gutter first:border-t-0 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:gap-gutter">
       {htmlFor ? (
-        <Label htmlFor={htmlFor} className="font-normal text-muted-foreground sm:h-7 sm:flex sm:items-center">
+        <Label htmlFor={htmlFor} className="font-normal text-muted-foreground sm:h-control sm:flex sm:items-center">
           {label}
         </Label>
       ) : (
-        <span id={labelId} className="text-sm text-muted-foreground sm:h-7 sm:flex sm:items-center">
+        <span id={labelId} className="text-sm text-muted-foreground sm:h-control sm:flex sm:items-center">
           {label}
         </span>
       )}

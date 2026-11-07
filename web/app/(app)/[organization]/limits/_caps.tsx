@@ -20,7 +20,7 @@ import { useAction } from "@/lib/use-action";
 
 import { setProjectCapsAction } from "./actions";
 
-const ROW_BUTTON = "h-9 text-xs text-muted-foreground hover:text-foreground";
+const ROW_BUTTON = "text-muted-foreground hover:text-foreground";
 
 /** Opens the dialog that sets one project's caps. */
 export function EditCaps({

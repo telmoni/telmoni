@@ -5,7 +5,8 @@ import { FolderPlus } from "lucide-react";
 import { startTransition, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { CodeField, CodeSentTo } from "@/components/code-field";
+import { CodeField, CodeSentTo, ResendCodeButton } from "@/components/code-field";
+import { ChoiceGroup } from "@/components/choice-group";
 import { useConsoleUi } from "@/components/console-ui-context";
 import { PageAction } from "@/components/page-action";
 import {
@@ -17,7 +18,6 @@ import {
 } from "@/components/side-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { createProjectAction } from "@/app/(app)/actions";
 import {
   requestContentModeCodeAction,
@@ -74,7 +74,7 @@ export function CreateProjectPanel({
     (code) => updateContentModeAction(madeId.current, ContentMode.On, { code }),
   );
 
-  const canSubmit = name.trim().length > 0 && organization !== null && !pending;
+  const canSubmit = (made !== null || name.trim().length > 0) && organization !== null && !pending;
 
   /** On to the project, the panel shutting as the page it leaves for lands. */
   function open(project: Project | undefined) {
@@ -148,6 +148,7 @@ export function CreateProjectPanel({
               ref={field}
               id="project-name"
               value={name}
+              disabled={pending || made !== null}
               onChange={(e) => setName(e.target.value)}
               // An example of what a project is here: the agent it watches.
               placeholder="Support agent"
@@ -172,27 +173,16 @@ export function CreateProjectPanel({
             <span className="truncate">{organization ? organizationLabel(organization) : "None"}</span>
           </SidePanelRow>
           <SidePanelRow label="Content mode" labelId={modeId}>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
+            <ChoiceGroup
+              labelledBy={modeId}
               value={mode}
-              // A press on the chosen one would choose none: it stays chosen.
-              onValueChange={(next) => next && setMode(next as ContentMode)}
-              aria-labelledby={modeId}
-              disabled={pending || made !== null}
-            >
-              {[ContentMode.Off, ContentMode.On].map((m) => (
-                <ToggleGroupItem
-                  key={m}
-                  value={m}
-                  disabled={m === ContentMode.On && !isOwner}
-                  className="px-gutter"
-                >
-                  {CONTENT_MODE_LABEL[m]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+              onChange={setMode}
+              options={[ContentMode.Off, ContentMode.On].map((value) => ({
+                value,
+                label: CONTENT_MODE_LABEL[value],
+                disabled: pending || made !== null || (value === ContentMode.On && !isOwner),
+              }))}
+            />
             <p className="text-muted-foreground">
               {mode === ContentMode.Off
                 ? "The content its spans carry — prompts, answers, tool inputs and outputs — is dropped as they arrive, and only metadata is kept."
@@ -201,13 +191,16 @@ export function CreateProjectPanel({
               You can change it later in its settings.
             </p>
             {made && flow.step.step === "code" && (
-              <CodeField
-                id={codeId}
-                label={<CodeSentTo email={email} />}
-                value={flow.code}
-                onType={flow.type}
-                disabled={flow.confirming}
-              />
+              <div className="grid gap-gutter">
+                <CodeField
+                  id={codeId}
+                  label={<CodeSentTo email={email} />}
+                  value={flow.code}
+                  onType={flow.type}
+                  disabled={flow.sending || flow.confirming}
+                />
+                <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
+              </div>
             )}
             {made && flow.error && (
               <p className="text-destructive" role="alert">
@@ -222,10 +215,10 @@ export function CreateProjectPanel({
               <Button type="submit" disabled={flow.sending || (flow.step.step === "code" && !flow.canConfirm)}>
                 {flow.confirming
                   ? "Saving…"
-                  : flow.sending
-                    ? "Sending…"
-                    : flow.step.step === "code"
-                      ? "Keep content"
+                  : flow.step.step === "code"
+                    ? "Keep content"
+                    : flow.sending
+                      ? "Sending…"
                       : "Send code again"}
               </Button>
               {/* The project is made; leaving here opens it with content off. */}

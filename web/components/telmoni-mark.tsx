@@ -1,5 +1,26 @@
 import { cn } from "@/lib/utils";
 
+/** The compact brand mark without the favicon's surrounding padding. */
+export function TelmoniMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 896 704"
+      aria-hidden="true"
+      className={cn("h-6 w-auto", className)}
+    >
+      <g transform="translate(-64 -128)">
+        <g fill="currentColor">
+          <rect x="192" y="128" width="128" height="704" />
+          <rect x="64" y="320" width="256" height="128" />
+          <path d="M256 320H416A224 224 0 0 1 640 544V832H512V544C512 482.56 477.44 448 416 448C354.56 448 320 482.56 320 544H256Z" />
+          <path d="M512 544A224 224 0 0 1 960 544V640H832V544C832 482.56 797.44 448 736 448C674.56 448 640 482.56 640 544Z" />
+        </g>
+        <rect x="832" y="704" width="128" height="128" className="fill-brand-unit" />
+      </g>
+    </svg>
+  );
+}
+
 /** The wordmark from `masters/wordmark.svg`. The word is drawn, not set: the
  *  one face in the console that is not the text's. */
 export function TelmoniWordmark({ className }: { className?: string }) {

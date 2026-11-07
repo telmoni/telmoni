@@ -135,7 +135,7 @@ export default async function SettingsPage({
           }
         >
           {posture ? (
-            <DataTable>
+            <DataTable flush>
               <THead>
                 <Th>Data</Th>
                 <Th>Kept</Th>
@@ -180,7 +180,7 @@ export default async function SettingsPage({
           }
         >
           {caps ? (
-            <DataTable>
+            <DataTable flush>
               <THead>
                 <Th>Limit</Th>
                 <Th>Cap</Th>

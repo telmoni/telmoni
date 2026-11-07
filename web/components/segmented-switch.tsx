@@ -3,6 +3,7 @@
 import type { LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { SEGMENTED_TRACK, segmentAppearance } from "@/components/choice-group";
 import { cn } from "@/lib/utils";
 
 // The track carries the shape, never the segments: each segment is
@@ -37,7 +38,7 @@ export function SegmentedSwitch<T extends string>({
 }) {
   return (
     <div
-      className="flex items-center overflow-hidden rounded-md border border-border"
+      className={SEGMENTED_TRACK}
       role="group"
       aria-label={label}
       // Its frame clips the segments, so Show focus draws their ring inside.
@@ -56,10 +57,8 @@ export function SegmentedSwitch<T extends string>({
             title={optionLabel}
             onClick={() => onChange(option)}
             className={cn(
-              "size-7 rounded-none",
-              active
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+              "rounded-none border-0 hover:bg-transparent",
+              segmentAppearance(active),
             )}
           >
             <Icon className="size-3.5" aria-hidden />

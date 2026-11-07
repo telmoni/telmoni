@@ -130,7 +130,7 @@ export function ConnectionActions({
           <Button
             variant="outline"
             size="sm"
-            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            className="text-destructive hover:text-destructive"
             disabled={pending}
             aria-label={`Disconnect ${label}`}
           >

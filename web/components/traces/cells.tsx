@@ -185,7 +185,7 @@ export function ScoreChips({ scores }: { scores: readonly ScoreSummary[] }) {
   return (
     <span className="flex flex-wrap gap-1">
       {scores.map((score) => (
-        <Badge key={score.name} variant="outline" className="max-w-full font-normal" title={scoreTitle(score)}>
+        <Badge key={score.name} variant="outline" className="max-w-full" title={scoreTitle(score)}>
           <span className="truncate">
             {score.name} <span className="tabular-nums text-muted-foreground">{scoreWords(score)}</span>
           </span>
@@ -211,14 +211,14 @@ export function TagChips({
     <span className="flex flex-wrap gap-1">
       {tags.map((tag) =>
         href && !(current?.length === 1 && current[0] === tag) ? (
-          <Badge key={tag} variant="secondary" className="max-w-full font-normal" asChild>
+          <Badge key={tag} variant="secondary" className="max-w-full" asChild>
             <Link href={href(tag)} scroll={false}>
               <span className="truncate">{tag}</span>
               <LinkPending />
             </Link>
           </Badge>
         ) : (
-          <Badge key={tag} variant="secondary" className="max-w-full font-normal">
+          <Badge key={tag} variant="secondary" className="max-w-full">
             <span className="truncate">{tag}</span>
           </Badge>
         ),

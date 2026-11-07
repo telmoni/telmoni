@@ -190,6 +190,9 @@ describe("SettingsPage: the end user's data and its retention", () => {
     const { unmount } = await page();
     expect(screen.getByText("90 days after a span arrives")).toBeInTheDocument();
     expect(screen.getByText("13 months")).toBeInTheDocument();
+    const tableScroll = screen.getByRole("columnheader", { name: "Kept" }).closest('[data-slot="table-scroll"]');
+    expect(tableScroll).toHaveAttribute("tabindex", "0");
+    expect(tableScroll?.closest('[data-slot="card"]')?.querySelector('[data-slot="card"]')).toBeNull();
     expect(screen.queryByLabelText("Keep spans for")).not.toBeInTheDocument();
     unmount();
 

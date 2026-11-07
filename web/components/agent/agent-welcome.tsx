@@ -22,7 +22,7 @@ export function Welcome({
   onAsk: (question: string) => void;
 }) {
   return (
-    <div className="my-auto grid justify-items-center gap-6 py-4 text-center">
+    <div className="my-auto grid justify-items-center gap-page py-4 text-center">
       <div className="grid justify-items-center gap-2">
         <Bot aria-hidden className="size-6 text-muted-foreground" />
         <h3 className="text-base font-semibold wrap-break-word">Ask about {project}</h3>
@@ -39,7 +39,7 @@ export function Welcome({
                 type="button"
                 disabled={disabled}
                 onClick={() => onAsk(s.question)}
-                className="flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex w-full cursor-pointer items-center gap-gutter rounded-lg border border-border px-gutter py-2.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
                   <Icon aria-hidden className="size-4" />

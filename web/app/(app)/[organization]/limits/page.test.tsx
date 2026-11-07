@@ -87,7 +87,11 @@ beforeEach(() => {
 describe("the Limits page", () => {
   it("shows each project's use against its cap, and the plan's pool", async () => {
     render(await LimitsPage());
-    expect(screen.getByText(/The plan holds 1,000,000 spans a month/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Organization pool" })).toBeInTheDocument();
+    expect(screen.getByText("Spans a month")).toBeInTheDocument();
+    expect(screen.getByText("1,000,000")).toBeInTheDocument();
+    expect(screen.getByText("1,000 MB")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Project usage and caps" })).toBeInTheDocument();
     const capped = screen.getByRole("cell", { name: "Support bot" }).closest("tr") as HTMLElement;
     expect(within(capped).getByText("12,500 of 200,000")).toBeInTheDocument();
     expect(within(capped).getByText("3 of 10")).toBeInTheDocument();

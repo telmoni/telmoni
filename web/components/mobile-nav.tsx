@@ -44,8 +44,8 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
       <Button
         ref={triggerRef}
         variant="ghost"
-        size={null}
-        className="size-7 text-muted-foreground hover:text-foreground"
+        size="icon"
+        className="text-muted-foreground hover:text-foreground"
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen(!open)}
       >
@@ -60,7 +60,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
         >
           <div
             ref={menuRef}
-            className="flex w-full flex-col border-b bg-background px-4 pb-6 pt-4"
+            className="flex w-full flex-col border-b bg-background px-4 pb-page pt-4"
             onClick={(e) => e.stopPropagation()}
           >
             <nav aria-label="Primary" className="flex flex-col gap-1 px-2">
@@ -87,12 +87,10 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
 
               <span aria-hidden className="my-2 h-px bg-border" />
 
-              {/* The header's pair, stacked, at the gap every button row uses: a
-                  visitor's way out outlined and the thing to do filled; a
-                  member's both outlined, as the header has them. */}
+              {/* The header's account actions, stacked for small screens. */}
               {signedIn ? (
                 <div className="flex flex-col gap-gutter">
-                  <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
+                  <Button asChild size="sm" variant="filled" className={NAV_TYPE}>
                     <Link href="/console" onNavigate={() => setOpen(false)}>
                       Console
                     </Link>

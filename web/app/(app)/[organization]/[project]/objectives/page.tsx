@@ -101,7 +101,7 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
                       <Td className="font-medium whitespace-nowrap">
                         <span className="flex items-center gap-gutter">
                           {alert.name}
-                          <Badge variant={severityVariant(alert.severity)} className="font-normal">
+                          <Badge variant={severityVariant(alert.severity)}>
                             {SEVERITY_LABEL[alert.severity]}
                           </Badge>
                         </span>

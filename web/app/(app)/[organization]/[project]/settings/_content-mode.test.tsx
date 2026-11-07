@@ -143,6 +143,22 @@ describe("ContentModeForm", () => {
     expect(toast.success).toHaveBeenCalledWith("Content mode set to On.");
   });
 
+  it("surfaces a refused resend and leaves the typed code available", async () => {
+    requestContentModeCodeAction.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
+      ok: false, error: "Please wait before requesting another code.",
+    });
+    render(form({ offered: [ContentMode.Off, ContentMode.On] }));
+    fireEvent.click(radio("On"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send confirmation code" })); });
+    const field = screen.getByLabelText(/code sent to/);
+    fireEvent.change(field, { target: { value: "123456" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Resend code" })); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Please wait before requesting another code.");
+    expect(field).toHaveValue("123456");
+    expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
+    expect(updateContentModeAction).not.toHaveBeenCalled();
+  });
+
   // Back to `off` asks nothing, and offers to delete what the project kept,
   // saying what each choice leaves.
   it("offers to delete what the project kept as it goes off", async () => {

@@ -68,6 +68,9 @@ describe("deviceLabel", () => {
 describe("ActiveSessions", () => {
   it("marks the caller's own row and no other", () => {
     render(<ActiveSessions sessions={rows} currentId="s-current" />);
+    const table = screen.getByRole("table");
+    expect(table.closest('[data-slot="table-scroll"]')).toHaveAttribute("tabindex", "0");
+    expect(table.closest('[data-slot="card"]')).toBeNull();
     const current = screen.getAllByText("Current");
     expect(current).toHaveLength(1);
     expect(current[0]!.closest("tr")!.textContent).toContain("Chrome (macOS)");

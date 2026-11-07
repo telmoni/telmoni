@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
-import { CodeField, CodeSentTo } from "@/components/code-field";
+import { CodeField, CodeSentTo, ResendCodeButton } from "@/components/code-field";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -166,20 +166,13 @@ export function ContentModeForm({
             label={<CodeSentTo email={email} />}
             value={flow.code}
             onType={flow.type}
-            disabled={flow.confirming}
+            disabled={flow.sending || flow.confirming}
           />
           <div className="flex items-center gap-gutter">
             <Button type="submit" disabled={!flow.canConfirm}>
               {flow.confirming ? "Saving..." : "Keep content"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={flow.sending || flow.confirming}
-              onClick={flow.sendCode}
-            >
-              Resend code
-            </Button>
+            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
           </div>
         </div>
       )}

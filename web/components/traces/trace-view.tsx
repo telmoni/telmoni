@@ -370,27 +370,28 @@ export const TraceBody = memo(function TraceBody({
               <ToggleGroupItem value="timeline">Timeline</ToggleGroupItem>
             </ToggleGroup>
           </div>
-          <div className="relative shrink-0 px-gutter pb-2">
-            <SearchIcon
-              className="pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              // Escape empties the search first, as a search field's own
-              // does, and shuts the peek only once there is nothing to empty.
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && search) {
-                  event.preventDefault();
-                  setSearch("");
-                }
-              }}
-              placeholder="Search spans"
-              aria-label="Search spans"
-              className="pl-8"
-            />
+          <div className="shrink-0 px-gutter pb-2">
+            <div className="relative">
+              <SearchIcon
+                className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                // Escape clears the search before it closes the peek.
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && search) {
+                    event.preventDefault();
+                    setSearch("");
+                  }
+                }}
+                placeholder="Search spans"
+                aria-label="Search spans"
+                className="pl-8"
+              />
+            </div>
           </div>
           {rows.length === 0 ? (
             <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
@@ -593,7 +594,7 @@ function SpanDetail({
   return (
     <section aria-label="The span chosen" className={cn("flex flex-col", className)}>
       <div className="grid shrink-0 gap-1.5 border-b border-border p-gutter">
-        <div className="flex min-h-7 min-w-0 items-center gap-2">
+        <div className="flex min-h-control min-w-0 items-center gap-2">
           {!spansShown && <SpansButton ref={showSpansRef} shown={false} onClick={onShowSpans} />}
           <KindIcon span={span} />
           <h3 className="min-w-0 truncate text-sm font-medium" title={span.name}>
@@ -764,7 +765,7 @@ function SpanDetail({
                   <Field label="Tags">
                     <span className="flex flex-wrap gap-1">
                       {tags.map(([key, value]) => (
-                        <Badge key={key} variant="secondary" className="text-xs font-normal">
+                        <Badge key={key} variant="secondary">
                           {key}={value}
                         </Badge>
                       ))}

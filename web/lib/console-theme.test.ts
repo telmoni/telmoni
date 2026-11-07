@@ -13,18 +13,11 @@ function block(selector: string): string {
   return CSS.slice(at, CSS.indexOf("\n}", at));
 }
 
-// ⚠ **Focus draws nothing, and one unlayered rule is the whole mechanism.**
-// This replaced the rail's inset outline, which existed because
-// `#console-sidebar` clips for the drawer slide and shaved a ring flat at both
-// ends. Nothing is drawn now, so there is nothing to clip.
-//
-// The accessibility cost is real and deliberate: a keyboard user has no focus
-// indicator, which WCAG 2.1 AA §2.4.7 asks for. Restoring one is an `outline`
-// in this block, never a ring on a component — the same rule would cancel it.
+// One global outline replaces component rings, so focus is drawn only once.
 describe("the focus indicator", () => {
   const RULE = "*:focus,\n*:focus-visible";
 
-  it("draws neither an outline nor a Tailwind ring", () => {
+  it("resets component outlines and rings before drawing the shared indicator", () => {
     const rule = block(RULE);
     expect(rule, "an outline still draws on focus").toMatch(/outline:\s*none/);
     expect(rule, "a component's ring still draws on focus").toMatch(
@@ -32,6 +25,12 @@ describe("the focus indicator", () => {
     );
     expect(rule, "a ring offset still draws on focus").toMatch(
       /--tw-ring-offset-shadow:\s*0 0 #0000/,
+    );
+  });
+
+  it("draws keyboard focus unless it was explicitly turned off", () => {
+    expect(block("html:not(.a11y-no-focus-rings) *:focus-visible")).toMatch(
+      /outline:\s*2px solid var\(--color-foreground\)/,
     );
   });
 
@@ -65,6 +64,7 @@ describe("the focus indicator", () => {
 // because a fill around the organization's name reads as the name shifting.
 const CHROME = [
   "components/console-header.tsx",
+  "components/agent-button.tsx",
   "components/search-button.tsx",
   "components/notifications-bell.tsx",
   "components/nav-user.tsx",
@@ -96,7 +96,7 @@ describe("the console chrome's hover fill", () => {
   it("is the one thing every chrome control reaches for", () => {
     for (const { file, src } of CHROME) {
       expect(src, `${file} does not hover with the rail's token`).toMatch(
-        /(?:^|[\s"'`])(?:group-)?hover:bg-sidebar-accent(?![\w-])/m,
+        /(?:^|[\s"'`])(?:md:)?(?:group-)?hover:bg-sidebar-accent(?![\w-])/m,
       );
     }
   });

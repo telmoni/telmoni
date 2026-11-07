@@ -38,7 +38,7 @@ export function FilterBar({
       aria-label="Filters in force"
     >
       {chips.map((chip) => (
-        <Badge key={`${chip.filter}:${chip.value}`} variant="secondary" className="max-w-full gap-1 font-normal">
+        <Badge key={`${chip.filter}:${chip.value}`} variant="secondary" className="max-w-full">
           <span className="text-muted-foreground">{chip.label}:</span>
           <span className="max-w-56 truncate" title={chip.value}>
             {chip.text}

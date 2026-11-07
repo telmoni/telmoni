@@ -76,7 +76,7 @@ export function PageAction({
     ref,
     variant,
     size: "sm" as const,
-    className: cn("gap-1.5 text-xs h-7 px-1.5 has-[>svg]:px-1.5 text-muted-foreground hover:text-foreground", className),
+    className: cn("text-muted-foreground hover:text-foreground", className),
     "aria-keyshortcuts": primary && !disabled && letterKeys ? PAGE_ACTION_KEY : undefined,
     ...props,
   };

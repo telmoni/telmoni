@@ -398,7 +398,7 @@ function AlertPanel({
             <SidePanelRow label="Filters">
               <div className="grid max-w-md gap-2">
                 {filterFieldsFor(draft.kind, draft.measure).map((name) => (
-                  <div key={name} className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+                  <div key={name} className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-gutter">
                     <Label htmlFor={`${id}-filter-${name}`} className="font-normal text-muted-foreground">
                       {FILTER_LABEL[name]}
                     </Label>
@@ -417,7 +417,7 @@ function AlertPanel({
                   </div>
                 ))}
                 {filtersStatus(draft.measure) && (
-                  <fieldset className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-3">
+                  <fieldset className="grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:gap-gutter">
                     <legend className="sr-only">Status</legend>
                     <span aria-hidden="true" className="text-sm text-muted-foreground">
                       Status
@@ -693,12 +693,12 @@ export function Links({
                     {connection.name}
                   </Label>
                   {status && (
-                    <Badge variant="secondary" className="shrink-0 font-normal">
+                    <Badge variant="secondary">
                       {status}
                     </Badge>
                   )}
                   {taken && (
-                    <Badge variant="secondary" className="shrink-0 font-normal">
+                    <Badge variant="secondary">
                       {taken}
                     </Badge>
                   )}

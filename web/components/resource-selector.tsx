@@ -30,25 +30,19 @@ import {
 import { organizationRows, projectRows, type SwitcherRow } from "@/lib/switcher";
 import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
 import { ContentMode } from "@/lib/types/enums";
-import { cn } from "@/lib/utils";
+import { cn, HEADER_MENU_OFFSET } from "@/lib/utils";
 
 // The header's two triggers: the one control in the header that gives way
 // (`shrink`, against Button's `shrink-0`), so a long name truncates instead
 // of pushing into the icon buttons. `gap-1.5` overrides Button's `gap-2`.
-// No fill on hover or while open: the name stands where the page title
-// does, and a fill drawn around it reads as the name shifting; the chevron
-// answers the pointer instead.
 const TRIGGER = cn(
-  "group h-7 min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal py-0 text-sm",
-  "transition-none hover:bg-transparent data-[state=open]:bg-transparent",
+  "group h-control min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal py-0 text-sm",
+  "transition-none hover:bg-sidebar-accent/50 data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground data-[state=open]:hover:bg-sidebar-accent",
 );
 const CHEVRON =
   "size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground";
 
-// A 28px trigger centred in the 51px above the header's 1px rule ends 12px
-// short of the header's bottom edge, so a menu opens right under the rule,
-// like the bell's and the account's.
-const MENU_OFFSET = 12;
+// The header's bottom gutter puts menus directly under its rule.
 // Along the bar a menu starts where its trigger's name does, the trigger's
 // own padding (`px-2`, `px-2.5`) in from its unseen edge, so the
 // organization's stands on the content's padding line, with the page's title.
@@ -69,7 +63,7 @@ function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: 
     <div className="flex items-center gap-0.5 rounded-md hover:bg-accent/50 focus-within:bg-accent/50">
       <DropdownMenuItem
         asChild
-        className="h-7 min-w-0 flex-1 cursor-pointer gap-2 px-2 focus:bg-transparent [&_svg]:size-3.5"
+        className="min-w-0 flex-1 cursor-pointer gap-2 px-2 focus:bg-transparent [&_svg]:size-3.5"
       >
         <Link href={row.href} aria-current={row.active ? "true" : undefined}>
           <span className="min-w-0 flex-1 truncate">{row.label}</span>
@@ -81,12 +75,8 @@ function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: 
         <DropdownMenuItem
           asChild
           className={cn(
-            // `mt-0!`: an item that follows another gets `mt-0.5` from the
-            // menu's own rule, meant for stacked rows; this one stands beside
-            // its sibling, and the margin would drop the gear 2px. The box
-            // is 28px, 4px in from a 36px row, its icon 14px, a step under the menu's 16px rule,
-            // since it is a secondary target beside the name.
-            "mt-0! mr-1 size-7 shrink-0 cursor-pointer justify-center p-0 [&_svg]:size-3.5",
+            // Adjacent targets share a row, so suppress the stacked-item margin.
+            "mt-0! mr-1 size-control shrink-0 cursor-pointer justify-center p-0 [&_svg]:size-3.5",
             "text-muted-foreground focus:bg-transparent hover:bg-foreground/10 hover:text-foreground",
             "focus-visible:bg-foreground/10 focus-visible:text-foreground",
           )}
@@ -125,7 +115,7 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
     <>
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="h-7 cursor-pointer gap-2 px-2"
+        className="cursor-pointer gap-2 px-2"
         onSelect={(e) => {
           e.preventDefault();
           onSelect();
@@ -216,8 +206,7 @@ export function ResourceSelector({
             ref={organizationsTrigger}
             variant="ghost"
             size="default"
-            // `px-2`, with the header cell's `pl-1.5`: the name starts where
-            // the page's title does.
+            // The header offsets this inset to align the name with the page.
             className={cn(TRIGGER, "px-2 has-[>svg]:px-2")}
           >
             {/* Named by what it shows, so a voice command can say it; the
@@ -233,7 +222,7 @@ export function ResourceSelector({
           align="start"
           alignOffset={ORGANIZATIONS_MENU_ALIGN}
           side="bottom"
-          sideOffset={MENU_OFFSET}
+          sideOffset={HEADER_MENU_OFFSET}
           onCloseAutoFocus={keepFocusForPanel}
         >
           <DropdownMenuGroup>
@@ -308,7 +297,7 @@ export function ResourceSelector({
               align="start"
               alignOffset={PROJECTS_MENU_ALIGN}
               side="bottom"
-              sideOffset={MENU_OFFSET}
+              sideOffset={HEADER_MENU_OFFSET}
               onCloseAutoFocus={keepFocusForPanel}
             >
               <DropdownMenuGroup>
@@ -316,7 +305,7 @@ export function ResourceSelector({
                   Projects
                 </DropdownMenuLabel>
                 {projectMenu.length === 0 && (
-                  <p className="flex h-7 items-center px-2 text-sm text-muted-foreground">
+                  <p className="flex h-control items-center px-2 text-sm text-muted-foreground">
                     {canCreate ? "No projects yet" : "No projects you can open"}
                   </p>
                 )}

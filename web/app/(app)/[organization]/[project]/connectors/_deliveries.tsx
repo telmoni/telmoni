@@ -299,20 +299,20 @@ function DeliveryStatusBadge({
 }) {
   if (status === "delivered") {
     return (
-      <Badge variant="outline" className="shrink-0 font-normal">
+      <Badge variant="outline">
         Delivered
       </Badge>
     );
   }
   if (status === "failed") {
     return (
-      <Badge variant="destructive" className="shrink-0 font-normal">
+      <Badge variant="destructive">
         Failed
       </Badge>
     );
   }
   return (
-    <Badge variant="secondary" className="shrink-0 font-normal">
+    <Badge variant="secondary">
       {attempted ? "Retrying" : "Queued"}
     </Badge>
   );

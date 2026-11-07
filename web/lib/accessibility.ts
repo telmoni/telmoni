@@ -29,7 +29,7 @@ export const MOTION_STORAGE_KEY = "telmoni-motion";
 export const CONTRAST_STORAGE_KEY = "telmoni-contrast";
 /** "1" when letter-key shortcuts are off; absent when they are on. */
 export const LETTER_KEYS_STORAGE_KEY = "telmoni-shortcuts-disabled";
-/** "1" when keyboard focus is drawn; absent when it is not, the default. */
+/** "0" explicitly hides keyboard focus; absent or "1" keeps it visible. */
 export const FOCUS_RINGS_STORAGE_KEY = "telmoni-focus-rings";
 
 /** The classes `globals.css` keys on, on `<html>` (Radix portals render into
@@ -40,10 +40,8 @@ export const MORE_CONTRAST_CLASS = "a11y-more-contrast";
 export const STANDARD_CONTRAST_CLASS = "a11y-standard-contrast";
 /** On the root while letter keys are off, read by every bare-key handler. */
 export const LETTER_KEYS_OFF_CLASS = "a11y-no-letter-keys";
-/** ⚠ The console draws no focus indicator by default (`globals.css`, the
- *  unlayered `*:focus` rule), short of WCAG 2.1's 2.4.7 at level AA; this
- *  class is the way back to one, a person's own choice. */
-export const FOCUS_RINGS_CLASS = "a11y-focus-rings";
+/** An explicit opt-out from the default keyboard focus indicator. */
+export const FOCUS_RINGS_OFF_CLASS = "a11y-no-focus-rings";
 
 export function isMotionChoice(value: unknown): value is MotionChoice {
   return isOneOf(MOTION_CHOICES, value);
@@ -70,7 +68,7 @@ export const ACCESSIBILITY_BOOT_SCRIPT = [
   `else if(k==="standard")c.add(${JSON.stringify(STANDARD_CONTRAST_CLASS)});`,
   `if(s.getItem(${JSON.stringify(LETTER_KEYS_STORAGE_KEY)})==="1")`,
   `c.add(${JSON.stringify(LETTER_KEYS_OFF_CLASS)});`,
-  `if(s.getItem(${JSON.stringify(FOCUS_RINGS_STORAGE_KEY)})==="1")`,
-  `c.add(${JSON.stringify(FOCUS_RINGS_CLASS)});`,
+  `if(s.getItem(${JSON.stringify(FOCUS_RINGS_STORAGE_KEY)})==="0")`,
+  `c.add(${JSON.stringify(FOCUS_RINGS_OFF_CLASS)});`,
   "}catch(e){}",
 ].join("");

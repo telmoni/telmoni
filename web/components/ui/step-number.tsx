@@ -8,7 +8,7 @@ export function StepNumber({ children, className, ...props }: ComponentProps<"sp
   return (
     <span
       className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-sm tabular-nums",
+        "flex size-control shrink-0 items-center justify-center rounded-md border border-border text-sm tabular-nums",
         className,
       )}
       {...props}

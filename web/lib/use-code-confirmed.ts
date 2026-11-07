@@ -32,16 +32,21 @@ export function useCodeConfirmed<Done extends object>(
     error: confirming.error ?? sending.error,
     sending: sending.pending,
     confirming: confirming.pending,
-    canConfirm: step.step === "code" && isConfirmationCode(code) && !confirming.pending,
+    canConfirm: step.step === "code" && isConfirmationCode(code) && !sending.pending && !confirming.pending,
     type(raw: string) {
       setCode(codeTyped(raw));
       clear();
     },
     sendCode() {
+      if (sending.pending || confirming.pending || step.step === "done") return;
       clear();
-      sending.run(send, () => setStep({ step: "code" }));
+      sending.run(send, () => {
+        setCode("");
+        setStep({ step: "code" });
+      });
     },
     confirmCode() {
+      if (step.step !== "code" || !isConfirmationCode(code) || sending.pending || confirming.pending) return;
       clear();
       confirming.run(
         () => confirm(code),

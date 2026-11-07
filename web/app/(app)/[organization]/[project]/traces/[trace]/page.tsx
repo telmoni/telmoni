@@ -93,7 +93,7 @@ export default async function TracePage({
           reads. The trace's line stands inside, where its wrapping on a
           narrow window takes the panes' room rather than the page's. */}
       <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
-        <div className="shrink-0 border-b border-border p-gutter">
+        <div className="mx-gutter shrink-0 border-b border-border py-gutter">
           <TraceMeta
             trace={trace}
             organization={organization}
@@ -121,7 +121,7 @@ export default async function TracePage({
             scores={scores.kind === "ok" ? scores.scores : []}
             comments={commentsOf(trace.content)}
           >
-            <div className="max-h-56 shrink-0 overflow-y-auto border-b border-border p-gutter">
+            <div className="mx-gutter max-h-56 shrink-0 overflow-y-auto border-b border-border py-gutter">
               <RunTurn fields={fieldsOf(trace.content, root.span_id)} />
             </div>
             <TraceBody trace={trace} organization={organization} slug={slug} className="min-h-0 flex-1" />

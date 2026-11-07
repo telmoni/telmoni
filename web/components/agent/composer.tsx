@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, type KeyboardEvent, type RefObject } from "react";
 import { ArrowUp, Info, Square } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 import { AGENT_MESSAGE_MAX } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
@@ -105,13 +106,9 @@ export function Composer({
                 {draft.length.toLocaleString()} / {AGENT_MESSAGE_MAX.toLocaleString()}
               </span>
             )}
-            {/* One button, Send or Stop, so focus on it survives the turn
-                starting and ending: two would swap under it, and a removed
-                or disabled button drops focus. An empty field marks it
-                `aria-disabled` rather than disabling it, for the same
-                reason. A plain button, never a submit one: Stop must not
-                become a submit while its own press is still landing. */}
-            <button
+            {/* Keep one non-submit button so Send/Stop retains focus; an empty draft uses aria-disabled. */}
+            <Button
+              size="icon-sm"
               type="button"
               aria-label={streaming ? "Stop the reply" : "Send"}
               title={streaming ? "Stop" : "Send"}
@@ -119,12 +116,8 @@ export function Composer({
               aria-disabled={!streaming && draft.trim() === "" ? true : undefined}
               onClick={streaming ? onStop : submit}
               className={cn(
-                "flex size-8 shrink-0 items-center justify-center rounded-md",
-                streaming
-                  ? "cursor-pointer bg-foreground text-background hover:bg-foreground/80"
-                  : !disabled && draft.trim() !== ""
-                    ? "cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "cursor-not-allowed bg-muted text-muted-foreground",
+                !streaming && (disabled || draft.trim() === "") &&
+                  "cursor-not-allowed text-muted-foreground",
               )}
             >
               {streaming ? (
@@ -132,7 +125,7 @@ export function Composer({
               ) : (
                 <ArrowUp className="size-4" />
               )}
-            </button>
+            </Button>
           </div>
         </div>
         <p className="pt-2.5 text-center text-[11px] text-muted-foreground">

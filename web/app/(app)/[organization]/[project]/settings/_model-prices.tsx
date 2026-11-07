@@ -101,7 +101,7 @@ export function ModelPricesForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canEdit || pending) return;
+    if (!canEdit || pending || !changed) return;
     const asked = pricesOf(drafts);
     if ("error" in asked) {
       setError(asked.error);
@@ -179,7 +179,7 @@ export function ModelPricesForm({
           >
             Add a price
           </Button>
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" disabled={pending || !changed}>
             {pending ? "Saving..." : "Save"}
           </Button>
           {changed && (

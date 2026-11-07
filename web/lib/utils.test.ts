@@ -18,6 +18,13 @@ describe("cn", () => {
     ["gap-gutter", "gap-1"],
     ["gap-gutter", "gap-page"],
     ["p-page", "p-gutter"],
+    ["h-control", "h-7"],
+    ["h-7", "h-control"],
+    ["size-control", "size-8"],
+    ["h-console-header", "h-16"],
+    ["w-sidebar", "w-10"],
+    ["w-sidebar-collapsed", "w-sidebar"],
+    ["w-sidebar-inner", "w-full"],
   ])("lets %s lose to %s like any other value", (base, override) => {
     expect(cn(base, override)).toBe(override);
   });

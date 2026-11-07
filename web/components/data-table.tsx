@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 
 // One cell's padding, the gutter, spent by both `Th` and `Td` so a header never
 // drifts out of step with the column beneath it.
-const CELL = "px-gutter py-gutter";
+const CELL = "px-gutter py-gutter first:pl-0 last:pr-0";
 
 // Which way the table still runs past its card: a table wider than its card
 // scrolls inside it, and the scrollbar at the card's foot is out of sight
@@ -69,15 +69,25 @@ function useOverflow(wrapper: React.RefObject<HTMLDivElement | null>) {
 // minimum, the track grows to it, and the page scrolls sideways instead.
 export function DataTable({
   className,
+  flush = false,
   ...props
-}: React.ComponentProps<"table">) {
+}: React.ComponentProps<"table"> & { flush?: boolean }) {
   const wrapper = React.useRef<HTMLDivElement>(null);
   const overflow = useOverflow(wrapper);
+  const Surface = flush ? "div" : Card;
   return (
-    <div ref={wrapper} className="relative min-w-0" data-overflow={overflow || undefined}>
-      <Card className="overflow-hidden p-0 gap-0" tabIndex={0}>
+    <div
+      ref={wrapper}
+      className={cn("relative min-w-0", flush && "first:-mt-gutter last:-mb-gutter")}
+      data-overflow={overflow || undefined}
+    >
+      <Surface
+        data-slot={flush ? "table-scroll" : "card"}
+        className={flush ? "min-w-0 overflow-x-auto" : "overflow-hidden py-0 gap-0"}
+        tabIndex={0}
+      >
         <table className={cn("w-full text-sm", className)} {...props} />
-      </Card>
+      </Surface>
     </div>
   );
 }

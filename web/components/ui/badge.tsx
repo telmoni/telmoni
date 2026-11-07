@@ -4,14 +4,9 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-// ⚠ **`rounded-sm`, NOT the `rounded-md` every button and field takes.** A
-// badge stands 22px tall — 16px wherever a caller passes `h-4` — and a corner
-// radius is clamped to half the shorter side, so 8px on the 16px badge is
-// exactly the pill it was asked to replace, and the change would have been
-// invisible. 6px is the same fraction of a badge that 8px is of a 32px
-// button, which is what matching means at this size.
+// Keep badge density here so roles, counts and statuses share one shape.
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border border-transparent px-2 py-0.5 text-[10px] leading-4 font-normal whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {

@@ -3,6 +3,7 @@
 import { Search } from "lucide-react";
 
 import { useConsoleUi } from "@/components/console-ui-context";
+import { Button } from "@/components/ui/button";
 import { SEARCH_KEY } from "@/lib/keys";
 import { useLetterKeys } from "@/lib/use-accessibility";
 import { useIsMac } from "@/lib/use-platform";
@@ -13,24 +14,28 @@ import { cn } from "@/lib/utils";
 export function SearchButton() {
   const isMac = useIsMac();
   const letterKeys = useLetterKeys();
-  const { setSearchOpen } = useConsoleUi();
+  const { searchOpen, setSearchOpen } = useConsoleUi();
   const chord = isMac ? "⌘K" : "Ctrl K";
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       type="button"
       data-testid="search-button"
       aria-label="Search"
+      aria-expanded={searchOpen}
       aria-keyshortcuts={isMac ? "Meta+K" : "Control+K"}
       title={letterKeys ? `Search (${chord} or ${SEARCH_KEY})` : `Search (${chord})`}
       onClick={() => setSearchOpen(true)}
       className={cn(
-        "flex size-7 shrink-0 items-center justify-center",
+        "flex size-control shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",
-        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
         "hover:bg-sidebar-accent/50",
+        searchOpen && "bg-sidebar-accent text-foreground hover:bg-sidebar-accent",
+        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
       <Search className="size-4" />
-    </button>
+    </Button>
   );
 }

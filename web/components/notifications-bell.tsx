@@ -51,7 +51,7 @@ import { useBellPlaces, useScopeFeed, type BellScope } from "@/lib/use-scope-fee
 import type { AuditExport } from "@/lib/types/audit-export";
 import type { GivenSeat } from "@/lib/types/given-seat";
 import type { IncomingInvite } from "@/lib/types/incoming-invite";
-import { cn } from "@/lib/utils";
+import { cn, HEADER_MENU_OFFSET } from "@/lib/utils";
 
 import {
   acceptIncomingInviteAction,
@@ -115,10 +115,11 @@ export function NotificationsBell() {
             : "Notifications"
         }
         className={cn(
-          "relative flex size-7 shrink-0 items-center justify-center",
+          "relative flex size-control shrink-0 items-center justify-center",
           "rounded-md text-muted-foreground hover:text-foreground",
           "outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "hover:bg-sidebar-accent/50",
+          "data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground data-[state=open]:hover:bg-sidebar-accent",
         )}
       >
         <Bell className="size-4" />
@@ -133,18 +134,11 @@ export function NotificationsBell() {
         )}
       </DropdownMenuTrigger>
 
-      {/* ⚠ **The panel keeps its `p-1`.** That inset is what sets a row's
-          `rounded-md` corner 4px inside the panel's `rounded-menu` one — the
-          concentric curve — so overriding it to `p-0` would square off every
-          hover in this menu. Anything that needs the full width bleeds back
-          out with `-mx-1` instead — the same trick `DropdownMenuSeparator`
-          uses. */}
+      {/* Keep the panel inset around rounded rows; the scroller bleeds to its edges. */}
       <DropdownMenuContent
         className="w-80 animate-none!"
         align="end"
-        // Right under the header's rule, as the switchers' menus open
-        // (`resource-selector.tsx`).
-        sideOffset={12}
+        sideOffset={HEADER_MENU_OFFSET}
         data-testid="notifications-menu"
       >
         {/* The head is the account menu's: one 28px line in the label's small
@@ -152,7 +146,7 @@ export function NotificationsBell() {
         <DropdownMenuLabel className="flex h-7 items-center justify-between gap-2 px-2 py-0 text-xs font-normal text-muted-foreground">
           <span>Notifications</span>
           {count > 0 && (
-            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+            <Badge variant="secondary">
               {count}
             </Badge>
           )}
@@ -161,16 +155,12 @@ export function NotificationsBell() {
 
         {count === 0 && exportsBuilding.length === 0 && notices.length === 0 ? (
           <p
-            className="px-2 py-6 text-center text-sm text-muted-foreground"
+            className="px-2 py-page text-center text-sm text-muted-foreground"
             data-testid="notifications-menu-empty"
           >
             {reading ? "Reading…" : "You\u2019re all caught up."}
           </p>
         ) : (
-          // The bleed sits on the scroller, not on each row: a row carrying its
-          // own negative margin would push past a scroll container and earn a
-          // horizontal scrollbar, since a box scrolling on one axis cannot keep
-          // the other visible.
           <div className="-mx-1 max-h-96 overflow-y-auto">
             {organization &&
               exportsWaiting.map((entry) => (
@@ -198,11 +188,9 @@ export function NotificationsBell() {
           </div>
         )}
 
-        {/* The foot is every header menu's foot (`nav-user.tsx`,
-            `resource-selector.tsx`): a rule, then one 28px row, its icon
-            first. The rows above drop their last rule for it. */}
+        {/* Match the other header menus' ruled action row. */}
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="h-7 cursor-pointer gap-2 px-2">
+        <DropdownMenuItem asChild className="cursor-pointer gap-2 px-2">
           <Link href={seeAll} onClick={() => setOpen(false)} data-testid="notifications-menu-all">
             <Bell className="size-4 shrink-0 text-muted-foreground" />
             See all
@@ -380,7 +368,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
           className={cn(
             buttonVariants({ size: "sm" }),
             // The icon takes the button's colour, as the Accept beside it does.
-            "h-7 flex-1 gap-1 text-xs focus:bg-primary/90 focus:text-primary-foreground [&_svg:not([class*='text-'])]:text-current",
+            "flex-1 gap-1 focus:bg-transparent focus:text-foreground [&_svg:not([class*='text-'])]:text-current",
           )}
         >
           <Link
@@ -404,7 +392,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
           aria-describedby={about}
           className={cn(
             buttonVariants({ variant: "outline", size: "sm" }),
-            "mt-0! h-7 flex-1 gap-1 text-xs text-muted-foreground hover:text-foreground focus:text-foreground [&_svg:not([class*='text-'])]:text-current",
+            "mt-0! flex-1 gap-1 text-muted-foreground hover:text-foreground focus:text-foreground [&_svg:not([class*='text-'])]:text-current",
           )}
         >
           <X className="size-3.5" />
@@ -469,7 +457,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
       <div className="flex items-center gap-gutter">
         <Button
           size="sm"
-          className="h-7 flex-1 gap-1 text-xs"
+          className="flex-1 gap-1"
           disabled={pending}
           onClick={() => settle(() => acceptIncomingInviteAction(invite.id))}
         >
@@ -482,7 +470,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
         <Button
           variant="outline"
           size="sm"
-          className="h-7 flex-1 gap-1 text-xs text-muted-foreground hover:text-foreground"
+          className="flex-1 gap-1 text-muted-foreground hover:text-foreground"
           disabled={pending}
           onClick={() => settle(() => declineIncomingInviteAction(invite.id))}
         >

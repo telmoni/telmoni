@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 import {
   ALLOW_MOTION_CLASS,
   CONTRAST_STORAGE_KEY,
-  FOCUS_RINGS_CLASS,
+  FOCUS_RINGS_OFF_CLASS,
   FOCUS_RINGS_STORAGE_KEY,
   LETTER_KEYS_OFF_CLASS,
   LETTER_KEYS_STORAGE_KEY,
@@ -47,7 +47,7 @@ function onStorage(event: StorageEvent) {
   } else if (event.key === LETTER_KEYS_STORAGE_KEY) {
     root().toggle(LETTER_KEYS_OFF_CLASS, event.newValue === "1");
   } else if (event.key === FOCUS_RINGS_STORAGE_KEY) {
-    root().toggle(FOCUS_RINGS_CLASS, event.newValue === "1");
+    root().toggle(FOCUS_RINGS_OFF_CLASS, event.newValue === "0");
   } else {
     return;
   }
@@ -88,7 +88,7 @@ export function bootAccessibility() {
   const contrast = read(CONTRAST_STORAGE_KEY);
   applyContrast(isContrastChoice(contrast) ? contrast : "system");
   root().toggle(LETTER_KEYS_OFF_CLASS, read(LETTER_KEYS_STORAGE_KEY) === "1");
-  root().toggle(FOCUS_RINGS_CLASS, read(FOCUS_RINGS_STORAGE_KEY) === "1");
+  root().toggle(FOCUS_RINGS_OFF_CLASS, read(FOCUS_RINGS_STORAGE_KEY) === "0");
   if (root().value !== before) emit();
 }
 
@@ -111,8 +111,8 @@ export function setLetterKeys(on: boolean) {
 }
 
 export function setFocusRings(on: boolean) {
-  root().toggle(FOCUS_RINGS_CLASS, on);
-  store(FOCUS_RINGS_STORAGE_KEY, on ? "1" : null);
+  root().toggle(FOCUS_RINGS_OFF_CLASS, !on);
+  store(FOCUS_RINGS_STORAGE_KEY, on ? null : "0");
   emit();
 }
 
@@ -123,7 +123,7 @@ export function letterKeysOn(): boolean {
 }
 
 function focusRingsOn(): boolean {
-  return root().contains(FOCUS_RINGS_CLASS);
+  return !root().contains(FOCUS_RINGS_OFF_CLASS);
 }
 
 function motionSnapshot(): MotionChoice {
@@ -153,7 +153,7 @@ export function useLetterKeys(): boolean {
 }
 
 export function useFocusRings(): boolean {
-  return useSyncExternalStore(subscribe, focusRingsOn, () => false);
+  return useSyncExternalStore(subscribe, focusRingsOn, () => true);
 }
 
 // What the device itself asks for, so the page can say what "System" means

@@ -81,7 +81,7 @@ export function AlertActions({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 gap-1.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className="h-9 gap-1.5 text-xs text-destructive hover:text-destructive"
             disabled={pending}
             aria-label={`Delete ${alert.name}`}
           >

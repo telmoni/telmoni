@@ -42,18 +42,14 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
           </Link>
         </div>
 
-        {/* A visitor gets the pair every row of buttons in the product uses:
-            the other way out outlined, the thing you came to do filled, with
-            its key (`header-shortcuts.tsx`). A member gets two outlined: the console is where they
-            already are, not a thing to sell, and the key stays on it. Below
-            `lg` neither shows; the drawer carries the same pair. */}
+        {/* The mobile drawer carries the same account actions below `lg`. */}
         <div className={cn("flex items-center gap-gutter", inset ? INSET : "px-gutter")}>
           <SiteNavMenu />
           <div className="hidden items-center gap-gutter lg:flex">
             {signedIn ? (
               <>
                 <SignOutButton className={NAV_TYPE} />
-                <Button asChild variant="outline" size="sm" className={NAV_TYPE}>
+                <Button asChild variant="filled" size="sm" className={NAV_TYPE}>
                   <Link href="/console">
                     Console
                   </Link>

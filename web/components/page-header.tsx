@@ -55,11 +55,9 @@ export function PageHeader({
   }, []);
 
   if (!title && !action && !toolbar) return null;
-  // At least as tall as the rail rows (28px), so the page title sits on the
-  // first row's axis whether the rail is closed or open; a toolbar
-  // the row cannot hold scrolls beside the title rather than wrapping.
+  // Match navigation and action heights to keep their first rows aligned.
   const row = (
-    <div className="flex min-h-7 w-full min-w-0 items-center gap-gutter">
+    <div className="flex min-h-control w-full min-w-0 items-center gap-gutter">
       {title && (
         <div className="flex min-w-0 items-center gap-2">
           <h1

@@ -11,7 +11,7 @@ export default function GlobalError({
   retry: () => void;
 }) {
   return (
-    <div className="flex flex-col items-start px-8 py-24 gap-6 max-w-md">
+    <div className="flex flex-col items-start px-8 py-24 gap-page max-w-md">
       <p className="text-xs tracking-label text-brand-negative uppercase">error</p>
       <h1 className="text-3xl font-light tracking-tight">Something went wrong.</h1>
       <p className="text-sm text-muted-foreground leading-relaxed">

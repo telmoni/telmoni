@@ -593,6 +593,17 @@ describe("AlertsPage", () => {
     expect(within(document.getElementById(`alert-${RULE}`)!).queryByText("Starter")).toBeNull();
   });
 
+  it("shows connector icons on the setup actions for an admin without connectors", async () => {
+    mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    mockConnectors = { ...(mockConnectors as object), connections: [] };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    for (const name of ["Connect Slack", "Connect a webhook"]) {
+      const icon = screen.getByRole("link", { name }).querySelector("svg");
+      expect(icon).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
   it("names the starters the plan had no room for, in the plan's own words", async () => {
     const plan = "This organization is on Hobby, which holds 10 alerts across its projects.";
     mockAlerts = { ...(mockAlerts as object), startersWithheld: ["repeats", "stalled"], startersDetail: plan };

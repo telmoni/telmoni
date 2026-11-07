@@ -3,6 +3,7 @@
 import { Bot } from "lucide-react";
 
 import { useConsoleUi } from "@/components/console-ui-context";
+import { Button } from "@/components/ui/button";
 import { AGENT_MODIFIER_KEY } from "@/lib/keys";
 import { useIsMac } from "@/lib/use-platform";
 import { cn } from "@/lib/utils";
@@ -16,7 +17,9 @@ export function AgentButton() {
   const isMac = useIsMac();
   const key = AGENT_MODIFIER_KEY.toUpperCase();
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       type="button"
       data-testid="agent-button"
       aria-label="Agent"
@@ -26,14 +29,14 @@ export function AgentButton() {
       title={`Agent (${isMac ? "⌘" : "Ctrl "}${key})`}
       onClick={() => setAgentOpen((open) => !open)}
       className={cn(
-        "relative flex size-7 shrink-0 items-center justify-center",
+        "relative flex size-control shrink-0 items-center justify-center",
         "rounded-md text-muted-foreground hover:text-foreground",
-        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        // Half the accent, as the search, the bell and the account beside it.
         "hover:bg-sidebar-accent/50",
+        agentOpen && "bg-sidebar-accent text-foreground hover:bg-sidebar-accent",
+        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
       <Bot className="size-4" />
-    </button>
+    </Button>
   );
 }

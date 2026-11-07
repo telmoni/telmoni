@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { CONFIRMATION_CODE_LENGTH } from "@/lib/confirmation-code";
 
@@ -46,5 +47,24 @@ export function CodeSentTo({ email }: { email: string }) {
       Enter the {CONFIRMATION_CODE_LENGTH}-digit code sent to{" "}
       <span className="font-medium">{email}</span>
     </>
+  );
+}
+
+/** Resending and confirming share one busy state across the code forms. */
+export function ResendCodeButton({ sending, confirming, onResend }: {
+  sending: boolean;
+  confirming: boolean;
+  onResend: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="w-fit"
+      disabled={sending || confirming}
+      onClick={onResend}
+    >
+      {sending ? "Sending…" : "Resend code"}
+    </Button>
   );
 }

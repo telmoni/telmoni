@@ -74,33 +74,44 @@ test.describe("Console chrome row", () => {
     await injectSession(page, testUser(testInfo.project.name));
     await gotoOrganizationMembers(page);
 
-    // The name is drawn with the mark, one image filling the link, so the
-    // link stands for it.
+    // The wordmark links home; the mark keeps its own fixed box.
     const brand = page.getByRole("banner").getByRole("link", { name: "Telmoni", exact: true });
     await expect(brand).toBeVisible();
     const rail = page.locator("#console-sidebar");
     const row = rail.getByRole("link", { name: "Projects" });
 
-    // Open, the header's first cell holds the toggle on the left — in line
-    // with the nav row icons below — and the brand to its right, aligned
-    // with the nav row labels at the 48px mark (rowOpen.x + 28px icon slot + 8px gap).
+    // The brand and collapse fill the rail's cell; search stays on the right.
     const railOpen = (await rail.boundingBox())!;
     const brandOpen = (await brand.boundingBox())!;
     const rowOpen = (await row.boundingBox())!;
     const close = (await page.getByRole("button", { name: "Collapse navigation" }).boundingBox())!;
-    expect(Math.abs(close.x + close.width / 2 - (rowOpen.x + 14))).toBeLessThanOrEqual(1);
-    expect(Math.abs(rowOpen.x - railOpen.x - 12)).toBeLessThanOrEqual(1);
-    expect(Math.abs(brandOpen.x - (rowOpen.x + 36))).toBeLessThanOrEqual(1);
-    expect(brandOpen.x).toBeGreaterThan(close.x + close.width);
+    const markIcon = page.locator('[data-slot="console-brand-mark"] svg');
+    const mark = (await markIcon.boundingBox())!;
+    const word = (await brand.locator("svg").last().boundingBox())!;
+    const search = (await page.getByRole("button", { name: "Search", exact: true }).boundingBox())!;
+    const profile = (await page.getByRole("button", { name: /^Account:/ }).boundingBox())!;
+    expect(railOpen.width).toBe(252);
+    expect(close.width).toBe(36);
+    expect(Math.abs(mark.x + mark.width / 2 - (rowOpen.x + 18))).toBeLessThanOrEqual(1);
+    expect(Math.abs(rowOpen.x - railOpen.x - 18)).toBeLessThanOrEqual(1);
+    expect(Math.abs(word.x - (rowOpen.x + 44))).toBeLessThanOrEqual(1);
+    expect(close.x).toBeGreaterThan(brandOpen.x + brandOpen.width);
+    expect(search.x).toBeGreaterThan(railOpen.x + railOpen.width);
+    expect(profile.width).toBe(36);
+    expect(profile.height).toBe(36);
+    expect(profile.y).toBe(search.y);
+    expect(Math.abs(railOpen.x + railOpen.width - close.x - close.width - 18)).toBeLessThanOrEqual(1);
 
     await page.getByRole("button", { name: "Collapse navigation" }).click();
     const open = page.getByRole("button", { name: "Expand navigation" });
     await expect(open).toBeVisible();
+    await expect(open).toBeFocused();
     await page.waitForTimeout(400);
 
-    // Closed, the brand is hidden and the toggle button remains on the
-    // center axis that every icon shares.
+    // The wordmark hides while the mark and toggle keep the rail's icon axis.
     await expect(brand).toBeHidden();
+    await expect(markIcon).toBeVisible();
+    expect(await markIcon.boundingBox()).toEqual(mark);
     const railShut = (await rail.boundingBox())!;
     const centre = railShut.x + railShut.width / 2;
     for (const piece of [open, row]) {
@@ -110,6 +121,7 @@ test.describe("Console chrome row", () => {
 
     await open.click();
     await expect(brand).toBeVisible();
+    await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeFocused();
     await page.waitForTimeout(400);
     expect(Math.abs((await brand.boundingBox())!.x - brandOpen.x)).toBeLessThanOrEqual(1);
   });

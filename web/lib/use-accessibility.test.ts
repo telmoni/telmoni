@@ -6,7 +6,8 @@ import {
   ACCESSIBILITY_BOOT_SCRIPT,
   ALLOW_MOTION_CLASS,
   CONTRAST_STORAGE_KEY,
-  FOCUS_RINGS_CLASS,
+  FOCUS_RINGS_STORAGE_KEY,
+  FOCUS_RINGS_OFF_CLASS,
   LETTER_KEYS_OFF_CLASS,
   LETTER_KEYS_STORAGE_KEY,
   MORE_CONTRAST_CLASS,
@@ -33,7 +34,7 @@ const CLASSES = [
   MORE_CONTRAST_CLASS,
   STANDARD_CONTRAST_CLASS,
   LETTER_KEYS_OFF_CLASS,
-  FOCUS_RINGS_CLASS,
+  FOCUS_RINGS_OFF_CLASS,
 ];
 
 afterEach(() => {
@@ -49,13 +50,13 @@ function boot() {
 const has = (c: string) => document.documentElement.classList.contains(c);
 
 describe("a first visit", () => {
-  it("follows the system, keeps letter keys on and draws no focus", () => {
+  it("follows the system and keeps letter keys and keyboard focus on", () => {
     boot();
     for (const c of CLASSES) expect(has(c), c).toBe(false);
     expect(renderHook(() => useMotion()).result.current).toBe("system");
     expect(renderHook(() => useContrast()).result.current).toBe("system");
     expect(renderHook(() => useLetterKeys()).result.current).toBe(true);
-    expect(renderHook(() => useFocusRings()).result.current).toBe(false);
+    expect(renderHook(() => useFocusRings()).result.current).toBe(true);
   });
 });
 
@@ -93,16 +94,23 @@ describe("every choice survives leaving and coming back", () => {
     expect(letterKeysOn()).toBe(false);
   });
 
-  it("focus shown", () => {
-    act(() => setFocusRings(true));
-    document.documentElement.classList.remove(FOCUS_RINGS_CLASS);
+  it("focus explicitly hidden", () => {
+    act(() => setFocusRings(false));
+    document.documentElement.classList.remove(FOCUS_RINGS_OFF_CLASS);
     boot();
-    expect(has(FOCUS_RINGS_CLASS)).toBe(true);
-    expect(renderHook(() => useFocusRings()).result.current).toBe(true);
+    expect(has(FOCUS_RINGS_OFF_CLASS)).toBe(true);
+    expect(renderHook(() => useFocusRings()).result.current).toBe(false);
   });
 });
 
 describe("choosing System again", () => {
+  it("restores default focus visibility and forgets the opt-out", () => {
+    act(() => setFocusRings(false));
+    act(() => setFocusRings(true));
+    expect(has(FOCUS_RINGS_OFF_CLASS)).toBe(false);
+    expect(window.localStorage.getItem(FOCUS_RINGS_STORAGE_KEY)).toBeNull();
+    expect(renderHook(() => useFocusRings()).result.current).toBe(true);
+  });
   it("clears the class and forgets the stored choice", () => {
     act(() => setMotion("reduce"));
     act(() => setContrast("more"));
@@ -125,6 +133,17 @@ describe("choosing System again", () => {
 // Another tab's choice lands here as well, or two windows of one console
 // disagree until one reloads.
 describe("another tab's choice", () => {
+  it("applies an explicit focus opt-out and restores the default when cleared", () => {
+    const { result } = renderHook(() => useFocusRings());
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: FOCUS_RINGS_STORAGE_KEY, newValue: "0" }));
+    });
+    expect(result.current).toBe(false);
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: FOCUS_RINGS_STORAGE_KEY, newValue: null }));
+    });
+    expect(result.current).toBe(true);
+  });
   it("applies here and re-renders what reads it", () => {
     const { result } = renderHook(() => useLetterKeys());
     act(() => {
@@ -167,7 +186,7 @@ describe("a page the boot script never ran on", () => {
     expect(letters.result.current).toBe(false);
     expect(motion.result.current).toBe("reduce");
     expect(document.documentElement.classList.contains(MORE_CONTRAST_CLASS)).toBe(true);
-    expect(document.documentElement.classList.contains(FOCUS_RINGS_CLASS)).toBe(true);
+    expect(document.documentElement.classList.contains(FOCUS_RINGS_OFF_CLASS)).toBe(false);
   });
 
   it("agrees with the boot script for every combination storage may hold", () => {
@@ -183,7 +202,7 @@ describe("a page the boot script never ran on", () => {
     for (const motion of ["reduce", "allow", "system", "nonsense", null]) {
       for (const contrast of ["more", "standard", "nonsense", null]) {
         for (const letters of ["1", "0", null]) {
-          for (const focus of ["1", "yes", null]) {
+          for (const focus of ["0", "1", "yes", null]) {
             const saved = {
               [MOTION_STORAGE_KEY]: motion,
               [CONTRAST_STORAGE_KEY]: contrast,

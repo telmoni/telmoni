@@ -5,7 +5,7 @@ import type { AgentConversationSummary } from "@/lib/types/agent";
 import { cn } from "@/lib/utils";
 
 export const ICON_BUTTON =
-  "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50";
+  "flex size-control shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50";
 
 export type HistoryState =
   | { kind: "loading" }

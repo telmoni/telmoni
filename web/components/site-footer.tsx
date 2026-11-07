@@ -38,7 +38,7 @@ export function SiteFooter({ inset = false }: { inset?: boolean }) {
             <h2 className="text-xs font-medium tracking-label text-foreground uppercase">
               {column.title}
             </h2>
-            <ul className="mt-3 flex flex-col gap-2">
+            <ul className="mt-gutter flex flex-col gap-2">
               {column.links.map((link) => (
                 <li key={link.href}>
                   <FooterAnchor
@@ -53,7 +53,7 @@ export function SiteFooter({ inset = false }: { inset?: boolean }) {
       </div>
       <div
         className={cn(
-          "flex w-full flex-col gap-4 border-t py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between",
+          "flex w-full flex-col gap-4 border-t py-page text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between",
           pad,
         )}
       >

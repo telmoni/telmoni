@@ -283,7 +283,7 @@ export function AgentPanel() {
               panelRef.current?.focus();
               agent.retry();
             }}
-            className="cursor-pointer rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent"
+            className="cursor-pointer rounded-md border border-border px-gutter py-1.5 text-sm hover:bg-accent"
           >
             Try again
           </button>

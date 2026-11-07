@@ -41,7 +41,7 @@ export const metadata = { title: "Connectors" };
 // thing shown of it afterwards is its host. This page lists what is connected
 // and offers the control that connects more.
 const BLURB: Record<Provider, string> = {
-  slack: "Post this project's notices to a channel in your Slack workspace.",
+  slack: "Post this project's notices to a channel in your Slack workspace. Choose the workspace and channel when you connect.",
   webhook: "Post this project's notices as signed JSON to an HTTPS endpoint you run.",
 };
 
@@ -152,7 +152,7 @@ function Tile({
   // `null` for the webhook: it has no handshake to start.
   const start = isOAuthProvider(provider) ? connectStartPath(provider, projectId) : null;
   return (
-    <Card className="gap-4">
+    <Card className="gap-gutter">
       <div className="flex items-start justify-between gap-gutter">
         <span className="flex items-center gap-gutter">
           {/* No colour class: these marks carry their brand's own. */}
@@ -160,7 +160,7 @@ function Tile({
           <span className="text-sm font-medium">{name}</span>
         </span>
         {!enabled && (
-          <Badge variant="secondary" className="shrink-0 font-normal">
+          <Badge variant="secondary">
             Soon
           </Badge>
         )}
@@ -236,41 +236,39 @@ function Tile({
         </ul>
       )}
 
-      {enabled ? (
-        canManage ? (
-          start ? (
-            // A plain anchor, not `Link`: the target is a GET Route Handler
-            // that STARTS a handshake, and a prefetch would start one on hover.
-            <Button asChild size="sm" variant="outline" className="w-fit">
-              <a href={start}>
-                {connections.length > 0 ? `Connect another ${name} channel` : `Connect ${name}`}
-              </a>
-            </Button>
+      <div className="mt-auto flex items-start">
+        {enabled ? (
+          canManage ? (
+            start ? (
+              // A plain anchor prevents prefetch from starting a handshake.
+              <Button asChild size="sm" variant="outline" className="w-fit">
+                <a href={start}>
+                  {connections.length > 0 ? `Connect another ${name} channel` : `Connect ${name}`}
+                </a>
+              </Button>
+            ) : (
+              <ConnectWebhookButton
+                projectId={projectId}
+                label={connections.length > 0 ? "Connect another endpoint" : `Connect ${name}`}
+              />
+            )
           ) : (
-            <ConnectWebhookButton
-              projectId={projectId}
-              label={connections.length > 0 ? "Connect another endpoint" : `Connect ${name}`}
-            />
+            <p className="text-xs text-muted-foreground">
+              Only a project owner or admin can connect or remove a destination.
+            </p>
           )
         ) : (
-          <p className="text-xs text-muted-foreground">
-            Only a project owner or admin can connect or remove a destination.
-          </p>
-        )
-      ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled
-          className="w-fit"
-          // The name is on the button, not just beside it: a screen
-          // reader moving control to control otherwise hears "Connect"
-          // twice with nothing to tell the two apart.
-          aria-label={`Connect ${name} — not available yet`}
-        >
-          Connect
-        </Button>
-      )}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled
+            className="w-fit"
+            aria-label={`Connect ${name} — not available yet`}
+          >
+            Connect
+          </Button>
+        )}
+      </div>
     </Card>
   );
 }
@@ -286,20 +284,20 @@ function eventsSummary(kinds: Connection["event_kinds"]): string {
 function StatusBadge({ status }: { status: Connection["status"] }) {
   if (status === "active") {
     return (
-      <Badge variant="outline" className="shrink-0 font-normal">
+      <Badge variant="outline">
         Connected
       </Badge>
     );
   }
   if (status === "errored") {
     return (
-      <Badge variant="destructive" className="shrink-0 font-normal">
+      <Badge variant="destructive">
         Needs attention
       </Badge>
     );
   }
   return (
-    <Badge variant="secondary" className="shrink-0 font-normal">
+    <Badge variant="secondary">
       Disconnected
     </Badge>
   );

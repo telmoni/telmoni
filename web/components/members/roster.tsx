@@ -21,7 +21,7 @@ export function RoleCards({ cards }: { cards: Record<Role, RoleCard> }) {
         <Card key={role} className="gap-1.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium text-sm">{roleLabel(role)}</span>
-            <Badge variant="secondary" className="text-xs shrink-0">
+            <Badge variant="secondary">
               {cards[role].badge}
             </Badge>
           </div>

@@ -56,7 +56,7 @@ export function ListPagination({ list, organization, slug, query, ui = {}, total
   const to = (p: number) => href({ page: p > 1 ? p : undefined });
   return (
     <nav
-      className="flex flex-wrap items-center justify-end gap-x-6 gap-y-2 text-sm"
+      className="flex flex-wrap items-center justify-end gap-x-page gap-y-2 text-sm"
       aria-label="Pages"
       aria-busy={pending}
       data-pending={pending ? "" : undefined}

@@ -1,4 +1,4 @@
-import { GUTTER_PX } from "@/lib/utils";
+import { PAGE_GUTTER_PX } from "@/lib/utils";
 
 // A panel beside a list, its edge dragged: the width it comes to as the
 // pointer moves, held between the widths it may stand at. The trace and
@@ -17,11 +17,8 @@ export function draggedPanelWidth(start: number, startX: number, x: number, boun
   return Math.round(Math.min(Math.max(start + moved, bounds.min), Math.max(bounds.max, bounds.min)));
 }
 
-/** The filters' own width, in pixels: the main sidebar's links', the 168px rail
- *  (`--spacing-sidebar`) less two gutters (`--spacing-sidebar-inner`, which
- *  `w-filters` reads). Also the narrowest they are dragged to, below which their
- *  headers cut their names short. */
-export const FILTERS_WIDTH_DEFAULT = 168 - 2 * GUTTER_PX;
+/** Match the rail's link area: its 252px width less the page inset on each side. */
+export const FILTERS_WIDTH_DEFAULT = 252 - 2 * PAGE_GUTTER_PX;
 
 /** The widest the filters are dragged to. */
 export const FILTERS_WIDTH_MAX = 480;

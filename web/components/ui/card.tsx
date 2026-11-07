@@ -7,17 +7,9 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card"
       className={cn(
-        // The one card padding, the gutter, as a table cell's; callers
-        // don't set their own, except `p-0` for a card that is a table. No
-        // fill: a card stands on the page's own background, drawn by a
-        // half-pixel rule alone, so the page reads as one surface with its
-        // parts ruled off, not as panels laid on it.
-        // ⚠ **A ring, not a border, and the half pixel is why.** Chrome rounds
-        // a border thinner than a pixel up to a whole one, so `border-[0.5px]`
-        // draws exactly what `border` draws. A shadow's spread is drawn at
-        // its true width: one device pixel on a dense display, a half-tone
-        // line on a plain one.
-        "flex flex-col gap-6 rounded-xl ring-[0.5px] ring-border p-gutter text-card-foreground",
+        // The shared gutter insets content and dividers. A ring preserves
+        // the half-pixel outline that browsers round up on a border.
+        "flex flex-col gap-page rounded-xl ring-[0.5px] ring-border p-gutter text-card-foreground",
         className
       )}
       {...props}
@@ -30,7 +22,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 has-[[data-slot=card-action]]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 has-[[data-slot=card-action]]:grid-cols-[1fr_auto] [.border-b]:pb-page",
         className
       )}
       {...props}
@@ -85,7 +77,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-footer"
-      className={cn("flex items-center [.border-t]:pt-6", className)}
+      className={cn("flex items-center [.border-t]:pt-page", className)}
       {...props}
     />
   )

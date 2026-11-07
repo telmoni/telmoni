@@ -7,7 +7,6 @@ import Link from "next/link";
 import { Activity, BookOpen, House, Keyboard, LogOut, Settings, User } from "lucide-react";
 
 import { GithubIcon } from "@/components/brand-icons";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,8 +23,9 @@ import { useIsMac } from "@/lib/use-platform";
 import { DOCS_URL, REPO_URL, STATUS_URL } from "@/lib/site";
 import { useUser } from "@/lib/store";
 import { displayName } from "@/lib/user-display";
+import { HEADER_MENU_OFFSET } from "@/lib/utils";
 
-const ROW = "h-7 gap-2 px-2 cursor-pointer";
+const ROW = "gap-2 px-2 cursor-pointer";
 
 export function NavUser() {
   const user = useUser();
@@ -57,24 +57,17 @@ export function NavUser() {
             aria-label={`Account: ${name}`}
             aria-keyshortcuts="Control+Shift+K Meta+Shift+K"
             title={`${name} (${chord})`}
-            size={null}
-            className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
+            size="icon"
+            className="shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground data-[state=open]:hover:bg-sidebar-accent"
           >
-            <Avatar className="size-full">
-              <AvatarImage src="" alt="" />
-              <AvatarFallback className="bg-transparent text-inherit">
-                <User aria-hidden className="size-4" />
-              </AvatarFallback>
-            </Avatar>
+            <User aria-hidden className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           className="w-64 animate-none!"
           side="bottom"
           align="end"
-          // Right under the header's rule, as the switchers' menus open
-          // (`resource-selector.tsx`).
-          sideOffset={12}
+          sideOffset={HEADER_MENU_OFFSET}
         >
           {/* The head is the address alone, a row the foot's height, as the
               switchers head their menus with one line: the name is the
@@ -131,11 +124,10 @@ export function NavUser() {
             )}
           </DropdownMenuGroup>
 
-          {/* The foot is the switchers' foot: a rule, then one 28px row, so
-              every menu in the header ends the same way. */}
+          {/* Every header menu ends with the same ruled action row. */}
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="h-7 cursor-pointer gap-2 px-2"
+            className="cursor-pointer gap-2 px-2"
             onSelect={(event) => {
               event.preventDefault();
               signOut();

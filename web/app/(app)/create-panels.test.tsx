@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
@@ -93,6 +93,26 @@ describe("New project", () => {
     expect(closeCreate).toHaveBeenCalledTimes(1);
   });
 
+  it("holds the project fields while creating, and restores them if creation fails", async () => {
+    let finish!: (answer: { ok: false; error: string }) => void;
+    createProjectAction.mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    panels();
+    const name = screen.getByLabelText("Project name");
+    fireEvent.change(name, { target: { value: "Support agent" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(createProjectAction).toHaveBeenCalledOnce());
+    expect(name).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Off" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "On" })).toBeDisabled();
+    await act(async () => { finish({ ok: false, error: "Try again." }); });
+    expect(name).toBeEnabled();
+    expect(name).toHaveValue("Support agent");
+    expect(screen.getByRole("radio", { name: "On" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Create project" })).toBeEnabled();
+  });
+
   it("starts with content off, and makes the project keep it once the owner's mailed code is typed", async () => {
     createProjectAction.mockResolvedValue({
       ok: true,
@@ -108,10 +128,51 @@ describe("New project", () => {
     await waitFor(() => expect(requestContentModeCodeAction).toHaveBeenCalledWith("p1"));
     expect(push).not.toHaveBeenCalled();
     const code = await screen.findByLabelText(/sent to/);
+    expect(screen.getByLabelText("Project name")).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Off" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "On" })).toBeDisabled();
     fireEvent.change(code, { target: { value: "123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Keep content" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/support-agent"));
     expect(updateContentModeAction).toHaveBeenCalledWith("p1", "on", { code: "123456" });
+  });
+
+  it("resends the content code without creating another project or submitting the old code", async () => {
+    createProjectAction.mockResolvedValue({
+      ok: true,
+      project: { id: "p1", slug: "support-agent", name: "Support agent", role: "owner" },
+    });
+    let sent!: (answer: { ok: true }) => void;
+    requestContentModeCodeAction.mockResolvedValueOnce({ ok: true }).mockImplementationOnce(
+      () => new Promise((resolve) => { sent = resolve; }),
+    );
+    updateContentModeAction.mockResolvedValue({ ok: true });
+    panels();
+    fireEvent.click(screen.getByRole("radio", { name: "On" }));
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Support agent" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    const code = await screen.findByLabelText(/sent to/);
+    fireEvent.change(code, { target: { value: "123456" } });
+    const confirm = screen.getByRole("button", { name: "Keep content" });
+    const resend = screen.getByRole("button", { name: "Resend code" });
+    fireEvent.click(resend);
+    await waitFor(() => expect(requestContentModeCodeAction).toHaveBeenCalledTimes(2));
+    expect(resend).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Sending…" })).toEqual([resend]);
+    expect(confirm).toHaveTextContent("Keep content");
+    expect(confirm).toBeDisabled();
+    expect(code).toBeDisabled();
+    expect(updateContentModeAction).not.toHaveBeenCalled();
+    await act(async () => { sent({ ok: true }); });
+    expect(code).toHaveValue("");
+    expect(confirm).toBeDisabled();
+    expect(resend).toBeEnabled();
+    fireEvent.change(code, { target: { value: "654321" } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/support-agent"));
+    expect(createProjectAction).toHaveBeenCalledTimes(1);
+    expect(requestContentModeCodeAction).toHaveBeenNthCalledWith(2, "p1");
+    expect(updateContentModeAction).toHaveBeenCalledWith("p1", "on", { code: "654321" });
   });
 
   it("offers an admin no project that keeps content", () => {

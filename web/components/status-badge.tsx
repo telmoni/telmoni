@@ -22,13 +22,13 @@ export function StatusBadge({
 }) {
   if (status === null) {
     return (
-      <Badge variant="secondary" className="font-normal">
+      <Badge variant="secondary">
         Running
       </Badge>
     );
   }
   return (
-    <Badge variant={VARIANT[status]} className="font-normal">
+    <Badge variant={VARIANT[status]}>
       {STATUS_LABEL[status]}
       {status === SpanStatus.Error && detail ? `: ${detail}` : ""}
     </Badge>

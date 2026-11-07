@@ -64,7 +64,7 @@ export function InstallTabs({
             onClick={() => setAt(i)}
             className={cn(
               "relative text-muted-foreground transition-colors hover:text-foreground",
-              compact ? "p-gutter" : "px-5 py-gutter lg:px-6 lg:py-4",
+              compact ? "p-gutter" : "px-5 py-gutter lg:px-page lg:py-4",
               i === at &&
                 "text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-foreground",
             )}
@@ -79,7 +79,7 @@ export function InstallTabs({
         aria-labelledby={`${id}-tab-${at}`}
         className={cn(
           "flex justify-between gap-gutter",
-          compact ? "items-start bg-muted/40 p-gutter" : "items-center px-5 py-5 lg:px-6 lg:py-7",
+          compact ? "items-start bg-muted/40 p-gutter" : "items-center px-5 py-5 lg:px-page lg:py-7",
         )}
       >
         <code

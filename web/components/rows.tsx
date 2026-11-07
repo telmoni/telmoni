@@ -40,7 +40,7 @@ export function Row({
   keep?: boolean;
 }) {
   return (
-    <div className="flex min-h-14 items-center justify-between gap-6 py-gutter">
+    <div className="flex min-h-14 items-center justify-between gap-page py-gutter">
       <div className="grid min-w-0 gap-0.5">
         <span className={cn("font-medium", danger && "text-destructive")}>{label}</span>
         {hint ? <span className="text-muted-foreground">{hint}</span> : null}

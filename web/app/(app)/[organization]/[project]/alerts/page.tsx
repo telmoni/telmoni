@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, Webhook } from "lucide-react";
 import Link from "next/link";
 import { z } from "zod";
 
 import { AccessDenied } from "@/components/access-denied";
+import { SlackIcon } from "@/components/brand-icons";
 import { FirstRun, FirstRunStep } from "@/components/first-run";
 import { Button } from "@/components/ui/button";
 import { LocalTime } from "@/components/local-time";
@@ -206,10 +207,16 @@ export default async function AlertsPage({
                 {(connections?.length ?? 0) === 0 && administers(project.role) && (
                   <div className="flex flex-wrap gap-gutter">
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`${projectPath(organization, slug)}/connectors`}>Connect Slack</Link>
+                      <Link href={`${projectPath(organization, slug)}/connectors`}>
+                        <SlackIcon />
+                        Connect Slack
+                      </Link>
                     </Button>
                     <Button asChild variant="outline" size="sm">
-                      <Link href={`${projectPath(organization, slug)}/connectors`}>Connect a webhook</Link>
+                      <Link href={`${projectPath(organization, slug)}/connectors`}>
+                        <Webhook aria-hidden="true" />
+                        Connect a webhook
+                      </Link>
                     </Button>
                   </div>
                 )}
@@ -320,12 +327,12 @@ function AlertCard({
             <h2 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-sm font-medium">
               {alert.name}
             </h2>
-            <Badge variant={severityVariant(alert.severity)} className="shrink-0 font-normal">
+            <Badge variant={severityVariant(alert.severity)}>
               {/* Read, an alert keeping its last severity can still have none to keep. */}
               {alert.severity === Severity.Unknown && read ? "No severity" : SEVERITY_LABEL[alert.severity]}
             </Badge>
             {alert.starter && (
-              <Badge variant="secondary" className="shrink-0 font-normal">
+              <Badge variant="secondary">
                 Starter
               </Badge>
             )}
@@ -373,19 +380,19 @@ function AlertCard({
                     </span>
                     {/* A connection that is not active hears nothing, whatever the alert links. */}
                     {stopped && (
-                      <Badge variant="secondary" className="font-normal">
+                      <Badge variant="secondary">
                         {stopped}
                       </Badge>
                     )}
                     {/* A webhook hears only the kinds of notice its events name. */}
                     {taken && (
-                      <Badge variant="secondary" className="font-normal">
+                      <Badge variant="secondary">
                         {taken}
                       </Badge>
                     )}
                     {link.muted && (
                       <>
-                        <Badge variant="secondary" className="font-normal">
+                        <Badge variant="secondary">
                           Muted after five failed deliveries
                         </Badge>
                         <HearAgain
@@ -487,7 +494,7 @@ function IncidentItem({
       tabIndex={followed ? -1 : undefined}
     >
       <div className="flex flex-wrap items-center gap-x-gutter gap-y-1.5">
-        <Badge variant={severityVariant(incident.severity)} className="font-normal">
+        <Badge variant={severityVariant(incident.severity)}>
           {SEVERITY_LABEL[incident.severity]}
         </Badge>
         <IncidentState incident={incident} who={who} />

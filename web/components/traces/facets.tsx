@@ -113,11 +113,11 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
-      <div className="flex h-7 items-center gap-2">
+      <div className="flex h-control items-center gap-2">
         <PanelButton shown />
         <h2 className="min-w-0 truncate text-sm font-medium">Filters</h2>
         {ticked > 0 && (
-          <Badge variant="secondary" className="shrink-0 px-1.5 tabular-nums">
+          <Badge variant="secondary" className="tabular-nums">
             {ticked}
           </Badge>
         )}
@@ -260,7 +260,7 @@ function FacetSection({
             />
             <span className="truncate">{label}</span>
             {ticked.length > 0 && (
-              <Badge variant="secondary" className="shrink-0 px-1.5 tabular-nums">
+              <Badge variant="secondary" className="tabular-nums">
                 {ticked.length}
               </Badge>
             )}
@@ -396,7 +396,7 @@ function ScoreSection({
             />
             <span className="truncate">Score</span>
             {set && (
-              <Badge variant="secondary" className="shrink-0 px-1.5 tabular-nums">
+              <Badge variant="secondary" className="tabular-nums">
                 1
               </Badge>
             )}

@@ -23,7 +23,7 @@ export function Section({
   children: ReactNode;
 }) {
   const heading = (
-    <div className={cn("grid gap-1", card && "p-gutter")}>
+    <div className={cn("grid gap-1", card && "py-gutter")}>
       <h2
         id={headingId}
         tabIndex={headingId ? -1 : undefined}
@@ -37,12 +37,12 @@ export function Section({
   if (card) {
     return (
       <section className="grid gap-gutter">
-        <Card className={cn("gap-0 overflow-hidden p-0", danger && "ring-destructive/40")}>
+        <Card className={cn("gap-0 overflow-hidden py-0", danger && "bg-destructive/5 ring-destructive/40")}>
           {heading}
           <div
             className={cn(
-              "grid gap-gutter border-t border-border p-gutter text-sm",
-              danger && "bg-destructive/5",
+              "grid gap-gutter border-t border-border py-gutter text-sm",
+              danger && "border-destructive/20",
             )}
           >
             {children}

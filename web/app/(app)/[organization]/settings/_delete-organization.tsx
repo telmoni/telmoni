@@ -1,6 +1,6 @@
 "use client";
 
-import { CodeField, CodeSentTo } from "@/components/code-field";
+import { CodeField, CodeSentTo, ResendCodeButton } from "@/components/code-field";
 import { Button } from "@/components/ui/button";
 import { useCodeConfirmed } from "@/lib/use-code-confirmed";
 
@@ -83,20 +83,13 @@ export function DeleteOrganizationForm({
             label={<CodeSentTo email={email} />}
             value={flow.code}
             onType={flow.type}
-            disabled={flow.confirming}
+            disabled={flow.sending || flow.confirming}
           />
           <div className="flex items-center gap-gutter">
             <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
               {flow.confirming ? "Deleting…" : "Delete this organization"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={flow.sending || flow.confirming}
-              onClick={flow.sendCode}
-            >
-              Resend code
-            </Button>
+            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
           </div>
         </form>
       )}

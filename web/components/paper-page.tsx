@@ -76,7 +76,7 @@ export function PaperSection({
     <section
       id={id}
       className={cn(
-        "flex scroll-mt-24 flex-col gap-6 border-b border-border py-12 last:border-b-0 lg:py-16",
+        "flex scroll-mt-24 flex-col gap-page border-b border-border py-12 last:border-b-0 lg:py-16",
         INSET,
       )}
     >

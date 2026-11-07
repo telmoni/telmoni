@@ -34,6 +34,7 @@ export function OverviewCard({
   title,
   icon: Icon,
   action,
+  footer,
   links = [],
   children,
 }: {
@@ -41,26 +42,29 @@ export function OverviewCard({
   icon?: LucideIcon;
   /** A control beside the title, such as Mark read. */
   action?: ReactNode;
+  /** A tracker or action held at the bottom when neighboring cards are taller. */
+  footer?: ReactNode;
   links?: readonly CardLink[];
   children: ReactNode;
 }) {
   // Titles are unique on a page, so each names its own heading's id.
   const heading = `card-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
-    <Card className="gap-0 overflow-hidden p-0" role="region" aria-labelledby={heading}>
-      <div className="flex items-center justify-between gap-gutter p-gutter">
+    <Card className="gap-0 overflow-hidden py-0" role="region" aria-labelledby={heading}>
+      <div className="flex items-center justify-between gap-gutter py-gutter">
         <h2 id={heading} className="flex min-w-0 items-center gap-gutter text-base font-medium">
           {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
           <span className="truncate">{title}</span>
         </h2>
         {action}
       </div>
-      <div className="grid min-w-0 gap-gutter px-gutter pb-gutter text-sm">{children}</div>
+      <div className="grid min-w-0 gap-gutter pb-gutter text-sm">{children}</div>
+      {footer && <div className="mt-auto grid min-w-0 gap-gutter pb-gutter text-sm">{footer}</div>}
       {links.map((link) => (
         <Link
           key={link.href}
           href={link.href}
-          className="flex items-center gap-gutter border-t border-border p-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+          className="flex items-center gap-gutter border-t border-border py-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
         >
           <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
           {link.label}

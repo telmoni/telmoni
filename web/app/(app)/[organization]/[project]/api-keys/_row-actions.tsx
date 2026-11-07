@@ -62,7 +62,7 @@ export function TokenRowActions({
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5 text-xs h-9 text-destructive hover:text-destructive hover:bg-destructive/10"
+            className="gap-1.5 text-xs h-9 text-destructive hover:text-destructive"
             disabled={pending}
             aria-label={`Revoke ${name}`}
           >

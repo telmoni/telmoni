@@ -5,20 +5,14 @@ import { ChevronRight } from "lucide-react";
 import { NavigationMenu } from "radix-ui";
 
 import { PRIMARY_NAV, type NavLink, type NavPanel } from "@/components/site-nav";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-// ⚠ **A trigger and a plain link have to be the same shape, so neither is a
-// `Button`.** A Button would give the link its pill and the trigger nothing,
-// and the two sit side by side in one row. This is `size="md"`'s geometry
-// written out once — `h-9 px-3` — with the ghost variant's fill.
-//
-// `data-[state=open]` is what borrows the open look: the item whose panel is
-// showing stays filled, so the row says which panel you are reading. Radix
-// sets it, and there is no chevron to turn because the fill already says it.
+// Links fill only on hover; an open panel keeps that highlight.
 const ROW = cn(
-  "inline-flex h-9 cursor-pointer items-center rounded-md px-3",
+  buttonVariants({ variant: "ghost" }),
   "text-sm font-normal whitespace-nowrap transition-colors",
-  "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+  "text-muted-foreground hover:text-foreground",
   "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
   "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
 );
@@ -81,7 +75,7 @@ function Panel({ panel }: { panel: NavPanel }) {
             <Link
               href={feature.href}
               {...outbound(feature)}
-              className="flex flex-col gap-1.5 p-6 transition-colors hover:bg-accent"
+              className="flex flex-col gap-1.5 p-page transition-colors hover:bg-accent"
             >
               <span className="flex items-center gap-1.5 text-base text-foreground">
                 {feature.label}
@@ -101,7 +95,7 @@ function Panel({ panel }: { panel: NavPanel }) {
           )}
         >
           {panel.groups.map((group) => (
-            <div key={group.title} className="flex flex-col gap-gutter p-6">
+            <div key={group.title} className="flex flex-col gap-gutter p-page">
               <span className="text-xs tracking-label text-muted-foreground uppercase">
                 {group.title}
               </span>

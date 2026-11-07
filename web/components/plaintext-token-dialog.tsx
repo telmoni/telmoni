@@ -37,13 +37,11 @@ export function DialogSection({
 /** A value to copy, in a box of its own, wrapped rather than scrolled, its copy button inside. */
 export function CopyBox({ value, label, className }: { value: string; label: string; className?: string }) {
   return (
-    <div className={cn("relative rounded-md border border-border bg-muted/40", className)}>
-      <pre className="p-gutter pr-10 font-mono text-sm break-all whitespace-pre-wrap select-all">
+    <div className={cn("flex items-start gap-gutter rounded-md border border-border bg-muted/40 p-gutter", className)}>
+      <pre className="min-w-0 flex-1 font-mono text-sm break-all whitespace-pre-wrap select-all">
         {value}
       </pre>
-      <div className="absolute top-gutter right-gutter">
-        <CopyButton value={value} label={label} />
-      </div>
+      <CopyButton value={value} label={label} />
     </div>
   );
 }

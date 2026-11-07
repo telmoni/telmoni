@@ -31,7 +31,7 @@ export function IncomingInvitesSection({
     <section className="grid gap-gutter" id="pending-invitations" data-testid="pending-invitations">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-medium">Pending invitations</h2>
-        <Badge variant="secondary" className="text-xs">
+        <Badge variant="secondary">
           {invites.length}
         </Badge>
       </div>
@@ -70,7 +70,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
       <Td className="font-medium">
         <div className="flex items-center gap-gutter">
           <span>{invite.targetName}</span>
-          <Badge variant="secondary" className="text-[10px] font-normal uppercase tracking-wider">
+          <Badge variant="secondary" className="uppercase tracking-wider">
             {invite.scope}
           </Badge>
         </div>

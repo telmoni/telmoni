@@ -108,7 +108,7 @@ export function ActiveSessions({
           </Button>
         </div>
       )}
-      <DataTable>
+      <DataTable flush>
         <THead>
           <Th>Device</Th>
           <Th>Started</Th>

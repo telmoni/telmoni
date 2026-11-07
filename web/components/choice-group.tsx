@@ -4,6 +4,14 @@ import { useRef, type KeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils";
 
+export const SEGMENTED_TRACK = "flex shrink-0 items-center overflow-hidden rounded-md border border-border";
+
+export function segmentAppearance(selected: boolean): string {
+  return selected
+    ? "bg-secondary text-foreground hover:bg-secondary"
+    : "text-muted-foreground enabled:hover:text-foreground disabled:opacity-50";
+}
+
 export interface Choice<T extends string> {
   value: T;
   label: string;
@@ -83,7 +91,7 @@ export function ChoiceGroup<T extends string>({
       onKeyDown={onKeyDown}
       // Its frame clips the segments, so Show focus draws their ring inside.
       data-segmented=""
-      className="flex shrink-0 items-center overflow-hidden rounded-md border border-border"
+      className={SEGMENTED_TRACK}
     >
       {options.map((option, i) => {
         const checked = option.value === value;
@@ -100,12 +108,10 @@ export function ChoiceGroup<T extends string>({
             tabIndex={i === stop ? 0 : -1}
             onClick={() => onChange(option.value)}
             className={cn(
-              "h-7 cursor-pointer px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed",
+              "h-control cursor-pointer px-gutter text-sm font-medium transition-colors disabled:cursor-not-allowed",
               // The checked segment is never dimmed: closed or not, it is the
               // answer the group gives.
-              checked
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground enabled:hover:text-foreground disabled:opacity-50",
+              segmentAppearance(checked),
             )}
           >
             {option.label}

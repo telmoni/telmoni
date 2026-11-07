@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { CodeField, CodeSentTo } from "@/components/code-field";
+import { CodeField, CodeSentTo, ResendCodeButton } from "@/components/code-field";
 import { Button } from "@/components/ui/button";
 import { signOut } from "@/lib/auth/sign-out";
 import { PRODUCT_NAME } from "@/lib/site";
@@ -104,20 +104,13 @@ export function DeleteAccountForm({
             label={<CodeSentTo email={email} />}
             value={flow.code}
             onType={flow.type}
-            disabled={flow.confirming}
+            disabled={flow.sending || flow.confirming}
           />
           <div className="flex items-center gap-gutter">
             <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
               {flow.confirming ? "Deleting…" : "Permanently delete my account"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={flow.sending || flow.confirming}
-              onClick={flow.sendCode}
-            >
-              Resend code
-            </Button>
+            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
           </div>
         </form>
       )}

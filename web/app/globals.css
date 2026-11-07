@@ -10,6 +10,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --control-size: 2.25rem;
   /* The cursor over a closed rail: a bar and an arrow, black with a white
      outline as the system pointer is, the same
      in both themes so it reads as a cursor and never as a theme's icon.
@@ -356,26 +357,7 @@
   background: transparent;
 }
 
-/* ⚠ **NOTHING MARKS FOCUS BY DEFAULT — an accessibility cost taken on purpose.**
-   A keyboard user sees where they are only once they turn on **Show focus**
-   (Account › Accessibility, the `a11y-focus-rings` rule below), which is how
-   the console meets WCAG 2.1 AA §2.4.7's indicator: as a person's choice.
-   `e2e/accessibility.spec.ts` will not catch a missing one, because axe has no
-   automated rule for focus visibility. To draw one for everybody, put
-   `outline: 2px solid var(--color-ring)` back below — components need no
-   change, because none of their rings ever reach the screen through this.
-
-   ⚠ **UNLAYERED ON PURPOSE, and that is the only reason it works.** Tailwind's
-   utilities live in `@layer utilities`, which beats anything in `@layer base`
-   whatever its specificity — so a base rule cannot cancel the
-   `focus-visible:ring-[3px]` that button, input, select, switch, badge and
-   scroll-area each carry. An unlayered rule beats every layer, so one block
-   covers all six, and the next component too, without editing shadcn
-   primitives that regenerate.
-
-   `#console-sidebar` is `overflow-hidden` for the drawer slide, so a ring
-   drawn around a row there is shaved flat at both ends: Show focus draws its
-   ring inside the row there, as in a menu, a list and a row of segments. */
+/* Focus is drawn once below, outside Tailwind's layers, including on native controls. */
 /* ── The sharp corner theme (`lib/corners.ts`) ────────────────────────────────
    ⚠ **A utility override, not a token override, and that is forced.** The
    radius tokens cannot carry this:
@@ -438,14 +420,8 @@
    `app/layout.tsx`. Unlayered, as the focus rule above is, so they beat
    Tailwind's utilities whatever their specificity. */
 
-/* Show focus: the one way focus is drawn, for whoever asks. A ring in the
-   text's own colour, past WCAG 2.4.13's 3:1 on either theme, where the browser
-   marks focus visible: from the keyboard, and in a text field however it was
-   reached, never on a click on a button or a link. In the rail, a menu or a
-   list, a row of joined segments, and a modal's body, which scrolls between
-   its header and footer with no padding of its own above or below, each of
-   which clips what overflows, it is drawn inside the element. */
-html.a11y-focus-rings *:focus-visible {
+/* Keyboard focus is visible by default; only an explicit saved choice hides it. */
+html:not(.a11y-no-focus-rings) *:focus-visible {
   outline: 2px solid var(--color-foreground);
   outline-offset: 2px;
   /* Drawn at once: a control that transitions every property (a button's
@@ -453,7 +429,10 @@ html.a11y-focus-rings *:focus-visible {
      3px over its duration. */
   transition-property: color, background-color, border-color, opacity, box-shadow;
 }
-html.a11y-focus-rings :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"]) *:focus-visible {
+html:not(.a11y-no-focus-rings) :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"], [data-slot="card"] table, [data-slot="table-scroll"]) *:focus-visible {
+  outline-offset: -2px;
+}
+html:not(.a11y-no-focus-rings) :is([data-slot="card"], [data-slot="card"] > a, [data-slot="table-scroll"]):focus-visible {
   outline-offset: -2px;
 }
 
@@ -573,13 +552,13 @@ html.a11y-more-contrast.dark [data-slot="input"] {
 }
 
 .theme-console
-  [data-slot="card"]
+  :is([data-slot="card"], [data-slot="table-scroll"])
   table
   :is(thead, tbody > tr:not(:last-child)) {
   border-bottom: 1px solid var(--border);
 }
 
-.theme-console [data-slot="card"] table thead {
+.theme-console :is([data-slot="card"], [data-slot="table-scroll"]) table thead {
   @apply text-xs text-muted-foreground;
   line-height: inherit;
 }
@@ -588,7 +567,7 @@ html.a11y-more-contrast.dark [data-slot="input"] {
   width: 100%;
 }
 
-.theme-console [data-slot="card"]:has(table) {
+.theme-console [data-slot="card"]:has(> table) {
   overflow-x: auto;
 }
 /* While a table runs past its card on a side, that edge fades into the page,
@@ -613,7 +592,7 @@ html.a11y-more-contrast.dark [data-slot="input"] {
   background: linear-gradient(to left, var(--background), transparent);
 }
 
-.theme-console [data-slot="card"] table {
+.theme-console :is([data-slot="card"], [data-slot="table-scroll"]) table {
   min-width: max-content;
 }
 
@@ -709,18 +688,17 @@ html.a11y-more-contrast.dark [data-slot="input"] {
 
   --tracking-label: 0.4em;
 
-  /* The console's two gutters. A control's: every padding off an edge and
-     every gap between controls side by side, inside a card as between buttons
-     (`p-gutter`, `gap-gutter`); `GUTTER_PX` in TypeScript. The page's, twice
-     it: the page's inset, which the header keeps, and every gap between cards
-     and between sections (`p-page`, `gap-page`). */
-  --spacing-gutter: 0.75rem;
-  --spacing-page: calc(2 * var(--spacing-gutter));
+  /* Cards, controls and page sections share one spacing value. */
+  --spacing-gutter: 1.125rem;
+  --spacing-page: var(--spacing-gutter);
+  --spacing-control: var(--control-size);
+  --spacing-console-header: calc(var(--control-size) + 2 * var(--spacing-gutter) + 1px);
 
-  /* The side panels stand at `--spacing-sidebar`; the rail's links, a gutter in
-     from each side, at `--spacing-sidebar-inner`, as do the lists' filters. */
-  --spacing-sidebar: 10.5rem;
-  --spacing-sidebar-inner: calc(var(--spacing-sidebar) - 2 * var(--spacing-gutter));
+  /* The wider rail keeps its link area while sharing the page's inset;
+     list filters match that inner width. */
+  --spacing-sidebar: 15.75rem;
+  --spacing-sidebar-collapsed: calc(2 * var(--spacing-page) + var(--control-size) + 1px);
+  --spacing-sidebar-inner: calc(var(--spacing-sidebar) - 2 * var(--spacing-page));
 
   --font-sans:
     var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system,
@@ -772,20 +750,16 @@ html.a11y-more-contrast.dark [data-slot="input"] {
   width: var(--filters-width, var(--spacing-sidebar-inner));
 }
 
+@media (pointer: coarse) {
+  :root {
+    --control-size: 2.75rem;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;
   }
-  @media (pointer: coarse) {
-    button,
-    [role="button"],
-    input,
-    select,
-    textarea {
-      min-height: 44px;
-    }
-  }
-
   html {
     @apply min-w-[320px] max-w-full overflow-x-hidden;
     scrollbar-gutter: stable;

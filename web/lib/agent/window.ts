@@ -33,10 +33,8 @@ export type Edge = "n" | "e" | "s" | "w" | "ne" | "se" | "sw" | "nw";
  *  opens that far in from the right and under the header. */
 export const WINDOW_EDGE_PX = GUTTER_PX;
 
-// The console's header (`h-13`), for where it cannot be measured. The window
-// first opens below it, clear of the button that opened it — lower when a
-// banner stands above the header.
-const HEADER_PX = 52;
+// Match `--spacing-console-header` when the header cannot be measured.
+const HEADER_PX = 36 + 2 * GUTTER_PX + 1;
 
 // The least the header's four controls, the title and the composer need.
 export const WINDOW_MIN = { width: 360, height: 420 } as const;

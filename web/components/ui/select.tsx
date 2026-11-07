@@ -37,7 +37,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex h-7 w-fit min-w-0 items-center justify-between gap-1.5 rounded-md border border-input bg-transparent px-2.5 text-xs whitespace-nowrap outline-none transition-[color,box-shadow] cursor-pointer has-[>svg]:px-1.5",
+        "flex h-control w-fit min-w-0 items-center justify-between gap-1.5 rounded-md border border-input bg-transparent px-gutter text-sm whitespace-nowrap outline-none transition-[color,box-shadow] cursor-pointer",
         "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
         "aria-invalid:border-destructive aria-invalid:ring-destructive/20",
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -121,7 +121,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex h-7 w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-8 pl-2 text-sm outline-hidden select-none transition-colors",
+        "relative flex h-control w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-8 pl-gutter text-sm outline-hidden select-none transition-colors",
         "focus:bg-accent focus:text-accent-foreground",
         "data-disabled:cursor-not-allowed data-disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4 [&_svg]:text-muted-foreground",

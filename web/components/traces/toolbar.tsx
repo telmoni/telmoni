@@ -307,7 +307,7 @@ function ColumnsMenu({ list }: { list: ListName }) {
         <Button variant="outline">
           <Columns3Icon />
           Columns
-          <Badge variant="secondary" className="px-1.5 tabular-nums">
+          <Badge variant="secondary" className="tabular-nums">
             {columnsCounted(columns.length, table.columns.length)}
           </Badge>
         </Button>

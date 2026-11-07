@@ -21,8 +21,8 @@ export function CopyButton({
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground hover:text-foreground"
+      size="icon"
+      className="text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground"
       aria-label={`Copy ${label}`}
       onClick={async () => {
         const text = absolute ? `${window.location.origin}${value}` : value;

@@ -141,7 +141,7 @@ export function SavedMenu<T extends Saved>({
                 *
               </span>
             )}
-            <Badge variant="secondary" className="px-1.5 tabular-nums">
+            <Badge variant="secondary" className="tabular-nums">
               {saved?.length ?? 0}
             </Badge>
             <ChevronDownIcon className="text-muted-foreground" />
