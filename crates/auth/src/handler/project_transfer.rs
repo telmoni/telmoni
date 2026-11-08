@@ -835,6 +835,18 @@ pub async fn accept(
     {
         return Err(AuthzError::Forbidden("you are not a member of this project".into()).into());
     }
+    // Billing's ceiling read before the person's lock, as every other door
+    // reads it, for the destination as it stands now; asked again under the
+    // lock only if the person's organizations changed in between.
+    let owned_before =
+        organization_members::active_organizations_owned_by(&mut tx, &user_id).await?;
+    let early = match resolve_destination_organization(named.clone(), &owned_before, &source) {
+        Ok(destination) => {
+            let ceiling = super::projects::project_ceiling_of(&state, &destination).await;
+            Some((destination, ceiling))
+        }
+        Err(_) => None,
+    };
 
     locks::lock_person(&mut tx, &user_id).await?;
     let Some(person) = identities::get(&mut tx, &user_id).await? else {
@@ -849,7 +861,10 @@ pub async fn accept(
 
     let owned = organization_members::active_organizations_owned_by(&mut tx, &user_id).await?;
     let destination = resolve_destination_organization(named, &owned, &source)?;
-    let ceiling = super::projects::project_ceiling_of(&state, &destination).await;
+    let ceiling = match early {
+        Some((asked, ceiling)) if asked == destination => ceiling,
+        _ => super::projects::project_ceiling_of(&state, &destination).await,
+    };
 
     lock_transfer_organizations(&mut tx, &source, &destination).await?;
 
@@ -1050,6 +1065,17 @@ pub(crate) async fn move_into(
             "the project is already in that organization".into(),
         ));
     }
+    // Asked once the caller owns both, and before the person's lock, as every
+    // other door reads it; ownership is checked again under the lock.
+    if organization_members::role_on_organization(&mut tx, destination, user_id).await?
+        != Some(OrganizationRole::Owner)
+    {
+        return Err(AuthzError::Forbidden(
+            "you do not own that organization — a project moves only into one of yours".into(),
+        )
+        .into());
+    }
+    let ceiling = super::projects::project_ceiling_of(state, destination).await;
 
     locks::lock_person(&mut tx, user_id).await?;
     let Some(person) = identities::get(&mut tx, user_id).await? else {
@@ -1069,8 +1095,6 @@ pub(crate) async fn move_into(
         .into());
     }
 
-    // Asked once the caller owns both, before either organization's lock.
-    let ceiling = super::projects::project_ceiling_of(state, destination).await;
     lock_transfer_organizations(&mut tx, &source, destination).await?;
 
     // Under the locks, everything again.
