@@ -171,14 +171,19 @@ impl Known {
     }
 }
 
-/// A project's caps as its row keeps them; none where it has no row.
+/// A project's caps as its row keeps them; none where it has no row, or its
+/// row was set in an organization it has since moved out of.
 pub async fn caps_of<B: telmoni_shared::db::tenant_session::Binding>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
 ) -> sqlx::Result<Caps> {
     Ok(sqlx::query_as::<_, Caps>(
-        "SELECT spans, content_bytes, alerts, monitors, objectives, alert_deliveries_per_day
-           FROM telemetry.project_limits WHERE project_id = $1",
+        "SELECT l.spans, l.content_bytes, l.alerts, l.monitors, l.objectives,
+                l.alert_deliveries_per_day
+           FROM telemetry.project_limits AS l
+           JOIN telemetry.project_settings AS s
+             ON s.project_id = l.project_id AND s.organization_id = l.organization_id
+          WHERE l.project_id = $1",
     )
     .bind(project_id)
     .fetch_optional(tx.conn())
@@ -324,10 +329,13 @@ pub async fn claim(
     matches!(claimed, Ok((true,))).then_some(told_key)
 }
 
-/// [`tell_now`] on its own task, so the export that found the project past
-/// its cap is answered without waiting on it.
-pub fn tell(
-    state: Arc<AppState>,
+/// The owner and admins told once, for the cap `what` at `cap` in `period`,
+/// that the project is past it, naming it: on a task of its own, so the
+/// export or the delivery that found it past its cap never waits on the mail.
+/// The claim `told_key` is given up where the telling fails, so a later pass
+/// tells.
+pub async fn tell(
+    state: &AppState,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
     what: &'static str,
@@ -335,39 +343,49 @@ pub fn tell(
     period: String,
     told_key: Option<String>,
 ) {
+    let auth = Arc::clone(&state.auth);
+    let notifications = Arc::clone(&state.notifications);
+    // Taken now, while the state is to hand: the task outlives the borrow.
+    let redis = match told_key {
+        Some(_) => state.redis.connection().await,
+        None => None,
+    };
     let organization_id = organization_id.clone();
     let project_id = project_id.clone();
     tokio::spawn(async move {
-        tell_now(
-            &state,
+        let told = tell_now(
+            auth.as_ref(),
+            notifications.as_ref(),
             &organization_id,
             &project_id,
             what,
             cap,
             &period,
-            told_key,
         )
         .await;
+        if !told
+            && let Some(told_key) = told_key
+            && let Some(mut connection) = redis
+        {
+            let _: Result<(), redis::RedisError> = connection.del(&told_key).await;
+        }
     });
 }
 
-/// The owner and admins told once, for the cap `what` at `cap` in `period`,
-/// that the project is past it, naming it; the claim `told_key` given up
-/// where the telling failed, so a later pass tells.
-pub async fn tell_now(
-    state: &AppState,
+/// The telling itself; whether the owners were told.
+async fn tell_now(
+    auth: &dyn seam::Auth,
+    notifications: &dyn seam::Notifications,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
     what: &str,
     cap: u64,
     period: &str,
-    told_key: Option<String>,
-) {
-    if !chain::open(state.auth.as_ref(), organization_id).await {
-        return;
+) -> bool {
+    if !chain::open(auth, organization_id).await {
+        return false;
     }
-    let home = state
-        .auth
+    let home = auth
         .project_homes(std::slice::from_ref(project_id))
         .await
         .ok()
@@ -394,20 +412,7 @@ pub async fn tell_now(
                           "cap": cap }),
         dedup_key: Some(&dedup_key),
     };
-    let told = seam::tell_owners(
-        state.notifications.as_ref(),
-        state.auth.as_ref(),
-        organization_id,
-        alert,
-        &path,
-    )
-    .await;
-    if !told
-        && let Some(told_key) = told_key
-        && let Some(mut connection) = state.redis.connection().await
-    {
-        let _: Result<(), redis::RedisError> = connection.del(&told_key).await;
-    }
+    seam::tell_owners(notifications, auth, organization_id, alert, &path).await
 }
 
 #[cfg(test)]

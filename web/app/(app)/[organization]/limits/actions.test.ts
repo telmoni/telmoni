@@ -81,6 +81,9 @@ describe("setProjectCapsAction", () => {
     expect(
       errorOf(await setProjectCapsAction(ORGANIZATION, PROJECT, { ...CAPS, alerts: -1 })),
     ).toMatch(/whole number/);
+    expect(
+      errorOf(await setProjectCapsAction(ORGANIZATION, PROJECT, { ...CAPS, alerts: 2_147_483_648 })),
+    ).toBe("A cap is at most 2,147,483,647.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

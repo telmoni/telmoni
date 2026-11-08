@@ -286,6 +286,9 @@ pub async fn put_limits(
         chain::hold(auth, &acting, tx)
             .await?
             .require_organization_admin()?;
+        // Filed, so the purge sweep, which pages the settings rows, finds a
+        // project that holds caps and nothing else; and its caps hold.
+        crate::db::ensure_settings(tx, &project_id, &acting.organization_id).await?;
         let before =
             project_limits::set_caps(tx, &project_id, &acting.organization_id, &caps).await?;
         if before != caps {
@@ -307,6 +310,15 @@ pub async fn put_limits(
     })
     .await?;
     state.project_caps.forget(&project_id);
+    // Nothing counted the project while it had no span cap: its month so far
+    // counts from now on. Failing that, the hourly pass does it.
+    if caps.spans.is_some()
+        && let Err(error) =
+            capacity::raise_project_spans(&state, &acting.organization_id, &project_id).await
+    {
+        tracing::warn!(project_id = %project_id, error = %error,
+            "telemetry: a capped project's month could not be counted yet");
+    }
     tracing::info!(project_id = %project_id, "telemetry: a project's caps set");
     Ok(Json(caps))
 }

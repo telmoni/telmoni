@@ -8,6 +8,7 @@ import { env } from "@/lib/env";
 import { isProjectId } from "@/lib/ids";
 import { admitOrganization } from "@/lib/server/admit";
 import { sessionHeaders } from "@/lib/server/entities/identity-context";
+import { CAP_MOST } from "@/lib/limits";
 import type { Caps } from "@/lib/server/entities/limits";
 
 const CAPS = [
@@ -39,6 +40,9 @@ export async function setProjectCapsAction(
     const cap = caps[key];
     if (cap !== null && !(Number.isSafeInteger(cap) && cap >= 0)) {
       return refused("A cap is a whole number, none or more; leave it empty to share the pool.");
+    }
+    if (cap !== null && cap > CAP_MOST[key]) {
+      return refused(`A cap is at most ${CAP_MOST[key].toLocaleString("en-US")}.`);
     }
     body[key] = cap;
   }

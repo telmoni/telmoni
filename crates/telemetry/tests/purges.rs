@@ -51,7 +51,7 @@ async fn settings_and_a_view(pool: &PgPool, project: &ProjectId, organization: &
 /// The tables a purge empties in which the project has a row still.
 async fn left_of(pool: &PgPool, project: &ProjectId) -> Vec<&'static str> {
     let mut left = Vec::new();
-    for table in ["project_settings", "trace_views"] {
+    for table in ["project_settings", "trace_views", "project_limits"] {
         let rows: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM telemetry.{table} WHERE project_id = $1"
         )))
@@ -167,6 +167,53 @@ async fn a_purge_waits_two_seconds_at_most_for_a_project_held_in_place(pool: PgP
         left_of(&pool, &project).await,
         ["project_settings", "trace_views"]
     );
+}
+
+/// A project's caps go with its purge and its organization's, and a project
+/// that holds caps and nothing else is purged whole.
+#[sqlx::test]
+async fn a_purge_takes_a_projects_caps(pool: PgPool) {
+    let state = common::state(&pool, AuthStub::new());
+    let organization = OrganizationId::new();
+    let (purged_alone, purged_with) = (ProjectId::new(), ProjectId::new());
+    for project in [&purged_alone, &purged_with] {
+        settings_and_a_view(&pool, project, &organization).await;
+        sqlx::query(
+            "INSERT INTO telemetry.project_limits (project_id, organization_id, alerts)
+             VALUES ($1, $2, 1)",
+        )
+        .bind(project)
+        .bind(&organization)
+        .execute(&pool)
+        .await
+        .expect("the project's caps");
+        assert_eq!(
+            left_of(&pool, project).await,
+            ["project_settings", "trace_views", "project_limits"]
+        );
+    }
+
+    let mut tx = maintenance_scope(&state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    db::purge_project(&mut tx, &purged_alone)
+        .await
+        .expect("purged");
+    tx.commit().await.expect("commit");
+    assert!(left_of(&pool, &purged_alone).await.is_empty());
+    assert_eq!(
+        left_of(&pool, &purged_with).await,
+        ["project_settings", "trace_views", "project_limits"]
+    );
+
+    let mut tx = maintenance_scope(&state.db, TelemetryLane)
+        .await
+        .expect("the lane");
+    db::purge_organization(&mut tx, &organization)
+        .await
+        .expect("purged");
+    tx.commit().await.expect("commit");
+    assert!(left_of(&pool, &purged_with).await.is_empty());
 }
 
 /// An organization's purge holds each of its projects as it deletes, and takes their rows alone.

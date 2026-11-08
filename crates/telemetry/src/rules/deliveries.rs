@@ -50,9 +50,10 @@ return left
 /// still read after it.
 const KEPT_S: i64 = 2 * 24 * 60 * 60;
 
-/// The room a notice took for its deliveries: how many it wanted and was
-/// given, the day and number they were counted against, where they were,
-/// and its project's own share, where its owners capped one.
+/// The room a notice took for its deliveries: how many it asked of the
+/// organization's day and was given, the day and number they were counted
+/// against, where they were, and its project's own share, where its owners
+/// capped one, with how many the notice wanted of it.
 #[derive(Debug, Clone)]
 #[must_use = "the room a notice took is given back by `settle`"]
 pub struct Taken {
@@ -69,6 +70,7 @@ struct ProjectTaken {
     day: NaiveDate,
     cap: u64,
     room: usize,
+    wanted: usize,
 }
 
 impl Taken {
@@ -89,9 +91,10 @@ pub async fn take(
     wanted: usize,
 ) -> Taken {
     let project = take_project(state, project_id, wanted).await;
+    // The organization is asked only what the project's day let through, and
+    // told its own day is spent only where that ran short.
     let asked = project.as_ref().map_or(wanted, |project| project.room);
     let mut taken = take_organization(state, organization_id, asked).await;
-    taken.wanted = wanted;
     taken.project = project;
     taken
 }
@@ -126,6 +129,7 @@ async fn take_project(
             day,
             cap,
             room: usize::try_from(taken).unwrap_or(0),
+            wanted,
         }),
         Err(error) => {
             state.redis.stood_in("a project's alert deliveries", &error);
@@ -186,7 +190,7 @@ async fn take_organization(
 /// the owner and admins told.
 pub async fn settle(state: &AppState, organization_id: &OrganizationId, taken: Taken, made: usize) {
     if let Some(project) = &taken.project {
-        settle_project(state, organization_id, project, taken.wanted, made).await;
+        settle_project(state, organization_id, project, made).await;
     }
     let Some((day, deliveries_per_day)) = taken.counted else {
         return;
@@ -226,7 +230,6 @@ async fn settle_project(
     state: &AppState,
     organization_id: &OrganizationId,
     project: &ProjectTaken,
-    wanted: usize,
     made: usize,
 ) {
     let unused = project.room.saturating_sub(made);
@@ -241,19 +244,19 @@ async fn settle_project(
                 state.redis.stood_in("a project's alert deliveries", &error);
             }
         }
-    } else if project.room < wanted {
+    } else if project.room < project.wanted {
         let what = "alert deliveries a day";
         let day = project.day.to_string();
         if let Some(told_key) =
             crate::project_limits::claim(state, &project.project_id, what, project.cap, &day).await
         {
-            crate::project_limits::tell_now(
+            crate::project_limits::tell(
                 state,
                 organization_id,
                 &project.project_id,
                 what,
                 project.cap,
-                &day,
+                day,
                 Some(told_key),
             )
             .await;

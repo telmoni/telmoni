@@ -575,6 +575,13 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.trace_views",
             &["SELECT", "DELETE"],
         ),
+        // The caps cache and the hourly pass read a project's caps; the
+        // purges delete them. The project's own scope writes them.
+        (
+            "telemetry_maintenance",
+            "telemetry.project_limits",
+            &["SELECT", "DELETE"],
+        ),
         // The purges delete content with its project, and a transfer counts
         // a project's to move its bytes; the nightly purge runs as the owner.
         (

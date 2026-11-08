@@ -387,6 +387,51 @@ async fn a_project_past_the_plans_number_is_made_without_its_starters_and_says_s
     );
 }
 
+/// ⚠ A project its owners capped at fewer alerts than its starters is made
+/// as many as the cap has room for, the rest withheld in words naming the
+/// project's cap, never the plan's, which had room to spare.
+#[sqlx::test]
+async fn a_projects_own_alerts_cap_withholds_its_starters_past_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, [first, ..]) = seated();
+    let state =
+        common::state_with_stores_noticed(&pool, auth, Arc::new(Holds(10)), NoticeLog::new());
+    let app = lanes(state);
+    sqlx::query(
+        "INSERT INTO telemetry.project_limits (project_id, organization_id, alerts)
+         VALUES ($1, $2, 1)",
+    )
+    .bind(first.as_str())
+    .bind(organization.as_str())
+    .execute(&pool)
+    .await
+    .expect("the project's cap");
+
+    export(&app, KEYS[0]).await;
+    eventually("the project's first run is answered", || async {
+        answered(&pool, &first).await
+    })
+    .await;
+    let made: Vec<String> = starters_of(&pool, &first)
+        .await
+        .into_iter()
+        .map(|(name, ..)| name)
+        .collect();
+    assert_eq!(made, vec!["Failing runs"]);
+    let (_, list) = ask(&app, "GET", RULES, (&organization, &first), None).await;
+    assert_eq!(
+        list["starters_withheld"],
+        json!(["repeats", "stalled"]),
+        "{list}"
+    );
+    let detail = list["starters_detail"].as_str().unwrap_or_default();
+    assert!(detail.contains("Limits page"), "{detail}");
+    assert_ne!(detail, DETAIL, "the plan was named, not the project's cap");
+}
+
 /// A starter is leased five minutes after its last evaluation, and a
 /// member's alert one minute after its own.
 #[sqlx::test]

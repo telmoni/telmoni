@@ -289,14 +289,15 @@ async fn hold_project_spans(
         .await;
     if let Ok((true,)) = claimed {
         crate::project_limits::tell(
-            Arc::clone(state),
+            state,
             organization_id,
             project_id,
             "spans a month",
             cap,
             period.to_string(),
             Some(told_key),
-        );
+        )
+        .await;
     }
     let detail = crate::project_limits::detail("spans a month", cap);
     sample(batch, &detail, storage);
@@ -401,14 +402,15 @@ pub async fn hold_content(
                     .await
         {
             crate::project_limits::tell(
-                Arc::clone(state),
+                state,
                 organization_id,
                 project_id,
                 "bytes of content",
                 cap,
                 "held".to_owned(),
                 Some(told_key),
-            );
+            )
+            .await;
         }
         drop_content(batch);
         return true;
@@ -537,25 +539,7 @@ pub async fn spans_used(
     let projects = db::projects_filed(&mut lane, organization_id).await?;
     lane.commit().await?;
     let since = capacity.period_start;
-    let this_hour = Utc::now()
-        .duration_trunc(chrono::Duration::hours(1))
-        .unwrap_or_else(|_| Utc::now());
-    let totals = match store::Projects::of(projects) {
-        Some(read) => state
-            .store
-            .read(&read, MONTH_UNITS)
-            .param("since", store::seconds(since))
-            .param("until", store::seconds(this_hour))
-            .fetch_one::<u64>()
-            .await
-            .map_err(|error| {
-                telmoni_shared::TelmoniError::Internal(format!(
-                    "the month's spans could not be read ({})",
-                    store::Fault::of(&error).as_str()
-                ))
-            })?,
-        None => 0,
-    };
+    let totals = hours_past(state, projects, since).await?;
     let key = format!("telemetry:spans:{organization_id}:{}", since.timestamp());
     let Some(mut connection) = state.redis.connection().await else {
         return Ok(totals);
@@ -581,6 +565,64 @@ pub async fn spans_used(
     Ok(counted.max(totals))
 }
 
+/// The span units of `projects` in the hours wholly past since `since`, by the
+/// hourly totals: the hour under way is the door's alone to count.
+async fn hours_past(
+    state: &AppState,
+    projects: Vec<ProjectId>,
+    since: DateTime<Utc>,
+) -> Result<u64, telmoni_shared::TelmoniError> {
+    let this_hour = Utc::now()
+        .duration_trunc(chrono::Duration::hours(1))
+        .unwrap_or_else(|_| Utc::now());
+    let Some(read) = store::Projects::of(projects) else {
+        return Ok(0);
+    };
+    state
+        .store
+        .read(&read, MONTH_UNITS)
+        .param("since", store::seconds(since))
+        .param("until", store::seconds(this_hour))
+        .fetch_one::<u64>()
+        .await
+        .map_err(|error| {
+            telmoni_shared::TelmoniError::Internal(format!(
+                "the month's spans could not be read ({})",
+                store::Fault::of(&error).as_str()
+            ))
+        })
+}
+
+/// A project's count of its month raised to its hours wholly past, never
+/// lowered. Nothing counts a project without a span cap, so a cap set
+/// mid-period starts from here, as does a count Redis lost; what the hour
+/// under way sent before the cap is not recovered.
+pub async fn raise_project_spans(
+    state: &AppState,
+    organization_id: &OrganizationId,
+    project_id: &ProjectId,
+) -> Result<(), telmoni_shared::TelmoniError> {
+    let period = project_period(state, organization_id, Utc::now()).await;
+    let since = DateTime::from_timestamp(period, 0).unwrap_or_else(Utc::now);
+    let totals = hours_past(state, vec![project_id.clone()], since).await?;
+    if totals == 0 {
+        return Ok(());
+    }
+    let Some(mut connection) = state.redis.connection().await else {
+        return Ok(());
+    };
+    let raised: Result<(), redis::RedisError> = redis::Script::new(RAISE)
+        .key(format!("telemetry:project-spans:{project_id}:{period}"))
+        .arg(totals)
+        .arg(COUNTS_KEPT_S)
+        .invoke_async(&mut connection)
+        .await;
+    if let Err(error) = raised {
+        state.redis.stood_in("a project's month of spans", &error);
+    }
+    Ok(())
+}
+
 /// A count set to `ARGV[1]` where it holds less, never lowered.
 const RAISE: &str = "local held = tonumber(redis.call('GET', KEYS[1]) or '0') \
      if held < tonumber(ARGV[1]) then redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]) end \
@@ -597,15 +639,19 @@ pub async fn run_usage(state: Arc<AppState>) {
         .await;
 }
 
-/// Each organization's month counted again, and its owners told, on its feed
-/// and by mail, once its spans reach four fifths of the month and once its
-/// content fills its ceiling; the month's spans spent are told at the door
-/// ([`hold_spans`]). One organization that cannot be read holds up no other.
+/// Each organization's capped projects counted again, whatever its plan; and
+/// where a plan sells capacity, its month counted again and its owners told,
+/// on its feed and by mail, once its spans reach four fifths of the month and
+/// once its content fills its ceiling; the month's spans spent are told at the
+/// door ([`hold_spans`]). One organization that cannot be read holds up no other.
 pub async fn tell_usage(state: &AppState) -> Result<(), telmoni_shared::TelmoniError> {
     let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
     let filed = db::organizations_filed(&mut lane).await?;
     lane.commit().await?;
     for (organization_id, _) in filed {
+        // First, and whatever the plan: a project's own cap holds where no
+        // plan sells capacity too, as on a self-hosted installation.
+        raise_capped_projects(state, &organization_id).await;
         let Some(capacity) = seam::capacity(state.entitlements.as_ref(), &organization_id).await
         else {
             continue;
@@ -665,6 +711,40 @@ pub async fn tell_usage(state: &AppState) -> Result<(), telmoni_shared::TelmoniE
         }
     }
     Ok(())
+}
+
+/// Each of the organization's projects with a span cap, its count raised to
+/// its hours wholly past. One that cannot be read holds up no other.
+async fn raise_capped_projects(state: &AppState, organization_id: &OrganizationId) {
+    let projects = async {
+        let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
+        let projects = db::projects_filed(&mut lane, organization_id).await?;
+        lane.commit().await?;
+        Ok::<_, telmoni_shared::TelmoniError>(projects)
+    };
+    let projects = match projects.await {
+        Ok(projects) => projects,
+        Err(error) => {
+            tracing::warn!(organization_id = %organization_id, error = %error,
+                "telemetry: an organization's projects could not be read to count their months");
+            return;
+        }
+    };
+    for project_id in projects {
+        if state
+            .project_caps
+            .of(state, &project_id)
+            .await
+            .spans()
+            .is_none()
+        {
+            continue;
+        }
+        if let Err(error) = raise_project_spans(state, organization_id, &project_id).await {
+            tracing::warn!(project_id = %project_id, error = %error,
+                "telemetry: a project's month could not be counted; the next hour tries");
+        }
+    }
 }
 
 /// The share told of `used` out of `limit`.

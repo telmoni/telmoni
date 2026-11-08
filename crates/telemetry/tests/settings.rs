@@ -403,3 +403,49 @@ async fn a_first_export_auth_cannot_place_is_tried_again(pool: PgPool) {
         Some(holds.to_string())
     );
 }
+
+/// ⚠ A project's caps hold only in the organization they were set in: moved
+/// out, it is uncapped in the one it joins; moved back, as a transfer that
+/// did not finish moves it, its caps hold again as they were.
+#[sqlx::test]
+async fn a_projects_caps_hold_where_they_were_set_and_survive_a_move_back(pool: PgPool) {
+    let state = state(&pool);
+    let seam = TelemetrySeam(state.clone());
+    let (leaving, joining) = (OrganizationId::new(), OrganizationId::new());
+    let project = ProjectId::new();
+    seed(&pool, &leaving, &project, ContentMode::Off).await;
+    sqlx::query(
+        "INSERT INTO telemetry.project_limits (project_id, organization_id, alerts)
+         VALUES ($1, $2, 3)",
+    )
+    .bind(&project)
+    .bind(&leaving)
+    .execute(&pool)
+    .await
+    .expect("the project's caps");
+    let alerts = || async {
+        let mut tx = project_scope(&state.db, &project).await.expect("a scope");
+        let caps = telmoni_telemetry::project_limits::caps_of(&mut tx, &project)
+            .await
+            .expect("its caps");
+        tx.commit().await.expect("commit");
+        caps.alerts
+    };
+    assert_eq!(alerts().await, Some(3));
+
+    seam.move_project(&project, &joining).await.expect("move");
+    assert_eq!(
+        alerts().await,
+        None,
+        "caps set against the pool it left held in the one it joined"
+    );
+
+    seam.move_project(&project, &leaving)
+        .await
+        .expect("move back");
+    assert_eq!(
+        alerts().await,
+        Some(3),
+        "a move back lost the project's caps"
+    );
+}

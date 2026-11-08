@@ -2197,6 +2197,275 @@ async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool
     assert_eq!(told(), 1, "told once a month");
 }
 
+/// ⚠ A project capped mid-period is held to what it sent before its cap: the
+/// hourly pass raises its count to its hours wholly past, so the next export
+/// past the cap is sampled at once; and a count Redis lost is raised again.
+#[sqlx::test]
+async fn a_cap_set_mid_period_counts_the_hours_before_it(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let month = common::PlanMonth {
+        spans: 1_000_000,
+        grace_days: 7,
+        content_bytes: 25_000_000,
+    };
+    let state = common::state_with_stores_noticed(
+        &pool,
+        auth.clone(),
+        Arc::new(month),
+        common::NoticeLog::new(),
+    );
+    let lane = Lane {
+        app: lanes(state.clone()),
+        project: project.clone(),
+        other: ProjectId::new(),
+        state: state.clone(),
+        auth,
+    };
+    // Five units two hours ago, while nothing counted the project.
+    let earlier = (Utc::now() - chrono::Duration::hours(2)).timestamp();
+    ch.migrator
+        .query(
+            "INSERT INTO telemetry.spans_hourly \
+               (project_id, hour, sample_rate, cost_reported, spans, units, duration_ms) \
+             SELECT ?, toStartOfHour(toDateTime(?, 'UTC')), 1, false, 5, 5, \
+                    quantilesTDigestState(0.5, 0.9, 0.99)(toFloat64(0))",
+        )
+        .bind(project.as_str())
+        .bind(earlier)
+        .execute()
+        .await
+        .expect("the earlier hour");
+    sqlx::query(
+        "INSERT INTO telemetry.project_limits (project_id, organization_id, spans)
+         VALUES ($1, $2, 5)",
+    )
+    .bind(project.as_str())
+    .bind(organization.as_str())
+    .execute(&pool)
+    .await
+    .expect("the project's cap");
+
+    // Its first export files it; its count knows nothing of the earlier hour.
+    let any = [RUN.to_owned(), RUN.to_owned()];
+    let (status, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(1, &any),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json_body(&answer)["partialSuccess"]["rejectedSpans"], 0);
+
+    let sampled = |answer: &[u8]| {
+        let answer = json_body(answer);
+        assert_eq!(answer["partialSuccess"]["rejectedSpans"], 1, "{answer}");
+        let message = answer["partialSuccess"]["errorMessage"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            message.starts_with("1 spans sampled out: This project's cap is 5 spans a month"),
+            "{message}"
+        );
+    };
+    telmoni_telemetry::capacity::tell_usage(&state)
+        .await
+        .expect("the hourly pass");
+    let runs = picked(&lane).await;
+    let (status, _, past) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(2, &runs),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    sampled(&past);
+
+    // The count lost, as after a Redis restart, and raised again.
+    let period =
+        telmoni_telemetry::capacity::project_period(&state, &organization, Utc::now()).await;
+    let mut connection = state.redis.connection().await.expect("Redis");
+    let _: () = redis::cmd("DEL")
+        .arg(format!("telemetry:project-spans:{project}:{period}"))
+        .query_async(&mut connection)
+        .await
+        .expect("the count dropped");
+    telmoni_telemetry::capacity::raise_project_spans(&state, &organization, &project)
+        .await
+        .expect("the count raised");
+    let (status, _, past) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(3, &runs),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    sampled(&past);
+}
+
+/// ⚠ Where no plan sells capacity, as on a self-hosted installation, a cap
+/// saved through the console counts the hours before it at once, again once
+/// cleared and set again, and the hourly pass rebuilds a count Redis lost.
+#[sqlx::test]
+async fn a_cap_with_no_plan_counts_the_hours_before_it_and_is_rebuilt(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    // Saving caps files an audit row.
+    telmoni_shared::test_util::apply_audit_migrations(&pool).await;
+    // The calendar month's first hour has no hour wholly past in it.
+    use chrono::{Datelike as _, DurationRound as _};
+    let this_hour = Utc::now()
+        .duration_trunc(chrono::Duration::hours(1))
+        .expect("an hour");
+    let month_start = this_hour
+        .date_naive()
+        .with_day(1)
+        .and_then(|day| day.and_hms_opt(0, 0, 0))
+        .expect("the month")
+        .and_utc();
+    if this_hour == month_start {
+        return;
+    }
+    let earlier = (this_hour - chrono::Duration::hours(1)).max(month_start);
+
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    auth.seat(
+        "user_admin",
+        &organization,
+        &project,
+        OrganizationRole::Admin,
+        Some(Role::Admin),
+    );
+    let state = common::state_with_stores(&pool, auth.clone());
+    let lane = Lane {
+        app: lanes(state.clone()),
+        project: project.clone(),
+        other: ProjectId::new(),
+        state: state.clone(),
+        auth,
+    };
+    ch.migrator
+        .query(
+            "INSERT INTO telemetry.spans_hourly \
+               (project_id, hour, sample_rate, cost_reported, spans, units, duration_ms) \
+             SELECT ?, toDateTime(?, 'UTC'), 1, false, 5, 5, \
+                    quantilesTDigestState(0.5, 0.9, 0.99)(toFloat64(0))",
+        )
+        .bind(project.as_str())
+        .bind(earlier.timestamp())
+        .execute()
+        .await
+        .expect("the earlier hour");
+
+    // Filed by its first export, with no cap and nothing counted.
+    let any = [RUN.to_owned(), RUN.to_owned()];
+    let (status, _, _) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(1, &any),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let console = router(state.clone());
+    let set = |caps: Value| {
+        let console = console.clone();
+        let organization = organization.clone();
+        let project = project.clone();
+        async move {
+            let answer = console
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/internal/v1/telemetry/limits")
+                        .header(SERVICE_SECRET_HEADER, SECRET)
+                        .header("authorization", "Bearer tok_user_admin")
+                        .header("x-organization-id", organization.as_str())
+                        .header("x-project-id", project.as_str())
+                        .header("content-type", "application/json")
+                        .body(Body::from(caps.to_string()))
+                        .expect("a request"),
+                )
+                .await
+                .expect("an answer");
+            assert_eq!(answer.status(), StatusCode::OK, "the caps saved");
+        }
+    };
+    let runs = picked(&lane).await;
+    let sampled = |answer: &[u8]| {
+        let answer = json_body(answer);
+        assert_eq!(answer["partialSuccess"]["rejectedSpans"], 1, "{answer}");
+    };
+
+    set(json!({ "spans": 5 })).await;
+    let (_, _, past) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(2, &runs),
+        )
+        .await;
+    sampled(&past);
+
+    // Cleared, its count lost meanwhile, and set again: counted at once.
+    let period =
+        telmoni_telemetry::capacity::project_period(&state, &organization, Utc::now()).await;
+    let count = format!("telemetry:project-spans:{project}:{period}");
+    let mut connection = state.redis.connection().await.expect("Redis");
+    set(json!({})).await;
+    let _: () = redis::cmd("DEL")
+        .arg(&count)
+        .query_async(&mut connection)
+        .await
+        .expect("the count dropped");
+    set(json!({ "spans": 5 })).await;
+    let (_, _, past) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(3, &runs),
+        )
+        .await;
+    sampled(&past);
+
+    // Lost again, and rebuilt by the hourly pass with no plan to read.
+    let _: () = redis::cmd("DEL")
+        .arg(&count)
+        .query_async(&mut connection)
+        .await
+        .expect("the count dropped");
+    telmoni_telemetry::capacity::tell_usage(&state)
+        .await
+        .expect("the hourly pass");
+    let (_, _, past) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            two_runs(4, &runs),
+        )
+        .await;
+    sampled(&past);
+}
+
 /// A project its organization capped at fewer spans a month than the plan
 /// holds is sampled past its cap with no grace, in words naming the cap and
 /// who may raise it, its owners told once; the organization's month, with

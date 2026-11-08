@@ -434,11 +434,9 @@ pub async fn move_project(
         .bind(organization_id)
         .execute(tx.conn())
         .await?;
-    // Its caps divided the pool it left; the one it joins divides its own.
-    sqlx::query("DELETE FROM telemetry.project_limits WHERE project_id = $1")
-        .bind(project_id)
-        .execute(tx.conn())
-        .await?;
+    // Its caps divided the pool it left, and stay filed under it: they hold
+    // only where the project is (`caps_of`), so a transfer that does not
+    // finish, moving it back, finds them as they were.
     // The content's bytes follow it to the organization that now holds it,
     // its settings row locked first, as `delete_content` locks it.
     sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CAP_FIELDS as FIELDS } from "@/lib/limits";
+import { CAP_FIELDS as FIELDS, capTyped } from "@/lib/limits";
 import type { Caps } from "@/lib/server/entities/limits";
 import { useAction } from "@/lib/use-action";
 
@@ -92,18 +92,13 @@ function CapsDialog({
 
   function submit() {
     const next = {} as Caps;
-    for (const { key, label, unit } of FIELDS) {
-      const text = typed[key].trim();
-      if (text === "") {
-        next[key] = null;
-        continue;
-      }
-      const n = Number(text);
-      if (!Number.isFinite(n) || n < 0) {
-        setError(`${label}: a number, none or more, or empty to share the pool.`);
+    for (const field of FIELDS) {
+      const cap = capTyped(field, typed[field.key]);
+      if (cap !== null && typeof cap === "object") {
+        setError(cap.refused);
         return;
       }
-      next[key] = Math.round(unit ? n * unit : n);
+      next[field.key] = cap;
     }
     run(
       () => setProjectCapsAction(organizationId, projectId, next),
@@ -136,12 +131,12 @@ function CapsDialog({
               plan&apos;s. Leave one empty to share the pool. Past a cap, this project alone is
               held as the organization is past its plan.
             </DialogDescription>
-            {FIELDS.map(({ key, label }) => (
+            {FIELDS.map(({ key, label, unit }) => (
               <div key={key} className="grid gap-2">
                 <Label htmlFor={`${id}-${key}`}>{label}</Label>
                 <Input
                   id={`${id}-${key}`}
-                  inputMode="numeric"
+                  inputMode={unit ? "decimal" : "numeric"}
                   placeholder="Shares the pool"
                   value={typed[key]}
                   onChange={(e) => {

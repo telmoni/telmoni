@@ -1,5 +1,5 @@
 ---
-title: "Organizations and projects"
+title: "Organizations"
 description: "How Telmoni organizes work: organizations, projects, their URLs and slugs, moving between them, the name a new organization starts with, creating an organization or a project, a project's content mode, and how each is renamed, transferred and deleted."
 ---
 
@@ -466,18 +466,24 @@ the pool. Every change is in the [audit log](/docs/workspace/audit-log). Past
 its cap, that project alone is held as the organization is past its plan:
 
 - **Spans** past the month's cap are sampled, one run in ten kept and flagged,
-  with no grace, since the cap is the team's own.
+  with no grace, since the cap is the team's own. A cap set partway through
+  the month counts what the project sent in its earlier hours, though not in
+  the hour under way when it was set.
 - **Content** past its cap is dropped as it arrives, its spans keeping their
   metadata.
 - **A new alert, monitor or objective** is refused, naming the cap and who may
-  raise it, and a [starter alert](/docs/monitoring/alerts) is not made.
+  raise it, as is an edit that turns an alert into an objective or an objective
+  into an alert past the cap of what it becomes, and a
+  [starter alert](/docs/monitoring/alerts) is not made.
 - **Alert deliveries** past the day's cap reach the feed alone until midnight
   UTC.
 
-The organization's Owner and Admins are told once in the feed when a project
-passes a cap, and its other projects carry on. A project's own **Settings**
+The organization's Owner and Admins are told once in the feed when a project's
+spans, the content its spans carry or its alert deliveries pass a cap; a new
+alert, monitor or objective refused at its cap is told only to the member who
+asked. The organization's other projects carry on. A project's own **Settings**
 page shows its caps to its members. A project moved to another organization
-leaves its caps behind.
+leaves its caps behind, and finds them again if it moves back.
 
 ### Deleting an organization
 
@@ -520,8 +526,7 @@ self-hosted instance) goes the same way.
   role and however it came, by invitation or from the organization's roster.
   Leaving gives up the seat alone: you stay on the organization's roster, and
   an Owner or Admin can add you back. The organization's **Projects** page
-  (`/{organization}/projects`), which opens only for the organization's Owner
-  and Admins, offers an Admin **Leave** beside each project they still hold a
+  (`/{organization}/projects`) offers an Admin **Leave** beside each project they still hold a
   seat on; they keep their access to every project through their organization
   role, and the Owner, who holds every project outright, is offered none.
 - The **Owner cannot leave** an active organization. To leave, the Owner must

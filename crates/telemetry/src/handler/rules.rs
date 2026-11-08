@@ -156,9 +156,30 @@ pub async fn list_rules(
     let ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
     let links = rules::links(&mut tx, project_id, &ids).await?;
     let starters_withheld = crate::starters::withheld(&mut tx, project_id).await?;
+    // Said in the words of what holds them back now: the project's own cap
+    // on its alerts where it stands at it, its organization's plan otherwise.
+    let project_cap = if starters_withheld.is_empty() {
+        None
+    } else {
+        let caps = crate::project_limits::caps_of(&mut tx, project_id).await?;
+        // Its alerts, objectives apart, as the cap counts them.
+        let held = rows
+            .iter()
+            .filter(|row| row.definition.objective.is_none())
+            .count();
+        crate::project_limits::admit(
+            &caps,
+            crate::project_limits::Counted::Alerts,
+            u64::try_from(held).unwrap_or(0),
+        )
+        .err()
+        .and_then(|refused| refused.to_problem_details().detail)
+    };
     tx.commit().await?;
     let starters_detail = if starters_withheld.is_empty() {
         None
+    } else if project_cap.is_some() {
+        project_cap
     } else {
         seam::alert_ceilings(state.entitlements.as_ref(), &acting.organization_id)
             .await
@@ -267,16 +288,7 @@ async fn save(
         let held = rules::organization_count(tx, &acting.organization_id).await?;
         ceilings.admit(u64::try_from(held).unwrap_or(0))?;
     }
-    // The project's own share, read under the lock as its owners set it.
-    let objective = rule.definition.objective.is_some();
-    let caps = crate::project_limits::caps_of(tx, project_id).await?;
-    let held = rules::project_count(tx, project_id, objective).await?;
-    let counted = if objective {
-        crate::project_limits::Counted::Objectives
-    } else {
-        crate::project_limits::Counted::Alerts
-    };
-    crate::project_limits::admit(&caps, counted, u64::try_from(held).unwrap_or(0))?;
+    admit_one_more(tx, project_id, rule.definition.objective.is_some()).await?;
     let row = rules::insert(
         tx,
         project_id,
@@ -295,6 +307,23 @@ async fn save(
     };
     chain::file(tx, acting, project_id, change).await?;
     Ok(row)
+}
+
+/// One more alert, or objective, past the project's own cap on its kind, read
+/// under the lock as its owners set it: refused.
+async fn admit_one_more(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    objective: bool,
+) -> Result<(), TelmoniError> {
+    let caps = crate::project_limits::caps_of(tx, project_id).await?;
+    let held = rules::project_count(tx, project_id, objective).await?;
+    let counted = if objective {
+        crate::project_limits::Counted::Objectives
+    } else {
+        crate::project_limits::Counted::Alerts
+    };
+    crate::project_limits::admit(&caps, counted, u64::try_from(held).unwrap_or(0))
 }
 
 /// The organization's chain lock taken in `tx`, and `verb` on the project's
@@ -333,6 +362,12 @@ pub async fn update_rule(
         let before = rules::rule(tx, project_id, id)
             .await?
             .ok_or_else(not_found)?;
+        // An alert made an objective, or an objective an alert, is one more
+        // of the kind it becomes.
+        let objective = rule.definition.objective.is_some();
+        if before.definition.objective.is_some() != objective {
+            admit_one_more(tx, project_id, objective).await?;
+        }
         let linked: Vec<Link> = rules::links(tx, project_id, &[id])
             .await?
             .into_iter()
