@@ -199,6 +199,55 @@ describe('run.json', () => {
   });
 });
 
+interface RetrievalSpec {
+  source: string;
+  query: string;
+  top_k: number;
+  memory?: boolean;
+  documents?: unknown[];
+  fails_with?: string;
+}
+
+interface RetrievalFixture {
+  scenario: {
+    run: { agent: string; user_id: string; session_id: string; inside: Array<{ retrieval: RetrievalSpec }> };
+  };
+  cases: Array<{ capture_content: boolean; content_mode: string; sends: 'metadata' | 'content' }>;
+  metadata: ExportBody;
+  content: ExportBody;
+}
+
+describe('retrieval.json', () => {
+  const fixture = loadFixture<RetrievalFixture>('retrieval.json');
+  const spec = fixture.scenario.run;
+
+  it.each(fixture.cases)('the retrievals match the golden export: %o', async (each) => {
+    const mode = (): ReturnType<typeof answer> => answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
+    const { telmoni, transport } = harness({ captureContent: each.capture_content }, {}, [mode(), mode(), mode(), mode()]);
+    try {
+      telmoni.run(spec.agent, { userId: spec.user_id, sessionId: spec.session_id }, (run) => {
+        for (const { retrieval } of spec.inside) {
+          const options = { query: retrieval.query, topK: retrieval.top_k, memory: retrieval.memory ?? false };
+          run.retrieval(retrieval.source, options, (found) => {
+            if (retrieval.documents !== undefined) found.returned(retrieval.documents);
+            else found.fail(retrieval.fails_with);
+          });
+        }
+      });
+      expect(await telmoni.flush()).toBe(true);
+    } finally {
+      await telmoni.shutdown();
+    }
+    // The ask before the first content holds no spans.
+    const bodies = transport.bodies().filter((body) => body.resourceSpans.length > 0);
+    const gathered = structuredClone(bodies[0]!);
+    gathered.resourceSpans[0]!.scopeSpans[0]!.spans = bodies.flatMap(
+      (body) => body.resourceSpans[0]!.scopeSpans[0]!.spans,
+    );
+    expect(normalize(gathered)).toEqual(fixture[each.sends]);
+  });
+});
+
 interface RunStartFixture {
   scenario: {
     run: { agent: string; user_id: string; session_id: string; tags: Record<string, string> };

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -67,6 +68,19 @@ type ToolCallOptions struct {
 	// Arguments are content: recorded as JSON, sent only when CaptureContent
 	// is on and the project's mode allows.
 	Arguments any
+}
+
+// RetrievalOptions is what a retrieval is opened with.
+type RetrievalOptions struct {
+	// Query is what it searched for, content: recorded as JSON, a string as
+	// given, sent only when CaptureContent is on and the project's mode allows.
+	Query any
+	// TopK is how many results it asked for, 0 for none; one below 0 is left
+	// off with one warning.
+	TopK int
+	// Memory makes it a search of a memory store, search_memory, rather than
+	// of a vector store or an index.
+	Memory bool
 }
 
 // Answer is what a model answered: its name, its tokens and its messages.
@@ -225,6 +239,15 @@ type ModelCall struct {
 type ToolCall struct {
 	handle
 	run *Run
+}
+
+// Retrieval is a search inside a run, of a vector store or an index, or of a
+// memory store.
+type Retrieval struct {
+	handle
+	run *Run
+	// memory is whether it searched a memory, whose names its finds go under.
+	memory bool
 }
 
 type runKey struct{}
@@ -435,6 +458,14 @@ func (t *ToolCall) Fail(err error) {
 	t.handle.Fail(t.run.failure(err))
 }
 
+// Fail marks the retrieval failed as its run's Fail would.
+func (r *Retrieval) Fail(err error) {
+	if r == nil {
+		return
+	}
+	r.handle.Fail(r.run.failure(err))
+}
+
 // End ends the step's span; a second End does nothing.
 func (s *Step) End() {
 	if s == nil {
@@ -449,6 +480,14 @@ func (t *ToolCall) End() {
 		return
 	}
 	t.handle.End()
+}
+
+// End ends the retrieval's span; a second End does nothing.
+func (r *Retrieval) End() {
+	if r == nil {
+		return
+	}
+	r.handle.End()
 }
 
 // FailWith marks the step failed as its run's FailWith would.
@@ -475,6 +514,14 @@ func (t *ToolCall) FailWith(errorType string) {
 	t.handle.FailWith(errorType)
 }
 
+// FailWith marks the retrieval failed as its run's FailWith would.
+func (r *Retrieval) FailWith(errorType string) {
+	if r == nil {
+		return
+	}
+	r.handle.FailWith(errorType)
+}
+
 // Cancel marks the step cancelled as its run's Cancel would.
 func (s *Step) Cancel() {
 	if s == nil {
@@ -497,6 +544,14 @@ func (t *ToolCall) Cancel() {
 		return
 	}
 	t.handle.Cancel()
+}
+
+// Cancel marks the retrieval cancelled as its run's Cancel would.
+func (r *Retrieval) Cancel() {
+	if r == nil {
+		return
+	}
+	r.handle.Cancel()
 }
 
 // FailWith marks the run failed with errorType as its error.type, none if
@@ -588,6 +643,44 @@ func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (
 	}
 	ctx, span := r.child(ctx, spanName, trace.SpanKindInternal, attrs)
 	return ctx, &ToolCall{handle: handle{span: span, client: r.client}, run: r}
+}
+
+// Retrieval opens a search of source, or with opts.Memory of a memory store,
+// where Step opens a step; Returned records what it found.
+func (r *Run) Retrieval(ctx context.Context, source string, opts RetrievalOptions) (context.Context, *Retrieval) {
+	if r == nil || r.span == nil {
+		return ctx, &Retrieval{}
+	}
+	if err := r.opens(ctx, false); err != nil {
+		return contextWithRun(refused(ctx, err), r), &Retrieval{}
+	}
+	c := r.client
+	operation, sourceKey, queryKey := retrievalOperation, attrDataSourceID, attrRetrievalQueryText
+	if opts.Memory {
+		operation, sourceKey, queryKey = searchMemory, attrMemoryStoreID, attrMemoryQueryText
+	}
+	name := operation
+	attrs := []attribute.KeyValue{attribute.String(attrOperation, operation)}
+	// Ingest names a retrieval by its source, and one with none by its span.
+	if strings.TrimSpace(source) == "" {
+		c.exporter.warnOnce("retrieval:source", WarningInput, "telmoni: a retrieval needs its source; one without is sent named by its operation alone")
+	} else {
+		source = c.cut(source, nameMax, "retrieval's source")
+		attrs = append(attrs, attribute.String(sourceKey, source))
+		if !opts.Memory {
+			name = operation + " " + source
+		}
+	}
+	if opts.TopK > 0 {
+		attrs = append(attrs, attribute.Int(attrRetrievalTopK, opts.TopK))
+	} else if opts.TopK < 0 {
+		c.exporter.warnOnce("retrieval:"+attrRetrievalTopK, WarningInput, "telmoni: "+attrRetrievalTopK+" must be a whole number from 0 within 64 bits; the retrieval is sent without it")
+	}
+	if opts.Query != nil {
+		attrs = append(attrs, attribute.String(queryKey, asJSON(opts.Query)))
+	}
+	ctx, span := r.child(ctx, name, trace.SpanKindClient, attrs)
+	return ctx, &Retrieval{handle: handle{span: span, client: c}, run: r, memory: opts.Memory}
 }
 
 // inheritedAttributes is what every span of a run carries, live or recorded:
@@ -766,6 +859,33 @@ func (t *ToolCall) Returned(result any) {
 		return
 	}
 	t.span.SetAttributes(attribute.String(attrToolCallResult, asJSON(result)))
+}
+
+// Returned records what the search found, a slice or an array: the documents
+// as content and how many in every mode; anything else, bytes too, is refused.
+func (r *Retrieval) Returned(documents any) {
+	if r == nil || r.span == nil {
+		return
+	}
+	list := reflect.ValueOf(documents)
+	kind := list.Kind()
+	// Bytes are no documents, and JSON would send them as base64 text.
+	if (kind != reflect.Slice && kind != reflect.Array) || list.Type().Elem().Kind() == reflect.Uint8 {
+		// Whole: a count once set stays, beside any documents set after.
+		r.client.exporter.warnOnce("retrieval:documents", WarningInput, "telmoni: a retrieval's documents must be a list; they are neither sent nor counted")
+		return
+	}
+	found, count := attrRetrievalDocuments, attrRetrievalReturned
+	if r.memory {
+		found, count = attrMemoryRecords, attrMemoryRecordCount
+	}
+	// A nil slice is an empty list, which JSON would write as null.
+	sent := "[]"
+	if kind == reflect.Array || !list.IsNil() {
+		sent = asJSON(documents)
+	}
+	// One call, under the span's one lock, so the last list sets both.
+	r.span.SetAttributes(attribute.String(found, sent), attribute.Int(count, list.Len()))
 }
 
 // modelOperation is a model call's operation as ingest reads one: chat for a

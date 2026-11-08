@@ -1,6 +1,6 @@
 """The Python SDK for Telmoni, privacy-first, open-source monitoring for AI
-agents: an agent's runs, steps, model calls and tool calls as OpenTelemetry
-spans, sent to Telmoni and nowhere else."""
+agents: an agent's runs, steps, model calls, tool calls and retrievals as
+OpenTelemetry spans, sent to Telmoni and nowhere else."""
 
 from ._version import __version__
 from .client import Telmoni
@@ -19,7 +19,7 @@ from .models import (
     WarningKind,
 )
 from .processor import Batching, QueueFullError, ShutdownError
-from .runs import ModelCall, Run, Step, ToolCall, current_run
+from .runs import ModelCall, Retrieval, Run, Step, ToolCall, current_run
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -30,6 +30,7 @@ __all__ = [
     "ModelCallRecord",
     "Price",
     "QueueFullError",
+    "Retrieval",
     "Run",
     "RunRecord",
     "Secret",

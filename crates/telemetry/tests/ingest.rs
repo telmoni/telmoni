@@ -1007,6 +1007,147 @@ async fn another_exporters_spans_are_held_then_placed_in_their_runs(pool: PgPool
     assert_eq!(again.len(), 4);
 }
 
+/// Another exporter's retrievals and memory searches land as retrievals,
+/// named by what they searched: under an agent, in its run, and with none,
+/// in their trace's; an agent's data source stays an attribute of its run.
+#[sqlx::test]
+async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    let span = |trace: &str, id: &str, parent: &str, name: &str, attributes: Value| {
+        json!({
+            "traceId": trace, "spanId": id, "parentSpanId": parent, "name": name,
+            "startTimeUnixNano": "1760000000000000000",
+            "endTimeUnixNano": "1760000000100000000",
+            "attributes": attributes,
+        })
+    };
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let int = |key: &str, value: i64| json!({ "key": key, "value": { "intValue": value } });
+    let (agent_trace, calls_trace) = ("aa".repeat(16), "bb".repeat(16));
+    let body = json!({ "resourceSpans": [{
+        "resource": { "attributes": [text("service.name", "checkout")] },
+        "scopeSpans": [{ "scope": { "name": "openinference" }, "spans": [
+            span(&agent_trace, &"22".repeat(8), "", "invoke_agent planner", json!([
+                text(contract::OPERATION, "invoke_agent"), text(contract::AGENT_NAME, "planner"),
+                text(contract::DATA_SOURCE_ID, "docs-index"),
+            ])),
+            span(&agent_trace, &"33".repeat(8), &"22".repeat(8), "retrieval docs-index", json!([
+                text(contract::OPERATION, "retrieval"), text(contract::DATA_SOURCE_ID, "docs-index"),
+                int(contract::RETRIEVAL_TOP_K, 5),
+            ])),
+            span(&calls_trace, &"44".repeat(8), "", "POST /ask", json!([])),
+            span(&calls_trace, &"55".repeat(8), &"44".repeat(8), "retrieval kb", json!([
+                text(contract::OPERATION, "retrieval"), text(contract::DATA_SOURCE_ID, "kb"),
+            ])),
+            span(&calls_trace, &"66".repeat(8), &"44".repeat(8), "search_memory", json!([
+                text(contract::OPERATION, contract::SEARCH_MEMORY),
+                text(contract::MEMORY_STORE_ID, "preferences"),
+                int(contract::MEMORY_RECORD_COUNT, 2),
+            ])),
+        ]}],
+    }]});
+    let (status, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            body.to_string().into_bytes(),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&answer)
+    );
+    sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .expect("quiet");
+    telmoni_telemetry::foreign::land_quiet(&lane.state)
+        .await
+        .expect("a pass");
+    let read = || {
+        ch.store
+            .read(
+                &Projects::one(lane.project.clone()),
+                "SELECT span_id, kind, name, agent, toString(run_id), \
+                 attributes['gen_ai.data_source.id'], attributes['gen_ai.retrieval.top_k'], \
+                 attributes['gen_ai.memory.record.count'] FROM telemetry.spans \
+                 WHERE project_id IN {projects:Array(String)} AND kind != 'run_start' \
+                 ORDER BY span_id",
+            )
+            .fetch_all::<(
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+                String,
+            )>()
+    };
+    common::eventually("the placed spans are read", || async {
+        read().await.is_ok_and(|rows| rows.len() == 5)
+    })
+    .await;
+    let landed = read().await.expect("the rows");
+    let of = |id: &str| {
+        landed
+            .iter()
+            .find(|row| row.0 == id)
+            .cloned()
+            .expect("the span landed")
+    };
+    let agent_run =
+        telmoni_telemetry::foreign::run_of_span(&lane.project, &agent_trace, &"22".repeat(8))
+            .to_string();
+    let calls_run =
+        telmoni_telemetry::foreign::run_of_trace(&lane.project, &calls_trace).to_string();
+    let run = of(&"22".repeat(8));
+    assert_eq!((run.1.as_str(), run.2.as_str()), ("run", "planner"));
+    assert_eq!(
+        run.5, "docs-index",
+        "an agent's data source is its run's attribute"
+    );
+    let found = of(&"33".repeat(8));
+    assert_eq!(
+        (
+            found.1.as_str(),
+            found.2.as_str(),
+            found.3.as_str(),
+            found.4.as_str()
+        ),
+        ("retrieval", "docs-index", "planner", agent_run.as_str())
+    );
+    assert_eq!((found.5.as_str(), found.6.as_str()), ("docs-index", "5"));
+    let alone = of(&"55".repeat(8));
+    assert_eq!(
+        (
+            alone.1.as_str(),
+            alone.2.as_str(),
+            alone.3.as_str(),
+            alone.4.as_str()
+        ),
+        ("retrieval", "kb", "checkout", calls_run.as_str()),
+        "a retrieval with no agent above it is kept in its trace's run"
+    );
+    let memory = of(&"66".repeat(8));
+    assert_eq!(
+        (memory.1.as_str(), memory.2.as_str(), memory.4.as_str()),
+        ("retrieval", "preferences", calls_run.as_str())
+    );
+    assert_eq!(memory.7, "2");
+    assert!(
+        landed.iter().all(|row| row.0 != "44".repeat(8)),
+        "a span above every run is dropped"
+    );
+}
+
 /// An agent's children, sent before the agent ends, wait for it however
 /// quiet the trace goes, then land in its run once it arrives.
 #[sqlx::test]

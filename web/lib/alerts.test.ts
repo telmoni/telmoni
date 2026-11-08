@@ -8,6 +8,7 @@ import {
   connectionChoices,
   draftOf,
   filterFieldsFor,
+  filterWords,
   filtersStatus,
   hoursWords,
   incidentHref,
@@ -314,6 +315,49 @@ describe("the form", () => {
     const quoted: Alert = { ...ALERT, filters: { agent: ["support, tier 2", "triage"] } };
     const checked = inputOf(draftOf(quoted));
     expect(checked.ok && checked.input.filters).toEqual({ agent: ["support, tier 2", "triage"] });
+  });
+});
+
+describe("a retrieval alert", () => {
+  const SEARCHES: Alert = {
+    ...ALERT,
+    name: "Failing docs searches",
+    kind: SpanKind.Retrieval,
+    measure: RuleMeasure.Failures,
+    aggregation: RuleAggregation.Count,
+    filters: { agent: ["support-bot"], source: ["docs-index"] },
+  };
+
+  it("counts, fails and times retrievals as tool calls, in its notices' words", () => {
+    expect(measuresFor(SpanKind.Retrieval)).toEqual(measuresFor(SpanKind.ToolCall));
+    expect(metricWords(SEARCHES)).toBe("The failures of retrievals over the last hour");
+    expect(filterWords(SEARCHES.filters)).toEqual(["agent support-bot", "source docs-index"]);
+  });
+
+  // ⚠ A source lost on the way back would widen the alert to every retrieval as it is saved again.
+  it("filters by source as a tool call by tool, and keeps it as it is saved again", () => {
+    expect(filterFieldsFor(SpanKind.Retrieval, RuleMeasure.Count)).toEqual([
+      "agent",
+      "source",
+      "environment",
+      "release",
+    ]);
+    expect(filterFieldsFor(SpanKind.ToolCall, RuleMeasure.Count)).not.toContain("source");
+    expect(draftOf(SEARCHES).filters.source).toBe("docs-index");
+    const checked = inputOf(draftOf(SEARCHES));
+    expect(checked.ok && checked.input).toMatchObject({
+      kind: SpanKind.Retrieval,
+      filters: { agent: ["support-bot"], source: ["docs-index"] },
+    });
+  });
+
+  // The lane refuses a source on any other kind, and a tool on a retrieval.
+  it("sends a source on a retrieval alone, and a tool on a tool call alone", () => {
+    const typed = { ...draftOf(SEARCHES), filters: { ...draftOf(SEARCHES).filters, tool: "search_docs" } };
+    const searches = inputOf(typed);
+    expect(searches.ok && searches.input.filters).toEqual({ agent: ["support-bot"], source: ["docs-index"] });
+    const tools = inputOf(withKind(typed, SpanKind.ToolCall));
+    expect(tools.ok && tools.input.filters).toEqual({ agent: ["support-bot"], tool: ["search_docs"] });
   });
 });
 

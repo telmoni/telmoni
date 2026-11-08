@@ -44,6 +44,9 @@ ATTRIBUTE_VALUE_MAX = 1024
 """An attribute's longest key and value as text, in characters: ingest drops one
 past either."""
 CANCELLED = "telmoni.cancelled"
+RETRIEVAL_RETURNED = "telmoni.retrieval.returned"
+"""How many documents a retrieval returned, counted from the list it was handed:
+the conventions name no such count."""
 ENVIRONMENT = "deployment.environment.name"
 """The deployment, on the resource: the client's ``environment`` and ``release``."""
 RELEASE = "service.version"
@@ -76,12 +79,22 @@ COST = "gen_ai.usage.cost"
 """What the call cost in US dollars, as reported: Langfuse's name, since the
 conventions have none."""
 SESSION_ID = "gen_ai.conversation.id"
+DATA_SOURCE_ID = "gen_ai.data_source.id"
+MEMORY_STORE_ID = "gen_ai.memory.store.id"
+"""What a retrieval searched, a vector store or an index, or a memory: its name."""
+RETRIEVAL_TOP_K = "gen_ai.retrieval.top_k"
+MEMORY_RECORD_COUNT = "gen_ai.memory.record.count"
+"""How many records a memory search returned."""
 
 INPUT_MESSAGES = "gen_ai.input.messages"
 OUTPUT_MESSAGES = "gen_ai.output.messages"
 SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
 TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
 TOOL_CALL_RESULT = "gen_ai.tool.call.result"
+RETRIEVAL_QUERY_TEXT = "gen_ai.retrieval.query.text"
+RETRIEVAL_DOCUMENTS = "gen_ai.retrieval.documents"
+MEMORY_QUERY_TEXT = "gen_ai.memory.query.text"
+MEMORY_RECORDS = "gen_ai.memory.records"
 CONTENT_CUT = "telmoni.content_cut"
 SCRUBBED = "telmoni.scrubbed"
 """What the scrubbers took out of a span's content, counted by kind, as JSON with
@@ -141,10 +154,10 @@ CONTENT = frozenset(
         "gen_ai.tool.definitions",
         TOOL_CALL_ARGUMENTS,
         TOOL_CALL_RESULT,
-        "gen_ai.retrieval.query.text",
-        "gen_ai.retrieval.documents",
-        "gen_ai.memory.query.text",
-        "gen_ai.memory.records",
+        RETRIEVAL_QUERY_TEXT,
+        RETRIEVAL_DOCUMENTS,
+        MEMORY_QUERY_TEXT,
+        MEMORY_RECORDS,
         "gen_ai.prompt.variable",
         "user.email",
         "user.full_name",
@@ -168,6 +181,10 @@ RUN_OPERATION = "invoke_agent"
 DEFAULT_MODEL_OPERATION = "chat"
 """A model call's operation when it names none."""
 TOOL_OPERATION = "execute_tool"
+RETRIEVAL_OPERATION = "retrieval"
+SEARCH_MEMORY = "search_memory"
+"""A search of a vector store or an index, and of a memory: ingest reads both as
+a retrieval."""
 
 MEDIA_FIELDS = frozenset({INPUT_MESSAGES, OUTPUT_MESSAGES, SYSTEM_INSTRUCTIONS})
 """The content fields whose messages' ``blob`` parts the exporter lifts out:

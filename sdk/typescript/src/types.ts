@@ -177,6 +177,15 @@ export interface ToolCallOptions {
   arguments?: unknown;
 }
 
+export interface RetrievalOptions {
+  /** What it searched for. Content: sent only with `captureContent` and the project's mode `on`. */
+  query?: unknown;
+  /** How many results it asked for, read as a token count is; one that is none is left off with one warning. */
+  topK?: number | undefined;
+  /** A search of a memory store, sent as `search_memory`, rather than of a vector store or an index. */
+  memory?: boolean | undefined;
+}
+
 /** When something in a record happened: a `Date`, or milliseconds since the Unix epoch. */
 export type RecordTime = Date | number;
 

@@ -25,6 +25,9 @@ pub(crate) const TAG_KEY_MAX: usize = 64;
 /// The most characters a tag's value holds: ingest's `TAG_VALUE_MAX`.
 pub(crate) const TAG_VALUE_MAX: usize = 256;
 pub(crate) const CANCELLED: &str = "telmoni.cancelled";
+/// How many documents a retrieval returned, counted from the list it was
+/// handed: the conventions name no such count.
+pub(crate) const RETRIEVAL_RETURNED: &str = "telmoni.retrieval.returned";
 /// What the scrubbers took out of a span's content, by kind, as JSON.
 pub(crate) const SCRUBBED: &str = "telmoni.scrubbed";
 /// The deployment, on the resource: the configuration's `environment` and
@@ -57,6 +60,13 @@ pub(crate) const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.inpu
 /// conventions have none.
 pub(crate) const COST: &str = "gen_ai.usage.cost";
 pub(crate) const SESSION_ID: &str = "gen_ai.conversation.id";
+/// What a retrieval searched, a vector store or an index, or a memory: its
+/// name.
+pub(crate) const DATA_SOURCE_ID: &str = "gen_ai.data_source.id";
+pub(crate) const MEMORY_STORE_ID: &str = "gen_ai.memory.store.id";
+pub(crate) const RETRIEVAL_TOP_K: &str = "gen_ai.retrieval.top_k";
+/// How many records a memory search returned.
+pub(crate) const MEMORY_RECORD_COUNT: &str = "gen_ai.memory.record.count";
 /// In seconds, from the request to the answer's first chunk.
 pub(crate) const TIME_TO_FIRST_CHUNK: &str = "gen_ai.response.time_to_first_chunk";
 
@@ -67,6 +77,10 @@ pub(crate) const OUTPUT_MESSAGES: &str = "gen_ai.output.messages";
 pub(crate) const SYSTEM_INSTRUCTIONS: &str = "gen_ai.system_instructions";
 pub(crate) const TOOL_CALL_ARGUMENTS: &str = "gen_ai.tool.call.arguments";
 pub(crate) const TOOL_CALL_RESULT: &str = "gen_ai.tool.call.result";
+pub(crate) const RETRIEVAL_QUERY_TEXT: &str = "gen_ai.retrieval.query.text";
+pub(crate) const RETRIEVAL_DOCUMENTS: &str = "gen_ai.retrieval.documents";
+pub(crate) const MEMORY_QUERY_TEXT: &str = "gen_ai.memory.query.text";
+pub(crate) const MEMORY_RECORDS: &str = "gen_ai.memory.records";
 
 /// What the exporter takes off a span unless asked and the project allows.
 /// The content fields the exporter cut so a span fits an export, by name.
@@ -119,10 +133,10 @@ const CONTENT: &[&str] = &[
     "gen_ai.tool.definitions",
     TOOL_CALL_ARGUMENTS,
     TOOL_CALL_RESULT,
-    "gen_ai.retrieval.query.text",
-    "gen_ai.retrieval.documents",
-    "gen_ai.memory.query.text",
-    "gen_ai.memory.records",
+    RETRIEVAL_QUERY_TEXT,
+    RETRIEVAL_DOCUMENTS,
+    MEMORY_QUERY_TEXT,
+    MEMORY_RECORDS,
     "gen_ai.prompt.variable",
     "user.email",
     "user.full_name",
@@ -146,6 +160,10 @@ pub(crate) const DEFAULT_MODEL_OPERATION: &str = "chat";
 pub(crate) const MODEL_OPERATIONS: [&str; 4] =
     ["chat", "generate_content", "text_completion", "embeddings"];
 pub(crate) const TOOL_OPERATION: &str = "execute_tool";
+/// A search of a vector store or an index, and of a memory: ingest reads both
+/// as a retrieval.
+pub(crate) const RETRIEVAL_OPERATION: &str = "retrieval";
+pub(crate) const SEARCH_MEMORY: &str = "search_memory";
 
 /// The content fields whose messages' `blob` parts the exporter lifts out:
 /// each image or file put to [`MEDIA_PATH`] and sent as a `file` part naming it.

@@ -132,6 +132,25 @@ describe("saveAlertAction", () => {
     expect(sent()).toMatchObject({ url: `${BASE}/rules/${RULE}`, method: "PUT", body: INPUT });
   });
 
+  it("makes a retrieval alert on its source, and saves it over with the source kept", async () => {
+    const searches = {
+      ...INPUT,
+      kind: "retrieval",
+      measure: "failures",
+      aggregation: "count",
+      filters: { source: ["docs-index"] },
+    };
+    expect(await saveAlertAction(PROJECT, null, searches)).toEqual({ ok: true });
+    const made = sent();
+    expect([made.url, made.method]).toEqual([`${BASE}/rules`, "POST"]);
+    expect(made.body).toEqual(searches);
+    fetchMock.mockClear();
+    expect(await saveAlertAction(PROJECT, RULE, searches)).toEqual({ ok: true });
+    const saved = sent();
+    expect([saved.url, saved.method]).toEqual([`${BASE}/rules/${RULE}`, "PUT"]);
+    expect(saved.body).toEqual(searches);
+  });
+
   // A Server Action takes whatever is posted to it.
   const which = /^Couldn't tell which alert/;
   const unread = /^That alert could not be read/;

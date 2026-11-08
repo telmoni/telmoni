@@ -138,6 +138,48 @@ def test_the_run_matches_the_golden_export(
         assert headers["Telmoni-Sent-At"].isdigit()
 
 
+@pytest.mark.parametrize("case", load_fixture("retrieval.json")["cases"])
+def test_the_retrievals_match_the_golden_export(
+    case: dict[str, Any], transport: FakeTransport
+) -> None:
+    fixture = load_fixture("retrieval.json")
+    spec = fixture["scenario"]["run"]
+    mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
+    transport.answers = [mode] * 4
+    client = Telmoni(
+        Config(api_key="k", capture_content=case["capture_content"]),
+        transport=transport,
+    )
+    try:
+        with client.run(
+            spec["agent"], user_id=spec["user_id"], session_id=spec["session_id"]
+        ):
+            for item in spec["inside"]:
+                each = item["retrieval"]
+                with client.retrieval(
+                    each["source"],
+                    query=each["query"],
+                    top_k=each["top_k"],
+                    memory=each.get("memory", False),
+                ) as found:
+                    if "documents" in each:
+                        found.returned(each["documents"])
+                    else:
+                        found.fail(each["fails_with"])
+        assert client.flush()
+    finally:
+        client.shutdown()
+    # The ask before the first content holds no spans.
+    bodies = [body for body in transport.bodies() if body["resourceSpans"]]
+    gathered = copy.deepcopy(bodies[0])
+    gathered["resourceSpans"][0]["scopeSpans"][0]["spans"] = [
+        span
+        for body in [*bodies, *transport.openings]
+        for span in body["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    ]
+    assert normalize(gathered) == fixture[case["sends"]]
+
+
 def test_a_run_is_sent_from_its_start(transport: FakeTransport) -> None:
     fixture = load_fixture("run-start.json")
     scenario = fixture["scenario"]

@@ -94,6 +94,7 @@ fn trace() -> TraceRow {
         steps: 2,
         model_calls: 2,
         tool_calls: 1,
+        retrievals: 1,
         errors: 1,
         input_tokens: 1_200,
         output_tokens: 340,
@@ -272,7 +273,7 @@ fn the_histogram_answers_as_the_console_reads() {
     );
 }
 
-/// One trace's page: a model call that reported its cost, and the run.
+/// One trace's page: a model call that reported its cost, a retrieval, and the run.
 #[test]
 fn a_trace_answers_as_the_console_reads() {
     let span = |span_id: &str, kind, cost: Option<f64>| TraceSpan {
@@ -304,12 +305,29 @@ fn a_trace_answers_as_the_console_reads() {
         units: 1,
         received_at: at(5),
     };
+    let found = TraceSpan {
+        name: "docs-index".into(),
+        model: String::new(),
+        provider: String::new(),
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        attributes: [
+            ("gen_ai.data_source.id", "docs-index"),
+            ("gen_ai.retrieval.top_k", "5"),
+            ("telmoni.retrieval.returned", "3"),
+        ]
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .into(),
+        ..span("00f067aa0ba902b9", SpanKind::Retrieval, None)
+    };
     pin(
         "trace",
         &TraceDetail {
             run_id: RUN,
             spans: vec![
                 span("00f067aa0ba902b7", SpanKind::Run, None),
+                found,
                 span("00f067aa0ba902b8", SpanKind::ModelCall, Some(0.0012)),
             ],
             truncated: false,
@@ -357,8 +375,8 @@ fn saved_dashboards_answer_as_the_console_reads() {
 }
 
 /// The alerts page's alerts: one evaluated and linked within hours, one its
-/// plan paused before a first evaluation, and a starter beside one the plan
-/// had no room for.
+/// plan paused before a first evaluation, a starter beside one the plan had
+/// no room for, and one on a retrieval's source.
 #[test]
 fn alerts_answer_as_the_console_reads() {
     let alert = Alert {
@@ -461,10 +479,37 @@ fn alerts_answer_as_the_console_reads() {
         created_at: at(0),
         updated_at: at(0),
     };
+    let retrieval = Alert {
+        id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b20),
+        definition: Definition {
+            name: "Failing docs searches".into(),
+            kind: SpanKind::Retrieval,
+            measure: RuleMeasure::Failures,
+            aggregation: RuleAggregation::Count,
+            filters: RuleFilters {
+                source: vec!["docs-index".into()],
+                ..RuleFilters::default()
+            },
+            alert_threshold: 5.0,
+            warning_threshold: None,
+            renotify_minutes: None,
+            ..alert.definition.clone()
+        },
+        paused: None,
+        paused_at: None,
+        value: Some(1.0),
+        evaluated_at: Some(at(300)),
+        severity: Severity::Ok,
+        severity_since: at(0),
+        connectors: Vec::new(),
+        starter: false,
+        created_at: at(0),
+        updated_at: at(0),
+    };
     pin(
         "alerts",
         &AlertList {
-            rules: vec![alert, paused, starter],
+            rules: vec![alert, paused, starter, retrieval],
             starters_withheld: vec![RuleMeasure::Stalled],
             starters_detail: Some(
                 "This organization's plan holds 10 alerts across its projects, paused ones counted."

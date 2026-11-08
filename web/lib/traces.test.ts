@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 
-import { cellOf } from "@/components/traces/cells";
+import { cellOf, titleOf } from "@/components/traces/cells";
 import type { Trace, TraceSpan } from "@/lib/server/entities/traces";
 import { testSpan } from "@/lib/span-fixture";
 import { TraceColumn } from "@/lib/types/traces";
@@ -11,6 +11,7 @@ import {
   DEFAULT_COLUMNS,
   TRACE_COLUMNS,
   activeFilters,
+  countOf,
   currentSort,
   downloadHref,
   fits,
@@ -29,6 +30,9 @@ import {
   parseTraceUi,
   presetActive,
   presetToggled,
+  retrievalCounts,
+  retrievalSource,
+  retrievalWords,
   sessionRunsHref,
   shortId,
   orderedColumns,
@@ -278,7 +282,7 @@ describe("the URL as the list's state", () => {
       block.kind === "group" ? [[block.label, block.columns.map((c) => c.key)]] : [],
     );
     expect(groups).toEqual([
-      ["Counts", ["steps", "model_calls", "tool_calls", "errors", "spans"]],
+      ["Counts", ["steps", "model_calls", "tool_calls", "retrievals", "errors", "spans"]],
       ["Tokens", ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "tokens"]],
     ]);
   });
@@ -403,42 +407,128 @@ describe("numbers into words", () => {
   });
 });
 
+const LISTED: Trace = {
+  run_id: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+  agent: "nightly-report",
+  user_id: "",
+  session_id: "",
+  ended: true,
+  status: "ok",
+  error_type: "",
+  started_at: "2026-10-11T03:00:00Z",
+  ended_at: "2026-10-11T03:00:02Z",
+  duration_ms: 2000,
+  time_to_first_token_ms: null,
+  spans: 2,
+  steps: 0,
+  model_calls: 1,
+  tool_calls: 0,
+  retrievals: 0,
+  errors: 0,
+  input_tokens: 10,
+  output_tokens: 5,
+  cache_read_input_tokens: 0,
+  cache_write_input_tokens: 0,
+  spend: 0,
+  models: [],
+  tools: [],
+  environments: [],
+  releases: [],
+  tags: [],
+  scores: [],
+};
+
 describe("a run's time to first token in the list", () => {
   const column = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.TimeToFirstToken)!;
-  const run = (ms: number | null): Trace => ({
-    run_id: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
-    agent: "nightly-report",
-    user_id: "",
-    session_id: "",
-    ended: true,
-    status: "ok",
-    error_type: "",
-    started_at: "2026-10-11T03:00:00Z",
-    ended_at: "2026-10-11T03:00:02Z",
-    duration_ms: 2000,
-    time_to_first_token_ms: ms,
-    spans: 2,
-    steps: 0,
-    model_calls: 1,
-    tool_calls: 0,
-    errors: 0,
-    input_tokens: 10,
-    output_tokens: 5,
-    cache_read_input_tokens: 0,
-    cache_write_input_tokens: 0,
-    spend: 0,
-    models: [],
-    tools: [],
-    environments: [],
-    releases: [],
-    tags: [],
-    scores: [],
-  });
+  const run = (ms: number | null): Trace => ({ ...LISTED, time_to_first_token_ms: ms });
 
   it("reads as a duration, and as a dash where none of its calls reported one", () => {
     expect(cellOf(column, run(420), {}, null)).toBe("420 ms");
     const none = cellOf(column, run(null), {}, null) as ReactElement<{ children: string }>;
     expect(none.props.children).toBe("—");
+  });
+});
+
+describe("a run's retrievals in the list", () => {
+  const column = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.Retrievals)!;
+  const steps = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.Steps)!;
+  const run: Trace = { ...LISTED, model_calls: 2, tool_calls: 1, retrievals: 3 };
+
+  it("counts them in a column offered beside the tool calls, hidden at first and sorting nothing", () => {
+    expect(cellOf(column, run, {}, null)).toBe("3");
+    expect(column).toMatchObject({ label: "Retrievals", numeric: true, group: "counts" });
+    expect(column.sort).toBeUndefined();
+    expect(DEFAULT_COLUMNS).not.toContain(TraceColumn.Retrievals);
+  });
+
+  it("names them beside the model and tool calls on a hover of the run's steps", () => {
+    expect(titleOf(steps, run)).toBe("2 model calls, 1 tool calls, 3 retrievals");
+  });
+});
+
+describe("a retrieval's counts", () => {
+  // Every attribute is kept as text, so "0" is a count that is there.
+  it("reads a count only as a whole number from 0 within the safe integers, and one not sent as none", () => {
+    expect(countOf("0")).toBe(0);
+    expect(countOf("3")).toBe(3);
+    expect(countOf(String(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+    for (const text of [
+      undefined,
+      "",
+      "-1",
+      "-0",
+      "2.5",
+      "3.0",
+      "1e3",
+      " 3",
+      "+3",
+      "0x10",
+      "three",
+      "NaN",
+      "Infinity",
+      String(Number.MAX_SAFE_INTEGER + 1),
+      "9".repeat(400),
+    ]) {
+      expect(countOf(text), String(text)).toBeNull();
+    }
+  });
+
+  it("draws what came back of what it asked for, more than it asked for as sent", () => {
+    const top = (k: string, returned: string) => ({
+      "gen_ai.retrieval.top_k": k,
+      "telmoni.retrieval.returned": returned,
+    });
+    expect(retrievalWords(top("5", "3"))).toBe("3 of 5");
+    expect(retrievalWords(top("5", "0"))).toBe("0 of 5");
+    expect(retrievalWords(top("5", "7"))).toBe("7 of 5");
+    expect(retrievalWords(top("1000", "1200"))).toBe("1,200 of 1,000");
+    expect(retrievalWords({ "telmoni.retrieval.returned": "3" })).toBe("3");
+    expect(retrievalWords(top("five", "3")), "a top-k that is no count").toBe("3");
+  });
+
+  it("reads a memory search's records as what came back, and leaves a count nothing sent out", () => {
+    const memory = { "gen_ai.retrieval.top_k": "3", "gen_ai.memory.record.count": "2" };
+    expect(retrievalCounts(memory)).toEqual({ asked: 3, returned: 2 });
+    expect(retrievalWords({ "gen_ai.memory.record.count": "0" })).toBe("0");
+    // Another exporter's retrieval names no count of what came back: its top-k alone.
+    expect(retrievalCounts({ "gen_ai.retrieval.top_k": "5" })).toEqual({ asked: 5, returned: null });
+    expect(retrievalWords({ "gen_ai.retrieval.top_k": "5" })).toBeNull();
+    expect(retrievalCounts({})).toEqual({ asked: null, returned: null });
+    expect(retrievalCounts({ "telmoni.retrieval.returned": "-2" })).toEqual({ asked: null, returned: null });
+  });
+
+  it("names what a retrieval searched by its id, never the span's own name standing in for it", () => {
+    const long = "s".repeat(200);
+    expect(retrievalSource({ name: "kb", attributes: { "gen_ai.data_source.id": "kb" } })).toBe("kb");
+    expect(
+      retrievalSource({
+        name: "prefs",
+        attributes: { "gen_ai.data_source.id": "kb", "gen_ai.memory.store.id": "prefs" },
+      }),
+      "the id its row is named by",
+    ).toBe("prefs");
+    expect(retrievalSource({ name: "vector search", attributes: { "gen_ai.data_source.id": long } })).toBe(long);
+    expect(retrievalSource({ name: "retrieval", attributes: {} }), "another exporter's, naming none").toBeNull();
   });
 });
 

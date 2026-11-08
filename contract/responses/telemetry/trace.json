@@ -47,6 +47,41 @@
     {
       "agent": "support",
       "attributes": {
+        "gen_ai.data_source.id": "docs-index",
+        "gen_ai.retrieval.top_k": "5",
+        "telmoni.retrieval.returned": "3"
+      },
+      "cache_read_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "cost": null,
+      "ended_at": "2027-01-15T08:00:04Z",
+      "environment": "production",
+      "error_type": "",
+      "input_tokens": 0,
+      "kind": "retrieval",
+      "model": "",
+      "name": "docs-index",
+      "output_tokens": 0,
+      "parent_span_id": "",
+      "provider": "",
+      "received_at": "2027-01-15T08:00:05Z",
+      "release": "1.4.2",
+      "sample_rate": null,
+      "session_id": "s_9c2e",
+      "span_id": "00f067aa0ba902b9",
+      "started_at": "2027-01-15T08:00:00Z",
+      "status": "ok",
+      "tags": {
+        "tier": "pro"
+      },
+      "time_to_first_token": null,
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "units": 1,
+      "user_id": "u_1f3a"
+    },
+    {
+      "agent": "support",
+      "attributes": {
         "gen_ai.operation.name": "chat"
       },
       "cache_read_input_tokens": 400,

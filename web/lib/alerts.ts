@@ -38,7 +38,7 @@ import {
 } from "@/lib/types/enums";
 
 /** The kinds of span an alert reads: every kind but the bare span. */
-export const ALERT_KINDS = [SpanKind.Run, SpanKind.Step, SpanKind.ModelCall, SpanKind.ToolCall] as const;
+export const ALERT_KINDS = [SpanKind.Run, SpanKind.Step, SpanKind.ModelCall, SpanKind.ToolCall, SpanKind.Retrieval] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 export function isAlertKind(kind: SpanKind): kind is AlertKind {
@@ -50,6 +50,7 @@ export const KIND_PLURAL: Record<AlertKind, string> = {
   [SpanKind.Step]: "steps",
   [SpanKind.ModelCall]: "model calls",
   [SpanKind.ToolCall]: "tool calls",
+  [SpanKind.Retrieval]: "retrievals",
 };
 
 /** The longest name an alert takes, the table's CHECK. */
@@ -425,7 +426,7 @@ export const LEVEL_LABEL: Record<RuleLevel, string> = {
 // ── Filters ──────────────────────────────────────────────────────────────────
 
 /** The text fields an alert filters by, each any of its values. */
-export const FILTER_FIELDS = ["agent", "model", "provider", "tool", "environment", "release", "tag"] as const;
+export const FILTER_FIELDS = ["agent", "model", "provider", "tool", "source", "environment", "release", "tag"] as const;
 export type FilterField = (typeof FILTER_FIELDS)[number];
 
 export const FILTER_LABEL: Record<FilterField, string> = {
@@ -433,15 +434,15 @@ export const FILTER_LABEL: Record<FilterField, string> = {
   model: "Model",
   provider: "Provider",
   tool: "Tool",
+  source: "Source",
   environment: "Environment",
   release: "Release",
   tag: "Tag",
 };
 
-/** The fields an alert's spans carry, so the ones its filters can name: a
- *  model call's model and provider, a tool call's tool, and a run's cost by
- *  its calls' model and provider, and by its tags (`key:value`), which only
- *  the spans keep, never the hourly totals. */
+/** The filters an alert's spans take: a model call's model and provider, a
+ *  tool call's tool, a retrieval's source, and a run's cost by its calls'
+ *  model and provider and its tags (`key:value`), which no hourly total keeps. */
 export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterField[] {
   // A score keeps no agent, model or release of its own.
   if (measure === RuleMeasure.Score) return [];
@@ -450,7 +451,9 @@ export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterFi
       ? ["model", "provider"]
       : kind === SpanKind.ToolCall
         ? ["tool"]
-        : [];
+        : kind === SpanKind.Retrieval
+          ? ["source"]
+          : [];
   const tag: FilterField[] = measure === RuleMeasure.Cost ? ["tag"] : [];
   return ["agent", ...own, "environment", "release", ...tag];
 }
@@ -690,6 +693,7 @@ const NO_FILTERS: Record<FilterField, string> = {
   model: "",
   provider: "",
   tool: "",
+  source: "",
   environment: "",
   release: "",
   tag: "",

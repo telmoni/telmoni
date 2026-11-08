@@ -23,9 +23,9 @@ import (
 var pricesFile []byte
 
 // CapExceededError is a cap a run reached, the cause of the context its next
-// step, model call or tool call opens with: Cap is "steps" or "spend", Limit
-// the cap, and Used what the run had used of it, its steps opened or the US
-// dollars it spent.
+// step, model call, tool call or retrieval opens with: Cap is "steps" or
+// "spend", Limit the cap, and Used what the run had used of it, its steps
+// opened or the US dollars it spent.
 type CapExceededError struct {
 	Cap   string
 	Limit float64

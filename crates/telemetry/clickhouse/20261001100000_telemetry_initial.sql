@@ -99,11 +99,12 @@ ORDER BY (project_id, started_at)
 SETTINGS non_replicated_deduplication_window = 10000;
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
--- name, status, the deployment's environment and release, the run's sample
--- rate (1 where none was set), which a spend read scales each row by, and
--- whether the spans reported their cost: no user and no tag, so it outlives
--- the spans, kept thirteen months. `tool` is empty on every kind but a tool call, so the
--- names an application gives its steps never multiply the rows. A row of
+-- name or a retrieval's source, status, the deployment's environment and
+-- release, the run's sample rate (1 where none was set), which a spend read
+-- scales each row by, and whether the spans reported their cost: no user and
+-- no tag, so it outlives the spans, kept thirteen months. `tool` is empty on
+-- every kind but those two, so the names an application gives its steps
+-- never multiply the rows. A row of
 -- spans that reported none sums no cost, so a read prices its tokens alone.
 -- Durations are a t-digest in milliseconds, which merges across hours and
 -- keys and answers any percentile, and their sum, which an average needs.
@@ -155,7 +156,7 @@ AS SELECT
     kind,
     model,
     provider,
-    if(kind = 'tool_call', name, '') AS tool,
+    if(kind IN ('tool_call', 'retrieval'), name, '') AS tool,
     status,
     environment,
     release,

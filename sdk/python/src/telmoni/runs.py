@@ -1,4 +1,5 @@
-"""Runs, steps, model calls and tool calls, as context managers and decorators.
+"""Runs, steps, model calls, tool calls and retrievals, as context managers and
+decorators.
 
 A run is a span of its own in whatever trace is current; every span inside it
 carries the run's id, agent, user and session, so ingest knows each span's run
@@ -240,6 +241,18 @@ class Run(Handle):
     ) -> Scope[ToolCall]:
         return self._client.tool_call(name, arguments=arguments, run=self)
 
+    def retrieval(
+        self,
+        source: str,
+        *,
+        query: object | None = None,
+        top_k: int | None = None,
+        memory: bool = False,
+    ) -> Scope[Retrieval]:
+        return self._client.retrieval(
+            source, query=query, top_k=top_k, memory=memory, run=self
+        )
+
 
 class Step(Handle):
     pass
@@ -362,6 +375,31 @@ class ToolCall(Handle):
         self._span.set_attribute(contract.TOOL_CALL_RESULT, _as_json(result))
 
 
+class Retrieval(Handle):
+    # Whether it searched a memory, whose names its finds go under.
+    _memory = False
+
+    def returned(self, documents: list[Any] | tuple[Any, ...]) -> None:
+        """What the search found, a list: content, sent only when asked and
+        allowed, and how many it holds, sent in every mode."""
+        # Refused whole: a count once set stays, beside any documents set after.
+        if not isinstance(documents, (list, tuple)):
+            self._client.exporter.warn_once(
+                "retrieval:documents",
+                "telmoni: a retrieval's documents must be a list; they are neither "
+                "sent nor counted",
+                _INPUT,
+            )
+            return
+        found, count = (
+            (contract.MEMORY_RECORDS, contract.MEMORY_RECORD_COUNT)
+            if self._memory
+            else (contract.RETRIEVAL_DOCUMENTS, contract.RETRIEVAL_RETURNED)
+        )
+        # One call, under the span's one lock, so the last list sets both.
+        self._span.set_attributes({found: _as_json(documents), count: len(documents)})
+
+
 class Scope(Generic[H]):
     """Opens a handle on ``with``, ``async with``, or each call of a decorated
     function; ``None`` from ``_open`` means nothing is opened (no run)."""
@@ -377,7 +415,7 @@ class Scope(Generic[H]):
         if not self._busy.acquire(blocking=False):
             raise RuntimeError(
                 "this scope is open; call telmoni.step() (or run, model_call, "
-                "tool_call) again for each block that opens one"
+                "tool_call, retrieval) again for each block that opens one"
             )
         try:
             self._handle = self._open()
@@ -493,7 +531,7 @@ class Nothing:
     def answered(self, **kwargs: object) -> None:
         return None
 
-    def returned(self, result: object) -> None:
+    def returned(self, *given: object, **named: object) -> None:
         return None
 
 
@@ -656,6 +694,66 @@ class Opener:
         if arguments is not None:
             attributes[contract.TOOL_CALL_ARGUMENTS] = _as_json(arguments)
         return self._child(run, ToolCall, span_name, attributes, SpanKind.INTERNAL)
+
+    def retrieval(
+        self,
+        source: str,
+        run: Run | None,
+        *,
+        query: object | None,
+        top_k: int | None,
+        memory: bool,
+    ) -> Retrieval | None:
+        run = run or self._outside("retrieval")
+        if run is None:
+            return None
+        run._guard.opens(step=False)
+        warn_once = self._client.exporter.warn_once
+        operation, source_key, query_key = (
+            (
+                contract.SEARCH_MEMORY,
+                contract.MEMORY_STORE_ID,
+                contract.MEMORY_QUERY_TEXT,
+            )
+            if memory
+            else (
+                contract.RETRIEVAL_OPERATION,
+                contract.DATA_SOURCE_ID,
+                contract.RETRIEVAL_QUERY_TEXT,
+            )
+        )
+        attributes: dict[str, Any] = {**run.inherited, contract.OPERATION: operation}
+        name = operation
+        source = _text(source, "retrieval's source", warn_once)
+        # Ingest names a retrieval by its source, and one with none by its span.
+        if _blank(source):
+            warn_once(
+                "retrieval:source",
+                "telmoni: a retrieval needs its source; one without is sent named "
+                "by its operation alone",
+                _INPUT,
+            )
+        else:
+            source = _cut(source, contract.NAME_MAX, "retrieval's source", warn_once)
+            attributes[source_key] = source
+            if not memory:
+                name = f"{operation} {source}"
+        if top_k is not None:
+            asked = _whole(top_k, _COUNT)
+            if asked is None:
+                warn_once(
+                    f"retrieval:{contract.RETRIEVAL_TOP_K}",
+                    f"telmoni: {contract.RETRIEVAL_TOP_K} must be a whole number "
+                    "from 0 within 64 bits; the retrieval is sent without it",
+                    _INPUT,
+                )
+            else:
+                attributes[contract.RETRIEVAL_TOP_K] = asked
+        if query is not None:
+            attributes[query_key] = _as_json(query)
+        retrieval = self._child(run, Retrieval, name, attributes, SpanKind.CLIENT)
+        retrieval._memory = bool(memory)
+        return retrieval
 
     def record(self, record: RunRecord) -> None:
         """Send a run that has ended as the live calls would have sent it.

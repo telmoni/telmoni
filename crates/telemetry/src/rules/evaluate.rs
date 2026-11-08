@@ -88,7 +88,7 @@ const TOTALS_SQL: &str = concat!(
     "AND hour >= {full_from:DateTime('UTC')} AND hour < {full_to:DateTime('UTC')} ",
     "AND kind = {kind:String} ",
     crate::rules::calls_admitted!(),
-    // The rollup keeps a tool call's name as its own column.
+    // The rollup keeps a tool call's name, and a retrieval's source, as its own column.
     "AND (empty({tools:Array(String)}) OR tool IN {tools:Array(String)}) ",
     "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
     "UNION ALL ",
@@ -168,7 +168,9 @@ const TOTALS_TOGETHER_SQL: &str = concat!(
     "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
     "AND (received_at < {full_from:DateTime('UTC')} OR received_at >= {full_to:DateTime('UTC')}) ",
     "AND kind = {kind:String} AND ",
-    admitted_together!("(kind = 'tool_call' AND has({tools:Array(Array(String))}[i + 1], name))"),
+    admitted_together!(
+        "(kind IN ('tool_call', 'retrieval') AND has({tools:Array(Array(String))}[i + 1], name))"
+    ),
     ") GROUP BY i",
     ") GROUP BY i"
 );
@@ -710,7 +712,7 @@ fn bind_together(read: Read, members: &[&RuleRow]) -> Read {
         .param("providers", field(|filters| filters.provider.clone()))
         .param("environments", field(|filters| filters.environment.clone()))
         .param("releases", field(|filters| filters.release.clone()))
-        .param("tools", field(|filters| filters.tool.clone()))
+        .param("tools", field(|filters| filters.names().to_vec()))
         .param(
             "statuses",
             field(|filters| filters.status.iter().map(ToString::to_string).collect()),

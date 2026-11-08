@@ -41,6 +41,7 @@ const TRACE = {
   steps: 1,
   model_calls: 1,
   tool_calls: 1,
+  retrievals: 1,
   errors: 1,
   input_tokens: 1200,
   output_tokens: 300,

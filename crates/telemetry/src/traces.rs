@@ -153,6 +153,8 @@ pub struct TraceRow {
     pub model_calls: u64,
     /// Its tool calls.
     pub tool_calls: u64,
+    /// Its retrievals.
+    pub retrievals: u64,
     /// Its spans that ended in error.
     pub errors: u64,
     /// Its model calls' input tokens, summed.
@@ -373,6 +375,7 @@ macro_rules! run_sums {
             "countIf(kind != 'run_start') AS spans, countIf(kind = 'step') AS steps, ",
             "countIf(kind = 'model_call') AS model_calls, ",
             "countIf(kind = 'tool_call') AS tool_calls, ",
+            "countIf(kind = 'retrieval') AS retrievals, ",
             "countIf(status = 'error') AS errors, ",
             "sumIf(input_tokens, kind = 'model_call') AS input_total, ",
             "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
@@ -456,7 +459,7 @@ macro_rules! list_sql {
             "run_error_type AS error_type, ",
             "first_started_at AS started_at, last_ended_at AS ended_at, duration_ms, ",
             "time_to_first_token_ms, ",
-            "spans, steps, model_calls, tool_calls, errors, ",
+            "spans, steps, model_calls, tool_calls, retrievals, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
             "cache_read_total AS cache_read_input_tokens, ",
             "cache_write_total AS cache_write_input_tokens, spent AS spend, models, tools, ",

@@ -38,6 +38,7 @@
       "releases": [
         "1.4.2"
       ],
+      "retrievals": 1,
       "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
       "session_id": "s_9c2e",
       "spans": 6,

@@ -1,6 +1,6 @@
 export { DEFAULT_ENDPOINT, Telmoni } from './client.js';
 export { CapExceededError, QueueFullError, ShutdownError } from './errors.js';
-export { Handle, ModelCall, Parent, Run, Step, ToolCall, currentRun } from './runs.js';
+export { Handle, ModelCall, Parent, Retrieval, Run, Step, ToolCall, currentRun } from './runs.js';
 export type {
   CallRecord,
   Config,
@@ -15,6 +15,7 @@ export type {
   RecordTime,
   RecordedScore,
   ResolvedConfig,
+  RetrievalOptions,
   RunAnswer,
   RunOptions,
   RunRecord,

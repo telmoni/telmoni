@@ -19,6 +19,9 @@ const (
 	attrUserID    = "user.id"
 	tagPrefix     = "telmoni.tag."
 	attrCancelled = "telmoni.cancelled"
+	// attrRetrievalReturned is how many documents a retrieval returned,
+	// counted from the list it was handed: the conventions name no such count.
+	attrRetrievalReturned = "telmoni.retrieval.returned"
 	// The deployment, on the resource: the configuration's Environment and
 	// Release.
 	attrEnvironment = "deployment.environment.name"
@@ -43,6 +46,13 @@ const (
 	// name, since the conventions have none.
 	attrCost      = "gen_ai.usage.cost"
 	attrSessionID = "gen_ai.conversation.id"
+	// What a retrieval searched, a vector store or an index, or a memory: its
+	// name.
+	attrDataSourceID  = "gen_ai.data_source.id"
+	attrMemoryStoreID = "gen_ai.memory.store.id"
+	attrRetrievalTopK = "gen_ai.retrieval.top_k"
+	// attrMemoryRecordCount is how many records a memory search returned.
+	attrMemoryRecordCount = "gen_ai.memory.record.count"
 	// attrTimeToFirstChunk is in seconds, from the request to the first chunk.
 	attrTimeToFirstChunk = "gen_ai.response.time_to_first_chunk"
 
@@ -53,10 +63,18 @@ const (
 	attrSystemInstructions = "gen_ai.system_instructions"
 	attrToolCallArguments  = "gen_ai.tool.call.arguments"
 	attrToolCallResult     = "gen_ai.tool.call.result"
+	attrRetrievalQueryText = "gen_ai.retrieval.query.text"
+	attrRetrievalDocuments = "gen_ai.retrieval.documents"
+	attrMemoryQueryText    = "gen_ai.memory.query.text"
+	attrMemoryRecords      = "gen_ai.memory.records"
 
 	runOperation          = "invoke_agent"
 	toolOperation         = "execute_tool"
 	defaultModelOperation = "chat"
+	// A search of a vector store or an index, and of a memory: ingest reads
+	// both as a retrieval.
+	retrievalOperation = "retrieval"
+	searchMemory       = "search_memory"
 
 	// contentModeHeader names the project's content mode on every answer:
 	// off or on.
@@ -202,24 +220,24 @@ const (
 const attrStatusDescription = "otel.status_description"
 
 var content = map[string]bool{
-	attrInputMessages:             true,
-	attrOutputMessages:            true,
-	attrSystemInstructions:        true,
-	"gen_ai.tool.definitions":     true,
-	attrToolCallArguments:         true,
-	attrToolCallResult:            true,
-	"gen_ai.retrieval.query.text": true,
-	"gen_ai.retrieval.documents":  true,
-	"gen_ai.memory.query.text":    true,
-	"gen_ai.memory.records":       true,
-	"gen_ai.prompt.variable":      true,
-	"user.email":                  true,
-	"user.full_name":              true,
-	"user.name":                   true,
-	attrContentCut:                true,
-	attrExceptionType:             true,
-	attrExceptionMessage:          true,
-	"exception.stacktrace":        true,
-	attrStatusDescription:         true,
-	"telmoni.events":              true,
+	attrInputMessages:         true,
+	attrOutputMessages:        true,
+	attrSystemInstructions:    true,
+	"gen_ai.tool.definitions": true,
+	attrToolCallArguments:     true,
+	attrToolCallResult:        true,
+	attrRetrievalQueryText:    true,
+	attrRetrievalDocuments:    true,
+	attrMemoryQueryText:       true,
+	attrMemoryRecords:         true,
+	"gen_ai.prompt.variable":  true,
+	"user.email":              true,
+	"user.full_name":          true,
+	"user.name":               true,
+	attrContentCut:            true,
+	attrExceptionType:         true,
+	attrExceptionMessage:      true,
+	"exception.stacktrace":    true,
+	attrStatusDescription:     true,
+	"telmoni.events":          true,
 }

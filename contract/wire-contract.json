@@ -259,6 +259,7 @@
       "step",
       "model_call",
       "tool_call",
+      "retrieval",
       "span"
     ],
     "SpanStatus": [
@@ -402,6 +403,11 @@
         "failures",
         "duration",
         "tokens"
+      ],
+      "retrieval": [
+        "count",
+        "failures",
+        "duration"
       ],
       "run": [
         "count",

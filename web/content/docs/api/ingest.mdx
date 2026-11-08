@@ -71,11 +71,15 @@ named in the answer, and an exporter does not send it again.
 What a span is, its **kind**, follows `gen_ai.operation.name`: `invoke_agent`
 or `invoke_workflow` is the run itself; `chat`, `generate_content`,
 `text_completion` or `embeddings` a model call; `execute_tool` a tool call;
-any other span opened under the `telmoni` instrumentation scope a step, and
-one opened elsewhere a plain span. A run is named by `gen_ai.agent.name` (or
-`gen_ai.workflow.name`), a tool call by `gen_ai.tool.name`, and every other
-span by its own name, 1 to 145 characters: room for a model call's
-`<operation> <model>`, the longest operation and a model at its cap.
+`retrieval` or `search_memory` a retrieval, a search of a vector store or a
+memory; `plan` a step; any other span opened under the `telmoni`
+instrumentation scope a step, and one opened elsewhere a plain span. A run is
+named by `gen_ai.agent.name` (or `gen_ai.workflow.name`), a tool call by
+`gen_ai.tool.name`, a retrieval by the source it searched
+(`gen_ai.data_source.id`, or `gen_ai.memory.store.id` for a memory search),
+and every other span by its own name, 1 to 145 characters: room for a model
+call's `<operation> <model>`, the longest operation and a model at its cap. A
+source past 145 characters leaves a retrieval named by its span's own name.
 
 ## What is kept
 

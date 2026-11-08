@@ -1,5 +1,5 @@
 /**
- * Runs, steps, model calls and tool calls, as callbacks on handles.
+ * Runs, steps, model calls, tool calls and retrievals, as callbacks on handles.
  *
  * A run is a span of its own in whatever trace is current; every span inside
  * it carries the run's id, agent, user and session, so ingest knows each
@@ -28,6 +28,7 @@ import type {
   RecordOutcome,
   RecordTime,
   ResolvedConfig,
+  RetrievalOptions,
   RunAnswer,
   RunOptions,
   RunRecord,
@@ -169,6 +170,17 @@ export abstract class Parent extends Handle {
   toolCall<R>(name: string, a: ToolCallOptions | ((tool: ToolCall) => R), b?: (tool: ToolCall) => R): R {
     const [options, fn] = split<ToolCallOptions, (tool: ToolCall) => R>(a, b);
     return within(this.#opener.toolCall(this.owner, this.context, name, options ?? {}), fn);
+  }
+
+  retrieval<R>(source: string, fn: (retrieval: Retrieval) => R): R;
+  retrieval<R>(source: string, options: RetrievalOptions, fn: (retrieval: Retrieval) => R): R;
+  retrieval<R>(
+    source: string,
+    a: RetrievalOptions | ((retrieval: Retrieval) => R),
+    b?: (retrieval: Retrieval) => R,
+  ): R {
+    const [options, fn] = split<RetrievalOptions, (retrieval: Retrieval) => R>(a, b);
+    return within(this.#opener.retrieval(this.owner, this.context, source, options ?? {}), fn);
   }
 }
 
@@ -341,6 +353,34 @@ export class ToolCall extends Handle {
   }
 }
 
+export class Retrieval extends Handle {
+  readonly #warnOnce: WarnOnce;
+  /** Whether it searched a memory, whose names its finds go under. */
+  readonly #memory: boolean;
+
+  constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce, memory: boolean) {
+    super(span, parent, run, warnOnce);
+    this.#warnOnce = warnOnce;
+    this.#memory = memory;
+  }
+
+  /** What the search found, a list: content, sent only when asked and allowed, and how many it holds, sent in every mode. */
+  returned(documents: readonly unknown[]): void {
+    // Refused whole: a count once set stays, beside any documents set after.
+    if (!Array.isArray(documents)) {
+      this.#warnOnce('retrieval:documents', "telmoni: a retrieval's documents must be a list; they are neither sent nor counted", {
+        kind: 'input',
+      });
+      return;
+    }
+    const [found, count] = this.#memory
+      ? [contract.MEMORY_RECORDS, contract.MEMORY_RECORD_COUNT]
+      : [contract.RETRIEVAL_DOCUMENTS, contract.RETRIEVAL_RETURNED];
+    // One call, so the last list sets both.
+    this.span.setAttributes({ [found]: asJson(documents), [count]: documents.length });
+  }
+}
+
 /**
  * Runs `fn` with the handle's span current and ends the span when `fn`
  * settles, synchronously or once its promise does: an error thrown or
@@ -493,6 +533,43 @@ export class Opener {
     }
     const span = this.#start(toolSpanName(name), parent, attributes, SpanKind.INTERNAL);
     return new ToolCall(span, parent, run, this.#warnOnce);
+  }
+
+  retrieval(run: Run, parent: Context, given: string, options: RetrievalOptions): Retrieval {
+    run[GUARD].opens(false);
+    const memory = Boolean(options.memory);
+    const [operation, sourceKey, queryKey] = memory
+      ? [contract.SEARCH_MEMORY, contract.MEMORY_STORE_ID, contract.MEMORY_QUERY_TEXT]
+      : [contract.RETRIEVAL_OPERATION, contract.DATA_SOURCE_ID, contract.RETRIEVAL_QUERY_TEXT];
+    const attributes: Attributes = { ...run.inherited, [contract.OPERATION]: operation };
+    const named = asText(given, "retrieval's source", this.#warnOnce);
+    const source = isBlank(named) ? '' : cut(named, contract.NAME_MAX, "retrieval's source", this.#warnOnce);
+    // Ingest names a retrieval by its source, and one with none by its span.
+    if (source === '') {
+      this.#warnOnce(
+        'retrieval:source',
+        'telmoni: a retrieval needs its source; one without is sent named by its operation alone',
+        { kind: 'input' },
+      );
+    } else {
+      attributes[sourceKey] = source;
+    }
+    const name = memory || source === '' ? operation : `${operation} ${source}`;
+    if (isSet(options.topK)) {
+      const topK = whole(options.topK, 0, 2 ** 63);
+      if (topK === undefined) {
+        this.#warnOnce(
+          `retrieval:${contract.RETRIEVAL_TOP_K}`,
+          `telmoni: ${contract.RETRIEVAL_TOP_K} must be a whole number from 0 within 64 bits; the retrieval is sent without it`,
+          { kind: 'input' },
+        );
+      } else {
+        attributes[contract.RETRIEVAL_TOP_K] = topK;
+      }
+    }
+    if (isSet(options.query)) attributes[queryKey] = asJson(options.query);
+    const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
+    return new Retrieval(span, parent, run, this.#warnOnce, memory);
   }
 
   /**

@@ -114,6 +114,10 @@ func (f guardFixture) perform(t *testing.T, ctx context.Context, run *telmoni.Ru
 			opened, tool := run.ToolCall(ctx, "lookup", telmoni.ToolCallOptions{})
 			tool.End()
 			return opened
+		case "retrieval":
+			opened, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+			found.End()
+			return opened
 		}
 		t.Fatalf("an op the fixture has no word for: %s", word)
 	}

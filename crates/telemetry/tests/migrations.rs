@@ -1,8 +1,8 @@
 //! The two migration files, held to the code and to the rules the tables are
-//! built under, with no database: the content mode's `CHECK` accepts exactly
-//! the modes Rust can hold, and the ClickHouse file runs again over itself
-//! on one node anywhere, isolates every reader but the migrator, and lays
-//! out `spans` as the module's row writes it.
+//! built under, with no database: the content mode's and an alert's kind's
+//! `CHECK`s accept exactly what Rust can hold, and the ClickHouse file runs
+//! again over itself on one node anywhere, isolates every reader but the
+//! migrator, and lays out `spans` as the module's row writes it.
 #![expect(
     clippy::expect_used,
     clippy::panic,
@@ -100,6 +100,25 @@ fn the_monitor_checks_admit_exactly_the_words_rust_holds() {
     assert_eq!(words("monitors_state_check"), states);
     assert_eq!(words("monitors_cause_check"), causes);
     assert_eq!(words("incidents_cause_check"), causes);
+}
+
+/// An alert's kind is `TEXT` read back through the enum, so the CHECK admits
+/// exactly the kinds an alert reads.
+#[test]
+fn the_rules_kind_check_admits_exactly_the_kinds_an_alert_reads() {
+    let sql = postgres_migration();
+    let admitted: BTreeSet<&str> = check_body(&sql, "rules_kind_check")
+        .split('\'')
+        .skip(1)
+        .step_by(2)
+        .collect();
+    let alerted: Vec<String> = SpanKind::all()
+        .iter()
+        .filter(|kind| kind.alertable())
+        .map(ToString::to_string)
+        .collect();
+    let alerted: BTreeSet<&str> = alerted.iter().map(String::as_str).collect();
+    assert_eq!(admitted, alerted);
 }
 
 /// ClickHouse's HTTP interface takes a statement at a time, and `migrate`

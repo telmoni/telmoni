@@ -2,8 +2,8 @@
 
 `telmoni`, the Python SDK for [Telmoni](https://github.com/telmoni/telmoni),
 privacy-first, open-source monitoring for AI agents: an agent's runs, steps,
-model calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere
-else. It runs a tracer provider of its own
+model calls, tool calls and retrievals as OpenTelemetry spans, sent to Telmoni
+and nowhere else. It runs a tracer provider of its own
 beside whatever OpenTelemetry your application already has, sends nothing
 outside a run, and takes prompts, completions and tool payloads off every span
 before it leaves the process unless you ask and the project allows.
@@ -46,6 +46,8 @@ def answer(question: str) -> str:
             )
     with telmoni.tool_call("search"):
         results = search(reply.query)  # an exception marks the call failed
+    with telmoni.retrieval("kb-articles", query=question, top_k=5) as found:
+        found.returned(index.search(question, k=5))  # your vector store's call
     return reply.text
 
 
@@ -60,31 +62,37 @@ with telmoni.run(
 telmoni.flush()  # before the process exits soon after a run, or a pool's task returns
 ```
 
-Each of `run`, `step`, `model_call` and `tool_call` is a context manager, an
-`async with`, and a decorator; on a generator, sync or async, the decorator's
-span covers its iteration. An exception that escapes one marks the span failed
+Each of `run`, `step`, `model_call`, `tool_call` and `retrieval` is a context
+manager, an `async with`, and a decorator; on a generator, sync or async, the
+decorator's span covers its iteration. A retrieval is a search of a vector store
+or an index, sent as `retrieval <source>`, or with `memory=True` of a memory
+store, sent as `search_memory`; `returned(documents)` takes the list it found,
+a list or a tuple, and sends how many it holds in every mode beside the
+documents themselves, content ([Content](#content)), the last list given
+standing whole, and anything else not sent, with one warning. An exception that escapes one marks the span failed
 with the exception's class, records its message and stack trace on the span as
 an `exception` event and the status's message, content
 ([Content](#content)), and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed before
 its end, marks it cancelled. `fail()` and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
 name or a cap that is no cap
-([The guard](#the-guard)). A token count is read from a number or its text,
-its fraction cut, and `Usage`'s `cost` is what the call cost in US dollars,
-where your provider reports it; of what ingest would refuse, these are left off
-with one warning: a token count below 0 or past 64 bits, a cost below 0, not
+([The guard](#the-guard)). A token count, or a retrieval's `top_k`, is read
+from a number or its text, its fraction cut, and `Usage`'s `cost` is what the
+call cost in US dollars, where your provider reports it; of what ingest would
+refuse, these are left off with one warning: a count below 0 or past 64 bits, a cost below 0, not
 finite, or text, a tag whose key is not
 1 to 64 characters or whose value is past 256, and the tags
 past the first 32 kept, the most ingest keeps; an empty user, session,
-provider or response model is left off as unset. A name, model, provider,
+provider or response model is left off as unset. A name, source, model, provider,
 user, session, response model or error type that is no string goes as its
 text with one warning, as does a tag that is no string, finite number or bool;
 an exception or an exception's class handed to `fail()` goes as the class's
 name, and an exception's message and stack trace are recorded as content. Past ingest's caps, counted in characters, a name, the agent, a model, a
 provider, a response model or an error type is cut to its cap — a step's or a
-tool's name to 145, the rest to 128 — and a user past 128 or a session past 200
-is left off, since cut it would name another; a step named nothing goes as
-`step`, a model call with no model is named by its operation alone, and one of
+tool's name or a retrieval's source to 145, the rest to 128 — and a user past
+128 or a session past 200 is left off, since cut it would name another; a step
+named nothing goes as `step`, a model call with no model and a retrieval with
+a blank source are named by their operation alone, and a model call of
 an operation ingest reads as no model call, any but `chat`, `generate_content`, `text_completion` and `embeddings`,
 goes as `chat`; each with one warning, where ingest would refuse the span,
 or the whole run for its agent, user or session, or file the call elsewhere.
@@ -182,8 +190,8 @@ mode say, and never handed to the mask.
 
 `telmoni.run("support-bot", max_steps=20, max_spend=0.50)` holds a run to caps
 on its steps and on what its model calls cost, in US dollars, counted in this
-process with no call to Telmoni. Past one, the next step, model call or tool
-call raises `CapExceededError`, a `RuntimeError` naming the `cap` (`steps` or
+process with no call to Telmoni. Past one, the next step, model call, tool
+call or retrieval raises `CapExceededError`, a `RuntimeError` naming the `cap` (`steps` or
 `spend`), its `limit` and what the run had `used`, before it opens: a step past
 the step cap, and anything once the run spent its spend cap or more. A call
 counts its reported `cost`; else its tokens at a price handed as
@@ -196,9 +204,10 @@ carries no cap.
 
 ## Content
 
-Prompts, completions, tool arguments and results (`input_messages`,
-`output_messages`, `arguments`, `returned(...)`, and a run's own
-`run(input_messages=)` and `run.answered(output_messages=)`) are recorded on
+Prompts, completions, tool arguments and results, and a retrieval's query and
+documents (`input_messages`, `output_messages`, `arguments`, `query`,
+`returned(...)`, and a run's own `run(input_messages=)` and
+`run.answered(output_messages=)`) are recorded on
 the span and taken off by the exporter before anything leaves the process. They are sent
 only when the client is built with `Config(capture_content=True)`, or from
 `Config.from_env()` with `TELMONI_CAPTURE_CONTENT=1`, **and** the

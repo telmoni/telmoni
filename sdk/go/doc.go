@@ -1,6 +1,6 @@
 // Package telmoni is the Go SDK for Telmoni, privacy-first, open-source
-// monitoring for AI agents: an agent's runs, steps, model calls and tool
-// calls as OpenTelemetry spans, sent to Telmoni and nowhere else.
+// monitoring for AI agents: an agent's runs, steps, model calls, tool calls
+// and retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else.
 //
 // A client runs a tracer provider of its own beside whatever OpenTelemetry the
 // application already has, sends nothing outside a run, and takes prompts,

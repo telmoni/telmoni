@@ -258,7 +258,8 @@ CREATE TABLE telemetry.rules (
     created_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
-    CONSTRAINT rules_kind_check CHECK (kind IN ('run', 'step', 'model_call', 'tool_call')),
+    CONSTRAINT rules_kind_check
+        CHECK (kind IN ('run', 'step', 'model_call', 'tool_call', 'retrieval')),
     CONSTRAINT rules_measure_check
         CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score', 'burn',
                            'steps', 'repeats', 'stalled')),

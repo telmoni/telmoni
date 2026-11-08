@@ -45,6 +45,7 @@ const RuleFiltersSchema = z.object({
   model: z.array(z.string()).optional(),
   provider: z.array(z.string()).optional(),
   tool: z.array(z.string()).optional(),
+  source: z.array(z.string()).optional(),
   status: z.array(z.enum(SpanStatus)).optional(),
   environment: z.array(z.string()).optional(),
   release: z.array(z.string()).optional(),

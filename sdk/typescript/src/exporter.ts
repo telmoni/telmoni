@@ -89,6 +89,7 @@ const INTEGERS: ReadonlySet<string> = new Set([
   contract.OUTPUT_TOKENS,
   contract.CACHE_READ_INPUT_TOKENS,
   contract.CACHE_WRITE_INPUT_TOKENS,
+  contract.RETRIEVAL_TOP_K,
 ]);
 
 export type AnyValue =

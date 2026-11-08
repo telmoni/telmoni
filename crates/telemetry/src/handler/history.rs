@@ -47,7 +47,7 @@ const HISTORY_SQL: &str = concat!(
     "ARRAY JOIN [(toString(h.agent), toUInt8(0)), ('', toUInt8(1))] AS who ",
     "WHERE h.project_id IN {projects:Array(String)} ",
     "AND h.hour >= {from:DateTime('UTC')} AND h.hour < {to:DateTime('UTC')} ",
-    "AND h.kind IN ('run', 'step', 'model_call', 'tool_call') ",
+    "AND h.kind IN ('run', 'step', 'model_call', 'tool_call', 'retrieval') ",
     "GROUP BY agent, every, kind, at) ",
     "WHERE every = 1 OR agent != '' ",
     "GROUP BY agent, every, kind ORDER BY every DESC, agent, kind LIMIT {max:UInt32}"
@@ -207,5 +207,21 @@ mod tests {
         let read = Percentiles::of(&[1.0, f64::NAN]);
         assert_eq!(read.p50, Some(1.0));
         assert_eq!((read.p90, read.p99), (None, None));
+    }
+
+    /// Every kind an alert reads has a history, and no other.
+    #[test]
+    fn the_history_reads_the_kinds_an_alert_reads() {
+        let read: Vec<String> = SpanKind::all()
+            .into_iter()
+            .filter(|kind| HISTORY_SQL.contains(&format!("'{kind}'")))
+            .map(|kind| kind.to_string())
+            .collect();
+        let alerted: Vec<String> = SpanKind::all()
+            .into_iter()
+            .filter(|kind| kind.alertable())
+            .map(|kind| kind.to_string())
+            .collect();
+        assert_eq!(read, alerted);
     }
 }

@@ -212,6 +212,7 @@ export type TraceSummary = {
   steps: number;
   modelCalls: number;
   toolCalls: number;
+  retrievals: number;
   inputTokens: number;
   outputTokens: number;
 };
@@ -243,6 +244,7 @@ export function summarizeTrace(spans: readonly TraceSpan[]): TraceSummary {
     steps: spans.filter((s) => s.kind === SpanKind.Step).length,
     modelCalls: modelCalls.length,
     toolCalls: spans.filter((s) => s.kind === SpanKind.ToolCall).length,
+    retrievals: spans.filter((s) => s.kind === SpanKind.Retrieval).length,
     inputTokens: modelCalls.reduce((sum, s) => sum + s.input_tokens, 0),
     outputTokens: modelCalls.reduce((sum, s) => sum + s.output_tokens, 0),
   };

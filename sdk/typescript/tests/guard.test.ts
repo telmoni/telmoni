@@ -30,7 +30,7 @@ interface CallSpec extends AnswerSpec {
   counted: number;
 }
 
-type Op = 'step' | 'tool_call' | { model_call: number };
+type Op = 'step' | 'tool_call' | 'retrieval' | { model_call: number };
 
 interface RunSpec {
   name: string;
@@ -90,6 +90,7 @@ function call(run: Run, spec: CallSpec): void {
 function perform(run: Run, op: Op): void {
   if (op === 'step') run.step('step', () => undefined);
   else if (op === 'tool_call') run.toolCall('lookup', () => undefined);
+  else if (op === 'retrieval') run.retrieval('kb', () => undefined);
   else call(run, FIXTURE.calls[op.model_call]!);
 }
 

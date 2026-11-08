@@ -309,6 +309,85 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	}
 }
 
+type retrievalFixture struct {
+	Scenario struct {
+		Run struct {
+			Agent     string `json:"agent"`
+			UserID    string `json:"user_id"`
+			SessionID string `json:"session_id"`
+			Inside    []struct {
+				Retrieval struct {
+					Source    string `json:"source"`
+					Query     string `json:"query"`
+					TopK      int    `json:"top_k"`
+					Memory    bool   `json:"memory"`
+					Documents []any  `json:"documents"`
+					FailsWith string `json:"fails_with"`
+				} `json:"retrieval"`
+			} `json:"inside"`
+		} `json:"run"`
+	} `json:"scenario"`
+	Cases []struct {
+		CaptureContent bool   `json:"capture_content"`
+		ContentMode    string `json:"content_mode"`
+		Sends          string `json:"sends"`
+	} `json:"cases"`
+	Metadata map[string]any `json:"metadata"`
+	Content  map[string]any `json:"content"`
+}
+
+func TestTheRetrievalsMatchTheGoldenExport(t *testing.T) {
+	var fixture retrievalFixture
+	if err := json.Unmarshal(loadFixture(t, "retrieval.json"), &fixture); err != nil {
+		t.Fatalf("decoding retrieval.json: %v", err)
+	}
+	spec := fixture.Scenario.Run
+	for _, each := range fixture.Cases {
+		t.Run(each.Sends, func(t *testing.T) {
+			mode := scripted{status: http.StatusOK, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
+			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, mode, mode, mode, mode))
+			ctx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{UserID: spec.UserID, SessionID: spec.SessionID})
+			for _, item := range spec.Inside {
+				given := item.Retrieval
+				_, found := run.Retrieval(ctx, given.Source, telmoni.RetrievalOptions{Query: given.Query, TopK: given.TopK, Memory: given.Memory})
+				if given.FailsWith != "" {
+					found.FailWith(given.FailsWith)
+				} else {
+					found.Returned(given.Documents)
+				}
+				found.End()
+			}
+			run.End()
+			h.flush()
+			// The ask before the first content holds no spans.
+			var bodies []map[string]any
+			for _, body := range h.transport.bodies(t) {
+				if len(spansIn(body)) > 0 {
+					bodies = append(bodies, body)
+				}
+			}
+			if len(bodies) == 0 {
+				t.Fatal("the run was not sent")
+			}
+			gathered := deepCopy(t, bodies[0])
+			var spans []any
+			for _, body := range append(bodies, decoded(t, h.transport.allOpenings())...) {
+				for _, span := range spansIn(body) {
+					spans = append(spans, span)
+				}
+			}
+			gathered["resourceSpans"].([]any)[0].(map[string]any)["scopeSpans"].([]any)[0].(map[string]any)["spans"] = spans
+			want := fixture.Metadata
+			if each.Sends == "content" {
+				want = fixture.Content
+			}
+			if got := normalize(t, gathered); !reflect.DeepEqual(got, want) {
+				t.Errorf("the export differs from retrieval.json's %s\n got: %s\nwant: %s", each.Sends, pretty(t, got), pretty(t, want))
+			}
+		})
+	}
+}
+
 type runStartFixture struct {
 	Scenario struct {
 		Run struct {

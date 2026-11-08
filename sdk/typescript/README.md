@@ -2,8 +2,8 @@
 
 `telmoni`, the TypeScript and JavaScript SDK for
 [Telmoni](https://github.com/telmoni/telmoni), privacy-first, open-source
-monitoring for AI agents: an agent's runs, steps, model calls and tool calls as
-OpenTelemetry spans, sent to Telmoni and nowhere else. It takes prompts,
+monitoring for AI agents: an agent's runs, steps, model calls, tool calls and
+retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else. It takes prompts,
 completions and tool payloads off every span before it leaves the process
 unless you ask and the project allows. Node 18.19 or 20.6 and later.
 
@@ -46,6 +46,9 @@ const reply = await telmoni.run(
         return completion.choices[0]?.message.content ?? '';
       }),
     );
+    await run.retrieval('kb-articles', { query: plan, topK: 5 }, async (retrieval) => {
+      retrieval.returned(await index.search(plan, 5)); // your vector store's call
+    });
     return run.toolCall('search', { arguments: { q: plan } }, async (tool) => {
       const found = await search(plan);
       tool.returned(found);
@@ -65,27 +68,34 @@ thrown or rejected inside marks the span with the error's class name
 `exception` event and the status's message, content ([Content](#content)), and
 is rethrown; an error named `AbortError`
 marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
-mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)` and
-`step.toolCall(...)` open under the step; the same methods on `run` open under
-the run. `run` throws a `TypeError` for a blank agent name and a `RangeError`
+mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)`,
+`step.toolCall(...)` and `step.retrieval(...)` open under the step; the same
+methods on `run` open under the run. A retrieval is a search of a vector store
+or an index, sent as `retrieval <source>`, or with `memory: true` of a memory
+store, sent as `search_memory`; `returned(documents)` takes the array it found
+and sends how many it holds in every mode beside the documents themselves,
+content ([Content](#content)), the last array given standing whole, and
+anything else, a typed array among them, not sent, with one warning. `run`
+throws a `TypeError` for a blank agent name and a `RangeError`
 for a cap that is no cap
-([The guard](#the-guard)). A token count is read from a number, a bigint or a
-decimal numeral's text, its fraction cut, and the usage's `cost` is what the
-call cost in US dollars, where your provider reports it; of what ingest would
-refuse, these are left off with one warning: a token count below 0 or past 64
-bits, a cost below 0, not finite, or no number, a tag whose key is not 1 to 64 characters or whose
+([The guard](#the-guard)). A token count, or a retrieval's `topK`, is read from
+a number, a bigint or a decimal numeral's text, its fraction cut, and the
+usage's `cost` is what the call cost in US dollars, where your provider reports
+it; of what ingest would refuse, these are left off with one warning: a count
+below 0 or past 64 bits, a cost below 0, not finite, or no number, a tag whose key is not 1 to 64 characters or whose
 value is past 256, and the tags past the first 32 kept,
 the most ingest keeps; an empty user, session, provider or response model is
-left off as unset. A name, model, provider, user, session, response model or
+left off as unset. A name, source, model, provider, user, session, response model or
 error type that is no string goes as its text with one warning, as does a tag
 that is no string, finite number or boolean; an error, or a class, handed to
 `fail()` goes as its class's name, an `Error`'s message and stack recorded as
 content. Past ingest's caps,
 counted in characters, a name, the agent, a model, a provider, a response
-model or an error type is cut to its cap — a step's or a tool's name to 145,
-the rest to 128 — and a user past 128 or a session past 200 is left off, since
-cut it would name another; a step named nothing goes as `step`, a model call
-with no model is named by its operation alone, and one of an operation ingest
+model or an error type is cut to its cap — a step's or a tool's name or a
+retrieval's source to 145, the rest to 128 — and a user past 128 or a session
+past 200 is left off, since cut it would name another; a step named nothing
+goes as `step`, a model call with no model and a retrieval with a blank source
+are named by their operation alone, and a model call of an operation ingest
 reads as no model call, any but `chat`, `generate_content`, `text_completion` and `embeddings`, goes
 as `chat`; each with one warning, where ingest would refuse the span, or the
 whole run for its agent, user or session, or file the call elsewhere.
@@ -195,8 +205,8 @@ to the mask.
 
 `telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, callback)` holds
 a run to caps on its steps and on what its model calls cost, in US dollars,
-counted in this process with no call to Telmoni. Past one, `step`, `modelCall`
-and `toolCall` throw `CapExceededError`, naming the `cap` (`steps` or
+counted in this process with no call to Telmoni. Past one, `step`, `modelCall`,
+`toolCall` and `retrieval` throw `CapExceededError`, naming the `cap` (`steps` or
 `spend`), its `limit` and what the run had `used`, before their callback runs:
 a step past the step cap, and anything once the run spent its spend cap or
 more. A call counts its reported `cost`; else its tokens at a price handed as
@@ -252,8 +262,9 @@ Headers that name no run give `undefined`.
 
 ## Content
 
-Prompts, completions, system instructions, tool arguments and tool results —
-`inputMessages`, `systemInstructions`, `outputMessages`, `arguments` and
+Prompts, completions, system instructions, tool arguments and tool results, and
+a retrieval's query and documents —
+`inputMessages`, `systemInstructions`, `outputMessages`, `arguments`, `query` and
 `returned(...)`, and a run's own `inputMessages` and
 `run.answered({ outputMessages })` — are content, and so are a failure's message
 and stack, its `exception` event and its status's message, and every event the

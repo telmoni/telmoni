@@ -1,5 +1,5 @@
 //! The Rust SDK for Telmoni, privacy-first, open-source monitoring for AI
-//! agents: an agent's runs, steps, model calls and tool calls as
+//! agents: an agent's runs, steps, model calls, tool calls and retrievals as
 //! OpenTelemetry spans, sent to Telmoni and nowhere else. The client takes
 //! prompts, completions and tool payloads off every span before it leaves the
 //! process unless you ask and the project allows.
@@ -19,7 +19,9 @@
 //! its own, with a current context of its own.
 //!
 //! ```no_run
-//! use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+//! use telmoni::{
+//!     Config, ModelCallOptions, Reply, RetrievalOptions, RunOptions, Telmoni, ToolCallOptions, Usage,
+//! };
 //!
 //! # fn main() -> Result<(), telmoni::Error> {
 //! // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE,
@@ -56,6 +58,16 @@
 //! let tool = run.tool_call("search", ToolCallOptions::default())?;
 //! tool.returned(serde_json::json!({ "results": 3 }));
 //! drop(tool);
+//! let found = run.retrieval(
+//!     "kb-articles",
+//!     RetrievalOptions {
+//!         query: Some("refunds".into()),
+//!         top_k: Some(5),
+//!         ..RetrievalOptions::default()
+//!     },
+//! )?;
+//! found.returned(&[serde_json::json!({ "id": "kb-112", "score": 0.91 })]);
+//! drop(found);
 //! run.end();
 //!
 //! telmoni.shutdown();
@@ -67,7 +79,7 @@
 //! methods take a closure instead and return its value, or the [`Error`] that
 //! kept their handle from opening; their `try_` forms, for a closure whose
 //! error converts from [`Error`], mark an `Err` on the span with the error
-//! type's name and return it unchanged. A step, a model call or a tool call opened once its run reached
+//! type's name and return it unchanged. A step, a model call, a tool call or a retrieval opened once its run reached
 //! a cap it was opened with — `max_steps`, or `max_spend` in US dollars,
 //! counted in this process — is [`Error::CapExceeded`], and opens nothing.
 //!
@@ -102,8 +114,8 @@ pub use processor::Batching;
 pub use propagation::Carrier;
 pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};
 pub use runs::{
-    Content, ModelCall, ModelCallOptions, Reply, Run, RunOptions, RunReply, Step, ToolCall,
-    ToolCallOptions, Usage,
+    Content, ModelCall, ModelCallOptions, Reply, Retrieval, RetrievalOptions, Run, RunOptions,
+    RunReply, Step, ToolCall, ToolCallOptions, Usage,
 };
 pub use scores::{Score, ScoreTarget};
 pub use warnings::{Warning, WarningKind};

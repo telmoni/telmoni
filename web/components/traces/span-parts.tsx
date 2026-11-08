@@ -1,4 +1,4 @@
-import { Footprints, ListTree, MoveHorizontal, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
+import { DatabaseSearch, Footprints, ListTree, MoveHorizontal, Play, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 
 import type { TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
@@ -6,6 +6,7 @@ import {
   STATUS_LABEL,
   formatCount,
   formatDuration,
+  retrievalWords,
   spanMillis,
   type TimelineBar,
 } from "@/lib/traces";
@@ -25,6 +26,7 @@ const KIND_ICON: Record<SpanKind, LucideIcon> = {
   [SpanKind.Step]: Footprints,
   [SpanKind.ModelCall]: Sparkles,
   [SpanKind.ToolCall]: Wrench,
+  [SpanKind.Retrieval]: DatabaseSearch,
   [SpanKind.Span]: MoveHorizontal,
 };
 
@@ -99,21 +101,23 @@ export function SpanBar({
 }
 
 /** What a span's row says beside its name: how long it ran, a model call's
- *  tokens, and a failure's class. */
+ *  tokens, a retrieval's count and a failure's class. */
 export function SpanFacts({
   span,
 }: {
   span: Pick<
     TraceSpan,
-    "kind" | "status" | "error_type" | "started_at" | "ended_at" | "input_tokens" | "output_tokens"
+    "kind" | "status" | "error_type" | "started_at" | "ended_at" | "input_tokens" | "output_tokens" | "attributes"
   >;
 }) {
+  const found = span.kind === SpanKind.Retrieval ? retrievalWords(span.attributes) : null;
   return (
     <>
       <Fact>{formatDuration(spanMillis(span))}</Fact>
       {span.kind === SpanKind.ModelCall && (
         <Fact>{formatCount(span.input_tokens + span.output_tokens)} tokens</Fact>
       )}
+      {found !== null && <Fact>{found}</Fact>}
       {span.status === SpanStatus.Error && (
         <span className="text-xs text-destructive">{span.error_type || STATUS_LABEL[span.status]}</span>
       )}

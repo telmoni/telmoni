@@ -755,6 +755,90 @@ async fn a_percentile_reads_both_sources_merged(pool: PgPool) {
     assert_eq!(listed["rules"][0]["value"], json!(6000.0), "{listed}");
 }
 
+/// ⚠ An alert on a retrieval's source counts its failures over the totals'
+/// full hours and the spans' partial ones, never another source's, nor a
+/// tool call's of the same name.
+#[sqlx::test]
+async fn a_failed_retrieval_is_counted_by_an_alert_on_its_source(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, project, _) = seated();
+    let state = common::state_with_stores_under(&pool, auth, Arc::new(NoLimits));
+    let app = router(state.clone());
+    let now = Utc::now();
+    let earlier = now.duration_trunc(TimeDelta::hours(1)).expect("an hour") - TimeDelta::hours(3);
+    let failed = [
+        (
+            SpanKind::Retrieval,
+            "docs-index",
+            earlier + TimeDelta::minutes(5),
+        ),
+        (
+            SpanKind::Retrieval,
+            "docs-index",
+            now - TimeDelta::seconds(2),
+        ),
+        (
+            SpanKind::Retrieval,
+            "faq-index",
+            now - TimeDelta::seconds(2),
+        ),
+        (
+            SpanKind::ToolCall,
+            "docs-index",
+            earlier + TimeDelta::minutes(5),
+        ),
+        (
+            SpanKind::ToolCall,
+            "docs-index",
+            now - TimeDelta::seconds(2),
+        ),
+    ];
+    let rows: Vec<_> = failed
+        .iter()
+        .zip(1u64..)
+        .map(|((kind, name, at), n)| telmoni_telemetry::store::SpanRow {
+            span_id: format!("{n:016x}"),
+            status: SpanStatus::Error,
+            ..common::received(&project, *kind, name, 100, *at)
+        })
+        .collect();
+    ch.store
+        .insert_spans(&rows)
+        .await
+        .expect("the spans are kept");
+    let body = json!({
+        "name": "Failing docs searches", "kind": "retrieval", "measure": "failures",
+        "aggregation": "count", "window": "day", "operator": "gt", "alert_threshold": 1,
+        "filters": { "source": ["docs-index"] }
+    });
+    let made = request(
+        "POST",
+        LANE,
+        "user_member",
+        &organization,
+        &project,
+        Some(&body),
+    );
+    let (status, made) = answer(&app, made).await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    assert_eq!(
+        made["filters"],
+        json!({ "source": ["docs-index"] }),
+        "{made}"
+    );
+
+    assert_eq!(evaluate::pass(&state).await.expect("a pass"), 1);
+    let (_, listed) = answer(
+        &app,
+        request("GET", LANE, "user_member", &organization, &project, None),
+    )
+    .await;
+    assert_eq!(listed["rules"][0]["value"], json!(2.0), "{listed}");
+}
+
 /// ⚠ An alert the plan lets run again reads as never evaluated, as a resume leaves it.
 #[sqlx::test]
 async fn an_alert_the_plan_lets_run_again_reads_as_never_evaluated(pool: PgPool) {

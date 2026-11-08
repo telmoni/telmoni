@@ -19,6 +19,7 @@ from .propagation import read_headers, write_headers
 from .runs import (
     ModelCall,
     Opener,
+    Retrieval,
     Run,
     RunScope,
     Scope,
@@ -160,6 +161,23 @@ class Telmoni:
     ) -> Scope[ToolCall]:
         """A tool call inside the current run; ``returned()`` records its result."""
         return Scope(lambda: self._opener.tool_call(name, run, arguments=arguments))
+
+    def retrieval(
+        self,
+        source: str,
+        *,
+        query: object | None = None,
+        top_k: int | None = None,
+        memory: bool = False,
+        run: Run | None = None,
+    ) -> Scope[Retrieval]:
+        """A search of ``source``, or with ``memory`` of a memory store, inside
+        the current run; ``returned()`` records what it found."""
+        return Scope(
+            lambda: self._opener.retrieval(
+                source, run, query=query, top_k=top_k, memory=memory
+            )
+        )
 
     def record_run(self, record: RunRecord) -> None:
         """Send a run that has already ended, as the live calls would have; a

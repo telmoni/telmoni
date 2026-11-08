@@ -108,6 +108,7 @@ const TRACE_A = {
   steps: 1,
   model_calls: 1,
   tool_calls: 1,
+  retrievals: 0,
   errors: 1,
   input_tokens: 1200,
   output_tokens: 300,
@@ -253,7 +254,7 @@ describe("TracesPage", () => {
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
     expect(table.getByRole("columnheader", { name: /Scores/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("10/27");
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("10/28");
     // The window, the refresh and the columns stand on the title's row.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");

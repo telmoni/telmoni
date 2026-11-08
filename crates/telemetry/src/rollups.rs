@@ -56,7 +56,9 @@ const METRICS_SQL: &str = concat!(
     // Each column by the table's name: bare, `spans` in `sumIf` reads the sum's alias.
     "SELECT if({daily:UInt8} = 1, toStartOfDay(h.hour), h.hour) AS at, ",
     "toString(multiIf({group:String} = 'agent', h.agent, {group:String} = 'model', h.model, ",
-    "{group:String} = 'provider', h.provider, {group:String} = 'tool', h.tool, ",
+    // `tool` holds a retrieval's source too, which is no tool.
+    "{group:String} = 'provider', h.provider, ",
+    "{group:String} = 'tool', if(h.kind = 'tool_call', h.tool, ''), ",
     "{group:String} = 'status', h.status, {group:String} = 'environment', h.environment, ",
     "{group:String} = 'release', h.release, '')) AS key, toUInt8(0) AS folded, ",
     "toUInt64(sum(h.spans)) AS spans, toUInt64(sumIf(h.spans, h.status = 'error')) AS failed, ",

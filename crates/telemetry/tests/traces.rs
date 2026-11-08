@@ -464,6 +464,54 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
     );
 }
 
+/// A run's retrievals are counted beside its tool calls, neither in the other.
+#[sqlx::test]
+async fn the_list_counts_a_runs_retrievals_beside_its_tool_calls(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let run = Uuid::new_v4();
+    let start = Utc::now().trunc_subsecs(6) - Duration::minutes(2);
+    let rows = [
+        span_at(&p.ours, run, SpanKind::Run, "support-bot", start, 1_000, 1),
+        span_at(
+            &p.ours,
+            run,
+            SpanKind::ToolCall,
+            "docs-index",
+            start,
+            100,
+            2,
+        ),
+        span_at(
+            &p.ours,
+            run,
+            SpanKind::Retrieval,
+            "docs-index",
+            start,
+            100,
+            3,
+        ),
+        span_at(
+            &p.ours,
+            run,
+            SpanKind::Retrieval,
+            "faq-index",
+            start,
+            100,
+            4,
+        ),
+    ];
+    ch.store.insert_spans(&rows).await.expect("the spans land");
+    let list = p.list("").await;
+    let report = trace(&list, run);
+    assert_eq!(report["spans"], 4);
+    assert_eq!(report["tool_calls"], 1);
+    assert_eq!(report["retrievals"], 2);
+    assert_eq!(report["tools"], serde_json::json!(["docs-index"]));
+}
+
 #[sqlx::test]
 async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {

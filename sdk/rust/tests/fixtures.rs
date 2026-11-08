@@ -20,8 +20,8 @@ use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
-    Batching, Config, ContentMode, Hooks, ModelCallOptions, Reply, RunOptions, RunRecord, Telmoni,
-    ToolCallOptions, ToolCallRecord, Usage,
+    Batching, Config, ContentMode, Hooks, ModelCallOptions, Reply, RetrievalOptions, RunOptions,
+    RunRecord, Telmoni, ToolCallOptions, ToolCallRecord, Usage,
 };
 
 /// The fixture's normalization, as its README sets it out.
@@ -251,6 +251,87 @@ fn the_run_matches_the_golden_export() -> Outcome {
                 .is_some_and(|at| !at.is_empty() && at.bytes().all(|b| b.is_ascii_digit()))
         );
         assert!(request.url.ends_with("/otlp/v1/traces"));
+    }
+    Ok(())
+}
+
+#[test]
+fn the_retrievals_match_the_golden_export() -> Outcome {
+    let fixture = load_fixture("retrieval.json")?;
+    let spec = fixture
+        .pointer("/scenario/run")
+        .ok_or("the scenario's run")?;
+    for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
+        let mode = Answer::new(
+            200,
+            vec![(
+                "Telmoni-Content-Mode".to_owned(),
+                text(case, "content_mode")?.to_owned(),
+            )],
+            b"{}".to_vec(),
+        );
+        let harness = Harness::answering(
+            Config {
+                capture_content: field(case, "capture_content")?
+                    .as_bool()
+                    .ok_or("capture_content")?,
+                ..keyed()
+            },
+            std::iter::repeat_n(Ok(mode), 4),
+        )?;
+        let run = harness.telmoni.run(
+            text(spec, "agent")?,
+            RunOptions {
+                user_id: Some(text(spec, "user_id")?.to_owned()),
+                session_id: Some(text(spec, "session_id")?.to_owned()),
+                ..RunOptions::default()
+            },
+        )?;
+        for item in field(spec, "inside")?.as_array().ok_or("inside")? {
+            let given = field(item, "retrieval")?;
+            let found = run.retrieval(
+                text(given, "source")?,
+                RetrievalOptions {
+                    query: Some(text(given, "query")?.into()),
+                    top_k: Some(u32::try_from(int(given, "top_k")?)?),
+                    memory: given.get("memory").and_then(Value::as_bool) == Some(true),
+                },
+            )?;
+            match given.get("documents").and_then(Value::as_array) {
+                Some(documents) => found.returned(documents),
+                None => found.fail(text(given, "fails_with")?),
+            }
+            found.end();
+        }
+        run.end();
+        harness.flush()?;
+
+        // The ask before the first content holds no spans.
+        let bodies: Vec<Value> = harness
+            .transport
+            .bodies()?
+            .into_iter()
+            .filter(|body| !spans_of(body).is_empty())
+            .collect();
+        let mut gathered = bodies.first().ok_or("the run was not sent")?.clone();
+        let every_span: Vec<Value> = bodies.iter().flat_map(spans_of).collect();
+        *gathered
+            .get_mut("resourceSpans")
+            .and_then(Value::as_array_mut)
+            .and_then(|resource_spans| resource_spans.first_mut())
+            .and_then(|resource_spans| resource_spans.get_mut("scopeSpans"))
+            .and_then(Value::as_array_mut)
+            .and_then(|scope_spans| scope_spans.first_mut())
+            .and_then(|scope_spans| scope_spans.get_mut("spans"))
+            .ok_or("the first body's spans")? = json!(every_span);
+        let normalized = normalize(&gathered)?;
+        let expected = field(&fixture, text(case, "sends")?)?;
+        assert!(
+            normalized == *expected,
+            "sent:\n{}\nexpected:\n{}",
+            serde_json::to_string_pretty(&normalized)?,
+            serde_json::to_string_pretty(expected)?
+        );
     }
     Ok(())
 }

@@ -74,6 +74,12 @@ fn mixed() -> Vec<Value> {
             json!({ "tool": ["search_docs"] }),
         ),
         with(
+            alert("Docs index failing", "retrieval", "failures", "count", 0.0),
+            "filters",
+            json!({ "source": ["docs-index"] }),
+        ),
+        alert("Retrievals", "retrieval", "count", "count", 1.0),
+        with(
             alert("Failed steps", "step", "count", "count", 0.0),
             "filters",
             json!({ "status": ["error"] }),
@@ -123,10 +129,24 @@ fn mixed() -> Vec<Value> {
 }
 
 /// The spans the alerts read: the varied runs, a run that loops on one tool,
-/// and one left open past the window before.
+/// one left open past the window before, and retrievals of two sources beside
+/// a tool of one's name.
 fn spans(project: &ProjectId) -> Vec<SpanRow> {
     let now = Utc::now();
     let mut rows = common::varied_runs(project);
+    let searched = [
+        (SpanKind::Retrieval, "docs-index", SpanStatus::Error),
+        (SpanKind::Retrieval, "docs-index", SpanStatus::Ok),
+        (SpanKind::Retrieval, "faq-index", SpanStatus::Error),
+        (SpanKind::ToolCall, "docs-index", SpanStatus::Error),
+    ];
+    for (n, (kind, name, status)) in searched.into_iter().enumerate() {
+        rows.push(SpanRow {
+            span_id: format!("{:016x}", 0xb00 + n),
+            status,
+            ..common::received(project, kind, name, 100, now - TimeDelta::minutes(20))
+        });
+    }
     let looping = Uuid::new_v4();
     for n in 0..8_i64 {
         rows.push(SpanRow {

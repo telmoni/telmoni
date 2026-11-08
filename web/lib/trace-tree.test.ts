@@ -154,6 +154,18 @@ describe("a trace summed", () => {
     });
   });
 
+  it("counts the run's retrievals beside its tool calls, and none where it made none", () => {
+    const found = span({
+      span_id: "found",
+      parent_span_id: "step-1",
+      kind: SpanKind.Retrieval,
+      name: "docs-index",
+      started_at: at(4),
+    });
+    expect(summarizeTrace([...SPANS, found])).toMatchObject({ steps: 2, modelCalls: 1, toolCalls: 1, retrievals: 1 });
+    expect(summarizeTrace(SPANS).retrievals).toBe(0);
+  });
+
   it("spans the run by its times, not by how many digits the server wrote", () => {
     const summary = summarizeTrace([
       span({ span_id: "a", started_at: "2026-10-11T03:00:00.250Z", ended_at: "2026-10-11T03:00:01Z" }),

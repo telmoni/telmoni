@@ -561,7 +561,7 @@ pub struct TraceList {
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 26] = [
+const CSV_HEADER: [&str; 27] = [
     "run_id",
     "agent",
     "user_id",
@@ -577,6 +577,7 @@ const CSV_HEADER: [&str; 26] = [
     "steps",
     "model_calls",
     "tool_calls",
+    "retrievals",
     "errors",
     "input_tokens",
     "output_tokens",
@@ -590,11 +591,14 @@ const CSV_HEADER: [&str; 26] = [
     "tags",
 ];
 
+/// A download's columns: the list's, then the run's content.
+const DOWNLOAD_COLUMNS: usize = CSV_HEADER.len() + 1;
+
 impl TraceRow {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
     /// RFC 3339, and its models, tools, environments, releases and tags each
     /// one cell, `; ` between them.
-    fn cells(&self) -> [String; 26] {
+    fn cells(&self) -> [String; 27] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.run_id.to_string(),
@@ -614,6 +618,7 @@ impl TraceRow {
             self.steps.to_string(),
             self.model_calls.to_string(),
             self.tool_calls.to_string(),
+            self.retrievals.to_string(),
             self.errors.to_string(),
             self.input_tokens.to_string(),
             self.output_tokens.to_string(),
@@ -1214,7 +1219,7 @@ pub async fn export_traces(
             row,
         })
         .collect();
-    let header: [&str; 27] =
+    let header: [&str; DOWNLOAD_COLUMNS] =
         std::array::from_fn(|i| CSV_HEADER.get(i).copied().unwrap_or("content"));
     download(format, &rows, &header, TraceDownload::cells, "trace")
 }
@@ -1230,7 +1235,7 @@ pub struct TraceDownload {
 
 impl TraceDownload {
     /// The row's cells and its content as one JSON cell.
-    fn cells(&self) -> [String; 27] {
+    fn cells(&self) -> [String; DOWNLOAD_COLUMNS] {
         let row = self.row.cells();
         let content = serde_json::to_string(&self.content).unwrap_or_default();
         std::array::from_fn(|i| row.get(i).cloned().unwrap_or_else(|| content.clone()))
@@ -1665,6 +1670,7 @@ mod tests {
             steps: 1,
             model_calls: 2,
             tool_calls: 1,
+            retrievals: 3,
             errors: 1,
             input_tokens: 10,
             output_tokens: 5,
@@ -1684,7 +1690,10 @@ mod tests {
             "00000000-0000-0000-0000-000000000000,\"'=cmd\",,\"thread, 42\",true,error,RuntimeError,"
         ));
         assert!(
-            line.contains("2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,250,4,")
+            line.contains(
+                "2026-10-11T12:30:00.000000Z,2026-10-11T12:30:01.500000Z,1500,250,4,1,2,1,3,1,10,5,"
+            ),
+            "each count under its own name"
         );
         assert!(line.ends_with(",a; b,,production,,repo:telmoni\r\n"));
         let json = serde_json::to_value(&trace).expect("JSON");

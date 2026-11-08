@@ -1,7 +1,7 @@
 //! The door as a customer reaches it: a run that has ended, recorded with the
 //! Rust SDK over TCP into this module's own ingest, lands with its calls under
 //! it, its user hashed as the project's user ids are, and the trace lanes read
-//! it back. What the console agent's own questions travel as
+//! it back; a live run's retrievals land as retrievals. What the console agent's own questions travel as
 //! (`crates/agent/src/report.rs`), and any customer's job.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -22,7 +22,8 @@ use uuid::Uuid;
 
 use common::{AuthStub, SECRET, clickhouse_or_skip, state_with_stores};
 use telmoni::{
-    Config, ModelCallRecord, RunRecord, Score, ScoreTarget, Telmoni, ToolCallRecord, Usage,
+    Config, ModelCallRecord, RetrievalOptions, RunOptions, RunRecord, Score, ScoreTarget, Telmoni,
+    ToolCallOptions, ToolCallRecord, Usage,
 };
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role};
@@ -266,5 +267,153 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
             ("thumbs".into(), "run".into(), String::new()),
         ],
         "{scores}"
+    );
+}
+
+/// A live run's retrieval and memory search, opened with the SDK, land as
+/// retrievals named by their sources, with what each asked for and how many
+/// came back, and the list counts them beside the run's tool call.
+#[sqlx::test]
+async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (organization, project) = (OrganizationId::new(), ProjectId::new());
+    let auth = AuthStub::new();
+    auth.seat(
+        "user_reader",
+        &organization,
+        &project,
+        OrganizationRole::Member,
+        Some(Role::Member),
+    )
+    .key(INGEST_KEY, &organization, &project, &[ApiKeyScope::Ingest]);
+    let state = state_with_stores(&pool, auth);
+    let app = router(Arc::clone(&state))
+        .nest("/otlp", otlp_router(Arc::clone(&state)))
+        .nest("/v1", v1_router(Arc::clone(&state)));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port of this machine's");
+    let endpoint = format!("http://{}", listener.local_addr().expect("an address"));
+    tokio::spawn(axum::serve(listener, app.clone()).into_future());
+    let telmoni = Telmoni::new(Config::new(endpoint, None, Some(INGEST_KEY.to_owned())));
+
+    // Opened, ended and flushed on the SDK's side of the runtime, as an agent's code is.
+    let run_id = tokio::task::spawn_blocking(move || {
+        let run = telmoni
+            .run("support-bot", RunOptions::default())
+            .expect("a run");
+        let found = run
+            .retrieval(
+                "docs-index",
+                RetrievalOptions {
+                    top_k: Some(5),
+                    ..RetrievalOptions::default()
+                },
+            )
+            .expect("a retrieval");
+        found.returned(&[
+            serde_json::json!({ "id": "kb-1" }),
+            serde_json::json!({ "id": "kb-2" }),
+            serde_json::json!({ "id": "kb-3" }),
+        ]);
+        found.end();
+        let remembered = run
+            .retrieval(
+                "preferences",
+                RetrievalOptions {
+                    top_k: Some(3),
+                    memory: true,
+                    ..RetrievalOptions::default()
+                },
+            )
+            .expect("a memory search");
+        remembered.returned(&[serde_json::json!({ "id": "mem-1" })]);
+        remembered.end();
+        run.tool_call("docs-index", ToolCallOptions::default())
+            .expect("a tool call")
+            .end();
+        let run_id = run.run_id().to_owned();
+        run.end();
+        assert!(telmoni.flush(), "the export did not leave within the wait");
+        run_id
+    })
+    .await
+    .expect("the run ran");
+
+    let request = |path: String| {
+        Request::builder()
+            .method("GET")
+            .uri(path)
+            .header(SERVICE_SECRET_HEADER, SECRET)
+            .header("authorization", "Bearer tok_user_reader")
+            .header("x-organization-id", organization.as_str())
+            .header("x-project-id", project.as_str())
+            .body(Body::empty())
+            .expect("a request")
+    };
+    let read = |path: String| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(request(path))
+                .await
+                .expect("the router answers");
+            if response.status() != StatusCode::OK {
+                return Value::Null;
+            }
+            let bytes = response
+                .into_body()
+                .collect()
+                .await
+                .expect("a body")
+                .to_bytes();
+            serde_json::from_slice(&bytes).expect("a JSON body")
+        }
+    };
+    let mut detail = Value::Null;
+    for _ in 0..100 {
+        detail = read(format!("/internal/v1/telemetry/traces/{run_id}")).await;
+        let kinds = |kind: &str| {
+            detail["spans"].as_array().map_or(0, |spans| {
+                spans.iter().filter(|s| s["kind"] == kind).count()
+            })
+        };
+        if kinds("run") == 1 && kinds("retrieval") == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let spans = detail["spans"].as_array().expect("the run was recorded");
+    let span = |name: &str, kind: &str| {
+        spans
+            .iter()
+            .find(|s| s["name"] == name && s["kind"] == kind)
+            .expect("the span landed")
+    };
+    let found = span("docs-index", "retrieval");
+    assert_eq!(found["attributes"]["gen_ai.data_source.id"], "docs-index");
+    assert_eq!(found["attributes"]["gen_ai.retrieval.top_k"], "5");
+    assert_eq!(found["attributes"]["telmoni.retrieval.returned"], "3");
+    let remembered = span("preferences", "retrieval");
+    assert_eq!(
+        remembered["attributes"]["gen_ai.memory.store.id"],
+        "preferences"
+    );
+    assert_eq!(remembered["attributes"]["gen_ai.retrieval.top_k"], "3");
+    assert_eq!(remembered["attributes"]["gen_ai.memory.record.count"], "1");
+    assert_eq!(span("docs-index", "tool_call")["status"], "ok");
+
+    let list = read("/internal/v1/telemetry/traces?agent=support-bot".into()).await;
+    let trace = list["traces"]
+        .as_array()
+        .expect("traces")
+        .iter()
+        .find(|t| t["run_id"] == run_id)
+        .expect("the run is listed");
+    assert_eq!(
+        (&trace["retrievals"], &trace["tool_calls"]),
+        (&Value::from(2), &Value::from(1))
     );
 }

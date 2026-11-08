@@ -250,7 +250,11 @@ pub fn place(
             }
             match root {
                 Some(root) => Place::Root(root),
-                None if matches!(row.kind, SpanKind::ModelCall | SpanKind::ToolCall) => {
+                None if matches!(
+                    row.kind,
+                    SpanKind::ModelCall | SpanKind::ToolCall | SpanKind::Retrieval
+                ) =>
+                {
                     Place::Trace
                 }
                 None => Place::Nowhere,
@@ -878,8 +882,9 @@ mod tests {
         );
     }
 
-    /// Calls with no run above them are one run, named by the service, whose
-    /// own span is written once, its calls under it; anything else is dropped.
+    /// Calls and retrievals with no run above them are one run, named by the
+    /// service, whose own span is written once, its calls under it; anything
+    /// else is dropped, a plan among them.
     #[test]
     fn calls_with_no_run_above_them_are_one_run_of_the_service() {
         let (project, trace) = (ProjectId::new(), "ab".repeat(16));
@@ -892,6 +897,8 @@ mod tests {
             &trace,
             vec![
                 span("http", "", SpanKind::Span, "POST /ask"),
+                span("plan", "http", SpanKind::Step, "plan"),
+                span("found", "http", SpanKind::Retrieval, "docs-index"),
                 span("call", "http", SpanKind::ModelCall, "chat gpt"),
                 failed,
             ],
@@ -899,7 +906,7 @@ mod tests {
             waited_out(),
         );
         let run_span = run_span_of_trace(&trace);
-        assert_eq!(placed.dropped, vec!["http".to_owned()]);
+        assert_eq!(placed.dropped, vec!["http".to_owned(), "plan".to_owned()]);
         let run = placed
             .rows
             .iter()
@@ -915,7 +922,7 @@ mod tests {
             (SpanStatus::Error, "TimeoutError", "u1"),
             "it fails as its calls did, for whom they name"
         );
-        for id in ["call", "tool"] {
+        for id in ["found", "call", "tool"] {
             let call = placed.rows.iter().find(|r| r.span_id == id).expect("kept");
             assert_eq!(call.parent_span_id, run_span, "{id} hangs from the run");
             assert_eq!(call.run_id, run.run_id);

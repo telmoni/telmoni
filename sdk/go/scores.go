@@ -296,6 +296,14 @@ func (t *ToolCall) Score(name string, value ScoreValue, opts ScoreOptions) {
 	t.handle.score(name, value, opts)
 }
 
+// Score scores the retrieval as its run's Score would.
+func (r *Retrieval) Score(name string, value ScoreValue, opts ScoreOptions) {
+	if r == nil {
+		return
+	}
+	r.handle.score(name, value, opts)
+}
+
 // SpanID is the run's span's id, 16 lowercase hex digits, which a late score
 // names; "" for a handle that does nothing.
 func (r *Run) SpanID() string {
@@ -327,6 +335,14 @@ func (t *ToolCall) SpanID() string {
 		return ""
 	}
 	return t.handle.spanID()
+}
+
+// SpanID is the retrieval's span's id, as its run's SpanID is.
+func (r *Retrieval) SpanID() string {
+	if r == nil {
+		return ""
+	}
+	return r.handle.spanID()
 }
 
 // recordedScores is a recorded span's scores as events' attributes, each

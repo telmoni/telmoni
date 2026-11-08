@@ -1,10 +1,10 @@
-//! Runs, steps, model calls and tool calls, as guards and closures.
+//! Runs, steps, model calls, tool calls and retrievals, as guards and closures.
 //!
 //! A run is a span of its own in whatever trace is current; every span inside
 //! it carries the run's id, agent, user and session, so ingest knows each
-//! span's run without waiting for the trace's tree. A step, a model call or a
-//! tool call is opened from the handle it belongs under, so nothing can be
-//! opened outside a run, and opens unless the run reached a cap
+//! span's run without waiting for the trace's tree. A step, a model call, a
+//! tool call or a retrieval is opened from the handle it belongs under, so
+//! nothing can be opened outside a run, and opens unless the run reached a cap
 //! ([`crate::guard`]).
 
 use std::collections::BTreeMap;
@@ -135,6 +135,21 @@ pub struct ToolCallOptions {
     /// [`Config::capture_content`](crate::Config::capture_content) is on and
     /// the project's mode allows.
     pub arguments: Option<Content>,
+}
+
+/// What a retrieval is opened with; `RetrievalOptions::default()` is a search
+/// of a vector store or an index with nothing but its source.
+#[derive(Debug, Clone, Default)]
+pub struct RetrievalOptions {
+    /// What it searched for: content, which leaves the process only when
+    /// [`Config::capture_content`](crate::Config::capture_content) is on and
+    /// the project's mode allows.
+    pub query: Option<Content>,
+    /// How many results it asked for.
+    pub top_k: Option<u32>,
+    /// A search of a memory store, `search_memory`, rather than of a vector
+    /// store or an index.
+    pub memory: bool,
 }
 
 /// What the model answered, for [`ModelCall::answered`]; each part optional.
@@ -319,6 +334,63 @@ impl Handle {
         })
     }
 
+    fn retrieval(&self, source: &str, options: RetrievalOptions) -> Result<Retrieval, Error> {
+        self.guard.opens(Opening::Call)?;
+        let warner = &self.client.warner;
+        let RetrievalOptions {
+            query,
+            top_k,
+            memory,
+        } = options;
+        let (operation, source_key, query_key) = if memory {
+            (
+                contract::SEARCH_MEMORY,
+                contract::MEMORY_STORE_ID,
+                contract::MEMORY_QUERY_TEXT,
+            )
+        } else {
+            (
+                contract::RETRIEVAL_OPERATION,
+                contract::DATA_SOURCE_ID,
+                contract::RETRIEVAL_QUERY_TEXT,
+            )
+        };
+        // Ingest names a retrieval by its source, and one with none by its span.
+        let source = if source.trim().is_empty() {
+            warner.once(
+                "retrieval:source".to_owned(),
+                "telmoni: a retrieval needs its source; one without is sent named by its operation alone",
+                WarningKind::Input.into(),
+            );
+            None
+        } else {
+            Some(cut(
+                source,
+                contract::NAME_MAX,
+                "retrieval's source",
+                warner,
+            ))
+        };
+        let name = match &source {
+            Some(source) if !memory => format!("{operation} {source}"),
+            _ => operation.to_owned(),
+        };
+        let mut attributes = vec![KeyValue::new(contract::OPERATION, operation)];
+        if let Some(source) = source {
+            attributes.push(KeyValue::new(source_key, source));
+        }
+        if let Some(top_k) = top_k {
+            attributes.push(KeyValue::new(contract::RETRIEVAL_TOP_K, i64::from(top_k)));
+        }
+        if let Some(query) = query {
+            attributes.push(KeyValue::new(query_key, query.0));
+        }
+        Ok(Retrieval {
+            handle: self.child(name, SpanKind::Client, attributes),
+            memory,
+        })
+    }
+
     fn fail(&self, error_type: &str) {
         self.set_failed(error_type, None);
     }
@@ -435,6 +507,14 @@ pub struct ToolCall {
     handle: Handle,
 }
 
+/// A retrieval inside a run: the span `retrieval <source>`, or `search_memory`
+/// for a memory, kind `CLIENT`; [`Retrieval::returned`] records what it found.
+pub struct Retrieval {
+    handle: Handle,
+    /// Whether it searched a memory, whose names its finds go under.
+    memory: bool,
+}
+
 /// What every handle has: the span's end, its marks, and its context.
 macro_rules! handle_methods {
     ($handle:ident, $what:literal) => {
@@ -507,9 +587,10 @@ handle_methods!(Run, "Run");
 handle_methods!(Step, "Step");
 handle_methods!(ModelCall, "ModelCall");
 handle_methods!(ToolCall, "ToolCall");
+handle_methods!(Retrieval, "Retrieval");
 
-/// What a handle that can hold work has: steps, model calls and tool calls
-/// opened under it, as guards or around closures.
+/// What a handle that can hold work has: steps, model calls, tool calls and
+/// retrievals opened under it, as guards or around closures.
 macro_rules! opens_children {
     ($handle:ident) => {
         impl $handle {
@@ -670,6 +751,61 @@ macro_rules! opens_children {
                 call.end();
                 result
             }
+
+            /// A search of `source` under this span, the span `retrieval <source>`
+            /// or `search_memory`; ended when its guard drops or on [`Retrieval::end`].
+            ///
+            /// # Errors
+            ///
+            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// its spend cap.
+            pub fn retrieval(
+                &self,
+                source: &str,
+                options: RetrievalOptions,
+            ) -> Result<Retrieval, Error> {
+                self.handle.retrieval(source, options)
+            }
+
+            /// [`Self::retrieval`] around `f`: the retrieval ends when `f`
+            /// returns, and `f`'s value is returned.
+            ///
+            /// # Errors
+            ///
+            /// As [`Self::retrieval`], before `f` runs.
+            pub fn retrieval_with<R>(
+                &self,
+                source: &str,
+                options: RetrievalOptions,
+                f: impl FnOnce(&Retrieval) -> R,
+            ) -> Result<R, Error> {
+                let retrieval = self.retrieval(source, options)?;
+                let value = f(&retrieval);
+                retrieval.end();
+                Ok(value)
+            }
+
+            /// [`Self::retrieval_with`] for a fallible `f`: an `Err` marks the
+            /// retrieval failed with `E`'s type name and its message and is
+            /// returned unchanged.
+            ///
+            /// # Errors
+            ///
+            /// `f`'s, or [`Self::retrieval`]'s as an `E`, before `f` runs.
+            pub fn try_retrieval_with<T, E: From<Error> + fmt::Display>(
+                &self,
+                source: &str,
+                options: RetrievalOptions,
+                f: impl FnOnce(&Retrieval) -> Result<T, E>,
+            ) -> Result<T, E> {
+                let retrieval = self.retrieval(source, options)?;
+                let result = f(&retrieval);
+                if let Err(error) = &result {
+                    retrieval.handle.fail_by(error);
+                }
+                retrieval.end();
+                result
+            }
         }
     };
 }
@@ -677,6 +813,7 @@ macro_rules! opens_children {
 opens_children!(Run);
 opens_children!(Step);
 opens_children!(ToolCall);
+opens_children!(Retrieval);
 
 impl Run {
     /// The run's id: a fresh UUID v4, on every span inside the run.
@@ -826,6 +963,23 @@ impl ToolCall {
     pub fn returned(&self, result: impl Into<Content>) {
         self.handle
             .set_last([KeyValue::new(contract::TOOL_CALL_RESULT, result.into().0)]);
+    }
+}
+
+impl Retrieval {
+    /// What the search found: the documents, content sent only when asked and
+    /// allowed, and how many, sent in every mode; the last list given stands.
+    pub fn returned(&self, documents: &[serde_json::Value]) {
+        let (found, count) = if self.memory {
+            (contract::MEMORY_RECORDS, contract::MEMORY_RECORD_COUNT)
+        } else {
+            (contract::RETRIEVAL_DOCUMENTS, contract::RETRIEVAL_RETURNED)
+        };
+        let sent = Content::from(serde_json::Value::from(documents));
+        let held = i64::try_from(documents.len()).unwrap_or(i64::MAX);
+        // One hold, under its one lock, so the last list sets both.
+        self.handle
+            .set_last([KeyValue::new(found, sent.0), KeyValue::new(count, held)]);
     }
 }
 

@@ -292,6 +292,7 @@ pub fn map(
                 }
             }),
         SpanKind::ToolCall => fields.tool_name.take().unwrap_or_else(|| span.name.clone()),
+        SpanKind::Retrieval => fields.source().unwrap_or_else(|| span.name.clone()),
         SpanKind::RunStart | SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => {
             span.name.clone()
         }
@@ -408,6 +409,8 @@ struct Fields {
     agent_name: Option<String>,
     workflow_name: Option<String>,
     tool_name: Option<String>,
+    data_source_id: Option<String>,
+    memory_store_id: Option<String>,
     error_type: Option<String>,
     response_model: Option<String>,
     request_model: Option<String>,
@@ -541,11 +544,19 @@ impl Fields {
             // ⚠ Dropped unless the project keeps content; the answer names
             // the mode, so a sender reads why.
             _ if contract::is_content(key) => self.content_or_drop(key, value, &mut drop_attribute),
-            // Before the namespace's refusal: the inventory names one of ours, the scrubbers' counts.
-            _ if contract::is_inventory_span(key) => match as_text(value) {
-                Some(rendered) => self.keep_attribute(key, rendered, &mut drop_attribute),
-                None => drop_attribute(key, DropReason::Unlisted),
-            },
+            // Kept as the inventory keeps them, and a retrieval's name besides.
+            contract::DATA_SOURCE_ID => {
+                self.data_source_id = text(value).map(Cow::into_owned);
+                self.keep_listed(key, value, &mut drop_attribute);
+            }
+            contract::MEMORY_STORE_ID => {
+                self.memory_store_id = text(value).map(Cow::into_owned);
+                self.keep_listed(key, value, &mut drop_attribute);
+            }
+            // Before the namespace's refusal, which would drop the two of ours it names.
+            _ if contract::is_inventory_span(key) => {
+                self.keep_listed(key, value, &mut drop_attribute);
+            }
             _ if key.starts_with("telmoni.") => drop_attribute(key, DropReason::Unlisted),
             _ => match value {
                 Value::IntValue(_) | Value::DoubleValue(_) | Value::BoolValue(_) => {
@@ -607,6 +618,27 @@ impl Fields {
         }
         self.attributes
             .push((key.to_owned(), rendered.into_owned()));
+    }
+
+    /// An attribute the inventory names: kept under its name in every mode.
+    fn keep_listed(&mut self, key: &str, value: &Value, drop: &mut impl FnMut(&str, DropReason)) {
+        match as_text(value) {
+            Some(rendered) => self.keep_attribute(key, rendered, drop),
+            None => drop(key, DropReason::Unlisted),
+        }
+    }
+
+    /// What a retrieval searched, by the id its operation names first, while
+    /// it fits a name: past that, the span's own name names it.
+    fn source(&mut self) -> Option<String> {
+        let (first, second) = if self.operation.as_deref() == Some(contract::SEARCH_MEMORY) {
+            (self.memory_store_id.take(), self.data_source_id.take())
+        } else {
+            (self.data_source_id.take(), self.memory_store_id.take())
+        };
+        first
+            .or(second)
+            .filter(|source| source.chars().count() <= contract::NAME_MAX)
     }
 
     /// Content, kept whole under its name: free of an attribute's value cap,
@@ -1212,6 +1244,101 @@ mod tests {
         };
         let (row, _) = map(&plain, &theirs, &mut Drops::default()).expect("kept");
         assert_eq!(row.kind, SpanKind::Span);
+    }
+
+    /// A retrieval is named by what it searched, its operation's own id
+    /// first, and keeps both ids; past a name's cap, by its span's name.
+    #[test]
+    fn a_retrieval_is_named_by_its_source() {
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        let on = context(&project, &[], &keep);
+        let span = |operation: &str, name: &str, ids: &[(&str, &str)]| {
+            let mut attributes = vec![
+                kv(contract::RUN_ID, s(RUN)),
+                kv(contract::AGENT, s("nightly-report")),
+                kv(contract::OPERATION, s(operation)),
+            ];
+            attributes.extend(ids.iter().map(|(key, id)| kv(key, s(id))));
+            Span {
+                name: name.into(),
+                attributes,
+                status: None,
+                events: Vec::new(),
+                ..call()
+            }
+        };
+        let row = |span: &Span| map(span, &on, &mut Drops::default()).expect("kept").0;
+        let both = [
+            (contract::DATA_SOURCE_ID, "docs-index"),
+            (contract::MEMORY_STORE_ID, "preferences"),
+        ];
+        for (operation, named) in [
+            ("retrieval", "docs-index"),
+            (contract::SEARCH_MEMORY, "preferences"),
+        ] {
+            let kept = row(&span(operation, operation, &both));
+            assert_eq!(
+                (kept.kind, kept.name.as_str()),
+                (SpanKind::Retrieval, named)
+            );
+            for (key, id) in both {
+                let attribute = (key.to_owned(), id.to_owned());
+                assert!(kept.attributes.contains(&attribute), "{operation}: {key}");
+            }
+        }
+        let other = row(&span(contract::SEARCH_MEMORY, "search_memory", &both[..1]));
+        assert_eq!(
+            other.name, "docs-index",
+            "the other id, where its own is unset"
+        );
+        let empty = row(&span(
+            "retrieval",
+            "retrieval",
+            &[(contract::DATA_SOURCE_ID, "")],
+        ));
+        assert_eq!(empty.name, "retrieval", "an empty id is none");
+        // The cap counts characters, never bytes.
+        let widest = "é".repeat(contract::NAME_MAX);
+        let past = "é".repeat(contract::NAME_MAX + 1);
+        let at_cap = row(&span(
+            "retrieval",
+            "retrieval",
+            &[(contract::DATA_SOURCE_ID, &widest)],
+        ));
+        assert_eq!(at_cap.name, widest);
+        let short = row(&span(
+            "retrieval",
+            "docs",
+            &[(contract::DATA_SOURCE_ID, &past)],
+        ));
+        assert_eq!(short.name, "docs", "past the cap, the span's own name");
+        let conventional = span(
+            "retrieval",
+            &format!("retrieval {past}"),
+            &[(contract::DATA_SOURCE_ID, &past)],
+        );
+        let refused = map(&conventional, &on, &mut Drops::default()).unwrap_err();
+        assert_eq!(refused.reason, Refusal::OverCap("name"));
+        // On an agent's span, a data source is an attribute alone.
+        let run = row(&span(
+            "invoke_agent",
+            "invoke_agent",
+            &[(contract::DATA_SOURCE_ID, "docs-index")],
+        ));
+        assert_eq!(
+            (run.kind, run.name.as_str()),
+            (SpanKind::Run, "nightly-report")
+        );
+        let attribute = (contract::DATA_SOURCE_ID.to_owned(), "docs-index".to_owned());
+        assert!(run.attributes.contains(&attribute));
+        let theirs = Context {
+            scope: "opentelemetry.instrumentation.langchain",
+            ..context(&project, &[], &keep)
+        };
+        let plan = span("plan", "plan nightly-report", &[]);
+        let (planned, _) = map(&plan, &theirs, &mut Drops::default()).expect("kept");
+        assert_eq!(planned.kind, SpanKind::Step, "from any exporter");
     }
 
     /// A span with no run is another exporter's: kept under the nil run, its

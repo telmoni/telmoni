@@ -51,7 +51,7 @@ export function titleOf(column: ColumnSpec, trace: Trace): string | undefined {
     case TraceColumn.ErrorType:
       return trace.error_type || undefined;
     case TraceColumn.Steps:
-      return `${formatCount(trace.model_calls)} model calls, ${formatCount(trace.tool_calls)} tool calls`;
+      return `${formatCount(trace.model_calls)} model calls, ${formatCount(trace.tool_calls)} tool calls, ${formatCount(trace.retrievals)} retrievals`;
     case TraceColumn.Tokens:
       return `${formatCount(trace.input_tokens)} in, ${formatCount(trace.output_tokens)} out`;
     case TraceColumn.Models:
@@ -110,6 +110,8 @@ export function cellOf(
       return formatCount(trace.model_calls);
     case TraceColumn.ToolCalls:
       return formatCount(trace.tool_calls);
+    case TraceColumn.Retrievals:
+      return formatCount(trace.retrievals);
     case TraceColumn.Errors:
       return formatCount(trace.errors);
     case TraceColumn.Spans:

@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 /// What one finished span of a run is: the run itself, a step inside it, a
-/// model or tool call, or anything else recorded under it. The stable string
-/// a span's row carries. `[PUBLIC-API]`.
+/// model or tool call, a retrieval, or anything else recorded under it. The
+/// stable string a span's row carries. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -16,14 +16,16 @@ pub enum SpanKind {
     /// seen before it ends: of no length, never a step, costing no unit.
     RunStart,
     /// A unit of work the SDKs, the CLI or a hook opened as one, under their
-    /// instrumentation scope, that is no model or tool call. What the step
-    /// cap counts.
+    /// instrumentation scope, that is no call, or an agent's `plan`. What the
+    /// step cap counts.
     Step,
     /// A call to a model: `chat`, `generate_content`, `text_completion` or
     /// `embeddings`.
     ModelCall,
     /// A call to a tool: `execute_tool`.
     ToolCall,
+    /// A search of a vector store or a memory: `retrieval` or `search_memory`.
+    Retrieval,
     /// Any other span under a run — an exporter's HTTP call or query among
     /// them — kept on the run's timeline and counted by no bound.
     Span,
@@ -35,6 +37,7 @@ crate::wire_enum!(SpanKind {
     Step => "step",
     ModelCall => "model_call",
     ToolCall => "tool_call",
+    Retrieval => "retrieval",
     Span => "span",
 });
 

@@ -827,6 +827,86 @@ async fn a_project_left_off_keeps_no_content_and_makes_no_key(pool: PgPool) {
     assert!(!keyed);
 }
 
+/// A retrieval's query and documents are content, dropped and named on an
+/// `off` project and sealed on an `on` one; what it asked for and how many
+/// came back are metadata, kept in either mode.
+#[sqlx::test]
+async fn a_retrievals_documents_are_content_and_its_counts_metadata(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let int = |key: &str, value: i64| json!({ "key": key, "value": { "intValue": value } });
+    let body = json!({
+        "resourceSpans": [{
+            "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
+                "traceId": TRACE,
+                "spanId": SPAN,
+                "name": "retrieval docs-index",
+                "startTimeUnixNano": "1760000000000000000",
+                "endTimeUnixNano": "1760000000200000000",
+                "attributes": [
+                    text(contract::RUN_ID, RUN),
+                    text(contract::AGENT, "nightly-report"),
+                    text(contract::OPERATION, "retrieval"),
+                    text(contract::DATA_SOURCE_ID, "docs-index"),
+                    int(contract::RETRIEVAL_TOP_K, 5),
+                    int(contract::RETRIEVAL_RETURNED, 3),
+                    text("gen_ai.retrieval.query.text", "refund policy"),
+                    text("gen_ai.retrieval.documents", r#"[{"id":"a"},{"id":"b"},{"id":"c"}]"#),
+                ],
+            }]}]
+        }]
+    })
+    .to_string()
+    .into_bytes();
+    for mode in [ContentMode::Off, ContentMode::On] {
+        let door = door(&pool, mode).await;
+        let (_, answer) = door.send(body.clone()).await;
+        let kept = door.kept(&pool).await;
+        let sealed: Vec<&str> = kept.iter().map(|(field, ..)| field.as_str()).collect();
+        if mode == ContentMode::Off {
+            let message = answer["partialSuccess"]["errorMessage"]
+                .as_str()
+                .unwrap_or_default();
+            for field in [
+                "gen_ai.retrieval.documents: content",
+                "gen_ai.retrieval.query.text: content",
+            ] {
+                assert!(message.contains(field), "{field}: {message}");
+            }
+            assert!(sealed.is_empty(), "{sealed:?}");
+        } else {
+            assert!(
+                answer["partialSuccess"].is_null(),
+                "nothing dropped: {answer}"
+            );
+            assert_eq!(
+                sealed,
+                ["gen_ai.retrieval.documents", "gen_ai.retrieval.query.text"]
+            );
+        }
+        let rows: Vec<(String, String, String, String)> = ch
+            .store
+            .read(
+                &Projects::one(door.project.clone()),
+                "SELECT kind, name, attributes['gen_ai.retrieval.top_k'], \
+                 attributes['telmoni.retrieval.returned'] FROM telemetry.spans \
+                 WHERE project_id IN {projects:Array(String)}",
+            )
+            .fetch_all()
+            .await
+            .expect("the row");
+        let row = (
+            "retrieval".to_owned(),
+            "docs-index".to_owned(),
+            "5".to_owned(),
+            "3".to_owned(),
+        );
+        assert_eq!(rows, [row], "{mode}");
+    }
+}
+
 /// The posture counts what spans arrived with by the inventory's rows, the
 /// content an `off` project dropped among them, to any role on it.
 #[sqlx::test]
@@ -2075,6 +2155,71 @@ async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
         .map(|p| p["failed_runs"].as_u64().unwrap_or(0))
         .sum();
     assert_eq!((runs, failed), (2, 1));
+}
+
+/// The totals keep a retrieval's source where they keep a tool's name, and a
+/// split by tool names tools alone: a source of a tool's name never joins it.
+#[sqlx::test]
+async fn a_split_by_tool_names_tools_alone(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let door = door_over(&pool, ContentMode::Off, true).await;
+    door.auth.seat(
+        "admin-1",
+        &door.organization,
+        &door.project,
+        OrganizationRole::Owner,
+        None,
+    );
+    let at = Utc::now() - chrono::Duration::seconds(30);
+    let rows = [
+        common::received(&door.project, SpanKind::ToolCall, "docs-index", 100, at),
+        common::received(&door.project, SpanKind::Retrieval, "docs-index", 100, at),
+        common::received(&door.project, SpanKind::Retrieval, "faq-index", 100, at),
+        common::received(&door.project, SpanKind::ModelCall, "chat", 100, at),
+    ];
+    ch.store.insert_spans(&rows).await.expect("the spans");
+
+    let (status, totals) = door
+        .lane("GET", "/rollups?days=1&group=tool", "admin-1", None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{totals}");
+    let spans = |key: &str| -> u64 {
+        totals["points"]
+            .as_array()
+            .expect("points")
+            .iter()
+            .filter(|p| p["value"] == key)
+            .map(|p| p["spans"].as_u64().unwrap_or(0))
+            .sum()
+    };
+    assert_eq!(spans("docs-index"), 1, "the tool alone: {totals}");
+    assert_eq!(spans("faq-index"), 0, "a source is no tool: {totals}");
+    assert_eq!(
+        spans(""),
+        3,
+        "the retrievals sit with every other kind: {totals}"
+    );
+    let kept: Vec<(String, String)> = ch
+        .store
+        .read(
+            &Projects::one(door.project.clone()),
+            "SELECT kind, tool FROM telemetry.spans_hourly \
+             WHERE project_id IN {projects:Array(String)} AND tool != '' ORDER BY kind, tool",
+        )
+        .fetch_all()
+        .await
+        .expect("the totals");
+    let keyed = |kind: &str, tool: &str| (kind.to_owned(), tool.to_owned());
+    assert_eq!(
+        kept,
+        [
+            keyed("retrieval", "docs-index"),
+            keyed("retrieval", "faq-index"),
+            keyed("tool_call", "docs-index"),
+        ]
+    );
 }
 
 /// A split by a tag, an end user or a session reads the spans: each call by

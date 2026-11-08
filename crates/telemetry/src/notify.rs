@@ -404,8 +404,9 @@ async fn run_of(state: &AppState, rule: &RuleRow, told: &[Told]) -> Option<Examp
 
 /// The console's trace list as the alert read it, spelled with ids: its
 /// filters, its window in days, and where it counts failures, those that
-/// failed. The list has no filter by provider, so an alert's widens it; none
-/// past [`LINK_MAX`], whose filters would run the notice past its bounds.
+/// failed. The list has no filter by provider or source, so an alert's widens
+/// it; none past [`LINK_MAX`], whose filters would run the notice past its
+/// bounds.
 fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
     let origin = state.config.app_url.as_deref()?;
     let mut url = reqwest::Url::parse(&format!(
@@ -594,6 +595,7 @@ fn picked(kind: SpanKind, pick: Pick) -> String {
         SpanKind::Step => "step",
         SpanKind::ModelCall => "model call",
         SpanKind::ToolCall => "tool call",
+        SpanKind::Retrieval => "retrieval",
         SpanKind::Span => "span",
     };
     match (pick, kind) {
@@ -923,6 +925,7 @@ fn measured(rule: &RuleRow) -> String {
         SpanKind::Step => "steps",
         SpanKind::ModelCall => "model calls",
         SpanKind::ToolCall => "tool calls",
+        SpanKind::Retrieval => "retrievals",
         SpanKind::Span => "spans",
     };
     format!("{folded} of {of} {}", over(rule.definition.window))
@@ -1498,6 +1501,10 @@ mod tests {
         assert_eq!(
             picked(SpanKind::ToolCall, Pick::LatestFailed),
             "The run of the latest failed tool call"
+        );
+        assert_eq!(
+            picked(SpanKind::Retrieval, Pick::LatestFailed),
+            "The run of the latest failed retrieval"
         );
         assert_eq!(
             picked(SpanKind::ModelCall, Pick::MostTokens),

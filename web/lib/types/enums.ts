@@ -61,6 +61,7 @@ export const SpanKind = {
   Step:      "step",
   ModelCall: "model_call",
   ToolCall:  "tool_call",
+  Retrieval: "retrieval",
   Span:      "span",
 } as const;
 export type SpanKind = typeof SpanKind[keyof typeof SpanKind];

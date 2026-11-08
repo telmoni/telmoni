@@ -48,6 +48,9 @@ def perform(
     elif op == "tool_call":
         with telmoni.tool_call("lookup", run=run):
             pass
+    elif op == "retrieval":
+        with telmoni.retrieval("kb", run=run):
+            pass
     else:
         assert isinstance(op, dict)
         call(telmoni, run, calls[op["model_call"]])

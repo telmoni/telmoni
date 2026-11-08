@@ -31,7 +31,7 @@ row each, fifty to a page:
 | User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
 | Session | The session the run belongs to (`gen_ai.conversation.id`), as stored: hashed under the project's own key |
 | Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the run's spans failed: a run can recover from a failed call |
-| Steps | How many steps the run took; hover for its model and tool calls |
+| Steps | How many steps the run took; hover for its model calls, tool calls and retrievals |
 | Tokens | Its model calls' input and output tokens, summed; hover for the split |
 | Duration | From its first span's start to its last span's end |
 | Scores | The run's own [scores](/docs/monitoring/scores) by name: a number's mean, a yes or no's share of yeses, a category's values |
@@ -41,8 +41,8 @@ run's last span ended, the deployment its spans were sent from
 (**Environment**: `production`, `staging`) and its release (**Release**: a
 version or a commit), each once where a run crossed services deployed apart,
 the class of the error it ended on (**Error**: `TimeoutError`,
-`RateLimitError` — never its message), its model calls, tool calls, errors
-and spans, its input, output and cached tokens, how soon the first of its
+`RateLimitError` — never its message), its model calls, tool calls,
+retrievals, errors and spans, its input, output and cached tokens, how soon the first of its
 model calls that said began to answer (**Time to first token**), what its
 model calls cost (**Spend**: each as it reported, else its tokens at the
 project's own price or the price table's, the run's own and never scaled by
@@ -191,7 +191,8 @@ project's [Alerts](/docs/monitoring/alerts#from-a-trace) page.
 
 Below it, the run's spans stand as the tree they ran in, each under the span
 it names as its parent: its kind, its name, how long it ran, a model call's
-tokens, and, for a span that failed, the error's type in red. **Search spans**
+tokens, a retrieval's results — how many came back, of how many it asked for —
+and, for a span that failed, the error's type in red. **Search spans**
 finds spans by name, kind, model, provider or error type, each with the spans
 above it.
 **Timeline** draws each span as a bar on one line of time, from the run's
@@ -203,12 +204,13 @@ own.
 Beside the tree stands the span you choose, the run's own first: its kind, its
 status and the error's type, its model and provider, the environment and
 release it was sent from, the tool it called — the model, the environment,
-the release and the tool each a link to the list narrowed to them — its
+the release and the tool each a link to the list narrowed to them — a
+retrieval's source, how many results it asked for and how many came back, its
 tokens, input, output and cached, the cost it reported, in US dollars, where
 it reported one, when it started and ended to the
 millisecond, how long it ran and how soon its answer began, when it was
 received, and its ids. The run's own span adds the
-run's steps, calls and tokens, its user, session and tags, and its sample
+run's steps, calls, retrievals and tokens, its user, session and tags, and its sample
 rate where a plan [kept one run in ten](/docs/api/ingest#what-is-dropped-at-the-door). **Attributes** lists what else was kept with the
 span under its own name, and **Raw** shows either as it was stored. The
 trace holds a run's first 5,000 spans, fewer where their names, tags and

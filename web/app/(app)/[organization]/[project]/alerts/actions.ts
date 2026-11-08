@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 
 import { refused } from "@/lib/action-result";
-import { MUTE_MINUTES_MAX } from "@/lib/alerts";
+import { ALERT_KINDS, MUTE_MINUTES_MAX } from "@/lib/alerts";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { admitProject } from "@/lib/server/admit";
@@ -16,7 +16,6 @@ import {
   RuleMeasure,
   RuleOperator,
   RuleWindow,
-  SpanKind,
   SpanStatus,
 } from "@/lib/types/enums";
 
@@ -37,7 +36,7 @@ const Values = z.array(z.string()).optional();
 
 const RuleInputSchema = z.strictObject({
   name: z.string(),
-  kind: z.enum([SpanKind.Run, SpanKind.Step, SpanKind.ModelCall, SpanKind.ToolCall]),
+  kind: z.enum(ALERT_KINDS),
   measure: z.enum(RuleMeasure),
   aggregation: z.enum(RuleAggregation),
   filters: z.strictObject({
@@ -45,6 +44,7 @@ const RuleInputSchema = z.strictObject({
     model: Values,
     provider: Values,
     tool: Values,
+    source: Values,
     status: z.array(z.enum(SpanStatus)).optional(),
     environment: Values,
     release: Values,

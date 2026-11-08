@@ -447,6 +447,13 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     group: "counts",
   },
   {
+    key: TraceColumn.Retrievals,
+    label: "Retrievals",
+    numeric: true,
+    group: "counts",
+    hint: "The run's searches of a vector store or a memory.",
+  },
+  {
     key: TraceColumn.Errors,
     label: "Errors",
     sort: TraceSort.Errors,
@@ -829,8 +836,52 @@ export const KIND_LABEL: Record<SpanKind, string> = {
   [SpanKind.Step]: "Step",
   [SpanKind.ModelCall]: "Model call",
   [SpanKind.ToolCall]: "Tool call",
+  [SpanKind.Retrieval]: "Retrieval",
   [SpanKind.Span]: "Span",
 };
+
+/** A count's figures alone: no sign, point, exponent or space. */
+const WHOLE = /^\d+$/;
+
+/** A count an attribute holds as text: a whole number from 0 within the safe
+ *  integers, else none, so one absent or malformed is never drawn as 0. */
+export function countOf(text: string | undefined): number | null {
+  if (text === undefined || !WHOLE.test(text)) return null;
+  const count = Number(text);
+  return Number.isSafeInteger(count) ? count : null;
+}
+
+/** What a retrieval asked for and what came back, as sent, never cut to what
+ *  it asked for: a memory search counts its records where ours counts documents. */
+export function retrievalCounts(attributes: Readonly<Record<string, string>>): {
+  asked: number | null;
+  returned: number | null;
+} {
+  return {
+    asked: countOf(attributes["gen_ai.retrieval.top_k"]),
+    returned: countOf(attributes["telmoni.retrieval.returned"] ?? attributes["gen_ai.memory.record.count"]),
+  };
+}
+
+/** A retrieval's count as its row says it, `3 of 5`, or `3` where it asked for
+ *  no number; none where nothing counted what came back. */
+export function retrievalWords(attributes: Readonly<Record<string, string>>): string | null {
+  const { asked, returned } = retrievalCounts(attributes);
+  if (returned === null) return null;
+  return asked === null ? formatCount(returned) : `${formatCount(returned)} of ${formatCount(asked)}`;
+}
+
+/** What a retrieval searched: the id its row is named by, else the one it
+ *  sent where that ran past a name's cap; none where it sent neither. */
+export function retrievalSource(span: {
+  name: string;
+  attributes: Readonly<Record<string, string>>;
+}): string | null {
+  const ids = [span.attributes["gen_ai.data_source.id"], span.attributes["gen_ai.memory.store.id"]].filter(
+    (id): id is string => id !== undefined && id !== "",
+  );
+  return ids.find((id) => id === span.name) ?? ids[0] ?? null;
+}
 
 /** A run's id as a row shows it: its first eight characters, enough to tell
  *  two apart, the whole on the trace's own page. */

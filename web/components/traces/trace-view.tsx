@@ -60,6 +60,8 @@ import {
   formatCount,
   formatDuration,
   barsById,
+  retrievalCounts,
+  retrievalSource,
   shortId,
   spanMillis,
   sessionRunsHref,
@@ -589,6 +591,9 @@ function SpanDetail({
   const reaching = useWindowReaching(span.started_at);
   const tokens = span.input_tokens + span.output_tokens;
   const run = span.kind === SpanKind.Run;
+  const calls = summary.modelCalls + summary.toolCalls + summary.retrievals;
+  const found = span.kind === SpanKind.Retrieval ? retrievalCounts(span.attributes) : null;
+  const source = found ? retrievalSource(span) : null;
   const tags = Object.entries(span.tags);
 
   return (
@@ -678,10 +683,10 @@ function SpanDetail({
                 {run && (
                   <Field label="Calls">
                     {formatCount(summary.steps)} {summary.steps === 1 ? "step" : "steps"},{" "}
-                    {formatCount(summary.modelCalls + summary.toolCalls)}{" "}
-                    {summary.modelCalls + summary.toolCalls === 1 ? "call" : "calls"}:{" "}
+                    {formatCount(calls)} {calls === 1 ? "call" : "calls"}:{" "}
                     <span className="text-muted-foreground">
-                      {formatCount(summary.modelCalls)} to a model, {formatCount(summary.toolCalls)} to a tool
+                      {formatCount(summary.modelCalls)} to a model, {formatCount(summary.toolCalls)} to a tool,{" "}
+                      {formatCount(summary.retrievals)} {summary.retrievals === 1 ? "retrieval" : "retrievals"}
                     </span>
                   </Field>
                 )}
@@ -725,6 +730,14 @@ function SpanDetail({
                   >
                     {span.name}
                   </FilterField>
+                )}
+                {/* The list has no filter by source, so it links nowhere. */}
+                {found && (
+                  <>
+                    {source !== null && <Field label="Source">{source}</Field>}
+                    {found.asked !== null && <Field label="Asked for">{formatCount(found.asked)}</Field>}
+                    {found.returned !== null && <Field label="Returned">{formatCount(found.returned)}</Field>}
+                  </>
                 )}
                 {(span.kind === SpanKind.ModelCall || tokens > 0) && (
                   <>

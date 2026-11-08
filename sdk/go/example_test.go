@@ -14,6 +14,11 @@ func lookUp(context.Context, string) (string, error) {
 	return "", errors.New("took 30 s")
 }
 
+// searchIndex stands for a search of the agent's vector store.
+func searchIndex(context.Context, string, int) []map[string]any {
+	return []map[string]any{{"id": "kb-112", "score": 0.91}}
+}
+
 func Example() {
 	// Reads TELMONI_ENDPOINT, TELMONI_API_KEY (a key with the ingest scope),
 	// TELMONI_ORG, TELMONI_ENVIRONMENT and TELMONI_RELEASE, and nothing else.
@@ -49,6 +54,10 @@ func Example() {
 		tool.Returned(result)
 	}
 	tool.End()
+
+	_, found := run.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: "weather", TopK: 5})
+	found.Returned(searchIndex(ctx, "weather", 5)) // counted in every mode, its documents content
+	found.End()
 }
 
 func ExampleClient_RecordRun() {

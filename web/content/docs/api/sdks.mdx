@@ -1,10 +1,10 @@
 ---
 title: "Client SDKs"
-description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust: an agent's runs, steps, model calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere else."
+description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust: an agent's runs, steps, model calls, tool calls and retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else."
 ---
 
-The SDKs record an agent's **runs**, and the **steps**, **model calls** and
-**tool calls** inside each, as OpenTelemetry spans, and send them to
+The SDKs record an agent's **runs**, and the **steps**, **model calls**,
+**tool calls** and **retrievals** inside each, as OpenTelemetry spans, and send them to
 [ingest](/docs/api/ingest), and, where content is sent, the images and files
 their messages carry to the platform beside them ([content](#content)). Each one runs a tracer provider of its own beside
 whatever OpenTelemetry your application already has, sends nothing outside a
@@ -58,8 +58,9 @@ carry nothing else; Rust also carries serde, serde_json, tracing, uuid, ring and
 
 A run is one execution of an agent. Open one around the agent's work, and
 inside it open a step for each unit of work, a model call around each call to
-a model, and a tool call around each tool. The SDK sends each span when it
-ends. Set `TELMONI_API_KEY` to a [project API key](/docs/api/api-keys)
+a model, a tool call around each tool, and a [retrieval](#a-retrieval)
+around each search of a vector store or a memory. The SDK sends each span when
+it ends. Set `TELMONI_API_KEY` to a [project API key](/docs/api/api-keys)
 holding the **ingest** scope.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
@@ -317,6 +318,84 @@ loop empties; none on a forced exit (`os._exit`, `process.exit()`,
 pool that terminates its workers, as `with Pool(...)` does as it closes, stops
 them with a signal too, so a task run there flushes before it returns.
 
+### A retrieval
+
+A search of a vector store or a memory is a call of its own: open a retrieval
+around it, named by the source it searched, and hand it what came back. The
+query and the documents are [content](#content), sent only when you ask and the
+project's mode allows; how many results it asked for (`top_k`) and how many
+came back are metadata, sent in every mode, the second counted from the list
+you hand over before anything leaves the process. Telmoni keeps it as a
+retrieval, named by its source, which an [alert](/docs/monitoring/alerts)
+counts, times and fails as it does tool calls, by source.
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```python
+    with telmoni.retrieval("kb-articles", query=question, top_k=5) as found:
+        found.returned(index.search(question, k=5))  # your vector store's search
+
+    with telmoni.retrieval("customer-preferences", top_k=3, memory=True) as remembered:
+        remembered.returned(memories.search(question, limit=3))
+    ```
+
+    `retrieval` is a context manager, an `async with` and a decorator, as
+    `tool_call` is, on the client or on a run; `returned` takes a list or a
+    tuple.
+  </Tab>
+  <Tab value="TypeScript">
+    ```typescript
+    await run.retrieval('kb-articles', { query: question, topK: 5 }, async (found) => {
+      found.returned(await index.search(question, 5)); // your vector store's search
+    });
+    await run.retrieval('customer-preferences', { topK: 3, memory: true }, async (remembered) => {
+      remembered.returned(await memories.search(question, 3));
+    });
+    ```
+
+    `retrieval` opens on a run or a step, as `toolCall` does; `returned` takes
+    an array.
+  </Tab>
+  <Tab value="Go">
+    ```go
+    _, found := run.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: question, TopK: 5})
+    found.Returned(index.Search(question, 5)) // your vector store's search
+    found.End()
+    ```
+
+    `Returned` takes a slice or an array, never of bytes, so a `[]byte` or a
+    `json.RawMessage` is refused; a nil slice counts as none came back. A
+    `TopK` of 0 is none.
+  </Tab>
+  <Tab value="Rust">
+    ```rust
+    use telmoni::RetrievalOptions;
+
+    let found = run.retrieval(
+        "kb-articles",
+        RetrievalOptions { query: Some(question.into()), top_k: Some(5), ..RetrievalOptions::default() },
+    )?;
+    found.returned(&index.search(question, 5)?); // your vector store's search: a Vec<serde_json::Value>
+    drop(found);
+    ```
+
+    `retrieval_with` and `try_retrieval_with` are its closure forms, as a tool
+    call's are.
+  </Tab>
+</Tabs>
+
+With `memory` on, the span is a search of a memory store, `search_memory`,
+its source `gen_ai.memory.store.id` and how many records came back
+`gen_ai.memory.record.count`; otherwise it is `retrieval <source>`, its source
+`gen_ai.data_source.id` and the count `telmoni.retrieval.returned`. A source
+names a store, never a person: it is kept as metadata in every mode and in the
+hourly totals for thirteen months, so a memory kept for each of your users
+names the user in the run's `user_id`. A source past 145 characters is cut to
+145, a blank one sends the span named by its operation alone, and a `top_k`,
+read as a token count is, is left off below 0, each with one warning. Anything
+handed to `returned` but a list is refused whole, with one warning, and the
+last list handed over wins: its documents and its count are set together.
+
 ---
 
 ## A run recorded after it ended
@@ -535,7 +614,7 @@ within, and any score the version of what scored, up to 64 characters. A
 score is metadata, sent in every content mode and never handed to your
 [mask](#masking-content).
 
-On a handle still open — a run, a step, a model call or a tool call — `score`
+On a handle still open — a run, a step, a model call, a tool call or a retrieval — `score`
 puts it on that span, as OpenTelemetry's evaluation event, and it leaves with
 the span. Once the span has ended, a person's feedback on an answer say, or
 for a session, the client's `score` names what it scores — a run by its id, a
@@ -741,7 +820,7 @@ A run opened with a cap is held to it in the agent's own process, with no
 call to Telmoni: `max_steps` caps its steps, and `max_spend`, in US dollars,
 what its model calls cost. Once the run reaches a cap, what it opens next is
 refused before it opens: a step past its step cap, and, once what it spent is
-its spend cap or more, any step, model call or tool call. A call's cost is
+its spend cap or more, any step, model call, tool call or retrieval. A call's cost is
 known only once it answers, so a run can spend past its cap by the calls
 already open as it crossed: one, where it makes them one at a time.
 
@@ -783,7 +862,7 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     ```
 
     `CapExceededError`, a `RuntimeError`, is raised where the step, model
-    call or tool call would open, naming the `cap` (`steps` or `spend`), its
+    call, tool call or retrieval would open, naming the `cap` (`steps` or `spend`), its
     `limit` and what the run had `used`; escaping the run, it marks the run
     failed with its class. A cap that is not above 0 raises `ValueError`, as a
     price that names no provider or model, or is no number from 0, does; a
@@ -802,7 +881,7 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     }); // rejects with a CapExceededError once the run reached a cap
     ```
 
-    `step`, `modelCall` and `toolCall` throw `CapExceededError` before their
+    `step`, `modelCall`, `toolCall` and `retrieval` throw `CapExceededError` before their
     callback runs, naming the `cap` (`steps` or `spend`), its `limit` and what
     the run had `used`; escaping the run, it marks the run failed with its
     class. A cap that is not above 0 throws a `RangeError`; a price that names
@@ -834,8 +913,8 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     }
     ```
 
-    Go's openers return no error: past a cap, `Step`, `ModelCall` and
-    `ToolCall` open nothing and return a context already cancelled, its
+    Go's openers return no error: past a cap, `Step`, `ModelCall`,
+    `ToolCall` and `Retrieval` open nothing and return a context already cancelled, its
     `context.Cause` a `*CapExceededError` naming the `Cap`, its `Limit` and
     what the run had `Used`, so a request made with it fails at once, as one
     past its deadline does, and nothing opens under it; `run.Err()` gives the
@@ -866,7 +945,7 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     }
     ```
 
-    `step`, `model_call` and `tool_call` return `Error::CapExceeded`, naming
+    `step`, `model_call`, `tool_call` and `retrieval` return `Error::CapExceeded`, naming
     the `cap` (`Cap::Steps` or `Cap::Spend`), its `limit` and what the run had
     `used`, and open nothing; carried out of `try_run_with`, it marks the run
     failed with its type, `Error`. `run` returns `Error::MaxSteps` for a step
@@ -920,7 +999,9 @@ from 0, taken by its answer (`answered(time_to_first_token=0.35)`,
 `Reply { time_to_first_token: Some(d), .. }`). In Python and TypeScript, a
 time below 0 or not finite is left off the call with one warning, as is a
 time below 0 in Go. A tool call is
-`execute_tool <name>`. A failure is marked by the error's class, as
+`execute_tool <name>`, and a retrieval `retrieval <source>`, or a memory's
+search `search_memory`, with what it asked for and how many came back
+([a retrieval](#a-retrieval)). A failure is marked by the error's class, as
 `error.type`, and an error status; its message is recorded on the span as an
 OpenTelemetry `exception` event (`exception.type`, `exception.message`, and
 `exception.stacktrace` in Python and TypeScript, where a stack comes cheaply)
@@ -931,8 +1012,9 @@ the server keeps of each.
 
 ### Content
 
-Prompts, completions, tool arguments and results — `input_messages`,
-`output_messages`, `system_instructions`, `arguments`, `returned(...)` — are
+Prompts, completions, tool arguments and results, and a retrieval's query and
+documents — `input_messages`, `output_messages`, `system_instructions`,
+`arguments`, `returned(...)`, `query` — are
 recorded on the span and taken off by the exporter before anything leaves
 the process. A run carries its own messages the same way, on its own span:
 what it was asked as it opens, and what it answered by `answered` (Python's

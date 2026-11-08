@@ -20,6 +20,7 @@ import {
   RosterChangeSchema,
 } from "@/lib/server/roster";
 import { AuditExportListSchema, AuditExportSchema } from "@/lib/types/audit-export";
+import { SpanKind } from "@/lib/types/enums";
 import { SettledInviteSchema } from "@/lib/types/settled-invite";
 
 import { ActiveSessionListSchema } from "./active-sessions";
@@ -167,6 +168,17 @@ describe("the server's answers", () => {
 
   it.each(Object.entries(READ_BY_NAME))("%s carries each key its reader takes", (name, keys) => {
     expect(Object.keys(pinned(name) as object)).toEqual(expect.arrayContaining([...keys]));
+  });
+
+  // ⚠ A filter the reader drops reopens an alert wider than it was saved, and
+  // saving it again keeps it so.
+  it("reads back every filter of each saved alert, a retrieval's source among them", () => {
+    const sent = z
+      .object({ rules: z.array(z.object({ filters: z.record(z.string(), z.unknown()) })) })
+      .parse(pinned("telemetry/alerts.json"));
+    const read = AlertListSchema.parse(pinned("telemetry/alerts.json"));
+    expect(read.rules.map((rule) => rule.filters)).toEqual(sent.rules.map((rule) => rule.filters));
+    expect(read.rules.find((rule) => rule.kind === SpanKind.Retrieval)?.filters.source).toEqual(["docs-index"]);
   });
 
   it("each has a reader", () => {

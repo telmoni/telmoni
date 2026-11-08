@@ -2,8 +2,8 @@
 
 `telmoni`, the Rust SDK for [Telmoni](https://github.com/telmoni/telmoni),
 privacy-first, open-source monitoring for AI agents: an agent's runs, steps,
-model calls and tool calls as OpenTelemetry spans, sent to Telmoni and nowhere
-else. The client owns a
+model calls, tool calls and retrievals as OpenTelemetry spans, sent to Telmoni
+and nowhere else. The client owns a
 tracer provider of its own, built part by part so no `OTEL_*` variable reaches
 it, and runs beside whatever OpenTelemetry the application already has: a run
 opened while an application span is current joins its trace, and the
@@ -28,7 +28,9 @@ point `TELMONI_ENDPOINT` at its machine host; the docs read in
 ## Quick start
 
 ```rust
-use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+use telmoni::{
+    Config, ModelCallOptions, Reply, RetrievalOptions, RunOptions, Telmoni, ToolCallOptions, Usage,
+};
 
 fn main() -> Result<(), telmoni::Error> {
     // Reads TELMONI_ENDPOINT, TELMONI_API_KEY, TELMONI_ORG, TELMONI_ENVIRONMENT, TELMONI_RELEASE,
@@ -64,6 +66,16 @@ fn main() -> Result<(), telmoni::Error> {
     let tool = run.tool_call("search", ToolCallOptions::default())?;
     tool.returned(serde_json::json!({ "results": 3 }));
     drop(tool);
+    let found = run.retrieval(
+        "kb-articles",
+        RetrievalOptions {
+            query: Some("refunds".into()),
+            top_k: Some(5),
+            ..RetrievalOptions::default()
+        },
+    )?;
+    found.returned(&index.search("refunds", 5)); // your vector store's call, a Vec<serde_json::Value>
+    drop(found);
     run.end();
 
     telmoni.shutdown();
@@ -71,7 +83,12 @@ fn main() -> Result<(), telmoni::Error> {
 }
 ```
 
-Every handle is a guard: its span ends when it is dropped or on `end()`.
+Every handle is a guard: its span ends when it is dropped or on `end()`. A
+retrieval is a search of a vector store or an index, sent as
+`retrieval <source>`, or with `memory: true` of a memory store, sent as
+`search_memory`; `returned(&documents)` takes the slice it found and sends how
+many it holds in every mode beside the documents themselves, content
+([Content](#content)), the last slice given standing whole.
 `run` returns `Error::EmptyAgent` for a blank agent name, and `Error::MaxSteps` or
 `Error::MaxSpend` for a cap that is no cap ([The guard](#the-guard)). A
 negative token count, or a `Usage`'s `cost` below 0 or not finite, is left
@@ -80,10 +97,11 @@ ingest keeps, and warns once of the rest. A tag whose key
 is not 1 to 64 characters or whose value is over 256 is left off with one
 warning first and takes no place among them. Past ingest's caps, counted in
 characters, a name, the agent, a model, a provider, a response model or an
-error type is cut to its cap — a step's or a tool's name to 145, the rest to
-128 — and a user past 128 or a session past 200 is left off, since cut it would
-name another; a step named nothing goes as `step`, a model call with no model is
-named by its operation alone, and one of an operation ingest reads as no model
+error type is cut to its cap — a step's or a tool's name or a retrieval's
+source to 145, the rest to 128 — and a user past 128 or a session past 200 is
+left off, since cut it would name another; a step named nothing goes as `step`,
+a model call with no model and a retrieval with a blank source are named by
+their operation alone, and a model call of an operation ingest reads as no model
 call, any but `chat`, `generate_content`, `text_completion` and `embeddings`, goes as `chat`;
 each with one warning, where ingest would refuse the span, or the whole run for
 its agent, user or session, or file the call elsewhere.
@@ -91,7 +109,7 @@ its agent, user or session, or file the call elsewhere.
 and no message; `cancel()` marks it cancelled by the agent. The `_with`
 methods take a closure and return its value, or the `Error` that kept their
 handle from opening — `telmoni.run_with(..)`, `run.step_with(..)`,
-`model_call_with`, `tool_call_with` — and their `try_` forms, for a closure
+`model_call_with`, `tool_call_with`, `retrieval_with` — and their `try_` forms, for a closure
 whose error converts from `telmoni::Error` and implements `Display`, mark an
 `Err` on the span with the error type's name, and its message as an `exception`
 event and the status's message, content ([Content](#content)), before returning
@@ -208,8 +226,8 @@ the mask.
 
 `RunOptions { max_steps: Some(20), max_spend: Some(0.50), .. }` holds a run
 to caps on its steps and on what its model calls cost, in US dollars, counted
-in this process with no call to Telmoni. Past one, `step`, `model_call` and
-`tool_call` return `Error::CapExceeded` (its `cap`, `Cap::Steps` or
+in this process with no call to Telmoni. Past one, `step`, `model_call`,
+`tool_call` and `retrieval` return `Error::CapExceeded` (its `cap`, `Cap::Steps` or
 `Cap::Spend`, its `limit` and what the run had `used`) and open nothing: a
 step past the step cap, and anything once the run spent its spend cap or more.
 A call counts its reported `cost`; else its tokens at a price handed as
@@ -274,8 +292,8 @@ any `Carrier`, a type that is both an OpenTelemetry `Injector` and
 
 ## Content
 
-Prompts, completions, tool arguments and results are content, and so are a
-run's own messages: `RunOptions::input_messages` and
+Prompts, completions, tool arguments and results, and a retrieval's query and
+documents are content, and so are a run's own messages: `RunOptions::input_messages` and
 `run.answered(RunReply { output_messages })`, a failure's message, its
 `exception` event and its status's message, and every event the application
 adds to a span through OpenTelemetry, a score's own keys apart ([Scores](#scores)). They are set on

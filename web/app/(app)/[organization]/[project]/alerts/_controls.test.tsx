@@ -155,6 +155,26 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("reads retrievals, filtered by a source where a tool call's alert takes a tool", async () => {
+    render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
+    fireEvent.click(screen.getByRole("button", { name: /New alert/ }));
+    const panel = screen.getByRole("dialog");
+    pick(within(panel).getByRole("combobox", { name: "Reads" }), "retrieval");
+    expect(within(panel).getByRole("combobox", { name: "Reads" })).toHaveTextContent("Retrievals");
+    expect(within(panel).queryByLabelText("Tool")).toBeNull();
+    fireEvent.change(within(panel).getByLabelText("Name"), { target: { value: "Failing docs searches" } });
+    fireEvent.change(within(panel).getByLabelText("Source"), { target: { value: "docs-index" } });
+    fireEvent.change(within(panel).getByLabelText("Alert when"), { target: { value: "10" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Make alert" }));
+    await waitFor(() => expect(saveAlertAction).toHaveBeenCalledOnce());
+    expect(saveAlertAction.mock.calls[0]![2]).toMatchObject({
+      kind: "retrieval",
+      measure: "failures",
+      filters: { source: ["docs-index"] },
+      alert_threshold: 0.1,
+    });
+  });
+
   it("says what is wrong beside the form and sends nothing, and keeps the lane's refusal", async () => {
     render(<NewAlert {...CONNECT} projectId={PROJECT} connections={CONNECTIONS} />);
     fireEvent.click(screen.getByRole("button", { name: /New alert/ }));

@@ -43,6 +43,8 @@ export const BATCH_SPANS_MAX = 1000;
 export const ATTRIBUTE_KEY_MAX = 128;
 export const ATTRIBUTE_VALUE_MAX = 1024;
 export const CANCELLED = 'telmoni.cancelled';
+/** How many documents a retrieval returned, counted from the list it was handed: the conventions name no such count. */
+export const RETRIEVAL_RETURNED = 'telmoni.retrieval.returned';
 /** The deployment, on the resource: the client's `environment` and `release`. */
 export const ENVIRONMENT = 'deployment.environment.name';
 export const RELEASE = 'service.version';
@@ -72,12 +74,22 @@ export const CACHE_WRITE_INPUT_TOKENS = 'gen_ai.usage.cache_write.input_tokens';
 /** What the call cost in US dollars, as reported: Langfuse's name, since the conventions have none. */
 export const COST = 'gen_ai.usage.cost';
 export const SESSION_ID = 'gen_ai.conversation.id';
+/** What a retrieval searched, a vector store or an index, or a memory: its name. */
+export const DATA_SOURCE_ID = 'gen_ai.data_source.id';
+export const MEMORY_STORE_ID = 'gen_ai.memory.store.id';
+export const RETRIEVAL_TOP_K = 'gen_ai.retrieval.top_k';
+/** How many records a memory search returned. */
+export const MEMORY_RECORD_COUNT = 'gen_ai.memory.record.count';
 
 export const INPUT_MESSAGES = 'gen_ai.input.messages';
 export const OUTPUT_MESSAGES = 'gen_ai.output.messages';
 export const SYSTEM_INSTRUCTIONS = 'gen_ai.system_instructions';
 export const TOOL_CALL_ARGUMENTS = 'gen_ai.tool.call.arguments';
 export const TOOL_CALL_RESULT = 'gen_ai.tool.call.result';
+export const RETRIEVAL_QUERY_TEXT = 'gen_ai.retrieval.query.text';
+export const RETRIEVAL_DOCUMENTS = 'gen_ai.retrieval.documents';
+export const MEMORY_QUERY_TEXT = 'gen_ai.memory.query.text';
+export const MEMORY_RECORDS = 'gen_ai.memory.records';
 
 /** What the exporter takes off a span unless asked and the project allows. */
 /** The content fields the exporter cut so a span fits an export, by name. */
@@ -99,10 +111,10 @@ export const CONTENT: ReadonlySet<string> = new Set([
   'gen_ai.tool.definitions',
   TOOL_CALL_ARGUMENTS,
   TOOL_CALL_RESULT,
-  'gen_ai.retrieval.query.text',
-  'gen_ai.retrieval.documents',
-  'gen_ai.memory.query.text',
-  'gen_ai.memory.records',
+  RETRIEVAL_QUERY_TEXT,
+  RETRIEVAL_DOCUMENTS,
+  MEMORY_QUERY_TEXT,
+  MEMORY_RECORDS,
   'gen_ai.prompt.variable',
   'user.email',
   'user.full_name',
@@ -125,6 +137,9 @@ export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([
 export const DEFAULT_MODEL_OPERATION = 'chat';
 export const TOOL_OPERATION = 'execute_tool';
 export const RUN_OPERATION = 'invoke_agent';
+/** A search of a vector store or an index, and of a memory: ingest reads both as a retrieval. */
+export const RETRIEVAL_OPERATION = 'retrieval';
+export const SEARCH_MEMORY = 'search_memory';
 
 /**
  * The content fields whose messages' `blob` parts the exporter lifts out: each

@@ -275,6 +275,10 @@ pub struct RuleFilters {
     pub provider: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tool: Vec<String>,
+    /// What a retrieval searched: a retrieval alert's alone, as `tool` is a
+    /// tool call alert's.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub status: Vec<SpanStatus>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -302,12 +306,13 @@ macro_rules! calls_admitted {
 }
 
 /// Every filter an alert takes, on `telemetry.spans`. Bound by
-/// [`RuleFilters::bind`].
+/// [`RuleFilters::bind`]; `tools` holds a retrieval alert's sources.
 macro_rules! spans_admitted {
     () => {
         concat!(
             $crate::rules::calls_admitted!(),
-            "AND (empty({tools:Array(String)}) OR (kind = 'tool_call' AND name IN {tools:Array(String)})) ",
+            "AND (empty({tools:Array(String)}) OR (kind IN ('tool_call', 'retrieval') ",
+            "AND name IN {tools:Array(String)})) ",
             "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
         )
     };
@@ -329,8 +334,18 @@ impl RuleFilters {
     pub(crate) fn bind(&self, read: Read) -> Read {
         let statuses: Vec<String> = self.status.iter().map(SpanStatus::to_string).collect();
         self.bind_calls(read)
-            .param("tools", &self.tool)
+            .param("tools", self.names())
             .param("statuses", statuses)
+    }
+
+    /// The names a span's own name is held to: a tool call's tools, or a
+    /// retrieval's sources, which no alert holds together.
+    pub(crate) fn names(&self) -> &[String] {
+        if self.tool.is_empty() {
+            &self.source
+        } else {
+            &self.tool
+        }
     }
 
     /// The filters as the trace list's checks leave them: each value
@@ -347,6 +362,7 @@ impl RuleFilters {
             model: values("model", &self.model, MODEL_MAX)?,
             provider: values("provider", &self.provider, PROVIDER_MAX)?,
             tool: values("tool", &self.tool, NAME_MAX)?,
+            source: values("source", &self.source, NAME_MAX)?,
             status,
             environment: values("environment", &self.environment, ENVIRONMENT_MAX)?,
             release: values("release", &self.release, RELEASE_MAX)?,
@@ -360,7 +376,7 @@ impl RuleFilters {
 #[serde(deny_unknown_fields)]
 pub struct RuleInput {
     pub name: String,
-    /// The spans it reads: runs, steps, model calls or tool calls.
+    /// The spans it reads: runs, steps, model calls, tool calls or retrievals.
     pub kind: SpanKind,
     pub measure: RuleMeasure,
     pub aggregation: RuleAggregation,
@@ -395,7 +411,7 @@ pub struct RuleInput {
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow)]
 pub struct Definition {
     pub name: String,
-    /// The spans it reads: runs, steps, model calls or tool calls.
+    /// The spans it reads: runs, steps, model calls, tool calls or retrievals.
     pub kind: SpanKind,
     pub measure: RuleMeasure,
     pub aggregation: RuleAggregation,
@@ -474,7 +490,9 @@ impl RuleInput {
             )));
         }
         if !self.kind.alertable() {
-            return Err(bad("an alert reads runs, steps, model calls or tool calls"));
+            return Err(bad(
+                "an alert reads runs, steps, model calls, tool calls or retrievals",
+            ));
         }
         if !self.measure.folds(self.aggregation) {
             return Err(bad(&format!(
@@ -573,6 +591,9 @@ impl RuleInput {
         }
         if self.kind != SpanKind::ToolCall && !filters.tool.is_empty() {
             return Err(bad("tool filters tool calls alone"));
+        }
+        if self.kind != SpanKind::Retrieval && !filters.source.is_empty() {
+            return Err(bad("source filters retrievals alone"));
         }
         if !self.alert_threshold.is_finite() {
             return Err(bad("the alert threshold is a finite number"));
@@ -1180,7 +1201,47 @@ mod tests {
             ..input()
         };
         assert!(calls.checked().is_ok());
+        let sources = || RuleFilters {
+            source: vec![" docs-index ".into()],
+            ..RuleFilters::default()
+        };
+        let retrievals = RuleInput {
+            kind: SpanKind::Retrieval,
+            filters: sources(),
+            ..input()
+        };
+        let checked = retrievals
+            .checked()
+            .expect("a retrieval alert takes its sources");
+        assert_eq!(
+            checked.definition.filters.names(),
+            ["docs-index".to_owned()]
+        );
+        assert_eq!(tools().names(), ["search_docs".to_owned()]);
         for refused in [
+            RuleInput {
+                kind: SpanKind::ToolCall,
+                filters: sources(),
+                ..input()
+            },
+            RuleInput {
+                kind: SpanKind::Run,
+                filters: sources(),
+                ..input()
+            },
+            RuleInput {
+                kind: SpanKind::Retrieval,
+                filters: tools(),
+                ..input()
+            },
+            RuleInput {
+                kind: SpanKind::Retrieval,
+                filters: RuleFilters {
+                    tool: tools().tool,
+                    ..sources()
+                },
+                ..input()
+            },
             RuleInput {
                 kind: SpanKind::Step,
                 ..input()

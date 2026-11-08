@@ -119,6 +119,9 @@ pub const CONTENT_CUT: &str = "telmoni.content_cut";
 /// What an SDK's scrubbers replaced in the span's content before it left:
 /// each kind's count, never a value; metadata.
 pub const SCRUBBED: &str = "telmoni.scrubbed";
+/// How many documents a retrieval returned, counted by the SDK from the list
+/// it was handed: the conventions name no such count.
+pub const RETRIEVAL_RETURNED: &str = "telmoni.retrieval.returned";
 /// A failure's class, message and stack trace, as the `exception` event the
 /// conventions name carries them; kept as content.
 pub const EXCEPTION_TYPE: &str = "exception.type";
@@ -175,6 +178,20 @@ pub const TIME_TO_FIRST_CHUNK: &str = "gen_ai.response.time_to_first_chunk";
 /// The session a span belongs to, under the conventions' name for it.
 pub const SESSION_ID: &str = "gen_ai.conversation.id";
 
+// ── A retrieval's names, kept as attributes ──────────────────────────────────
+
+/// The operation of a search of a memory, named by its store first.
+pub const SEARCH_MEMORY: &str = "search_memory";
+/// The vector store or index a retrieval searched: its row's name, and on
+/// any other span, an agent's among them, an attribute alone.
+pub const DATA_SOURCE_ID: &str = "gen_ai.data_source.id";
+/// The memory store a memory search searched: its row's name.
+pub const MEMORY_STORE_ID: &str = "gen_ai.memory.store.id";
+/// How many results a retrieval asked for.
+pub const RETRIEVAL_TOP_K: &str = "gen_ai.retrieval.top_k";
+/// How many records a memory search returned.
+pub const MEMORY_RECORD_COUNT: &str = "gen_ai.memory.record.count";
+
 /// The names the pinned conventions replaced, read as what replaced them,
 /// since exporters lag the conventions: a rename is an edit here, never to
 /// `spans`.
@@ -208,6 +225,8 @@ pub fn kind_of_operation(operation: &str) -> Option<SpanKind> {
     match operation {
         "invoke_agent" | "invoke_workflow" => Some(SpanKind::Run),
         "execute_tool" => Some(SpanKind::ToolCall),
+        "retrieval" | SEARCH_MEMORY => Some(SpanKind::Retrieval),
+        "plan" => Some(SpanKind::Step),
         _ if MODEL_OPERATIONS.contains(&operation) => Some(SpanKind::ModelCall),
         _ => None,
     }
@@ -276,9 +295,13 @@ pub const INVENTORY_SPAN: &[&str] = &[
     "gen_ai.output.type",
     "gen_ai.prompt.name",
     "gen_ai.prompt.version",
-    "gen_ai.data_source.id",
+    DATA_SOURCE_ID,
+    MEMORY_STORE_ID,
+    RETRIEVAL_TOP_K,
+    MEMORY_RECORD_COUNT,
     "server.address",
     SCRUBBED,
+    RETRIEVAL_RETURNED,
 ];
 
 /// The deployment a span was sent from, on its resource: our SDKs set it
@@ -365,6 +388,8 @@ pub enum ReadOn {
     ModelCall,
     /// A tool call.
     ToolCall,
+    /// A retrieval.
+    Retrieval,
     /// Any span that carries it.
     AnySpan,
     /// The resource every span of an export shares.
@@ -374,12 +399,13 @@ pub enum ReadOn {
 impl ReadOn {
     /// Every place, in the page's order.
     #[must_use]
-    pub const fn all() -> [Self; 6] {
+    pub const fn all() -> [Self; 7] {
         [
             Self::EverySpan,
             Self::Run,
             Self::ModelCall,
             Self::ToolCall,
+            Self::Retrieval,
             Self::AnySpan,
             Self::Resource,
         ]
@@ -393,6 +419,7 @@ impl ReadOn {
             Self::Run => "the run",
             Self::ModelCall => "a model call",
             Self::ToolCall => "a tool call",
+            Self::Retrieval => "a retrieval",
             Self::AnySpan => "any span",
             Self::Resource => "the resource",
         }
@@ -491,7 +518,8 @@ const CHOSEN_TEXT: &[&str] = &[
     TOOL_NAME,
     TAG_FAMILY,
     "gen_ai.prompt.name",
-    "gen_ai.data_source.id",
+    DATA_SOURCE_ID,
+    MEMORY_STORE_ID,
     "server.address",
     "service.name",
 ];
@@ -567,6 +595,9 @@ const RULE_CONTENT: &str = "content: what a person or a model wrote; free of an 
                             characters, held only by an export's 1 MiB";
 const RULE_PERSON: &str = "names a person: content, whatever else the span carries";
 const RULE_NAME: &str = "1 to 145 characters";
+const RULE_SOURCE: &str = "as an attribute, a value up to 1,024 characters; as a retrieval's name, \
+                           1 to 145, past which the span's own name is its name";
+const RULE_RESULT_COUNT: &str = "a whole number, 0 or more; another exporter's is kept as sent, and drawn only as a whole number";
 const RULE_1_TO_128: &str = "1 to 128 characters";
 const RULE_COUNT: &str = "a whole number, 0 or more";
 const RULE_REPLACED: &str = "a name the conventions replaced, read as the current one";
@@ -637,8 +668,9 @@ pub const INVENTORY: &[InventoryRow] = &[
         "the column kind",
         Needs::AnyMode,
         "invoke_agent or invoke_workflow is the run; chat, generate_content, text_completion or \
-         embeddings a model call; execute_tool a tool call; any other span a step under the \
-         telmoni scope, a plain span elsewhere",
+         embeddings a model call; execute_tool a tool call; retrieval or search_memory a \
+         retrieval; plan a step; any other span a step under the telmoni scope, a plain span \
+         elsewhere",
     ),
     row(
         AGENT_NAME,
@@ -856,11 +888,41 @@ pub const INVENTORY: &[InventoryRow] = &[
         RULE_ATTRIBUTE,
     ),
     row(
-        "gen_ai.data_source.id",
+        DATA_SOURCE_ID,
         ReadOn::AnySpan,
+        "attributes, under its own name; on a retrieval, the column name too",
+        Needs::AnyMode,
+        RULE_SOURCE,
+    ),
+    row(
+        MEMORY_STORE_ID,
+        ReadOn::AnySpan,
+        "attributes, under its own name; on a memory search, the column name too",
+        Needs::AnyMode,
+        RULE_SOURCE,
+    ),
+    row(
+        RETRIEVAL_TOP_K,
+        ReadOn::Retrieval,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
-        RULE_ATTRIBUTE,
+        RULE_RESULT_COUNT,
+    ),
+    row(
+        MEMORY_RECORD_COUNT,
+        ReadOn::AnySpan,
+        "attributes, under its own name: the records a memory search returned, or another memory \
+         operation attempted",
+        Needs::AnyMode,
+        RULE_RESULT_COUNT,
+    ),
+    row(
+        RETRIEVAL_RETURNED,
+        ReadOn::Retrieval,
+        KEPT_ATTRIBUTE,
+        Needs::AnyMode,
+        "a whole number, 0 or more: the documents the SDK was handed, counted before any \
+         content left; another exporter's is kept as sent, and drawn only as a whole number",
     ),
     row(
         "server.address",
@@ -1142,6 +1204,11 @@ mod tests {
         }
         assert!(RULE_CONTENT.contains(&format!("{} characters", grouped(ATTRIBUTE_VALUE_MAX))));
         assert!(RULE_CONTENT.contains(&format!("{} MiB", BATCH_MAX_BYTES / (1024 * 1024))));
+        assert!(RULE_SOURCE.contains(&format!(
+            "a value up to {} characters",
+            grouped(ATTRIBUTE_VALUE_MAX)
+        )));
+        assert!(RULE_SOURCE.contains(&format!("1 to {NAME_MAX}, past which")));
     }
 
     /// Every attribute a row names is counted under that row, where it is
@@ -1228,11 +1295,15 @@ mod tests {
             ("text_completion", SpanKind::ModelCall),
             ("embeddings", SpanKind::ModelCall),
             ("execute_tool", SpanKind::ToolCall),
+            ("retrieval", SpanKind::Retrieval),
+            ("search_memory", SpanKind::Retrieval),
+            ("plan", SpanKind::Step),
         ] {
             assert_eq!(kind_of_operation(operation), Some(kind), "{operation}");
         }
-        assert_eq!(kind_of_operation("create_agent"), None);
-        assert_eq!(kind_of_operation(""), None);
+        for unread in ["create_agent", "create_memory", "upsert_memory", ""] {
+            assert_eq!(kind_of_operation(unread), None, "{unread}");
+        }
     }
 
     /// A model it takes never costs a call its name, `<operation> <model>`.

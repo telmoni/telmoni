@@ -1,7 +1,7 @@
 /**
  * The guard: a run's opt-in caps on its steps and its spend, counted in this
- * process with no call to Telmoni, thrown at the step, model call or tool call
- * the run would open past one.
+ * process with no call to Telmoni, thrown at the step, model call, tool call
+ * or retrieval the run would open past one.
  *
  * A call's cost is counted as the server counts it: as reported, else its
  * tokens at its price in the table this release carries (`model_prices.json`,

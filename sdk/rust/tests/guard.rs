@@ -16,8 +16,8 @@ use common::{
 use serde_json::{Value, json};
 use telmoni::transport::TransportError;
 use telmoni::{
-    Cap, Config, Error, Hooks, ModelCall, ModelCallOptions, Price, Reply, Run, RunOptions, Telmoni,
-    ToolCallOptions, Usage,
+    Cap, Config, Error, Hooks, ModelCall, ModelCallOptions, Price, Reply, RetrievalOptions, Run,
+    RunOptions, Telmoni, ToolCallOptions, Usage,
 };
 
 fn near(a: f64, b: f64) -> bool {
@@ -86,6 +86,9 @@ fn perform(run: &Run, op: &Value, calls: &[Value]) -> Result<(), Error> {
         Some("tool_call") => run
             .tool_call("lookup", ToolCallOptions::default())
             .map(telmoni::ToolCall::end),
+        Some("retrieval") => run
+            .retrieval("kb", RetrievalOptions::default())
+            .map(telmoni::Retrieval::end),
         _ => {
             let n = op
                 .get("model_call")

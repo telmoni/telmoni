@@ -65,8 +65,9 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         ..span(&project, SpanKind::ToolCall, "search_docs", 40)
     };
     let step = span(&project, SpanKind::Step, "plan the reply", 10);
+    let found = span(&project, SpanKind::Retrieval, "docs-index", 30);
     ch.store
-        .insert_spans(&[call.clone(), run.clone(), tool, step])
+        .insert_spans(&[call.clone(), run.clone(), tool, step, found])
         .await
         .expect("the module's user inserts with no setting naming a project");
 
@@ -116,6 +117,16 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
                 1_000
             ),
             (
+                "retrieval".into(),
+                "docs-index".into(),
+                "ok".into(),
+                String::new(),
+                1,
+                1,
+                0,
+                0
+            ),
+            (
                 "run".into(),
                 String::new(),
                 "ok".into(),
@@ -146,7 +157,8 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
                 0
             ),
         ],
-        "the rollup keys a tool call by its name, and no other kind by its own"
+        "the rollup keys a tool call by its name and a retrieval by its source, and no other kind \
+         by its own"
     );
 
     // A t-digest answers in `Float32`, whatever it was fed. A closed set

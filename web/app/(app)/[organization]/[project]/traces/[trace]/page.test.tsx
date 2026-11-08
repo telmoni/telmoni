@@ -277,6 +277,58 @@ describe("TracePage", () => {
     expect(within(chosen()).getByText("Time to first token").nextSibling).toHaveTextContent("420 ms");
   });
 
+  it("draws a retrieval by its source with its count, beside the run's other calls", async () => {
+    const found = span({
+      span_id: "0000000000000005",
+      parent_span_id: "0000000000000002",
+      kind: "retrieval",
+      name: "docs-index",
+      attributes: {
+        "gen_ai.data_source.id": "docs-index",
+        "gen_ai.retrieval.top_k": "5",
+        "telmoni.retrieval.returned": "3",
+      },
+      started_at: "2026-10-11T03:00:01.820Z",
+      ended_at: "2026-10-11T03:00:01.900Z",
+    });
+    // A memory search that found nothing, and asked for no number.
+    const recalled = span({
+      span_id: "0000000000000006",
+      parent_span_id: "0000000000000002",
+      kind: "retrieval",
+      name: "preferences",
+      attributes: { "gen_ai.memory.store.id": "preferences", "gen_ai.memory.record.count": "0" },
+      started_at: "2026-10-11T03:00:01.905Z",
+      ended_at: "2026-10-11T03:00:01.909Z",
+    });
+    mockTrace = {
+      kind: "ok",
+      trace: { run_id: RUN, spans: [...SPANS, found, recalled], truncated: false, spend: null, content: [] },
+    };
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const tree = screen.getByRole("tree", { name: "Spans" });
+    const row = (name: string) =>
+      within(tree)
+        .getAllByRole("treeitem")
+        .find((item) => item.textContent?.includes(name))!;
+    expect(within(row("docs-index")).getByText("3 of 5")).toBeInTheDocument();
+    // ⚠ Nothing found is a count of 0, never a count left out.
+    expect(within(row("preferences")).getByText("0")).toBeInTheDocument();
+
+    expect(within(chosen()).getByText(/1 step, 4 calls/)).toBeInTheDocument();
+    expect(within(chosen()).getByText("1 to a model, 1 to a tool, 2 retrievals")).toBeInTheDocument();
+
+    const field = (label: string) => within(chosen()).queryByText(label)?.nextSibling;
+    fireEvent.click(within(tree).getByText("docs-index"));
+    expect(field("Source")).toHaveTextContent("docs-index");
+    expect(field("Asked for")).toHaveTextContent("5");
+    expect(field("Returned")).toHaveTextContent("3");
+    fireEvent.click(within(tree).getByText("preferences"));
+    expect(field("Source")).toHaveTextContent("preferences");
+    expect(field("Returned")).toHaveTextContent("0");
+    expect(within(chosen()).queryByText("Asked for")).toBeNull();
+  });
+
   it("walks the tree from the keyboard, the focus with the span chosen, and shuts a branch and opens it again", async () => {
     // The frame the row waits for, to take the focus, comes at once.
     vi.stubGlobal("requestAnimationFrame", (step: FrameRequestCallback) => {

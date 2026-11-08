@@ -102,14 +102,21 @@
     {
       "name": "a step past the step cap raises before it opens",
       "max_steps": 2,
-      "ops": ["step", { "model_call": 1 }, "step", "tool_call", "step"],
-      "refused": { "at": 4, "cap": "steps", "limit": 2, "used": 2 },
+      "ops": ["step", { "model_call": 1 }, "step", "tool_call", "retrieval", "step"],
+      "refused": { "at": 5, "cap": "steps", "limit": 2, "used": 2 },
       "spent": 0.004035
     },
     {
       "name": "past the spend cap, whatever the run opens next raises",
       "max_spend": 0.25,
       "ops": [{ "model_call": 1 }, { "model_call": 0 }, "tool_call"],
+      "refused": { "at": 2, "cap": "spend", "limit": 0.25, "used": 0.254035 },
+      "spent": 0.254035
+    },
+    {
+      "name": "past the spend cap, a retrieval raises as a tool call does",
+      "max_spend": 0.25,
+      "ops": [{ "model_call": 1 }, { "model_call": 0 }, "retrieval"],
       "refused": { "at": 2, "cap": "spend", "limit": 0.25, "used": 0.254035 },
       "spent": 0.254035
     },
@@ -121,9 +128,9 @@
       "spent": 0.25
     },
     {
-      "name": "a run inside its caps opens what it asks",
+      "name": "a run inside its caps opens what it asks, a retrieval no step",
       "max_steps": 3, "max_spend": 0.25,
-      "ops": ["step", { "model_call": 1 }, { "model_call": 3 }, "tool_call", "step", "step"],
+      "ops": ["step", "retrieval", { "model_call": 1 }, { "model_call": 3 }, "tool_call", "retrieval", "step", "step"],
       "refused": null,
       "spent": 0.006035
     },

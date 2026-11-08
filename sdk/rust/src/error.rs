@@ -4,8 +4,8 @@
 use std::fmt;
 
 /// Why a run did not open, a record was not sent, or a step or call did not
-/// open. Nothing else in the SDK fails: a step, a model call or a tool call
-/// opens unless its run reached a cap, and an export that fails is warned
+/// open. Nothing else in the SDK fails: a step, a model call, a tool call or
+/// a retrieval opens unless its run reached a cap, and an export that fails is warned
 /// about, never returned.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]

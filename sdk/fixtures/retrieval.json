@@ -1,0 +1,322 @@
+{
+  "scenario": {
+    "run": {
+      "agent": "support-bot",
+      "user_id": "user_42",
+      "session_id": "conv_7",
+      "inside": [
+        {
+          "retrieval": {
+            "source": "kb-articles",
+            "query": "How long does a refund take?",
+            "top_k": 5,
+            "documents": [
+              { "id": "kb-112", "score": 0.91 },
+              { "id": "kb-087", "score": 0.84 },
+              { "id": "kb-203", "score": 0.77 }
+            ]
+          }
+        },
+        {
+          "retrieval": {
+            "source": "customer-preferences",
+            "memory": true,
+            "query": "How does this customer like to be answered?",
+            "top_k": 3,
+            "documents": [
+              { "content": "Writes in French.", "id": "mem-41" },
+              { "content": "Asks for short answers.", "id": "mem-58" }
+            ]
+          }
+        },
+        {
+          "retrieval": {
+            "source": "kb-archive",
+            "query": "Was the old plan ever discounted?",
+            "top_k": 5,
+            "documents": []
+          }
+        },
+        {
+          "retrieval": {
+            "source": "web-index",
+            "query": "refund policy",
+            "top_k": 5,
+            "fails_with": "TimeoutError"
+          }
+        }
+      ]
+    }
+  },
+  "cases": [
+    { "capture_content": false, "content_mode": "on", "sends": "metadata" },
+    { "capture_content": true, "content_mode": "on", "sends": "content" }
+  ],
+  "metadata": {
+    "resourceSpans": [
+      {
+        "resource": {
+          "attributes": [
+            { "key": "telemetry.distro.name", "value": { "stringValue": "telmoni" } },
+            { "key": "telemetry.distro.version", "value": { "stringValue": "<version>" } },
+            { "key": "telemetry.sdk.language", "value": { "stringValue": "<language>" } },
+            { "key": "telemetry.sdk.name", "value": { "stringValue": "opentelemetry" } },
+            { "key": "telemetry.sdk.version", "value": { "stringValue": "<version>" } }
+          ]
+        },
+        "scopeSpans": [
+          {
+            "scope": { "name": "telmoni", "version": "<version>" },
+            "spans": [
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:invoke_agent support-bot>",
+                "name": "invoke_agent support-bot",
+                "kind": 1,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.agent.name", "value": { "stringValue": "support-bot" } },
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:retrieval kb-archive>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "retrieval kb-archive",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.data_source.id", "value": { "stringValue": "kb-archive" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "retrieval" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "5" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.retrieval.returned", "value": { "intValue": "0" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:retrieval kb-articles>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "retrieval kb-articles",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.data_source.id", "value": { "stringValue": "kb-articles" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "retrieval" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "5" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.retrieval.returned", "value": { "intValue": "3" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:retrieval web-index>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "retrieval web-index",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "error.type", "value": { "stringValue": "TimeoutError" } },
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.data_source.id", "value": { "stringValue": "web-index" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "retrieval" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "5" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ],
+                "status": { "code": 2 }
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:search_memory>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "search_memory",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.memory.record.count", "value": { "intValue": "2" } },
+                  { "key": "gen_ai.memory.store.id", "value": { "stringValue": "customer-preferences" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "search_memory" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "3" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:telmoni.run.start>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "telmoni.run.start",
+                "kind": 1,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "content": {
+    "resourceSpans": [
+      {
+        "resource": {
+          "attributes": [
+            { "key": "telemetry.distro.name", "value": { "stringValue": "telmoni" } },
+            { "key": "telemetry.distro.version", "value": { "stringValue": "<version>" } },
+            { "key": "telemetry.sdk.language", "value": { "stringValue": "<language>" } },
+            { "key": "telemetry.sdk.name", "value": { "stringValue": "opentelemetry" } },
+            { "key": "telemetry.sdk.version", "value": { "stringValue": "<version>" } }
+          ]
+        },
+        "scopeSpans": [
+          {
+            "scope": { "name": "telmoni", "version": "<version>" },
+            "spans": [
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:invoke_agent support-bot>",
+                "name": "invoke_agent support-bot",
+                "kind": 1,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.agent.name", "value": { "stringValue": "support-bot" } },
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:retrieval kb-archive>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "retrieval kb-archive",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.data_source.id", "value": { "stringValue": "kb-archive" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "retrieval" } },
+                  { "key": "gen_ai.retrieval.documents", "value": { "stringValue": "[]" } },
+                  { "key": "gen_ai.retrieval.query.text", "value": { "stringValue": "Was the old plan ever discounted?" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "5" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.retrieval.returned", "value": { "intValue": "0" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:retrieval kb-articles>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "retrieval kb-articles",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.data_source.id", "value": { "stringValue": "kb-articles" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "retrieval" } },
+                  { "key": "gen_ai.retrieval.documents", "value": { "stringValue": "[{\"id\":\"kb-112\",\"score\":0.91},{\"id\":\"kb-087\",\"score\":0.84},{\"id\":\"kb-203\",\"score\":0.77}]" } },
+                  { "key": "gen_ai.retrieval.query.text", "value": { "stringValue": "How long does a refund take?" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "5" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.retrieval.returned", "value": { "intValue": "3" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:retrieval web-index>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "retrieval web-index",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "error.type", "value": { "stringValue": "TimeoutError" } },
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.data_source.id", "value": { "stringValue": "web-index" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "retrieval" } },
+                  { "key": "gen_ai.retrieval.query.text", "value": { "stringValue": "refund policy" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "5" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ],
+                "status": { "code": 2 }
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:search_memory>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "search_memory",
+                "kind": 3,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "gen_ai.memory.query.text", "value": { "stringValue": "How does this customer like to be answered?" } },
+                  { "key": "gen_ai.memory.record.count", "value": { "intValue": "2" } },
+                  { "key": "gen_ai.memory.records", "value": { "stringValue": "[{\"content\":\"Writes in French.\",\"id\":\"mem-41\"},{\"content\":\"Asks for short answers.\",\"id\":\"mem-58\"}]" } },
+                  { "key": "gen_ai.memory.store.id", "value": { "stringValue": "customer-preferences" } },
+                  { "key": "gen_ai.operation.name", "value": { "stringValue": "search_memory" } },
+                  { "key": "gen_ai.retrieval.top_k", "value": { "intValue": "3" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              },
+              {
+                "traceId": "<trace>",
+                "spanId": "<span:telmoni.run.start>",
+                "parentSpanId": "<span:invoke_agent support-bot>",
+                "name": "telmoni.run.start",
+                "kind": 1,
+                "startTimeUnixNano": "<time>",
+                "endTimeUnixNano": "<time>",
+                "attributes": [
+                  { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
+                  { "key": "telmoni.agent", "value": { "stringValue": "support-bot" } },
+                  { "key": "telmoni.run_id", "value": { "stringValue": "<uuid>" } },
+                  { "key": "user.id", "value": { "stringValue": "user_42" } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
