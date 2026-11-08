@@ -373,6 +373,17 @@ pub(crate) async fn found_for_deployment(
     let ceiling = crate::handler::ownership::organization_ceiling_of(state, founder).await;
     let mut tx = person_scope(&state.db, founder).await?;
     locks::lock_person(&mut tx, founder).await?;
+    // Looked for again under the lock: a second settlement of this founding,
+    // waiting here while the first founded it, would be counted past the
+    // founder's number and its payment refunded. On this connection, never a
+    // second: one held while asking the pool for another starves it under
+    // load. The founder reads it as a member (`member_read`).
+    if let Some(slug) = organizations::slug_of(&mut tx, organization).await? {
+        return Ok(FoundedOrganization {
+            organization_id: organization.clone(),
+            slug,
+        });
+    }
     let person = founder_under_lock(state, &mut tx, founder).await?;
     crate::handler::ownership::owns_to(ceiling.as_ref(), &mut tx, founder).await?;
     if person.default_organization_id.is_none()

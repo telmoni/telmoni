@@ -603,6 +603,87 @@ async fn the_deployment_founds_an_organization_under_its_own_id_once(pool: PgPoo
     );
 }
 
+/// Two settlements of one founding at the founder's last place: the one that
+/// waited on the person's lock answers the organization the other founded,
+/// never a refusal past the number, which would refund a founded organization.
+#[sqlx::test]
+async fn a_founding_settled_twice_at_once_is_founded_once_and_refused_never(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    let state = deployment.state(&pool);
+    deployment.sign_in(&pool, OWNER).await;
+    // Their first organization and this one: the founding takes the last place.
+    deployment.entitlements.hold_organizations(OWNER, 2);
+    let founding = OrganizationFounding {
+        organization_id: OrganizationId::new(),
+        founder: UserId::try_new(OWNER).unwrap(),
+        name: "Paid Labs".into(),
+        slug: None,
+    };
+
+    // Both pass the first look before either takes the lock, held here.
+    let mut held = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('person:' || $1, 0))")
+        .bind(OWNER)
+        .execute(&mut *held)
+        .await
+        .unwrap();
+    let (first, second, ()) = tokio::join!(
+        state.found_organization(&founding),
+        state.found_organization(&founding),
+        async {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            held.commit().await.unwrap();
+        },
+    );
+    let (first, second) = (first.unwrap(), second.unwrap());
+    assert_eq!(first.organization_id, founding.organization_id);
+    assert_eq!(second.organization_id, founding.organization_id);
+    assert_eq!(first.slug, second.slug);
+    assert_eq!(
+        owner_of(&pool, founding.organization_id.as_str()).await,
+        OWNER
+    );
+    assert_eq!(
+        deployment
+            .ownership
+            .told()
+            .iter()
+            .filter(|change| **change == founded(founding.organization_id.as_str(), OWNER))
+            .count(),
+        1,
+        "the founding was told of twice"
+    );
+}
+
+/// A founding settles on a pool of one connection: the look under the
+/// person's lock reads on the connection holding it, never asking the pool
+/// for a second, which starves a pool whose every connection waits so.
+#[sqlx::test]
+async fn a_founding_settles_on_a_single_connection(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let deployment = Deployment::default();
+    deployment.sign_in(&pool, OWNER).await;
+    let one = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(2))
+        .connect_with((*pool.connect_options()).clone())
+        .await
+        .expect("a pool of one");
+    let state = deployment.state(&one);
+    let founding = OrganizationFounding {
+        organization_id: OrganizationId::new(),
+        founder: UserId::try_new(OWNER).unwrap(),
+        name: "Paid Labs".into(),
+        slug: None,
+    };
+    let founded = state
+        .found_organization(&founding)
+        .await
+        .expect("founded on one connection");
+    assert_eq!(founded.organization_id, founding.organization_id);
+}
+
 #[sqlx::test]
 async fn a_handover_is_asked_before_the_offer_and_the_accept_and_told_once(pool: PgPool) {
     apply_audit_migrations(&pool).await;
