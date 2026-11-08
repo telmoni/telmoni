@@ -60,6 +60,9 @@ vi.mock("./_mute", () => ({
     </button>
   ),
 }));
+vi.mock("../connectors/_webhook", () => ({
+  ConnectWebhookButton: ({ label }: { label: React.ReactNode }) => <button type="button">{label}</button>,
+}));
 vi.mock("./_incident-actions", () => ({
   IncidentActions: ({ incidentId, ruleId, status }: { incidentId: string; ruleId: string; status: string }) => (
     <span data-testid="incident-actions" data-incident={incidentId} data-rule={ruleId} data-status={status} />
@@ -429,7 +432,7 @@ describe("AlertsPage", () => {
     const heading = within(slow).getByRole("heading", { level: 2, name: "Slow calls" });
     expect(heading).toHaveAttribute("id", `alert-${RULE}-name`);
     expect(heading).toHaveAttribute("tabindex", "-1");
-    expect(heading).toHaveClass("min-w-0", "truncate", "text-sm", "font-medium");
+    expect(heading).toHaveClass("min-w-0", "truncate", "text-base", "font-medium");
   });
 
   // ⚠ Kept with no span yet, an alert has no severity to keep, and says so once read.
@@ -593,15 +596,44 @@ describe("AlertsPage", () => {
     expect(within(document.getElementById(`alert-${RULE}`)!).queryByText("Starter")).toBeNull();
   });
 
-  it("shows connector icons on the setup actions for an admin without connectors", async () => {
+  it("connects from the first run itself: Slack's handshake in a new tab, the webhook's dialog in place", async () => {
     mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
     mockProject = { ...(mockProject as object), role: Role.Admin };
     mockConnectors = { ...(mockConnectors as object), connections: [] };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    for (const name of ["Connect Slack", "Connect a webhook"]) {
-      const icon = screen.getByRole("link", { name }).querySelector("svg");
-      expect(icon).toHaveAttribute("aria-hidden", "true");
+    const slack = screen.getByRole("link", { name: "Connect Slack" });
+    expect(slack.getAttribute("href")).toMatch(/^\/connect\/slack\/start\?project=/);
+    expect(slack).toHaveAttribute("target", "_blank");
+    const webhook = screen.getByRole("button", { name: "Connect a webhook" });
+    for (const control of [slack, webhook]) {
+      expect(control.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     }
+  });
+
+  // A connect refreshes the page; were the control dropped once the step is
+  // done, the webhook's once-shown secret would go with it.
+  it("keeps offering the connect controls once the step is done, and never to a member", async () => {
+    mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole("heading", { name: /Choose where alerts go.*\(done\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect a webhook" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect Slack" })).toBeInTheDocument();
+
+    cleanup();
+    mockProject = { ...(mockProject as object), role: Role.Member };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByRole("button", { name: "Connect a webhook" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Connect Slack" })).toBeNull();
+  });
+
+  it("offers only the connectors this deployment has", async () => {
+    mockAlerts = { ...(mockAlerts as object), alerts: [], mutes: [] };
+    mockProject = { ...(mockProject as object), role: Role.Admin };
+    mockConnectors = { ...(mockConnectors as object), enabled: { slack: false, webhook: true }, connections: [] };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.queryByRole("link", { name: "Connect Slack" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Connect a webhook" })).toBeInTheDocument();
   });
 
   it("names the starters the plan had no room for, in the plan's own words", async () => {

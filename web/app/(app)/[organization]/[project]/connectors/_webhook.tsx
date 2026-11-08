@@ -25,7 +25,7 @@ import { createWebhookConnectorAction, type SigningSecret } from "./actions";
 // endpoint here, the service checks it and mints the signing secret, and the
 // secret is shown exactly once on the way back. Slack is a link to a GET
 // route instead, because the browser has to leave for the vendor.
-export function ConnectWebhookButton({ projectId, label }: { projectId: string; label: string }) {
+export function ConnectWebhookButton({ projectId, label }: { projectId: string; label: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [minted, setMinted] = useState<SigningSecret | null>(null);
 
@@ -102,6 +102,7 @@ function AddEndpointDialog({
   onConnected: (r: SigningSecret) => void;
 }) {
   const [url, setUrl] = useState("");
+  const [name, setName] = useState("");
   const [events, setEvents] = useState<EventChoice>({ all: true, kinds: [] });
   const { pending, error, setError, run } = useAction();
 
@@ -109,7 +110,7 @@ function AddEndpointDialog({
 
   function submit() {
     run(
-      () => createWebhookConnectorAction(projectId, url, kindsFrom(events)),
+      () => createWebhookConnectorAction(projectId, url, kindsFrom(events), name),
       (r) =>
         // In the transition, with the list the action drew again: after the
         // `await` it would be an update of its own, a frame ahead of it.
@@ -154,6 +155,23 @@ function AddEndpointDialog({
                 autoComplete="off"
                 maxLength={2048}
                 required
+                disabled={pending}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="webhook-name">
+                Name <span className="text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                id="webhook-name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setError(null);
+                }}
+                placeholder="e.g. On-call bot"
+                autoComplete="off"
+                maxLength={100}
                 disabled={pending}
               />
             </div>

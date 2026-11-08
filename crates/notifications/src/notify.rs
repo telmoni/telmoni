@@ -71,7 +71,8 @@ pub fn describe_target(
             format!("#{} in {workspace}", channel_name.trim_start_matches('#'))
         }
         (Provider::Slack, None) => format!("#{}", channel_name.trim_start_matches('#')),
-        (Provider::Webhook, _) => format!("the endpoint at {channel_name}"),
+        (Provider::Webhook, Some(name)) => format!("{name}, the endpoint at {channel_name}"),
+        (Provider::Webhook, None) => format!("the endpoint at {channel_name}"),
     }
 }
 
@@ -150,6 +151,14 @@ mod tests {
         assert_eq!(
             describe_target(Provider::Webhook, None, "hooks.example.com:8443"),
             "the endpoint at hooks.example.com:8443"
+        );
+        assert_eq!(
+            describe_target(
+                Provider::Webhook,
+                Some("Incidents bot"),
+                "hooks.example.com"
+            ),
+            "Incidents bot, the endpoint at hooks.example.com"
         );
     }
 }

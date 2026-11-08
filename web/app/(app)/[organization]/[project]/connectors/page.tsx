@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Webhook } from "lucide-react";
+import { ArrowUpRight, Webhook } from "lucide-react";
 
 import { SlackIcon } from "@/components/brand-icons";
 import { LocalTime } from "@/components/local-time";
@@ -183,6 +183,7 @@ function Tile({
                       of the URL's fingerprint — never by the URL. */}
                   {connection.provider === "webhook" && (
                     <span className="shrink-0 text-xs text-muted-foreground">
+                      {connection.external_workspace_name && `${connection.channel_name} · `}
                       {connection.channel_id.slice(0, 8)}
                     </span>
                   )}
@@ -242,8 +243,9 @@ function Tile({
             start ? (
               // A plain anchor prevents prefetch from starting a handshake.
               <Button asChild size="sm" variant="outline" className="w-fit">
-                <a href={start}>
+                <a href={start} target="_blank" rel="noreferrer">
                   {connections.length > 0 ? `Connect another ${name} channel` : `Connect ${name}`}
+                  <ArrowUpRight aria-hidden="true" />
                 </a>
               </Button>
             ) : (

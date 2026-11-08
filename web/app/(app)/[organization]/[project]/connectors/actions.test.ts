@@ -258,6 +258,21 @@ describe("createWebhookConnectorAction", () => {
       "/(app)/[organization]/[project]/connectors",
       "page",
     );
+    expect(vi.mocked(revalidatePath)).toHaveBeenCalledWith(
+      "/(app)/[organization]/[project]/alerts",
+      "page",
+    );
+  });
+
+  it("sends a name, trimmed, only when one is given", async () => {
+    fetchMock.mockResolvedValue(minted());
+    await createWebhookConnectorAction(PROJECT, "https://hooks.example.com/x", null, "  On-call bot ");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://notifications.test/internal/v1/connectors/webhook",
+      expect.objectContaining({
+        body: JSON.stringify({ url: "https://hooks.example.com/x", event_kinds: null, name: "On-call bot" }),
+      }),
+    );
   });
 
   it("sends a chosen list of kinds as it was chosen", async () => {

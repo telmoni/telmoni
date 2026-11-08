@@ -27,14 +27,13 @@ export const PROVIDER_LABEL: Record<Provider, string> = {
   webhook: "Webhook",
 };
 
-/** Where a connection points, in the vendor's own terms: `#alerts in Acme`
- *  for Slack, and the host alone for a webhook, whose path may carry the
- *  customer's own token. */
+/** Where a connection points: `#alerts in Acme` for Slack; a webhook's name,
+ *  or else its host, never the URL, whose path may carry the customer's token. */
 export function connectionName(
   connection: Pick<Connection, "provider" | "channel_name" | "external_workspace_name">,
 ): string {
   if (connection.provider === "webhook") {
-    return connection.channel_name;
+    return connection.external_workspace_name ?? connection.channel_name;
   }
   const channel = `#${connection.channel_name.replace(/^#/, "")}`;
   return connection.external_workspace_name

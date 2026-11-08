@@ -506,6 +506,9 @@ pub struct CreateWebhookRequest {
     /// The notice kinds it receives; absent or `null` is every kind.
     #[serde(default)]
     pub event_kinds: Option<Vec<NotificationKind>>,
+    /// What the team calls it; absent or blank is its host alone.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 impl std::fmt::Debug for CreateWebhookRequest {
@@ -513,9 +516,13 @@ impl std::fmt::Debug for CreateWebhookRequest {
         f.debug_struct("CreateWebhookRequest")
             .field("url", &"***")
             .field("event_kinds", &self.event_kinds)
+            .field("name", &self.name.as_ref().map(|_| "***"))
             .finish()
     }
 }
+
+/// A webhook's name, as long as a project's.
+const WEBHOOK_NAME_MAX_CHARS: usize = 100;
 
 /// A chosen set of kinds as the column stores it: once each, in the enum's
 /// wire order, so two requests naming the same kinds store the same array.
@@ -564,6 +571,12 @@ pub async fn create_webhook(
 
     let url = webhook::validate_endpoint_url(&req.url).map_err(TelmoniError::BadRequest)?;
     let event_kinds = event_kinds_column(req.event_kinds)?;
+    let name = req
+        .name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| super::bounded(name, "name", WEBHOOK_NAME_MAX_CHARS))
+        .transpose()?;
     let host = webhook::host_label(&url);
     let fingerprint = webhook::fingerprint(&url);
 
@@ -625,7 +638,7 @@ pub async fn create_webhook(
         organization_id: &identity.organization_id,
         provider: Provider::Webhook,
         external_workspace_id: &host,
-        external_workspace_name: None,
+        external_workspace_name: name,
         channel_id: &fingerprint,
         channel_name: &host,
         target: &creds.target,
@@ -660,7 +673,7 @@ pub async fn create_webhook(
         &identity.project_id,
         &identity.organization_id,
         Provider::Webhook,
-        None,
+        name,
         &host,
     )
     .await?;

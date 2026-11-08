@@ -99,6 +99,7 @@ export async function createWebhookConnectorAction(
   projectId: string,
   url: string,
   eventKinds: NotificationKind[] | null,
+  name = "",
 ): Promise<SecretResult> {
   const gate = await admitConnectorsCall("connectors:webhook", 10, projectId, null);
   if (!gate.ok) return refused(gate.error);
@@ -110,11 +111,14 @@ export async function createWebhookConnectorAction(
   const res = await tryFetchWithTimeout(`${gate.base}/internal/v1/connectors/webhook`, {
     method: "POST",
     headers: { ...gate.headers, "content-type": "application/json" },
-    body: JSON.stringify({ url: trimmed, event_kinds: checked.kinds }),
+    body: JSON.stringify({ url: trimmed, event_kinds: checked.kinds, name: name.trim() || undefined }),
   });
   if (!res) return refused(CONNECTORS_UNAVAILABLE);
   if (!res.ok) return refused((await extractProblem(res)).message);
-  return readSecret(res);
+  const result = await readSecret(res);
+  // The alerts page's first run offers this dialog too, and ticks its step.
+  if (result.ok) revalidatePath("/(app)/[organization]/[project]/alerts", "page");
+  return result;
 }
 
 // Which notices an endpoint receives. A webhook's alone: Slack takes every

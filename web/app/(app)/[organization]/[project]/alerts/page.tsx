@@ -37,6 +37,7 @@ import {
   windowsFor,
   type ConnectionChoice,
 } from "@/lib/alerts";
+import { connectStartPath } from "@/lib/connect";
 import { memberNames, ownerContact } from "@/lib/identity";
 import { sole } from "@/lib/list-query";
 import { administers } from "@/lib/roles";
@@ -60,6 +61,7 @@ import { shortId, traceHref } from "@/lib/traces";
 import { IncidentStatus, RuleBaseline, RuleMeasure, Severity } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
+import { ConnectWebhookButton } from "../connectors/_webhook";
 import { AlertActions, HearAgain } from "./_alert-actions";
 import { NewAlert } from "./_alert-panel";
 import { IncidentActions } from "./_incident-actions";
@@ -204,20 +206,32 @@ export default async function AlertsPage({
                       : "Every incident reaches the project's feed; the project's owners and admins connect Slack or a webhook."
                 }
               >
-                {(connections?.length ?? 0) === 0 && administers(project.role) && (
+                {/* Offered after the step is done too: the webhook's control holds
+                    the once-shown secret, and the refresh its connect causes would
+                    unmount it with the dialog open. */}
+                {administers(project.role) && (
                   <div className="flex flex-wrap gap-gutter">
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`${projectPath(organization, slug)}/connectors`}>
-                        <SlackIcon />
-                        Connect Slack
-                      </Link>
-                    </Button>
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={`${projectPath(organization, slug)}/connectors`}>
-                        <Webhook aria-hidden="true" />
-                        Connect a webhook
-                      </Link>
-                    </Button>
+                    {listing?.enabled.slack && (
+                      // A plain anchor, so prefetch never starts a handshake.
+                      <Button asChild variant="outline" size="sm">
+                        <a href={connectStartPath("slack", project.id)} target="_blank" rel="noreferrer">
+                          <SlackIcon />
+                          Connect Slack
+                          <ArrowUpRight aria-hidden="true" />
+                        </a>
+                      </Button>
+                    )}
+                    {listing?.enabled.webhook && (
+                      <ConnectWebhookButton
+                        projectId={project.id}
+                        label={
+                          <>
+                            <Webhook aria-hidden="true" />
+                            Connect a webhook
+                          </>
+                        }
+                      />
+                    )}
                   </div>
                 )}
               </FirstRunStep>

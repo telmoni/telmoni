@@ -111,6 +111,7 @@ describe("ConnectorsPage", () => {
     await renderPage();
     const link = screen.getByRole("link", { name: "Connect Slack" });
     expect(link).toHaveAttribute("href", `/connect/slack/start?project=${PROJECT}`);
+    expect(link).toHaveAttribute("target", "_blank");
   });
 
   // A provider this deployment holds no credentials for renders exactly as

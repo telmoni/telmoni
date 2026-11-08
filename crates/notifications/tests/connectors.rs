@@ -4741,6 +4741,46 @@ async fn a_webhook_is_connected_by_url_and_its_secret_is_answered_once(pool: PgP
     assert_eq!(states, 0, "no state row for a handshake that cannot finish");
 }
 
+/// A webhook may carry a name, trimmed and bounded; blank is its host alone.
+#[sqlx::test]
+async fn a_webhook_is_named_as_its_team_calls_it(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let mocks = MockServer::start().await;
+    let st = state(pool.clone(), &mocks, None);
+    let connect = |body: String| {
+        app(&st).oneshot(owner(
+            "POST",
+            "/internal/v1/connectors/webhook",
+            Some(&body),
+        ))
+    };
+
+    let resp = connect(r#"{"url":"https://a.example.invalid/","name":"  Incidents bot "}"#.into())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let answer = json_body(resp).await;
+    assert_eq!(
+        answer["connection"]["external_workspace_name"],
+        "Incidents bot"
+    );
+    assert_eq!(answer["connection"]["channel_name"], "a.example.invalid");
+
+    let resp = connect(r#"{"url":"https://b.example.invalid/","name":"   "}"#.into())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert!(json_body(resp).await["connection"]["external_workspace_name"].is_null());
+
+    let long = "n".repeat(101);
+    let resp = connect(format!(
+        r#"{{"url":"https://c.example.invalid/","name":"{long}"}}"#
+    ))
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
 /// The registration-time guard through the handler: plaintext, credentials,
 /// local names and every spelling of a private address are refused.
 #[sqlx::test]

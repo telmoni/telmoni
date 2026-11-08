@@ -507,12 +507,14 @@ describe("words", () => {
         connection("efgh5678", "webhook", "hooks.example.com", null),
         connection("ijkl9012", "webhook", "other.example.com", null),
         connection("mnop3456", "slack", "alerts", "Acme"),
+        connection("qrst7890", "webhook", "named.example.com", "On-call bot"),
       ]).map((choice) => choice.name),
     ).toEqual([
       "hooks.example.com (abcd1234)",
       "hooks.example.com (efgh5678)",
       "other.example.com",
       "#alerts in Acme",
+      "On-call bot",
     ]);
   });
 
