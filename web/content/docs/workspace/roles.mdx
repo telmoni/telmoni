@@ -1,5 +1,5 @@
 ---
-title: "Roles and permissions"
+title: "Roles"
 description: "The role model in Telmoni: organization roles, project roles, what each allows, and what a permission refusal tells you."
 ---
 
@@ -14,7 +14,8 @@ organization settings, invite authority, and organization-wide audit logs.
 
 | Permission | Owner | Admin | Member |
 |---|---|---|---|
-| Open the organization's Settings and Projects pages | Yes | Yes | No |
+| Open the organization's Settings page | Yes | Yes | No |
+| Open the organization's Projects page | Yes | Yes | Yes |
 | Create new projects | Yes | Yes | No |
 | Delete projects | Yes | No | No |
 | Manage organization settings and rename | Yes | Yes | No |
@@ -58,7 +59,8 @@ audit events.
 | Read the project's notices on its Notifications page, and mark them read for everyone on it | Yes | Yes | Yes |
 | Open the project's [saved dashboards](/docs/monitoring/dashboards#saved-dashboards) | Yes | Yes | Yes |
 | Save, rename, and delete saved dashboards | Yes | Yes | No |
-| Make, edit, pause, mute, and delete the project's [alerts](/docs/monitoring/alerts); acknowledge and resolve its incidents | Yes | Yes | Yes |
+| Make, edit, pause, mute, and delete the project's [alerts](/docs/monitoring/alerts), [monitors](/docs/monitoring/monitors) and [objectives](/docs/monitoring/objectives); acknowledge and resolve incidents | Yes | Yes | Yes |
+| Add, change, and remove own scores on traces (take back any member's: Owner/Admin) | Yes | Yes | Yes |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
 | Create, rotate, and revoke API keys | Yes | Yes | No |
 | View connectors and delivery logs | Yes | Yes | Yes |
@@ -80,12 +82,12 @@ audit events.
   manages Slack and webhook connectors; manages project seats; saves the
   dashboards; and reads the project audit log. Cannot change the project's content mode, or
   delete or transfer the project.
-- **Member**: Read-only access to project resources but its alerts. Can
+- **Member**: Read-only access to project resources but its alerts, monitors, objectives, and scores. Can
   inspect active connectors, delivery logs, and API key metadata (name,
   creation date, last used date), and open the project's saved dashboards.
   Cannot view the project audit log, and changes nothing but the
-  project's alerts and their incidents, as every role can; whether the
-  project's notices are marked read, which is the same for everyone on the
+  project's alerts, monitors, objectives, and their incidents, as every role can;
+  their own scores on traces; whether the project's notices are marked read, which is the same for everyone on the
   project; and their own seat, which they give up with **Leave** on the
   project's **Members** page.
 

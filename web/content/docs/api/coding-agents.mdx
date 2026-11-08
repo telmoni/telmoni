@@ -1,10 +1,10 @@
 ---
 title: "Coding agents"
-description: "Telmoni's plugins for Claude Code and Antigravity: each turn of the coding agent you already run, recorded as a run with no code, metadata alone unless you turn its conversation on."
+description: "Telmoni's plugins for Claude Code, Codex and Antigravity: each turn of the coding agent you already run, recorded as a run with no code, metadata alone unless you turn its conversation on."
 ---
 
-Telmoni's two plugins record each turn of Claude Code or Antigravity as a
-[run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
+Telmoni's three plugins record each turn of Claude Code, Codex or Antigravity
+as a [run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
 and their tokens, the tools it used, and Claude Code's subagents, each with its
 times and whether it failed. Unless you turn [content](#a-turns-conversation)
 on, a plugin never sends a prompt, a reply, a thought, a tool's input or
@@ -15,6 +15,7 @@ by the path to its file is sent by the file's name alone, or as `unknown`.
 |---|---|---|---|
 | **[Claude Code](#claude-code)** | [`telmoni/claude-code-observability-plugin`](https://github.com/telmoni/claude-code-observability-plugin) | the repository itself | `claude-code` |
 | **[Antigravity](#antigravity)** | [`telmoni/antigravity-observability-plugin`](https://github.com/telmoni/antigravity-observability-plugin) | the repository itself | `antigravity` |
+| **[Codex](#codex)** | [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) | the repository itself | `codex` |
 
 Each plugin is built on the [TypeScript SDK](/docs/api/sdks), bundled with it
 into JavaScript committed in the repository, so nothing is built or fetched as
@@ -26,7 +27,7 @@ scheme, it is `https://`, or `http://` for this machine, the only host plain
 HTTP goes to. Each needs [Node.js](https://nodejs.org) 22 or later on your
 `PATH`; without it the hook does nothing and writes no log, so
 `node --version` in the shell your agent starts in is the first thing to
-check. Claude Code also needs git, with which it adds the plugin's
+check. Claude Code and Codex also need git, with which they add the plugin's
 marketplace.
 
 ---
@@ -54,12 +55,21 @@ together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Ins
 - in Antigravity, **each API error**, as a failed model call named by its
   kind. A model call names the conversation's model with its effort apart:
   `gemini-3.8-flash-low` goes as `gemini-3.8-flash` at the reasoning level
-  `low`, under the provider `gcp.vertex_ai`.
+  `low`, under the provider `gcp.vertex_ai`;
+- in Codex, **what it ran**, each tool call by its kind: `shell` for a
+  command, `apply_patch` for an edit, `web_search`, and an MCP server's tool
+  as `mcp__<server>__<tool>`, an edit you refused cancelled; a model call names
+  the turn's model and its reasoning effort, under the provider Codex names
+  (`openai`, `ollama`), its `azure` as `azure.ai.openai`. A subagent Codex starts works
+  in a thread of its own: the run holds the tool calls that started it and
+  waited on it, not its model calls. The run's release is the version of Codex
+  that ran the turn.
 
 An interrupted turn is a cancelled run, and a turn an error ended a failed one,
 named by the error's kind (`rate_limit`), never its message; in Antigravity, so
-is a turn that hit its limits (`max_invocations`). A turn is sent once it has
-ended. If Telmoni cannot be reached or is busy, if its database
+is a turn that hit its limits (`max_invocations`), and in Codex one that ran out
+of its budget (`budget_limited`). A turn is sent once it has ended. If Telmoni
+cannot be reached or is busy, if its database
 fails it (`500` `/errors/internal/database`), or if it refuses the key or the
 endpoint, the turn is sent again as the session's next turn ends, the
 session's later turns waiting for it, or, once the session has ended, as any
@@ -97,6 +107,18 @@ reasoning, a tool's arguments or output, a file's path or contents, the
 workspace's folders, the transcript's path, a compaction's summary or an
 error's message, whatever the project's content mode.
 
+With content off, of what Codex writes down, its plugin reads only each line's
+kind and time and the turn it belongs to, each model response's tokens, the
+turn's model and effort, the session's provider and Codex's version, each tool
+call's kind, times and status, a command's exit code, an MCP tool's server and
+name, and an error's kind; of what its hook is handed, the session's id, the
+rollout's path, the turn's id and the model's name, and the session's folder,
+only to find the [tags](#tags) file above it. It never keeps or sends your
+prompt, a reply, the reasoning, the code the model ran, a command, a tool's
+input or output, a file's path or contents, the folder you work in, the
+rollout's path, a compaction's summary or an error's message, whatever the
+project's content mode.
+
 ### A turn's conversation
 
 A plugin can send what was said too, under the same two locks as the
@@ -108,7 +130,7 @@ switch travels with the key: a key in the environment takes
 switch from anywhere else. A key in Claude Code's plugin settings takes
 **Capture content** in `/plugin configure`
 (`{"TELMONI_CAPTURE_CONTENT": true}` through `--values-stdin`), and a key in
-Antigravity's key file takes `"captureContent": true` beside it. A plugin takes
+Antigravity's or Codex's key file takes `"captureContent": true` beside it. A plugin takes
 no [mask](/docs/api/sdks#masking-content), its hook running no code of yours:
 with both locks on, a turn is sent as it was said, but for what the SDK it
 sends through scrubs first. In each plugin both of its scrubbers are on:
@@ -117,7 +139,7 @@ numbers, each replaced by a marker like `[secret: aws_key]` or `[pii: email]`
 ([what each finds](/docs/api/sdks#scrubbing-secrets-and-personal-data)). Each
 is a switch beside the content's: **Scrub secrets** and **Scrub personal
 data** in Claude Code's `/plugin configure`, `"scrubSecrets": false` or
-`"scrubPii": false` in Antigravity's key file, and a key in the environment
+`"scrubPii": false` in Antigravity's or Codex's key file, and a key in the environment
 takes `TELMONI_SCRUB_SECRETS=0` or `TELMONI_SCRUB_PII=0` there. No pattern
 finds a name or a street address.
 
@@ -134,7 +156,11 @@ transcript's path, a session's title or anyone's email, beyond what the
 conversation itself holds, a tool's output among it. An
 Antigravity turn carries your prompt as you typed it, without the metadata
 Antigravity wraps it in, each reply with the reasoning written in plain text,
-each tool's arguments and output, and each compaction's summary. A turn
+each tool's arguments and output, and each compaction's summary. A Codex turn
+carries your prompt, without the instructions Codex hands the model, each reply
+with the reasoning summaries Codex writes, the code each model call ran through
+Codex's `exec` tool, each command's, edit's and tool call's input and output,
+and each compaction's summary. A turn
 waiting to be sent keeps what was said in the plugin's own folder, readable by
 you alone, until it goes.
 
@@ -159,7 +185,8 @@ and never derived from a path:
   takes one back. A tag you ask for holds from that turn to the session's end,
   or until you change it or take it back, and wins over the file's for its key;
   a turn already recorded keeps what it was sent with. In Antigravity, ask the
-  agent to tag the workspace and the plugin's skill writes the file.
+  agent to tag the workspace, and in Codex the repository, and the plugin's
+  skill writes the file.
 
 A key is 1 to 64 letters, digits, `_`, `.` or `-`, and a value up to 256
 characters; a turn carries 32 tags at most, in Claude Code `skills` among
@@ -261,3 +288,55 @@ shows; where both run, each turn is still sent once. Its log is
 `agy plugin list` shows the plugin enabled. To remove it, run
 `agy plugin uninstall telmoni-observability`, then delete the key file and
 `~/.gemini/config/telmoni/`.
+
+---
+
+## Codex
+
+Its repository is its marketplace, and the plugin is the repository itself:
+Codex clones it with your git and copies the plugin into
+`~/.codex/plugins/cache/telmoni-plugins/telmoni-observability/<version>/`, so
+there is nothing to build. It needs Codex 0.167 or later.
+
+```sh
+codex plugin marketplace add telmoni/codex-observability-plugin
+codex plugin add telmoni-observability@telmoni-plugins
+```
+
+Codex runs no plugin's hooks until you trust them: start Codex, run `/hooks`,
+and trust the plugin's `Stop` and `SessionEnd` hooks. To update, run
+`codex plugin marketplace upgrade telmoni-plugins`, add the plugin again, and
+trust its hooks again.
+
+Codex gives a plugin's hooks no settings of their own, so the key goes in one
+of two places. A `TELMONI_API_KEY` in Codex's environment, `~/.codex/.env`,
+which Codex loads as it starts, comes first, with the `TELMONI_ENDPOINT` beside
+it there; one exported in your shell reaches `codex exec`, but not always an
+interactive session, which Codex runs in a service that keeps the environment
+it first started with. Else the key file, `~/.codex/telmoni.json`,
+`{"apiKey": "tm_…"}`, with `"endpoint"` beside it for a self-hosted Telmoni,
+in `CODEX_HOME` where you set one. The plugin reads the file only while it is
+yours and shut to everyone else: one anyone else can read sends nothing, and
+the log says why. Write it so the key never reaches your shell's history: run
+this, type the JSON, press Enter, then Ctrl-D.
+
+```sh
+(umask 077 && cat > ~/.codex/telmoni.json) && chmod 600 ~/.codex/telmoni.json
+```
+
+Left blank, the endpoint is `https://api.telmoni.com`. A key is never sent to
+an endpoint named somewhere else. The file is read as each turn ends, so a
+change takes effect from the next turn.
+
+The hook runs as each turn ends and hands its work to a process of its own, so
+no turn waits on Telmoni. A turn is sent once Codex has closed it, just after
+its `Stop` hook returns; one an error ended or you interrupted fires no `Stop`,
+and is sent at the next turn's end, or when the session ends. The first turn
+the plugin hears end in a session is where it starts: turns from before it was
+installed, or before a key was set, stay on your machine, and a session Codex
+keeps no record of (`codex exec --ephemeral`) is not recorded. Its log is
+`hook.log` in `~/.codex/plugins/data/telmoni-observability-telmoni-plugins/`;
+if it is missing, check that `/hooks` shows the plugin's hooks trusted and
+`codex plugin list` shows the plugin installed. To remove it, run
+`codex plugin remove telmoni-observability@telmoni-plugins`, then delete the
+key file and that folder.

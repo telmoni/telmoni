@@ -1,5 +1,5 @@
 ---
-title: Production & Maintenance
+title: Maintenance
 description: Production hardening, database role separation, automated partition rotation, reverse proxying, and disaster recovery.
 ---
 
@@ -134,11 +134,11 @@ The database tier is split into five distinct roles:
 │ auth            │ CRUD on accounts, orgs, projects, and RBAC tables.     │
 │ notifications   │ CRUD on delivery queues, feeds, and connector records. │
 │ agent           │ CRUD on chunks, conversations, messages and cursors.   │
-│ telemetry       │ Reads and writes each project's settings; no deletes.  │
+│ telemetry       │ CRUD on its tables, within the limits listed below.    │
 └─────────────────┴────────────────────────────────────────────────────────┘
 ```
 
-The audit chain is the one surface shared across roles: `auth`, `notifications` and `telemetry` may read and append `audit.events`, each to record what it does (telemetry's are changes to a project's content mode and its alerts, its traces and end users deleted, and each read of the content a project keeps), and neither they nor the maintenance lanes may update or delete a row; `agent` has no audit grant at all. The spans are not in Postgres: ClickHouse keeps them, under users of its own (see [Kubernetes](/docs/self-host/kubernetes)). The owner role, `migrator`, keeps every privilege. Each module role is also kept from the writes the owner or a maintenance lane makes: `auth` may not write `feature_flags` or `organization_flags`, `notifications` may not write `delivery_attempts`, `agent` may not write `erasures`, and `telemetry` may not delete from `project_settings` or `content_held`, nor rewrite or delete the content in `plain_content`, which its purges and `rotate` remove.
+The audit chain is the one surface shared across roles: `auth`, `notifications` and `telemetry` may read and append `audit.events`, each to record what it does (telemetry's are changes to a project's content mode and its alerts, its traces and end users deleted, and each read of the content a project keeps), and neither they nor the maintenance lanes may update or delete a row; `agent` has no audit grant at all. The spans are not in Postgres: ClickHouse keeps them, under users of its own (see [Kubernetes](/docs/self-host/kubernetes)). The owner role, `migrator`, keeps every privilege. Each module role is also kept from the writes the owner or a maintenance lane makes: `auth` may not write `feature_flags` or `organization_flags`, `notifications` may not write `delivery_attempts`, `agent` may not write `erasures`, and `telemetry` may not delete from `project_settings` or `content_held`, nor rewrite or delete a row of `plain_content`, `held_spans`, `media` or `media_names`, which only its maintenance lanes remove, nor write `model_prices`, which `migrate` fills from the price file.
 
 ### Applying role hardening
 
@@ -434,7 +434,7 @@ The server speaks HTTP/1.1 alone, and gives each connection 620 seconds from its
 
 ### PostgreSQL backups
 
-Telmoni keeps its persistent state in two stores: everything but the spans in PostgreSQL, and the spans with their hourly totals in ClickHouse ([below](#clickhouse-backups)). Create periodic logical backups of PostgreSQL with `pg_dump`. Every tenant table forces row-level security, so run it as a role that bypasses it: a superuser, such as the Compose stack's single database user, or `migrator` with separate roles.
+Telmoni keeps its persistent state in two stores: everything but the spans in PostgreSQL, and the spans with their scores and hourly totals in ClickHouse ([below](#clickhouse-backups)). Create periodic logical backups of PostgreSQL with `pg_dump`. Every tenant table forces row-level security, so run it as a role that bypasses it: a superuser, such as the Compose stack's single database user, or `migrator` with separate roles.
 
 ```bash
 # Logical database dump, from the Compose host, inside the Postgres container
@@ -458,7 +458,7 @@ A dump holds a project's content only beside the key it is sealed under, so dele
 
 ### ClickHouse backups
 
-ClickHouse holds the `telemetry` database: every span, the hourly totals, and the digest of the statements its tables were made from. Losing it loses that history but not the server: `telmoni-server migrate` makes an empty store again. Back it up with ClickHouse's own `BACKUP`, as a user allowed to write backups, such as the Compose stack's single ClickHouse user. The image allows backups under `backups/` in its data directory, so on the Compose host the archive lands in ClickHouse's volume, from where you copy it off:
+ClickHouse holds the `telemetry` database: every span, its scores, the hourly totals, and the digest of the statements its tables were made from. Losing it loses that history but not the server: `telmoni-server migrate` makes an empty store again. Back it up with ClickHouse's own `BACKUP`, as a user allowed to write backups, such as the Compose stack's single ClickHouse user. The image allows backups under `backups/` in its data directory, so on the Compose host the archive lands in ClickHouse's volume, from where you copy it off:
 
 ```bash
 # The container's own CLICKHOUSE_USER and CLICKHOUSE_PASSWORD sign the client in

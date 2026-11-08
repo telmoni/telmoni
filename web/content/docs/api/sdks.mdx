@@ -23,7 +23,7 @@ Their source is the platform's repository,
 beside the ingest they send to, and each installs with its language's own
 tool, below. Each is built on its language's OpenTelemetry SDK and sends with
 the language's own HTTP client, Rust with reqwest. Python, TypeScript and Go
-carry nothing else; Rust also carries serde, serde_json, tracing and uuid.
+carry nothing else; Rust also carries serde, serde_json, tracing, uuid, ring and base64.
 
 ---
 
@@ -522,7 +522,7 @@ is sending, which Telmoni, where it reaches its Redis, answers within the hour
 as it answered the first, storing nothing twice: give a run the same id each
 time you send it. A record's content, its run's and each step's and call's,
 leaves under the same two locks as a live run's.
-The [Claude Code and Antigravity plugins](/docs/api/coding-agents) are built on it.
+The [Claude Code, Codex and Antigravity plugins](/docs/api/coding-agents) are built on it.
 
 ---
 
@@ -752,7 +752,7 @@ release carries — LiteLLM's, the one Telmoni
 model it answered as, whole; else nothing. The table names each provider as
 the GenAI conventions spell it, the spelling the
 [field inventory](/docs/api/field-inventory) gives — `openai`, `anthropic`,
-`gcp.gemini`, `aws.bedrock` and the rest of its list — so a call naming its
+`gcp.vertex_ai`, `aws.bedrock` and the rest of its list — so a call naming its
 provider otherwise, `gemini` or `bedrock` say, finds no price there. Prices of
 your own, handed to the
 client as `prices`, come before the table's, for a model it lacks or prices
@@ -1091,7 +1091,7 @@ the field's key: it never sends the field as it was.
 The secrets scrubber is on wherever content is sent: `scrub_secrets` /
 `scrubSecrets` / `ScrubSecrets` / `scrub_secrets` set false, or
 `TELMONI_SCRUB_SECRETS=0`, turns it off. The personal-data scrubber is off in
-the SDKs and on in the [Claude Code and Antigravity plugins](/docs/api/coding-agents):
+the SDKs and on in the [Claude Code, Codex and Antigravity plugins](/docs/api/coding-agents):
 `scrub_pii` / `scrubPii` / `ScrubPII` / `scrub_pii` set true, or
 `TELMONI_SCRUB_PII=1`, turns it on. Every client reads the two variables where
 your code leaves its switch unset, however the client was made; a switch set

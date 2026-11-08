@@ -144,7 +144,7 @@ kept readable, each read in the audit log, until its spans' retention ends.
 ## What cannot be deleted on its own yet
 
 - **A session's telemetry, alone.** It goes with its traces, its end
-  user's erasure, its project, or when its day passes the 360-day retention.
+  user's erasure, its project, or when its day passes the project's retention.
 - **An audit log entry.** The audit log is append-only by design, kept
   through every deletion, and verified daily; only an export's file is a
   copy, and it is deleted after seven days.

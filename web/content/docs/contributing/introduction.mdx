@@ -1,5 +1,5 @@
 ---
-title: "Contributing to Telmoni"
+title: "Contributing"
 description: "How to contribute to the open-source Telmoni platform: setting up, the rules the code follows, the gate before a pull request, and how commits are written."
 ---
 
@@ -9,7 +9,7 @@ Telmoni's open-source platform is [`telmoni/telmoni`](https://github.com/telmoni
 
 - [`telmoni/telmoni`](https://github.com/telmoni/telmoni), the platform, the four SDKs (`sdk/`) and these pages (`web/content/docs`), which its console serves at `/docs`. [Developing it](/docs/contributing/developing#the-platform) takes two commands; [`ARCHITECTURE.md`](https://github.com/telmoni/telmoni/blob/main/ARCHITECTURE.md) explains how it is built on one page: the place to read before changing anything structural. [The docs](/docs/contributing/developing#the-docs) says how a page is wired, and every claim on one is checked against the code first. `make ci` is the gate.
 - [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli), the CLI. [Developing it](/docs/contributing/developing#the-cli); its [`ARCHITECTURE.md`](https://github.com/telmoni/telmoni-cli/blob/main/ARCHITECTURE.md) explains how it is built on one page. `cargo xtask ci` is the gate.
-- [`telmoni/claude-code-observability-plugin`](https://github.com/telmoni/claude-code-observability-plugin) and [`telmoni/antigravity-observability-plugin`](https://github.com/telmoni/antigravity-observability-plugin), the Claude Code and Antigravity plugins. Each one's `ARCHITECTURE.md` explains how it is built and tested; `npm run verify` and `npm run validate` are the gate.
+- [`telmoni/claude-code-observability-plugin`](https://github.com/telmoni/claude-code-observability-plugin), [`telmoni/codex-observability-plugin`](https://github.com/telmoni/codex-observability-plugin) and [`telmoni/antigravity-observability-plugin`](https://github.com/telmoni/antigravity-observability-plugin), the Claude Code, Codex and Antigravity plugins. Each one's `ARCHITECTURE.md` explains how it is built and tested; `npm run verify` and `npm run validate` are the gate.
 
 ## Before you start
 

@@ -10,7 +10,7 @@ Telmoni provides a Helm chart located in `deploy/charts/telmoni`. It packages th
 ```mermaid
 flowchart TD
     Ingress["GKE Gateway (the chart's ingress, off by default) or your own route"] --> WebSvc["Service: web (Port 3000)"]
-    Ingress -->|"/otlp, /v1, /cli, /webhooks/v1/slack: by host or by path"| ApiSvc["Service: server-api (Port 8082)"]
+    Ingress -->|"/otlp, /v1, /cli, /webhooks/v1/slack, /heartbeat: by host or by path"| ApiSvc["Service: server-api (Port 8082)"]
     WebSvc --> WebPods["Deployment: web (Next.js BFF)"]
 
     WebPods --> ServerSvc["Service: server (Port 8082)"]

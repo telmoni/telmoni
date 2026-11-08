@@ -54,7 +54,8 @@ Include the key as a bearer token in the HTTP `Authorization` header:
 $ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://api.telmoni.com/v1/organization
 ```
 
-Each lane needs its scope: `/v1` the `read` scope, and
+Each lane needs its scope: `/v1` the `read` scope (except `POST /v1/scores` and
+`PUT /v1/media/{sha256}`, which take `ingest`), and
 [`/otlp/v1/traces`](/docs/api/ingest), where spans are sent, the `ingest`
 scope. A live key without the scope a lane needs is
 refused with `403` `/errors/authz/forbidden`.

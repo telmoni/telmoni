@@ -143,7 +143,7 @@ An unknown parameter, or a value that does not parse, is a `400`.
   "page": 1,
   "total": 1,
   "more": false,
-  "sort": "started_at",
+  "sort": "started",
   "dir": "desc"
 }
 ```
@@ -298,8 +298,8 @@ incidents whose notices showed that run.
 }
 ```
 
-- `status`: `open`, `acknowledged` or `resolved`; `severity` is `warning` or
-  `alert`, and `value` what the alert read when it crossed.
+- `status`: `open`, `acknowledged` or `resolved`; `severity` is `warning`,
+  `alert` or `no_data`, and `value` what the alert read when it crossed.
 - `acknowledged_by` and `resolved_by`: Who took or resolved it by hand, by
   user ID, or `null`.
 - `told_to`: The connections its notices were sent to. `runs`: The runs its

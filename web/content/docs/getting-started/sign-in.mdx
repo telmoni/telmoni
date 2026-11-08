@@ -1,5 +1,5 @@
 ---
-title: "Signing up and signing in"
+title: "Sign in"
 description: "Authentication methods in Telmoni, what your first sign-in provisions, session lifecycles, and signing out."
 ---
 
@@ -198,7 +198,7 @@ Two switches are involved, and they do different things:
 Each sign-in generates an active session backed by an HTTP-only cookie. Its
 access token lasts 15 minutes and is renewed in the background while a console
 tab is open, or on your next request, against a refresh token that lasts 30
-days and is replaced at every renewal; a session unused for 30 days ends. Your
+days and is replaced at every renewal; a session unused for 30 days ends. However often it is used, a session ends 90 days after you signed in, and the device signs in again. Your
 account's **Privacy** page (`/settings/privacy`) lists every session not yet
 signed out or revoked, one that lapsed after 30 days unused included, with
 device details and when each was last active. You

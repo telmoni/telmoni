@@ -23,7 +23,7 @@ hourly totals keep their 13 months whatever the project chose.
 
 | Data | Kept | Then |
 |---|---|---|
-| Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives, or the fewer days the project chose | `telmoni-server rotate` drops each day of spans once every span in it is older, and deletes a project's older than its own days |
+| Spans: every run, step, model call and tool call, as metadata | 360 days after a span arrives, or the fewer days the project chose (on the hosted service, bounded by the plan) | `telmoni-server rotate` drops each day of spans once every span in it is older, and deletes a project's older than its own days |
 | Hourly totals: spans, units, tokens, the cost calls reported and durations by project, agent, kind, model, provider, tool, status, environment and release, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
 | A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
 | The content a project whose content mode is `on` keeps: each field of a span, sealed under the project's own key, in Postgres | As long as its span | `rotate` deletes it with its span; purged with the project |
