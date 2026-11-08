@@ -66,7 +66,7 @@ function NavRow({
           "flex size-control items-center justify-center mx-auto rounded-md [a+&]:mt-0.5",
           item.isActive
             ? "bg-sidebar-accent text-sidebar-accent-foreground"
-            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
           className,
         )}
       >
@@ -78,7 +78,7 @@ function NavRow({
     "flex h-control items-center gap-2 rounded-md text-sm [a+&]:mt-0.5",
     item.isActive
       ? "bg-sidebar-accent text-sidebar-accent-foreground"
-      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground/80",
+      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
     className,
   );
   const icon = (

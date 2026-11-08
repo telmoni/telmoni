@@ -20,7 +20,7 @@ export function GivenSeatsSection({ seats }: { seats: readonly GivenSeat[] }) {
   return (
     <section className="grid gap-gutter" id="given-seats" data-testid="given-seats">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-medium">Projects you were added to</h2>
+        <h2 className="text-base font-medium">Projects you were added to</h2>
         <Badge variant="secondary">
           {seats.length}
         </Badge>

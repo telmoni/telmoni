@@ -65,7 +65,7 @@ export function Invited({
   if (invites.length === 0) return null;
   return (
     <section className="grid gap-gutter">
-      <h2 className="text-sm font-medium">Invited</h2>
+      <h2 className="text-base font-medium">Invited</h2>
       <DataTable>
         <THead>
           <Th>Email address</Th>

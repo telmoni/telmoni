@@ -19,7 +19,7 @@ const buttonVariants = cva(
           "border border-border text-secondary-foreground hover:border-foreground/40",
         ghost:
           "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "text-foreground underline underline-offset-4 hover:no-underline",
       },
       // The shared control height keeps actions aligned with fields and links.
       size: {

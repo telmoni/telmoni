@@ -379,7 +379,7 @@ function Row({
       {item.external && (
         <ArrowUpRight
           aria-label="Opens in a new tab"
-          className="size-3.5 shrink-0 text-muted-foreground"
+          className="size-4 shrink-0 text-muted-foreground"
         />
       )}
     </button>

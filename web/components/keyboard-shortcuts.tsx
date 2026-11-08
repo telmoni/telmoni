@@ -258,7 +258,7 @@ export function KeyboardShortcuts() {
             <Link
               href="/settings/accessibility"
               onClick={() => setSheetOpen(false)}
-              className="underline underline-offset-2 hover:text-foreground"
+              className="text-foreground underline underline-offset-4 hover:no-underline"
             >
               Accessibility
             </Link>

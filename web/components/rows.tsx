@@ -40,7 +40,7 @@ export function Row({
   keep?: boolean;
 }) {
   return (
-    <div className="flex min-h-14 items-center justify-between gap-page py-gutter">
+    <div className="grid min-h-14 grid-cols-1 items-center gap-gutter py-gutter sm:grid-cols-[minmax(0,1fr)_auto]">
       <div className="grid min-w-0 gap-0.5">
         <span className={cn("font-medium", danger && "text-destructive")}>{label}</span>
         {hint ? <span className="text-muted-foreground">{hint}</span> : null}
@@ -48,7 +48,7 @@ export function Row({
       {children !== undefined && (
         <div
           className={cn(
-            "flex items-center justify-end gap-2 text-right",
+            "flex max-w-full items-center justify-start gap-2 text-left sm:justify-end sm:text-right",
             keep ? "shrink-0 whitespace-nowrap" : "min-w-0",
           )}
         >

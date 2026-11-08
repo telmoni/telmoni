@@ -134,7 +134,7 @@ export function SafeLink({
       aria-label={label}
       target={inConsole ? undefined : "_blank"}
       rel={inConsole ? undefined : "noopener"}
-      className="text-primary underline underline-offset-2 hover:no-underline"
+      className="text-foreground underline underline-offset-4 hover:no-underline"
     >
       {children}
     </Link>

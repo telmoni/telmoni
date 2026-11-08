@@ -280,7 +280,7 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
           className="grid gap-2 rounded-xl border border-border p-gutter"
           aria-label={METRIC_LABEL[metric]}
         >
-          <h2 className="text-sm font-medium">
+          <h2 className="text-base font-medium">
             {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
           </h2>
           <MetricChart histogram={histogram} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />

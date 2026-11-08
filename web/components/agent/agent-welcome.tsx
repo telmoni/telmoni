@@ -25,7 +25,7 @@ export function Welcome({
     <div className="my-auto grid justify-items-center gap-page py-4 text-center">
       <div className="grid justify-items-center gap-2">
         <Bot aria-hidden className="size-6 text-muted-foreground" />
-        <h3 className="text-base font-semibold wrap-break-word">Ask about {project}</h3>
+        <h3 className="text-base font-medium wrap-break-word">Ask about {project}</h3>
         <p className="max-w-sm text-sm text-muted-foreground">
           It looks things up as you, so it sees what you can see, and it changes nothing.
         </p>

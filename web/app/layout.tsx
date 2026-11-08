@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import { ACCESSIBILITY_BOOT_SCRIPT } from "@/lib/accessibility";
@@ -9,6 +8,7 @@ import { SettingsBoot } from "@/components/settings-boot";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { env } from "@/lib/env";
+import { geistMono } from "@/lib/fonts";
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/site";
 
 // A function, not a constant: `metadataBase` is the deployment's origin, which
@@ -28,16 +28,6 @@ export function generateMetadata(): Metadata {
   };
 }
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
 export default async function RootLayout({
   children,
 }: {
@@ -48,7 +38,7 @@ export default async function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistMono.variable} ${inter.variable}`}
+      className={geistMono.variable}
     >
       <head>
         {/* Before first paint, so a sharp console never renders rounded and

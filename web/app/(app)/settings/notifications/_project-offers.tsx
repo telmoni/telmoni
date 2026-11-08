@@ -45,7 +45,7 @@ export function ProjectOffersSection({
   return (
     <section className="grid gap-gutter" data-testid="project-offers">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-medium">Project offers</h2>
+        <h2 className="text-base font-medium">Project offers</h2>
         <Badge variant="secondary">
           {offers.length}
         </Badge>

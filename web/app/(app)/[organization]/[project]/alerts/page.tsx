@@ -324,7 +324,7 @@ function AlertCard({
       <div className="flex flex-wrap items-start justify-between gap-gutter">
         <div className="grid min-w-0 gap-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-sm font-medium">
+            <h2 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-base font-medium">
               {alert.name}
             </h2>
             <Badge variant={severityVariant(alert.severity)}>

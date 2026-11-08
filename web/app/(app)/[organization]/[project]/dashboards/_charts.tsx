@@ -116,7 +116,7 @@ function Chart({
       aria-labelledby={heading}
       className={cn("grid gap-gutter rounded-md border border-border p-gutter", wide && "lg:col-span-2")}
     >
-      <h2 id={heading} className="text-sm font-medium">
+      <h2 id={heading} className="text-base font-medium">
         {title}
       </h2>
       <p className="sr-only">{summary}</p>
@@ -187,7 +187,7 @@ function SplitChart({
   if (split.kind !== "ok") {
     return (
       <section aria-label={title} className="grid gap-gutter rounded-md border border-border p-gutter lg:col-span-2">
-        <h2 className="text-sm font-medium">{title}</h2>
+        <h2 className="text-base font-medium">{title}</h2>
         <p className="text-sm text-muted-foreground">This split could not be read. Reload to try again.</p>
       </section>
     );

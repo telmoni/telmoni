@@ -27,7 +27,7 @@ export function Section({
       <h2
         id={headingId}
         tabIndex={headingId ? -1 : undefined}
-        className={cn("text-sm font-medium", danger && "text-destructive")}
+        className={cn("text-base font-medium", danger && "text-destructive")}
       >
         {title}
       </h2>

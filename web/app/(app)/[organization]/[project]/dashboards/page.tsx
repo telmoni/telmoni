@@ -120,7 +120,7 @@ export default async function DashboardsPage({
       <div className="grid gap-page">
         {budgets.length > 0 && (
           <section aria-labelledby="budgets" className="grid gap-gutter">
-            <h2 id="budgets" className="text-sm font-medium">
+            <h2 id="budgets" className="text-base font-medium">
               Budgets this month
             </h2>
             <Rows>

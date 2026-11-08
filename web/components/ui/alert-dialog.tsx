@@ -141,7 +141,7 @@ function AlertDialogTitle({
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
-      className={cn("min-w-0 py-[7px] text-base leading-snug font-semibold wrap-break-word", className)}
+      className={cn("min-w-0 py-[7px] text-base font-medium wrap-break-word", className)}
       {...props}
     />
   );

@@ -30,7 +30,7 @@ export function IncomingInvitesSection({
   return (
     <section className="grid gap-gutter" id="pending-invitations" data-testid="pending-invitations">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-medium">Pending invitations</h2>
+        <h2 className="text-base font-medium">Pending invitations</h2>
         <Badge variant="secondary">
           {invites.length}
         </Badge>

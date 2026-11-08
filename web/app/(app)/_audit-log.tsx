@@ -49,7 +49,7 @@ export function AuditLog({
       <div className="grid gap-page">
         <section className="grid gap-gutter">
           <div className="grid gap-1">
-            <h2 className="text-sm font-medium">Activity</h2>
+            <h2 className="text-base font-medium">Activity</h2>
             <p className="text-sm text-muted-foreground">{description}</p>
           </div>
 

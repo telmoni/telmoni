@@ -116,7 +116,7 @@ export default async function DataSheetPage() {
       />
       <div className="grid gap-page" data-print="sheet">
         <section className="grid gap-gutter" aria-labelledby="sheet-drawn">
-          <h2 id="sheet-drawn" className="text-sm font-medium">
+          <h2 id="sheet-drawn" className="text-base font-medium">
             {organization.name}, drawn <LocalTime iso={drawn.drawn.drawnAt} /> by {name(ident.userId)}
           </h2>
           <p className="text-sm text-muted-foreground">
@@ -236,7 +236,7 @@ export default async function DataSheetPage() {
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section className="grid gap-gutter" aria-labelledby={id}>
-      <h2 id={id} className="text-sm font-medium">
+      <h2 id={id} className="text-base font-medium">
         {title}
       </h2>
       {children}

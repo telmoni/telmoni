@@ -27,10 +27,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
         loading: <Loader2Icon className="size-4 animate-spin" />,
       }}
       toastOptions={{
-        className: "!shadow-2xl",
+        // Sonner sets 13px on the toast itself, so the container's size never reaches it.
+        className: "!shadow-2xl !text-sm",
       }}
       style={
         {
+          fontFamily: "var(--font-mono)",
+          fontSize: "var(--text-sm)",
           "--normal-bg": "var(--accent)",
           "--normal-text": "var(--accent-foreground)",
           "--normal-border": "transparent",

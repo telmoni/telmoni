@@ -126,7 +126,7 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
             Something hard to reach or to read? Write to{" "}
             <a
               href={`mailto:${supportEmail}`}
-              className="underline underline-offset-2 hover:text-foreground"
+              className="text-foreground underline underline-offset-4 hover:no-underline"
             >
               {supportEmail}
             </a>{" "}
