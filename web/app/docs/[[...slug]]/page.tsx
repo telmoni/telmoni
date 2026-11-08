@@ -1,10 +1,13 @@
-import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/layouts/docs/page";
+import { findNeighbour } from "fumadocs-core/page-tree";
 import { createRelativeLink } from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { getMDXComponents } from "@/components/mdx";
+import { REPO_URL } from "@/lib/site";
 import { source } from "@/lib/source";
+
+import { DocsPageView } from "../_docs-shell";
 
 type Params = PageProps<"/docs/[[...slug]]">;
 
@@ -16,14 +19,18 @@ export default async function DocsRoute({ params }: Params) {
   if (!page) notFound();
 
   const MDX = page.data.body;
+  const neighbours = findNeighbour(source.getPageTree(), page.url);
+
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
-      <DocsTitle>{page.data.title}</DocsTitle>
-      <DocsDescription>{page.data.description}</DocsDescription>
-      <DocsBody>
-        <MDX components={getMDXComponents({ a: createRelativeLink(source, page) })} />
-      </DocsBody>
-    </DocsPage>
+    <DocsPageView
+      title={page.data.title}
+      description={page.data.description}
+      toc={page.data.toc}
+      neighbours={neighbours}
+      repoUrl={REPO_URL}
+    >
+      <MDX components={getMDXComponents({ a: createRelativeLink(source, page) })} />
+    </DocsPageView>
   );
 }
 

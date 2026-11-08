@@ -29,6 +29,11 @@ describe("footerColumns", () => {
     expect(columns.find((column) => column.title === "Company")?.links).toEqual([
       expect.objectContaining({ label: "Contact", href: "mailto:support@example.com" }),
     ]);
+    expect(columns.find((column) => column.title === "Resources")?.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Security", href: "https://example.com/legal/security", newTab: true }),
+      ]),
+    );
     expect(columns.find((column) => column.title === "Legal")?.links).toEqual([
       expect.objectContaining({ label: "Terms", href: "https://example.com/legal/terms-of-service", newTab: true }),
       expect.objectContaining({ label: "Privacy", href: "https://example.com/legal/privacy-policy", newTab: true }),

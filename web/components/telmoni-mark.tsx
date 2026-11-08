@@ -35,23 +35,31 @@ export function TelmoniWordmark({ className }: { className?: string }) {
   );
 }
 
-/** The mark beside the wordmark in the brand pack's lockup geometry, so the
- *  two never need aligning. The word is drawn, not set: the one face in the
- *  console that is not the text's. The box is the mark's height, and the
- *  word's round letters overshoot the baseline below it, unclipped. */
-export function TelmoniLockup({ className }: { className?: string }) {
+/** The brand pack's lockup: the mark and the drawn word, whose round letters
+ *  overshoot the baseline unclipped. Scaled by height from the top left, so
+ *  `markOnly`, the mark alone in the same box, lands on the lockup's pixels. */
+export function TelmoniLockup({
+  className,
+  markOnly = false,
+}: {
+  className?: string;
+  markOnly?: boolean;
+}) {
   return (
     <svg
-      viewBox="0 -820 4546.17 827.35"
+      viewBox={markOnly ? "0 -820 1070.1 827.35" : "0 -820 4546.17 827.35"}
+      preserveAspectRatio="xMinYMin slice"
       aria-hidden="true"
       className={cn("h-6 w-auto overflow-visible", className)}
     >
       <g id="mark" transform="translate(0 -820) scale(0.82)">
         <MarkShapes />
       </g>
-      <g id="word" transform="translate(1316.1 0) scale(0.7)">
-        <path fill="currentColor" d={WORD} />
-      </g>
+      {!markOnly && (
+        <g id="word" transform="translate(1316.1 0) scale(0.7)">
+          <path fill="currentColor" d={WORD} />
+        </g>
+      )}
     </svg>
   );
 }

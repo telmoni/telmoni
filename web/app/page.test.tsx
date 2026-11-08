@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DOCS_URL } from "@/lib/site";
@@ -54,27 +54,28 @@ describe("the splash page", () => {
     });
   });
 
-  it("makes its claim as the one heading, and sends a visitor to sign up or to the docs", async () => {
+  it("makes its claim as the one heading, and sends a visitor to sign up or to the SDK docs", async () => {
     render(await SplashPage());
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/stall, loop or overspend/);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      /Privacy-first, open-source monitoring for AI agents/,
+    );
     expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute(
       "href",
       "/auth/signup",
     );
     expect(screen.queryByRole("link", { name: "Console" })).toBeNull();
-    expect(screen.getAllByRole("link", { name: "Documentation" })[0]).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Read docs" })).toHaveAttribute(
       "href",
-      DOCS_URL,
+      `${DOCS_URL}/api/sdks`,
     );
     expect(screen.queryByText(/not launched/i)).toBeNull();
   });
 
-  it("says the product is in beta, beside what it is", async () => {
+  it("says what it is in the subtitle", async () => {
     render(await SplashPage());
 
-    expect(screen.getByText("Beta")).toBeInTheDocument();
-    expect(screen.getByText("Privacy-first, open-source monitoring for AI agents")).toBeInTheDocument();
+    expect(screen.getByText(/stall, loop or overspend/)).toBeInTheDocument();
   });
 
   it("sends a member to the console instead", async () => {
@@ -102,7 +103,10 @@ describe("the splash page", () => {
         expect(link, `${href} would replace the page`).toHaveAttribute("target", "_blank");
       } else {
         expect(
-          href === "/auth/signup" || href === "/console" || href === DOCS_URL || href.startsWith(`${DOCS_URL}/`),
+          href === "/auth/signup" ||
+            href === "/console" ||
+            href === DOCS_URL ||
+            href.startsWith(`${DOCS_URL}/`),
           `${href} is no door of the console's`,
         ).toBe(true);
       }
@@ -112,47 +116,83 @@ describe("the splash page", () => {
   it("says what it catches, each with the page of the book that does it", async () => {
     render(await SplashPage());
 
-    expect(screen.getByRole("heading", { name: "What it catches" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What is Telmoni?" })).toBeInTheDocument();
     for (const [label, path] of [
       ["Loops and stalls", "/monitoring/alerts#loops-and-stalls"],
       ["Budgets", "/monitoring/alerts#a-budget"],
       ["The guard", "/api/sdks#the-guard"],
     ]) {
-      expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", `${DOCS_URL}${path}`);
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute(
+        "href",
+        `${DOCS_URL}${path}`,
+      );
     }
   });
 
-  it("offers the Claude Code and Antigravity plugins beside the SDKs, and nothing the page no longer sells", async () => {
+  it("offers the Console, Terminal (with curl and cargo install popover), and SDK surface cards", async () => {
     render(await SplashPage());
 
-    expect(screen.getByRole("tab", { name: "claude code" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "antigravity" })).toBeInTheDocument();
-    for (const gone of ["What is Telmoni?", "Why Telmoni?", "Start in five minutes"]) {
+    expect(screen.getByRole("heading", { name: "Console", level: 3 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Terminal", level: 3 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "SDK", level: 3 })).toBeInTheDocument();
+
+    const installBtn = screen.getByRole("button", { name: /Install/i });
+    fireEvent.click(installBtn);
+
+    expect(screen.getByText("curl -fsSL https://telmoni.com/install.sh | sh")).toBeInTheDocument();
+    expect(screen.getByText("cargo install --locked telmoni-cli")).toBeInTheDocument();
+
+    expect(screen.getByRole("link", { name: "Read docs" })).toHaveAttribute(
+      "href",
+      `${DOCS_URL}/api/sdks`,
+    );
+    for (const gone of [
+      "Why Telmoni?",
+      "Start in five minutes",
+      "Questions and answers",
+      "Everything you need to monitor your agents",
+    ]) {
       expect(screen.queryByRole("heading", { name: gone })).toBeNull();
     }
     expect(screen.queryByText(/Evaluators/)).toBeNull();
   });
 
-  it("answers the questions a visitor asks before signing up", async () => {
-    render(await SplashPage());
-
-    for (const question of [
-      "How do I get started?",
-      "What does it store?",
-      "Can I self-host it?",
-      "Where do alerts go?",
-    ]) {
-      expect(screen.getByText(question)).toBeInTheDocument();
+  it("copies the chosen install command and returns focus after Escape", async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      render(await SplashPage());
+      const trigger = screen.getByRole("button", { name: "Install" });
+      fireEvent.click(trigger);
+      const dialog = screen.getByRole("dialog", { name: "Terminal install commands" });
+      expect(dialog).toBeVisible();
+      for (const [label, command] of [
+        ["curl", "curl -fsSL https://telmoni.com/install.sh | sh"],
+        ["cargo", "cargo install --locked telmoni-cli"],
+      ]) {
+        const button = screen.getByRole("button", { name: `Copy ${label} install command` });
+        await act(async () => { fireEvent.click(button); });
+        expect(writeText).toHaveBeenLastCalledWith(command);
+        expect(button).toHaveTextContent("Copied");
+      }
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await waitFor(() => expect(trigger).toHaveFocus());
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original);
+      else Reflect.deleteProperty(navigator, "clipboard");
     }
   });
 
-  it("names the stack it works with, each chip a page of the book", async () => {
+  it("presents the open source section with Apache-2.0 and contribute link", async () => {
     render(await SplashPage());
 
-    expect(screen.getByRole("heading", { name: "Works with your stack" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "LangChain and LangGraph" })).toHaveAttribute(
+    expect(screen.getByRole("heading", { name: "Open source" })).toBeInTheDocument();
+    expect(screen.getByText(/Apache-2.0 licensed/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Contribute/ })).toHaveAttribute(
       "href",
-      `${DOCS_URL}/api/frameworks#langchain-and-langgraph`,
+      `${DOCS_URL}/contributing/introduction`,
     );
   });
 
@@ -161,13 +201,15 @@ describe("the splash page", () => {
     render(await SplashPage());
 
     expect(screen.getAllByRole("link", { name: "Sign up" }).at(-1)).toHaveTextContent(/^Sign up$/);
-    expect(screen.getAllByRole("link", { name: "Documentation" }).at(-1)).toHaveTextContent(/^Documentation$/);
+    expect(screen.getByRole("link", { name: "Read docs" })).toHaveTextContent(/^Read docs$/);
   });
 
   it("says where prompts stay, and no longer that none is ever kept, now that a project may keep content", async () => {
     render(await SplashPage());
 
-    expect(screen.getByText(/Prompts stay in your process unless you turn content on\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Prompts stay in your process unless you turn content on./),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/single prompt/)).toBeNull();
     expect(screen.queryByText(/only mode is off/)).toBeNull();
   });

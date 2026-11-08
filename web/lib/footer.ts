@@ -61,7 +61,11 @@ export function footerColumns(
         // The legal pages are the hosted service's, not this book's: the
         // policy is linked where it lives, so a self-hosted console's link
         // reaches it too.
-        { label: "Security", href: SECURITY_POLICY_URL },
+        {
+          label: "Security",
+          href: legalUrl ? `${legalUrl}/security` : SECURITY_POLICY_URL,
+          ...(legalUrl ? { newTab: true } : {}),
+        },
         docs("Contributing", "/contributing/introduction"),
         ...(DISCUSSIONS_URL ? [{ label: "Discussions", href: DISCUSSIONS_URL }] : []),
         ...(SPONSORS_URL ? [{ label: "Sponsor", href: SPONSORS_URL }] : []),

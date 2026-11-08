@@ -1,22 +1,29 @@
-import { Minus, Plus } from "lucide-react";
+import { Star } from "lucide-react";
+import Link from "next/link";
 
-import { InstallTabs, type InstallTab } from "@/components/install-tabs";
 import { JsonLd } from "@/components/json-ld";
 import {
   BODY,
+  ConsoleVideoPlaceholder,
+  FeatureGrid,
+  FeatureItem,
   LEAD,
-  PaperGo,
   PaperHero,
   PaperLink,
-  PaperPoint,
   PaperSection,
+  SdkVideoPlaceholder,
+  StatsProof,
+  SurfaceCard,
+  SurfaceGrid,
+  TerminalVideoPlaceholder,
 } from "@/components/paper-page";
 import { PaperShell } from "@/components/paper-shell";
+import { Button } from "@/components/ui/button";
 import { getServerSession } from "@/lib/server/session";
-import { DOCS_URL } from "@/lib/site";
+import { DOCS_URL, REPO_URL } from "@/lib/site";
 
 import { ForgetPersonalStorage } from "./_forget-personal-storage";
-import { WayIn } from "./_way-in";
+import { TerminalInstallMenu } from "./_way-in";
 
 // No `metadata` here on purpose. `layout.tsx` templates a page title as
 // `%s · Telmoni`, so a string set on the home route renders the product name
@@ -24,136 +31,60 @@ import { WayIn } from "./_way-in";
 
 const docs = (path: string) => `${DOCS_URL}${path}`;
 
-// What the product is, over the sentence the page makes, and the paragraph
-// under it: one job, said once.
-const KICKER = "Privacy-first, open-source monitoring for AI agents";
-// Beside the kicker, so nobody takes the product for finished.
-const STAGE = "Beta";
-const CLAIM = "Know when your agents fail, stall, loop or overspend, and stop them at the cap you set.";
-const PITCH =
-  "Telmoni watches the agents you run, from a Python service to a Claude Code session, alerts you when one goes wrong, and shows you the run that did it. Prompts stay in your process unless you turn content on.";
+const TITLE = "Privacy-first, open-source monitoring for AI agents";
+// The core promise and privacy guarantee taking the place of regular body copy
+const SUBTITLE =
+  "Know when your agents fail, stall, loop or overspend, and stop them at the cap you set. Prompts stay in your process unless you turn content on.";
 
-// One way in per tab, each line the book's.
-const INSTALL: readonly InstallTab[] = [
-  { label: "pip", command: "pip install telmoni" },
-  { label: "npm", command: "npm install telmoni" },
-  { label: "cargo", command: "cargo add telmoni" },
-  { label: "go", command: "go get github.com/telmoni/telmoni/sdk/go" },
+// Each entry names what goes wrong, what happens, and the page of the book
+// that explains the mechanism.
+const FEATURES: readonly {
+  title: string;
+  body: string;
+  link: { label: string; href: string };
+}[] = [
   {
-    label: "claude code",
-    command:
-      "claude plugin marketplace add telmoni/claude-code-observability-plugin && claude plugin install telmoni-observability@telmoni-plugins",
-  },
-  {
-    label: "antigravity",
-    command: "agy plugin install https://github.com/telmoni/antigravity-observability-plugin",
-  },
-];
-
-type Pointer = { label: string; href: string };
-
-// What Telmoni catches, a line each, each the alert or the guard that does it.
-// Nothing is named here as running before it is built.
-const CATCHES: { title: string; body: string; link: Pointer }[] = [
-  {
-    title: "A run that fails.",
-    body: "The failures over an hour, a day or a week, or their share of runs, against the threshold you set.",
+    title: "Failures, retries and rate limits",
+    body: "See when errors or retries climb on a model, tool or provider, and which run failed.",
     link: { label: "Alerts", href: docs("/monitoring/alerts") },
   },
   {
-    title: "A run that loops or stalls.",
-    body: "The same tool called again and again, too many steps, or a run left open.",
+    title: "Loops and stalls",
+    body: "Catch a run that repeats the same tool call or stops making progress before it burns through a session.",
     link: { label: "Loops and stalls", href: docs("/monitoring/alerts#loops-and-stalls") },
   },
   {
-    title: "A run that overspends.",
-    body: "Its cost read as its calls land, so the alert fires while the run is still going, and a monthly budget that says the day it will be reached.",
+    title: "Spend and token spikes",
+    body: "Set daily or monthly budgets per project or agent, and catch a run that costs far more than usual.",
     link: { label: "Budgets", href: docs("/monitoring/alerts#a-budget") },
   },
   {
-    title: "Agents that go quiet.",
-    body: "Runs that stop arriving, read against the window before, so a nightly batch that didn't run opens an incident.",
+    title: "Silent agents",
+    body: "Know when a scheduled or background agent stops sending runs at all.",
     link: { label: "No data", href: docs("/monitoring/alerts#making-an-alert") },
   },
   {
-    title: "And stops the runaway.",
-    body: "The SDKs' guard caps a run's steps and spend inside your own process, with no call to us, and stops it at the cap.",
+    title: "Hard caps in your process",
+    body: "Stop a run in the SDK when it reaches the step, token or spend ceiling you set.",
     link: { label: "The guard", href: docs("/api/sdks#the-guard") },
   },
-];
-
-const PRIVACY = {
-  title: "Built for privacy first",
-  points: [
-    "Content leaves your process only when two locks are both on: the switch in your SDK and the project's content mode, which only the organization's owner turns on. With either off, a span is sent and kept as metadata alone — timings, statuses, counts, and model and tool names.",
-    "End users' ids are hashed under each project's own key, every field is documented in the field inventory, and every change to your organization is in its audit log.",
-  ],
-  link: { label: "Read the field inventory", href: docs("/api/field-inventory") },
-} as const;
-
-// What the SDKs and the exporter already speak to, each a chip into its page.
-const STACK: { title: string; chips: Pointer[] }[] = [
   {
-    title: "Languages",
-    chips: [
-      { label: "Python", href: docs("/api/sdks") },
-      { label: "TypeScript", href: docs("/api/sdks") },
-      { label: "Go", href: docs("/api/sdks") },
-      { label: "Rust", href: docs("/api/sdks") },
-      { label: "Any OpenTelemetry exporter", href: docs("/api/ingest") },
-    ],
+    title: "Private by default",
+    body: "The SDK strips prompts, replies and tool arguments before export. The server drops any that arrive with content off.",
+    link: { label: "Field inventory", href: docs("/api/field-inventory") },
   },
   {
-    title: "Frameworks and model SDKs",
-    chips: [
-      { label: "OpenAI SDK", href: docs("/api/frameworks#openai-sdk") },
-      { label: "Anthropic SDK", href: docs("/api/frameworks#anthropic-sdk") },
-      { label: "LangChain and LangGraph", href: docs("/api/frameworks#langchain-and-langgraph") },
-      { label: "OpenAI Agents SDK", href: docs("/api/frameworks#openai-agents-sdk") },
-      { label: "CrewAI", href: docs("/api/frameworks#crewai") },
-      { label: "LiteLLM", href: docs("/api/frameworks#litellm") },
-      { label: "Vercel AI SDK", href: docs("/api/frameworks#vercel-ai-sdk") },
-    ],
+    title: "Content under your control",
+    body: "Capture content only when both your SDK and project allow it, with secret scrubbing and a separate encryption key per project.",
+    link: { label: "Content mode", href: docs("/api/sdks") },
   },
   {
-    title: "Coding agents",
-    chips: [
-      { label: "Claude Code", href: docs("/api/coding-agents#claude-code") },
-      { label: "Antigravity", href: docs("/api/coding-agents#antigravity") },
-    ],
-  },
-  {
-    title: "Where incidents go",
-    chips: [
-      { label: "Slack", href: docs("/integrations/slack") },
-      { label: "Webhooks", href: docs("/integrations/webhooks") },
-      { label: "The console's feed", href: docs("/integrations/notifications") },
-    ],
+    title: "A record of access",
+    body: "End-user ids are hashed per project. Reads and changes are recorded in the audit log.",
+    link: { label: "Read the field inventory", href: docs("/api/field-inventory") },
   },
 ];
 
-const FAQ = [
-  {
-    question: "How do I get started?",
-    answer:
-      "Sign up, create a project, make an API key and paste the first run its dialog offers for your language; or install the Claude Code or Antigravity plugin and give it the key. Your agent's runs appear in the console within minutes, and your alerts read them from there.",
-  },
-  {
-    question: "What does it store?",
-    answer:
-      "Metadata on every project: timings, statuses, counts, costs, and model and tool names. Content — prompts, completions, the model's thinking, tool payloads, images and files — is kept in full only on a project whose owner turned its content mode on, from code that sends it; anything else is dropped at the door.",
-  },
-  {
-    question: "Can I self-host it?",
-    answer:
-      "Yes, the whole platform, under Apache-2.0: one Rust server and one console, on Docker Compose on one machine or the Helm chart on Kubernetes.",
-  },
-  {
-    question: "Where do alerts go?",
-    answer:
-      "To the console's feed, Slack channels and signed webhooks, once each time an incident opens and once when it resolves, with the run that shows it; acknowledge or mute one straight from Slack.",
-  },
-];
 
 export default async function SplashPage() {
   const session = await getServerSession();
@@ -171,96 +102,149 @@ export default async function SplashPage() {
         {/* ⚠ **The sentence IS the `<h1>`.** The copy is the page's own claim,
             which is what a heading is for; `PRODUCT_NAME` is in the document
             title already and does not want saying twice. */}
-        <PaperHero badge={STAGE} eyebrow={KICKER} title={CLAIM}>
-          <p className={LEAD}>{PITCH}</p>
-          <WayIn signedIn={signedIn} docsHref={DOCS_URL} />
-          <div className="w-full max-w-2xl">
-            <InstallTabs tabs={INSTALL} />
-          </div>
+        <PaperHero title={TITLE}>
+          <p className={LEAD}>{SUBTITLE}</p>
         </PaperHero>
 
-        <PaperSection title="What it catches">
-          <ul className="flex max-w-[80ch] flex-col gap-4">
-            {CATCHES.map((item) => (
-              <PaperPoint key={item.title} title={item.title}>
-                {item.body}{" "}
-                <PaperLink
-                  href={item.link.href}
-                  className="text-foreground underline underline-offset-4 hover:no-underline"
-                >
-                  {item.link.label}
-                </PaperLink>
-              </PaperPoint>
-            ))}
-          </ul>
-          <PaperGo href={DOCS_URL}>Read the docs</PaperGo>
+        <PaperSection id="surfaces" className="pt-0 lg:pt-0">
+          <SurfaceGrid>
+            <SurfaceCard
+              title="Console"
+              description="Runs and the steps inside them, live alerts to Slack and webhooks, in-process step and spend caps, and audit logs."
+              action={
+                signedIn ? (
+                  <Button asChild size="sm" variant="filled">
+                    <Link href="/console">Console</Link>
+                  </Button>
+                ) : (
+                  <Button asChild size="sm" variant="filled">
+                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                    <a href="/auth/signup">Sign up</a>
+                  </Button>
+                )
+              }
+              preview={<ConsoleVideoPlaceholder />}
+            />
+            <SurfaceCard
+              title="Terminal"
+              description="Authenticate from your terminal or CI with the Telmoni CLI, and record Claude Code, Codex and Antigravity sessions with their plugins."
+              action={<TerminalInstallMenu />}
+              preview={<TerminalVideoPlaceholder />}
+            />
+            <SurfaceCard
+              title="SDK"
+              description="Drive Telmoni from Python, TypeScript, Go, and Rust with native OpenTelemetry export and privacy guards."
+              action={
+                <Button asChild size="sm" variant="filled">
+                  <PaperLink href={docs("/api/sdks")}>Read docs</PaperLink>
+                </Button>
+              }
+              preview={<SdkVideoPlaceholder />}
+            />
+          </SurfaceGrid>
         </PaperSection>
 
-        <PaperSection title={PRIVACY.title}>
-          <ul className="flex max-w-[80ch] flex-col gap-4">
-            {PRIVACY.points.map((point) => (
-              <PaperPoint key={point}>{point}</PaperPoint>
-            ))}
-          </ul>
-          <PaperGo href={PRIVACY.link.href}>{PRIVACY.link.label}</PaperGo>
-        </PaperSection>
-
-        <PaperSection title="Works with your stack">
-          <p className={`max-w-[80ch] ${BODY}`}>
-            Any language and framework that speaks OpenTelemetry, and these with a page of their own.
+        <PaperSection
+          title="What is Telmoni?"
+          className="[&_[data-component=features]]:gap-gutter"
+        >
+          <p className={LEAD}>
+            Telmoni is an open-source monitoring platform for AI agents. Follow runs,
+            catch failures and control spend, with prompts kept in your process by default.{" "}
+            <PaperLink href={DOCS_URL} className="text-foreground underline underline-offset-4 hover:no-underline">
+              Read the docs.
+            </PaperLink>
           </p>
-          <div className="grid gap-gutter sm:grid-cols-2">
-            {STACK.map((group) => (
-              <div key={group.title} className="flex flex-col gap-gutter border border-border p-4">
-                <h3 className="text-sm font-medium text-foreground">{group.title}</h3>
-                <ul className="flex flex-wrap gap-2">
-                  {group.chips.map((chip) => (
-                    <li key={chip.label}>
-                      <Chip href={chip.href}>{chip.label}</Chip>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <FeatureGrid>
+            {FEATURES.map((item) => (
+              <FeatureItem
+                key={item.title}
+                title={item.title}
+                description={
+                  <>
+                    {item.body}{" "}
+                    <PaperLink
+                      href={item.link.href}
+                      className="text-foreground underline underline-offset-4 hover:no-underline"
+                    >
+                      {item.link.label}
+                    </PaperLink>
+                  </>
+                }
+              />
             ))}
-          </div>
+          </FeatureGrid>
         </PaperSection>
 
-        <PaperSection title="Questions and answers">
-          <div className="flex flex-col">
-            {FAQ.map((entry) => (
-              <details key={entry.question} className="group">
-                <summary
-                  className={`flex cursor-pointer list-none items-start gap-4 py-gutter text-foreground [&::-webkit-details-marker]:hidden ${BODY}`}
+        <PaperSection title="Open source">
+          <p className={`max-w-[60ch] ${BODY}`}>
+            With an <span className="text-foreground">Apache-2.0</span> license,{" "}
+            <span className="text-foreground">4 native SDKs</span>, and{" "}
+            <span className="text-foreground">OpenTelemetry</span> ingest, Telmoni is built in the
+            open so you can run the whole platform on your own infrastructure: one Rust server and
+            one console, on Docker Compose or Kubernetes.
+          </p>
+          <StatsProof
+            stats={[
+              { label: "License", value: "Apache-2.0" },
+              { label: "Native SDKs", value: "4" },
+              { label: "Standard ingest", value: "OTLP" },
+            ]}
+            note={
+              REPO_URL ? (
+                <>
+                  <PaperLink
+                    href={`${REPO_URL}/blob/main/LICENSE`}
+                    className="text-foreground underline underline-offset-4 hover:no-underline"
+                  >
+                    Apache-2.0 licensed
+                  </PaperLink>
+                  . Built in the open by{" "}
+                  <PaperLink
+                    href={REPO_URL}
+                    className="text-foreground underline underline-offset-4 hover:no-underline"
+                  >
+                    Telmoni
+                  </PaperLink>{" "}
+                  and{" "}
+                  <PaperLink
+                    href={`${REPO_URL}/graphs/contributors`}
+                    className="text-foreground underline underline-offset-4 hover:no-underline"
+                  >
+                    contributors
+                  </PaperLink>
+                  .
+                </>
+              ) : (
+                "Apache-2.0 licensed. Built in the open by Telmoni and contributors."
+              )
+            }
+            action={
+              <>
+                {REPO_URL && (
+                  <Button asChild variant="filled" size="sm" className="gap-2">
+                    <PaperLink href={REPO_URL}>
+                      <Star className="size-3.5 fill-current" aria-hidden="true" />
+                      <span>Star on GitHub</span>
+                    </PaperLink>
+                  </Button>
+                )}
+                <Button
+                  asChild
+                  variant="secondary"
+                  size="sm"
+                  className="border-transparent bg-muted text-foreground hover:bg-muted/80"
                 >
-                  <Plus
-                    aria-hidden="true"
-                    className="mt-[0.35em] size-3.5 shrink-0 text-muted-foreground group-open:hidden"
-                  />
-                  <Minus
-                    aria-hidden="true"
-                    className="mt-[0.35em] hidden size-3.5 shrink-0 text-muted-foreground group-open:block"
-                  />
-                  <span className="text-foreground">{entry.question}</span>
-                </summary>
-                <p className={`max-w-[80ch] pb-4 pl-7.5 ${BODY}`}>{entry.answer}</p>
-              </details>
-            ))}
-          </div>
+                  <PaperLink href={docs("/contributing/introduction")}>
+                    Contribute
+                  </PaperLink>
+                </Button>
+              </>
+            }
+          />
         </PaperSection>
+
       </main>
     </PaperShell>
-  );
-}
-
-/** A link as a small outlined chip, as the stack lists them:
- *  a thumb's height on a phone, a line's on a wider page. */
-function Chip({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <PaperLink
-      href={href}
-      className="inline-flex min-h-9 items-center border border-border px-2.5 text-[13px] leading-none text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground sm:min-h-7"
-    >
-      {children}
-    </PaperLink>
   );
 }

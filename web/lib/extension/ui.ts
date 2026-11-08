@@ -45,6 +45,9 @@ export {
   PaperLink,
   PaperPoint,
   PaperSection,
+  FeatureGrid,
+  FeatureItem,
+  StatsProof,
 } from "@/components/paper-page";
 export { type ActionResult, type Refused, errorOf, refused } from "@/lib/action-result";
 export { INSET } from "@/lib/inset";

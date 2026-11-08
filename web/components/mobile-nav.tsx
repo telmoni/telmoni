@@ -105,7 +105,7 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
                       Sign in
                     </a>
                   </Button>
-                  <Button asChild size="sm" className={NAV_TYPE}>
+                  <Button asChild size="sm" variant="filled" className={NAV_TYPE}>
                     {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                     <a href="/auth/signup">
                       Sign up

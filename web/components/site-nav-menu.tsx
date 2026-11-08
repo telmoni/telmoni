@@ -104,7 +104,7 @@ function Panel({ panel }: { panel: NavPanel }) {
                   <Link
                     href={link.href}
                     {...outbound(link)}
-                    className="text-sm text-foreground transition-colors hover:text-muted-foreground"
+                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                   >
                     {link.label}
                   </Link>

@@ -3,12 +3,13 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { INSET } from "@/lib/inset";
+import { ArrowUpRight, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The pieces of a framed public page (`paper-shell.tsx`, `framed`): the
 // splash's, and every page laid out as it is. A hero, then sections ruled
-// apart, numbered where a page asks, each inset by the one measure; a list marked as the
-// monogram is drawn; one outlined button a section ends on.
+// apart in a two-column editorial layout, numbered where a page asks, each inset
+// by the one measure; one outlined button a section ends on.
 
 // The small line a section opens with: its number, as a document's
 // sections are numbered, or what a page is, over a title in the console's
@@ -16,10 +17,10 @@ import { cn } from "@/lib/utils";
 export const EYEBROW = "text-[11px] uppercase tracking-label text-muted-foreground";
 
 // A paragraph of a section.
-export const BODY = "text-[15px] leading-[1.65] text-muted-foreground";
+export const BODY = "text-sm leading-[1.65] text-muted-foreground";
 
 // The paragraph under a hero's heading, a size up.
-export const LEAD = "max-w-[58ch] text-base leading-[1.65] text-muted-foreground lg:text-lg";
+export const LEAD = "max-w-[72ch] text-base leading-[1.65] text-muted-foreground lg:text-lg";
 
 // The page's claim as its one `h1`, under the line that says what the page
 // is, a badge before it naming a stage, then whatever the page opens with.
@@ -28,27 +29,35 @@ export function PaperHero({
   badge,
   title,
   children,
+  className,
 }: {
   eyebrow?: string;
   badge?: string;
   title: string;
   children?: React.ReactNode;
+  className?: string;
 }) {
   return (
     <section
+      data-component="hero"
       className={cn(
-        "flex flex-col gap-8 border-b border-border pt-16 pb-14 lg:pt-32 lg:pb-24",
+        "flex flex-col gap-4 pt-8 pb-8 lg:pt-20 lg:pb-10 lg:pr-16",
         INSET,
+        className,
       )}
     >
       <div className="flex flex-col gap-5">
         {(badge !== undefined || eyebrow !== undefined) && (
           <div className="flex flex-wrap items-center gap-gutter">
-            {badge !== undefined && <Badge variant="outline">{badge}</Badge>}
+            {badge !== undefined && (
+              <Badge variant="outline" className="font-mono text-xs">
+                {badge}
+              </Badge>
+            )}
             {eyebrow !== undefined && <p className={EYEBROW}>{eyebrow}</p>}
           </div>
         )}
-        <h1 className="max-w-[30ch] text-[32px] font-semibold leading-[1.1] tracking-[-0.02em] text-balance text-foreground sm:text-[44px] lg:text-[52px]">
+        <h1 className="font-mono max-w-[44ch] text-[32px] font-medium leading-[1.15] tracking-tight text-foreground sm:text-[44px] lg:text-[50px]">
           {title}
         </h1>
       </div>
@@ -57,36 +66,54 @@ export function PaperHero({
   );
 }
 
-// A section of the column, ruled off from the next: its number and title,
-// then what it holds. Without a title it is a band at the same inset and
-// rhythm, as a page's cards are. The last before the footer leaves the rule
-// to the footer's own.
+// A two-column editorial block ruled off from the next: its title and number in
+// the left column, its body and structured components in the right column.
 export function PaperSection({
   id,
   number,
   title,
   children,
+  className,
 }: {
   id?: string;
   number?: string;
   title?: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <section
       id={id}
+      data-component="block"
+      data-columns="2"
       className={cn(
-        "flex scroll-mt-24 flex-col gap-page border-b border-border py-12 last:border-b-0 lg:py-16",
+        "flex scroll-mt-24 flex-col py-12 lg:py-16",
         INSET,
+        className,
       )}
     >
-      {title !== undefined && (
-        <div className="flex flex-col gap-2">
-          {number !== undefined && <p className={EYEBROW}>{number}</p>}
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground lg:text-[28px]">{title}</h2>
+      {title !== undefined ? (
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-12">
+          <div className="flex flex-col gap-2 lg:col-span-3">
+            {number !== undefined && (
+              <span className="font-mono text-xs text-muted-foreground tracking-wider">
+                [{number}]
+              </span>
+            )}
+            <h2
+              data-slot="label"
+              className="text-base font-medium text-foreground"
+            >
+              {title}
+            </h2>
+          </div>
+          <div data-slot="body" className="flex flex-col gap-8 lg:col-span-9">
+            {children}
+          </div>
         </div>
+      ) : (
+        <div className="flex flex-col gap-8">{children}</div>
       )}
-      {children}
     </section>
   );
 }
@@ -133,5 +160,290 @@ export function PaperGo({ href, children }: { href: string; children: React.Reac
     <Button asChild variant="outline" size="sm" className="w-fit font-normal">
       <PaperLink href={href}>{children} →</PaperLink>
     </Button>
+  );
+}
+
+// A 2-column feature list of key capabilities.
+export function FeatureGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <ul data-component="features" className="grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2">
+      {children}
+    </ul>
+  );
+}
+
+export function FeatureItem({
+  title,
+  description,
+  href,
+  linkText,
+}: {
+  title: string;
+  description: React.ReactNode;
+  href?: string;
+  linkText?: string;
+}) {
+  return (
+    <li className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5 text-base font-medium text-foreground">
+        <span>{title}</span>
+        {href && linkText && (
+          <PaperLink
+            href={href}
+            className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            {linkText} <ArrowUpRight className="size-4" aria-hidden="true" />
+          </PaperLink>
+        )}
+      </div>
+      <p className="text-sm text-muted-foreground">{description}</p>
+    </li>
+  );
+}
+
+export function StatsProof({
+  stats,
+  note,
+  action,
+}: {
+  stats: readonly { label: string; value: string }[];
+  note?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-8">
+      <dl className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+        {stats.map((s) => (
+          <div key={s.label} className="flex flex-col gap-2">
+            <dd className="font-mono text-4xl font-normal tracking-tight text-foreground sm:text-5xl">
+              {s.value}
+            </dd>
+            <dt className="text-sm text-muted-foreground">
+              {s.label}
+            </dt>
+          </div>
+        ))}
+      </dl>
+      {note && <div className={BODY}>{note}</div>}
+      {action && <div className="flex flex-wrap items-center gap-3">{action}</div>}
+    </div>
+  );
+}
+
+// 3-column surface card grid (Console, Terminal, SDK) inspired by editorial interfaces.
+export function SurfaceGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      data-component="surface-grid"
+      className="grid grid-cols-1 gap-gutter md:grid-cols-3"
+    >
+      {children}
+    </div>
+  );
+}
+
+// A surface card with video/media preview placeholder, title, description, and action button.
+export function SurfaceCard({
+  title,
+  description,
+  action,
+  preview,
+}: {
+  title: string;
+  description: string;
+  action: React.ReactNode;
+  preview: React.ReactNode;
+}) {
+  return (
+    <div data-component="surface-card" className="flex h-full min-w-0 flex-col gap-4">
+      <div tabIndex={0} role="region" aria-label={`${title} preview`} className="group relative aspect-[4/5] w-full overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-foreground text-background select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        {preview}
+      </div>
+      <div className="flex flex-1 flex-col gap-1.5">
+        <h3 className="text-base font-medium text-foreground">
+          {title}
+        </h3>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <div className="mt-auto pt-1">{action}</div>
+    </div>
+  );
+}
+
+function VideoPlayOverlay() {
+  return (
+    <>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 flex items-center justify-center bg-foreground/20 transition-all duration-300 group-hover:bg-foreground/5"
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-background/20 bg-background/10 text-background backdrop-blur-md shadow-2xl transition-transform duration-300 group-hover:scale-110">
+          <Play className="h-4 w-4 fill-background ml-0.5" />
+        </div>
+      </div>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none flex items-center justify-between pt-3 font-mono text-[10px] tracking-wider text-background/60"
+      >
+        <span className="rounded-md bg-foreground/60 px-1.5 py-0.5 border border-background/10 text-background/90 backdrop-blur-sm">
+          VIDEO PREVIEW
+        </span>
+        <span className="text-background/40">0:15</span>
+      </div>
+    </>
+  );
+}
+
+// Video placeholder mockup for the Web Console surface.
+export function ConsoleVideoPlaceholder() {
+  return (
+    <div className="relative min-h-full w-full p-4 flex flex-col justify-between gap-4 font-sans">
+      <div className="flex items-center justify-between text-[11px] font-mono text-background/60 border-b border-background/10 pb-2.5">
+        <div className="flex items-center gap-2">
+          <span className="size-2 rounded-full bg-brand-positive animate-pulse" />
+          <span className="text-background/90 font-medium">telmoni console</span>
+        </div>
+        <span className="text-background/40">prj_prod</span>
+      </div>
+
+      <div className="flex flex-col gap-2.5 my-auto">
+        <div className="rounded-md border border-background/10 bg-background/5 p-3 backdrop-blur-sm">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-mono text-background/90 font-medium">agent-coder</span>
+            <span className="rounded-md bg-brand-positive/20 px-1.5 py-0.5 font-mono text-[10px] text-brand-positive border border-brand-positive/30">
+              Active
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2 border-t border-background/10 pt-2 text-[10px] font-mono text-background/60">
+            <div>
+              <span className="text-background/40 block">STEPS</span>
+              <span className="text-background/80">14 / 50</span>
+            </div>
+            <div>
+              <span className="text-background/40 block">COST</span>
+              <span className="text-background/80">$0.042</span>
+            </div>
+            <div>
+              <span className="text-background/40 block">GUARD</span>
+              <span className="text-brand-positive">OK</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-background/10 bg-background/5 p-2.5">
+          <div className="flex items-center justify-between text-[11px] font-mono text-background/60">
+            <span>Spend ceiling</span>
+            <span className="text-background/80">$1.00 / session</span>
+          </div>
+          <div className="mt-1.5 h-1.5 w-full rounded-full bg-background/10 overflow-hidden">
+            <div className="h-full w-1/4 rounded-full bg-brand-positive" />
+          </div>
+        </div>
+      </div>
+
+      <VideoPlayOverlay />
+    </div>
+  );
+}
+
+// Video placeholder mockup for the Terminal / CLI surface.
+export function TerminalVideoPlaceholder() {
+  return (
+    <div className="relative min-h-full w-full p-4 flex flex-col justify-between gap-4 font-mono text-xs">
+      <div className="flex items-center justify-between text-[11px] text-background/60 border-b border-background/10 pb-2.5">
+        <div className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-background/20" />
+          <span className="size-2 rounded-full bg-background/20" />
+          <span className="size-2 rounded-full bg-background/20" />
+        </div>
+        <span className="text-background/40">telmoni — status</span>
+      </div>
+
+      <div className="my-auto flex flex-col gap-1.5 text-[11px] leading-relaxed text-background/80">
+        <p className="text-background">
+          <span className="text-brand-positive">$</span> telmoni status
+        </p>
+        <div className="mt-1 flex flex-col gap-1 border-l-2 border-background/20 pl-2">
+          {/* `telmoni status`'s own lines, as the CLI prints them. */}
+          <p className="text-background/80">
+            <span className="text-background/40">Signed in as</span> ada@example.com{" "}
+            <span className="text-background/60">(Ada)</span>
+          </p>
+          <p className="text-background/80">
+            <span className="text-background/40">Active organization:</span> Acme{" "}
+            <span className="text-background/60">(3f2b9c1e-7d4a-4c1b-9e2f-5a6b7c8d9e0f, owner)</span>
+          </p>
+          <p className="text-background/80">
+            <span className="text-background/40">Organizations:</span> 2
+          </p>
+          <p className="text-background/80">
+            <span className="text-background/40">Endpoint:</span> https://api.telmoni.com
+          </p>
+          <p className="text-background/80">
+            <span className="text-background/40">Token:</span> expires in 54 minutes
+          </p>
+        </div>
+        <p className="text-background/40 text-[10px] mt-2">
+          $ telmoni org list{" "}
+          <span className="inline-block h-3 w-1.5 bg-background/80 animate-pulse align-middle ml-1" />
+        </p>
+      </div>
+
+      <VideoPlayOverlay />
+    </div>
+  );
+}
+
+// Video placeholder mockup for the SDK surface.
+export function SdkVideoPlaceholder() {
+  return (
+    <div className="relative min-h-full w-full p-4 flex flex-col justify-between gap-4 font-mono text-xs">
+      <div className="flex items-center justify-between text-[11px] text-background/60 border-b border-background/10 pb-2.5">
+        <div className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-background/20" />
+          <span className="size-2 rounded-full bg-background/20" />
+          <span className="size-2 rounded-full bg-background/20" />
+        </div>
+        <span className="text-background/40">agent.ts</span>
+      </div>
+
+      <div className="my-auto flex flex-col gap-1 text-[11px] leading-relaxed">
+        <p>
+          <span className="text-brand-unit">import</span>{" "}
+          <span className="text-background">{"{ Telmoni }"}</span>{" "}
+          <span className="text-brand-unit">from</span>{" "}
+          <span className="text-brand-positive">&quot;telmoni&quot;</span>;
+        </p>
+        <div className="my-1" />
+        <p>
+          <span className="text-brand-unit">const</span>{" "}
+          <span className="text-background">telmoni</span> ={" "}
+          <span className="text-background">Telmoni.fromEnv()</span>;
+        </p>
+        <div className="my-1" />
+        <p>
+          <span className="text-brand-unit">await</span>{" "}
+          <span className="text-background">telmoni.run</span>(
+        </p>
+        <p className="pl-3">
+          <span className="text-brand-positive">&quot;support-bot&quot;</span>,
+        </p>
+        <p className="pl-3">
+          {"{ "}
+          <span className="text-background/60">maxSteps:</span>{" "}
+          <span className="text-brand-unit">20</span>,{" "}
+          <span className="text-background/60">maxSpend:</span>{" "}
+          <span className="text-brand-unit">0.50</span>
+          {" },"}
+        </p>
+        <p className="pl-3">
+          <span className="text-brand-unit">async</span> (
+          <span className="text-background">run</span>) =&gt; {"{ /* ... */ }"}
+        </p>
+        <p>{");"}</p>
+      </div>
+
+      <VideoPlayOverlay />
+    </div>
   );
 }

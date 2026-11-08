@@ -22,7 +22,7 @@ export type NavItem =
 
 const CORE_PRIMARY_NAV: readonly NavItem[] = [
   ...(REPO_URL ? [{ label: "GitHub", href: REPO_URL, newTab: true } satisfies NavItem] : []),
-  { label: "Docs", href: DOCS_URL },
+  { label: "Docs", href: DOCS_URL, newTab: true },
 ];
 
 /** The core's primary nav with links built on this console joined in. */

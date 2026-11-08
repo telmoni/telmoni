@@ -1,46 +1,76 @@
 "use client";
 
-import { useEffect } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 
-import { PaperLink } from "@/components/paper-page";
 import { Button } from "@/components/ui/button";
-import { inFront, pressedKey, typedInto } from "@/lib/keys";
-import { letterKeysOn, useLetterKeys } from "@/lib/use-accessibility";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 
-// The way in: the console for a member, sign-up for a visitor, and the docs
-// for either. The first's key is the header's (`header-shortcuts.tsx`: S to
-// sign up, C for the console); D for the docs is this page's. No button draws
-// its key; each announces it. Off with every letter key, in Accessibility.
+const TERMINAL_COMMANDS = [
+  {
+    label: "curl",
+    command: "curl -fsSL https://telmoni.com/install.sh | sh",
+  },
+  {
+    label: "cargo",
+    command: "cargo install --locked telmoni-cli",
+  },
+] as const;
 
-const DOCS_KEY = "d";
+export function TerminalInstallMenu() {
+  const [open, setOpen] = useState(false);
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+  const { copied, copy } = useCopyToClipboard(1500);
 
-export function WayIn({ signedIn, docsHref }: { signedIn: boolean; docsHref: string }) {
-  const letterKeys = useLetterKeys();
-  const start = signedIn ? { href: "/console", label: "Console" } : { href: "/auth/signup", label: "Sign up" };
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.repeat || typedInto(e)) return;
-      if (inFront() || !letterKeysOn() || pressedKey(e).toLowerCase() !== DOCS_KEY) return;
-      e.preventDefault();
-      // A whole navigation, as the link's: the book may stand on another origin.
-      window.location.assign(docsHref);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [docsHref]);
+  const handleCopy = async (label: string, command: string) => {
+    if (await copy(command)) {
+      setCopiedLabel(label);
+    } else {
+      toast.error("Couldn't copy the install command.");
+    }
+  };
 
   return (
-    <div className="flex flex-wrap items-center gap-gutter">
-      <Button asChild size="lg" className="gap-2 px-5">
-        {/* Sign-up is a route handler, which only a whole load reaches. */}
-        <a href={start.href}>{start.label}</a>
-      </Button>
-      <Button asChild size="lg" variant="outline" className="gap-2 px-5">
-        <PaperLink href={docsHref} aria-keyshortcuts={letterKeys ? DOCS_KEY : undefined}>
-          Documentation
-        </PaperLink>
-      </Button>
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" size="sm" variant="filled" className="gap-1.5">
+          <span>Install</span>
+          {open ? (
+            <ChevronUp className="size-3.5" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="size-3.5" aria-hidden="true" />
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        aria-label="Terminal install commands"
+        className="flex w-max max-w-[calc(100vw-2*var(--spacing-gutter))] flex-col gap-gutter p-gutter text-sm"
+      >
+        {TERMINAL_COMMANDS.map((item) => (
+          <div key={item.label} className="flex items-center justify-between gap-gutter">
+            <div className="flex min-w-0 items-center gap-gutter">
+              <span className="w-12 shrink-0 text-muted-foreground">{item.label}</span>
+              <code className="truncate font-mono text-foreground select-all" title={item.command}>
+                {item.command}
+              </code>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={`Copy ${item.label} install command`}
+              onClick={() => void handleCopy(item.label, item.command)}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              {copied && copiedLabel === item.label ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }

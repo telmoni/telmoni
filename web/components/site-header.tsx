@@ -61,7 +61,7 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/auth/login">Sign in</a>
                 </Button>
-                <Button asChild size="sm" className={NAV_TYPE}>
+                <Button asChild variant="filled" size="sm" className={NAV_TYPE}>
                   {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                   <a href="/auth/signup">
                     Sign up
