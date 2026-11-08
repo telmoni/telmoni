@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  cloneElement,
   createContext,
+  isValidElement,
   useContext,
   useEffect,
   useRef,
@@ -13,6 +15,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { PAGE_ACTION_KEY } from "@/lib/keys";
 import { useLetterKeys } from "@/lib/use-accessibility";
 import { cn } from "@/lib/utils";
@@ -56,7 +59,7 @@ export function PageAction({
   const ref = useRef<HTMLButtonElement>(null);
   const set = useContext(ActionSetCtx);
   const disabled = !!props.disabled;
-  // Off in Accessibility, the key is not announced; its keycap hides by CSS.
+  // The visual hint and announcement follow the same accessibility preference.
   const letterKeys = useLetterKeys();
 
   useEffect(() => {
@@ -81,7 +84,12 @@ export function PageAction({
     ...props,
   };
 
-  // Its key is answered and announced (`aria-keyshortcuts`), and listed on the
-  // shortcuts sheet (`?`), but drawn on no button.
-  return <Button {...buttonProps}>{children}</Button>;
+  const hint = primary && !disabled && letterKeys
+    ? <Kbd aria-hidden="true" className="size-5 shrink-0 p-0">{PAGE_ACTION_KEY.toUpperCase()}</Kbd>
+    : null;
+  const content = props.asChild && isValidElement<{ children?: ReactNode }>(children)
+    ? cloneElement(children, {}, <>{children.props.children}{hint}</>)
+    : <>{children}{hint}</>;
+
+  return <Button {...buttonProps}>{content}</Button>;
 }
