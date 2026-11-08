@@ -35,17 +35,21 @@ describe("the console's content containers", () => {
   // but it still checks the pages, because a page that reintroduces the shell
   // by hand is exactly what would slip past.
   it("gives the card that wraps a table a keyboard way into its scroll", () => {
-    const lines = dataTable.split("\n");
-    const at = lines.findIndex((l) =>
-      l.includes('<Card className="overflow-hidden p-0 gap-0"'),
+    // The shell is `Surface`: the list card, or a bare scroll box where flush;
+    // its props run over several lines, so the tag is read to its `>`.
+    expect(dataTable, "data-table.tsx no longer wraps the table in the list card").toContain(
+      'const Surface = flush ? "div" : Card;',
     );
-    expect(at, "data-table.tsx no longer wraps the table in the list card").toBeGreaterThanOrEqual(0);
-    const next = lines.slice(at + 1).find((l) => l.trim() !== "") ?? "";
+    const lines = dataTable.split("\n");
+    const at = lines.findIndex((l) => l.trim().startsWith("<Surface"));
+    expect(at, "data-table.tsx no longer draws its shell").toBeGreaterThanOrEqual(0);
+    const end = lines.findIndex((l, i) => i >= at && l.trimEnd().endsWith(">"));
+    const tag = lines.slice(at, end + 1).join("\n");
+    const next = lines.slice(end + 1).find((l) => l.trim() !== "") ?? "";
     expect(next.trim().startsWith("<table"), "the card no longer wraps a table").toBe(true);
-    expect(
-      lines[at],
-      "the card wraps a table and cannot be reached by keyboard",
-    ).toContain("tabIndex={0}");
+    expect(tag, "the card wraps a table and cannot be reached by keyboard").toContain(
+      "tabIndex={0}",
+    );
 
     // Vacuous today — no page draws a `<table>` at all, and console-table.test
     // is what holds that. It is the original scan, kept because a page that

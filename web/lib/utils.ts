@@ -19,7 +19,8 @@ export function cn(...inputs: ClassValue[]) {
  *  `gap-gutter`) in `app/globals.css`. */
 export const GUTTER_PX = 18;
 
-/** The page inset and section gap: `--spacing-page` in `app/globals.css`. */
+/** The page inset and section gap: `--spacing-page` in `app/globals.css`.
+ *  @alias */
 export const PAGE_GUTTER_PX = GUTTER_PX;
 
 /** From a header control's bottom to the outside of the header's rule. */
