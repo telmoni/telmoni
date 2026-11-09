@@ -5,23 +5,27 @@
 //! keyed by the incident and the kind, so an incident has one feed row of
 //! each; what it says again goes to the connectors alone. A notice names the
 //! alert, where it stands and the numbers that crossed it, the run that shows
-//! it and the traces it read: names and numbers alone, never a span's
-//! content, since every connector is a third party.
+//! it, what its agents changed to in the day before it opened
+//! ([`crate::changes`]) and the traces it read: names and numbers alone,
+//! never a span's content, since every connector is a third party.
+
+use std::time::Duration;
 
 use serde_json::json;
 use uuid::Uuid;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
 use telmoni_shared::seam::{IncidentNotice, Notice, Route};
 use telmoni_shared::{
-    IncidentStatus, MonitorCause, NotificationKind, OrganizationId, ProjectId, RuleAggregation,
-    RuleBaseline, RuleMeasure, RuleOperator, RuleWindow, Severity, SpanKind, SpanStatus,
-    TelmoniError,
+    ChangeKind, IncidentStatus, MonitorCause, NotificationKind, OrganizationId, ProjectId,
+    RuleAggregation, RuleBaseline, RuleMeasure, RuleOperator, RuleWindow, Severity, SpanKind,
+    SpanStatus, TelmoniError,
 };
 
 use crate::AppState;
+use crate::changes::{self, BEFORE_INCIDENT, Change, Opened, Scope};
 use crate::db::TelemetryLane;
 use crate::monitors::{Judged, MonitorRow};
 use crate::rules::db::{self, RuleRow};
@@ -60,6 +64,8 @@ pub async fn tell_incidents(
     };
     let muted = muted_at(state, &rule.project_id, owner, at).await;
     let run = run_of(state, rule, told).await;
+    let scope = Scope::of_alert(&rule.definition.filters);
+    let changed = changed_of(state, &rule.project_id, &scope, told).await;
     for one in told.iter().filter(|one| one.telling != Telling::Silent) {
         // A resolution's `told_to` names who heard its incident; any other's is empty.
         let hearers: Vec<Uuid> = links
@@ -67,7 +73,10 @@ pub async fn tell_incidents(
             .filter(|link| link.hears_end(one.heard_at, &one.told_to, muted, at))
             .map(|link| link.connection_id)
             .collect();
-        let shown = run.as_ref().filter(|_| shows_run(one));
+        let shown = Shown {
+            run: run.as_ref().filter(|_| shows_run(one)),
+            changed: changed.as_ref().filter(|_| shows_run(one)),
+        };
         tell_one(state, rule, value, one, &hearers, shown).await;
     }
 }
@@ -135,19 +144,29 @@ pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
         telling: Telling::Reminder,
         told_to: Vec::new(),
     };
-    tell_one(state, rule, value, &one, &hearers, None).await;
+    tell_one(state, rule, value, &one, &hearers, Shown::default()).await;
 }
 
-/// One move told to `hearers`, and to the feed unless said again: its words,
-/// the run it shows and the trace list as the alert read it, the day's
-/// deliveries taken for it, and where it went kept on its incident.
+/// What a breach's notice shows beside its words: the run, and what its
+/// agents changed to before it opened.
+#[derive(Clone, Copy, Default)]
+struct Shown<'a> {
+    run: Option<&'a ExampleRun>,
+    changed: Option<&'a Changed>,
+}
+
+/// One move told to `hearers`, and to the feed unless said again, with what
+/// it shows; the day's deliveries taken, and where it went kept on its incident.
 async fn tell_one(
     state: &AppState,
     rule: &RuleRow,
     value: Option<f64>,
     one: &Told,
     hearers: &[Uuid],
-    shown: Option<&ExampleRun>,
+    Shown {
+        run: shown,
+        changed,
+    }: Shown<'_>,
 ) {
     let traces_url = traces_link(state, rule);
     let (title, body) = words(rule, value, one);
@@ -157,6 +176,7 @@ async fn tell_one(
             shown.map(|run| run_line(state, rule, run, one.severity)),
             traces_url.as_ref().map(|url| format!("Traces: {url}")),
         ],
+        changed,
     );
     let metadata = json!({
         "incident_id": one.incident_id,
@@ -354,17 +374,194 @@ async fn muted_at(
     }
 }
 
-/// A notice's body, then a line for each of what else it carries.
-fn carrying<const N: usize>(body: String, lines: [Option<String>; N]) -> String {
-    std::iter::once(body)
+/// A notice's body, a line for each of what else it carries, then the changes
+/// before it that fit [`BODY_MAX`]: last, so a connector cutting a long body
+/// cuts them and never a link.
+fn carrying<const N: usize>(
+    body: String,
+    lines: [Option<String>; N],
+    changed: Option<&Changed>,
+) -> String {
+    let mut lines: Vec<String> = std::iter::once(body)
         .chain(lines.into_iter().flatten())
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    if let Some(changed) = changed {
+        let taken: usize = lines.iter().map(|line| chars(line) + 1).sum();
+        lines.extend(changed_lines(changed, (BODY_MAX + 1).saturating_sub(taken)));
+    }
+    lines.join("\n")
 }
 
-/// Whether a move shows the run: a breach opened, reopened or risen, which
-/// a window with no span cannot show; a recovery need not, nor a reminder,
-/// which may come every minute and whose opening named one.
+/// The most characters a notice's body holds, as the seam's `Notice` has it.
+const BODY_MAX: usize = 4_000;
+
+/// The most changes a notice names; its incident names the rest.
+const CHANGES_SHOWN: usize = 5;
+
+/// How long a notice waits for its changes before it goes without them.
+const CHANGES_BUDGET: Duration = Duration::from_secs(2);
+
+fn chars(line: &str) -> usize {
+    line.chars().count()
+}
+
+/// What an incident's agents changed to in the [`BEFORE_INCIDENT`] before it
+/// opened, as its notice names them.
+#[derive(Debug, Clone, PartialEq)]
+struct Changed {
+    opened_at: DateTime<Utc>,
+    /// The newest first.
+    changes: Vec<Change>,
+    /// Whether its incident had more than it names.
+    more: bool,
+    /// Whether each names its agent, the incident being of no single one.
+    several: bool,
+}
+
+/// The changes an evaluation's breach names, read once as its run is; none
+/// where no move shows them.
+async fn changed_of(
+    state: &AppState,
+    project_id: &ProjectId,
+    scope: &Scope,
+    told: &[Told],
+) -> Option<Changed> {
+    let one = told
+        .iter()
+        .find(|one| one.telling != Telling::Silent && shows_run(one))?;
+    let incident_id = one.incident_id;
+    let read = async {
+        let mut tx = project_scope(&state.db, project_id).await?;
+        let Some(incident) = incidents::one(&mut tx, project_id, incident_id).await? else {
+            return Ok(None);
+        };
+        let asked = Opened {
+            incident_id,
+            opened_at: incident.opened_at,
+            scope: scope.clone(),
+        };
+        // The incident's own read, so its notice counts what it names.
+        let mut around = changes::around_incidents(&mut tx, project_id, &[asked]).await?;
+        tx.commit().await?;
+        let (changes, more) = around.remove(&incident_id).unwrap_or_default();
+        Ok::<_, TelmoniError>(Some(Changed {
+            opened_at: incident.opened_at,
+            changes,
+            more,
+            several: scope.several(),
+        }))
+    };
+    changed_within(CHANGES_BUDGET, incident_id, read)
+        .await
+        .filter(|changed| !changed.changes.is_empty())
+}
+
+/// What `read` answers inside `budget`; none, logged by the incident's id,
+/// where it fails or runs past it, so a notice is never held for its changes.
+async fn changed_within(
+    budget: Duration,
+    incident_id: Uuid,
+    read: impl Future<Output = Result<Option<Changed>, TelmoniError>>,
+) -> Option<Changed> {
+    match tokio::time::timeout(budget, read).await {
+        Ok(Ok(changed)) => changed,
+        Ok(Err(error)) => {
+            tracing::warn!(
+                incident_id = %incident_id,
+                error = %error,
+                "telemetry: the changes before an incident could not be read; its notice goes without"
+            );
+            None
+        }
+        Err(_) => {
+            tracing::warn!(
+                incident_id = %incident_id,
+                "telemetry: the changes before an incident were not read in time; its notice goes without"
+            );
+            None
+        }
+    }
+}
+
+/// The newest [`CHANGES_SHOWN`] changes as lines within `room` characters,
+/// breaks counted, under a lead and over a count of the rest; none where none fits.
+fn changed_lines(changed: &Changed, room: usize) -> Vec<String> {
+    let named: Vec<String> = changed
+        .changes
+        .iter()
+        .take(CHANGES_SHOWN)
+        .map(|change| change_line(change, changed.opened_at, changed.several))
+        .collect();
+    for shown in (1..=named.len()).rev() {
+        let rest = changed.changes.len().saturating_sub(shown);
+        let more = match (rest, changed.more) {
+            (0, false) => None,
+            (rest, false) => Some(format!("and {rest} more on the incident")),
+            (rest, true) => Some(format!("and over {rest} more on the incident")),
+        };
+        let lines: Vec<String> = std::iter::once(format!(
+            "Changed in the {} hours before it opened:",
+            BEFORE_INCIDENT.num_hours()
+        ))
+        .chain(named.iter().take(shown).cloned())
+        .chain(more)
+        .collect();
+        if lines.iter().map(|line| chars(line) + 1).sum::<usize>() <= room {
+            return lines;
+        }
+    }
+    Vec::new()
+}
+
+/// One change as a notice names it: `release 2026.11.3 in production, 14
+/// minutes before`, its agent first where the incident is of several.
+fn change_line(change: &Change, opened_at: DateTime<Utc>, several: bool) -> String {
+    let what = match change.kind {
+        ChangeKind::Release => format!("release {}", clipped(&change.value)),
+        ChangeKind::Model => format!("model {}", clipped(&change.value)),
+        ChangeKind::Prompt => format!(
+            "prompt {} version {}",
+            clipped(change.prompt.as_deref().unwrap_or_default()),
+            clipped(&change.value)
+        ),
+    };
+    let who = if several {
+        format!("{}: ", clipped(&change.agent))
+    } else {
+        String::new()
+    };
+    let whereabouts = if change.environment.is_empty() {
+        String::new()
+    } else {
+        format!(" in {}", clipped(&change.environment))
+    };
+    // Its day marked no more of its kind, so it may not be the latest.
+    let capped = if change.capped {
+        ", and more that day"
+    } else {
+        ""
+    };
+    format!(
+        "{who}{what}{whereabouts}, {}{capped}",
+        before(opened_at - change.changed_at)
+    )
+}
+
+/// How long before, in whole minutes under an hour and whole hours past it.
+fn before(ago: TimeDelta) -> String {
+    match ago.num_minutes() {
+        ..=0 => "under a minute before".to_owned(),
+        1 => "1 minute before".to_owned(),
+        minutes @ 2..=59 => format!("{minutes} minutes before"),
+        60..=119 => "1 hour before".to_owned(),
+        minutes => format!("{} hours before", minutes / 60),
+    }
+}
+
+/// Whether a move shows the run, and the changes before its incident: a
+/// breach opened, reopened or risen, which a window with no span cannot
+/// show; a recovery need not, nor a reminder, which may come every minute
+/// and whose opening named them.
 fn shows_run(one: &Told) -> bool {
     one.change == Move::Opened
         && one.severity != Severity::NoData
@@ -1036,8 +1233,9 @@ fn dollars(value: f64) -> String {
 
 /// A monitor's moves, told after their commit as an alert's are: an opening
 /// and a resolution to the feed and its linked connectors, a rise to them
-/// alone; a failure shows the run that failed. Names the agent, the due time
-/// and the run's id alone.
+/// alone; a failure shows the run that failed, and an opening what the agent
+/// changed to before it. Names the agent, the due time, the run's id and
+/// those changes alone.
 pub async fn tell_monitor(
     state: &AppState,
     row: &MonitorRow,
@@ -1061,6 +1259,8 @@ pub async fn tell_monitor(
         }
     };
     let muted = muted_at(state, &row.project_id, owner, at).await;
+    let scope = Scope::of_monitor(&row.agent);
+    let changed = changed_of(state, &row.project_id, &scope, moves).await;
     for one in moves.iter().filter(|one| one.telling != Telling::Silent) {
         let hearers: Vec<Uuid> = links
             .iter()
@@ -1075,7 +1275,11 @@ pub async fn tell_monitor(
         let run_url =
             run.and_then(|run| run_page(state, &row.organization_id, &row.project_id, run));
         let (title, body) = monitor_words(row, judged, one);
-        let body = carrying(body, [run_url.as_ref().map(|url| format!("Run: {url}"))]);
+        let body = carrying(
+            body,
+            [run_url.as_ref().map(|url| format!("Run: {url}"))],
+            changed.as_ref().filter(|_| shows_run(one)),
+        );
         let metadata = json!({
             "incident_id": one.incident_id,
             "monitor_id": row.id,
@@ -1583,5 +1787,241 @@ mod tests {
         assert_eq!(shown.chars().count(), NAME_SHOWN);
         assert!(shown.ends_with('…'));
         assert_eq!(clipped(&"y".repeat(NAME_SHOWN)), "y".repeat(NAME_SHOWN));
+    }
+
+    fn opened() -> DateTime<Utc> {
+        DateTime::from_timestamp(1_800_000_000, 0).unwrap_or_default()
+    }
+
+    /// A release of `agent` in production, first carried `ago` before [`opened`].
+    fn released(agent: &str, value: &str, ago: TimeDelta) -> Change {
+        Change {
+            agent: agent.into(),
+            environment: "production".into(),
+            kind: ChangeKind::Release,
+            prompt: None,
+            value: value.into(),
+            changed_at: opened() - ago,
+            run_id: Uuid::nil(),
+            capped: false,
+        }
+    }
+
+    fn changed(changes: Vec<Change>) -> Changed {
+        Changed {
+            opened_at: opened(),
+            changes,
+            more: false,
+            several: false,
+        }
+    }
+
+    /// A change says how long before the incident it was, in whole minutes then hours.
+    #[test]
+    fn a_change_says_how_long_before_the_incident_it_was() {
+        let line = |ago| change_line(&released("support", "2026.11.3", ago), opened(), false);
+        for (ago, words) in [
+            (TimeDelta::zero(), "under a minute before"),
+            (TimeDelta::seconds(59), "under a minute before"),
+            (TimeDelta::seconds(60), "1 minute before"),
+            (TimeDelta::minutes(14), "14 minutes before"),
+            (TimeDelta::minutes(59), "59 minutes before"),
+            (TimeDelta::minutes(60), "1 hour before"),
+            (TimeDelta::minutes(119), "1 hour before"),
+            (TimeDelta::hours(3), "3 hours before"),
+            (
+                TimeDelta::hours(24) - TimeDelta::minutes(1),
+                "23 hours before",
+            ),
+        ] {
+            assert_eq!(
+                line(ago),
+                format!("release 2026.11.3 in production, {words}")
+            );
+        }
+    }
+
+    /// A change names its kind, place and agent, and says where its day was capped.
+    #[test]
+    fn a_change_is_named_by_its_kind_its_place_and_its_agent() {
+        let ago = TimeDelta::minutes(14);
+        let release = released("support", "2026.11.3", ago);
+        assert_eq!(
+            change_line(&release, opened(), true),
+            "support: release 2026.11.3 in production, 14 minutes before"
+        );
+        let model = Change {
+            kind: ChangeKind::Model,
+            environment: String::new(),
+            value: "gpt-4o-mini".into(),
+            capped: true,
+            ..release.clone()
+        };
+        assert_eq!(
+            change_line(&model, opened(), false),
+            "model gpt-4o-mini, 14 minutes before, and more that day"
+        );
+        let prompt = Change {
+            kind: ChangeKind::Prompt,
+            prompt: Some("triage".into()),
+            value: "3".into(),
+            ..release
+        };
+        assert_eq!(
+            change_line(&prompt, opened(), false),
+            "prompt triage version 3 in production, 14 minutes before"
+        );
+    }
+
+    /// Each name a change carries is clipped, and kept to one line.
+    #[test]
+    fn a_changes_names_are_clipped() {
+        let long = "v".repeat(NAME_SHOWN + 30);
+        let change = Change {
+            agent: format!("a\n{long}"),
+            environment: long.clone(),
+            kind: ChangeKind::Prompt,
+            prompt: Some(long.clone()),
+            ..released("", &long, TimeDelta::minutes(2))
+        };
+        let line = change_line(&change, opened(), true);
+        assert!(!line.contains('\n'), "one line");
+        assert!(!line.contains(&"v".repeat(NAME_SHOWN)), "{line}");
+        assert_eq!(line.matches('…').count(), 4, "{line}");
+        assert!(line.ends_with(", 2 minutes before"));
+    }
+
+    /// Seven changes are five lines under their lead and a count of the rest.
+    #[test]
+    fn a_notice_names_five_changes_and_counts_the_rest() {
+        let seven: Vec<Change> = (1..=7)
+            .map(|n| released("support", &format!("1.0.{n}"), TimeDelta::minutes(n)))
+            .collect();
+        let lines = changed_lines(&changed(seven.clone()), BODY_MAX);
+        assert_eq!(
+            lines,
+            [
+                "Changed in the 24 hours before it opened:",
+                "release 1.0.1 in production, 1 minute before",
+                "release 1.0.2 in production, 2 minutes before",
+                "release 1.0.3 in production, 3 minutes before",
+                "release 1.0.4 in production, 4 minutes before",
+                "release 1.0.5 in production, 5 minutes before",
+                "and 2 more on the incident",
+            ]
+        );
+        let five = changed_lines(&changed(seven.iter().take(5).cloned().collect()), BODY_MAX);
+        assert_eq!(five.len(), 6, "all named, none left to count");
+        let over = Changed {
+            more: true,
+            ..changed(seven)
+        };
+        assert_eq!(
+            changed_lines(&over, BODY_MAX).last().map(String::as_str),
+            Some("and over 2 more on the incident"),
+            "the incident had more than it names"
+        );
+    }
+
+    /// With room for fewer than five, fewer are named and counted; with none, none.
+    #[test]
+    fn changes_that_do_not_fit_are_counted_not_named() {
+        let seven: Vec<Change> = (1..=7)
+            .map(|n| released("support", &format!("1.0.{n}"), TimeDelta::minutes(n)))
+            .collect();
+        let all = changed_lines(&changed(seven.clone()), BODY_MAX);
+        let cost = |lines: &[String]| lines.iter().map(|line| chars(line) + 1).sum::<usize>();
+        assert_eq!(
+            changed_lines(&changed(seven.clone()), cost(&all)),
+            all,
+            "exactly its room"
+        );
+        let fewer = changed_lines(&changed(seven.clone()), cost(&all) - 1);
+        assert_eq!(fewer.len(), 6, "{fewer:?}");
+        assert_eq!(
+            fewer.last().map(String::as_str),
+            Some("and 3 more on the incident")
+        );
+        assert!(cost(&fewer) < cost(&all));
+        assert!(changed_lines(&changed(seven), 60).is_empty());
+    }
+
+    /// A body's changes come last and fill it to its bound, one fewer named a character short.
+    #[test]
+    fn a_body_with_its_changes_stays_inside_its_bound() {
+        let long = "é".repeat(NAME_SHOWN + 30);
+        let longest: Vec<Change> = (0..7)
+            .map(|n| Change {
+                agent: long.clone(),
+                environment: long.clone(),
+                kind: ChangeKind::Prompt,
+                prompt: Some(long.clone()),
+                capped: true,
+                ..released("", &long, TimeDelta::hours(n + 10))
+            })
+            .collect();
+        let several = Changed {
+            several: true,
+            ..changed(longest)
+        };
+        let all = changed_lines(&several, BODY_MAX);
+        assert_eq!(all.len(), 7, "its lead, five and the count");
+        let cost: usize = all.iter().map(|line| chars(line) + 1).sum();
+        let traces = format!("Traces: https://console.example/{}", "t".repeat(200));
+        // A body whose own three lines leave its changes `room` characters.
+        let with_room = |room: usize| {
+            let own = BODY_MAX + 1 - room - 3 - chars(&traces);
+            let (words, run) = ("w".repeat(own / 2), "r".repeat(own - own / 2));
+            let body = carrying(
+                words.clone(),
+                [Some(run.clone()), Some(traces.clone())],
+                Some(&several),
+            );
+            let lines: Vec<String> = body.lines().map(str::to_owned).collect();
+            let kept: Vec<String> = lines.iter().take(3).cloned().collect();
+            assert_eq!(kept, [words, run, traces.clone()], "its own lines first");
+            assert!(chars(&body) <= BODY_MAX, "{} characters", chars(&body));
+            (chars(&body), lines.into_iter().skip(3).collect::<Vec<_>>())
+        };
+        let (whole, named) = with_room(cost);
+        assert_eq!((whole, &named), (BODY_MAX, &all), "exactly full, all named");
+        let (_, fewer) = with_room(cost - 1);
+        assert_eq!(fewer.len(), 6, "one fewer named: {fewer:?}");
+        assert_eq!(
+            fewer.last().map(String::as_str),
+            Some("and 3 more on the incident"),
+            "and counted instead"
+        );
+        let (whole, none) = with_room(0);
+        assert_eq!((whole, none.len()), (BODY_MAX, 0), "a full body names none");
+        assert_eq!(
+            carrying("w".into(), [Some("t".to_owned())], None),
+            "w\nt",
+            "and a notice with none is its own lines"
+        );
+    }
+
+    /// A read that fails or outlasts its budget leaves the notice without changes.
+    #[tokio::test]
+    async fn changes_that_fail_or_stall_are_gone_without() {
+        let id = Uuid::nil();
+        let failed = async { Err(TelmoniError::Internal("no store".into())) };
+        assert_eq!(
+            changed_within(Duration::from_secs(5), id, failed).await,
+            None
+        );
+        let began = std::time::Instant::now();
+        let stalled = std::future::pending::<Result<Option<Changed>, TelmoniError>>();
+        assert_eq!(
+            changed_within(Duration::from_millis(50), id, stalled).await,
+            None
+        );
+        assert!(began.elapsed() < Duration::from_secs(2), "it did not wait");
+        let read = changed(vec![released("support", "1.0.1", TimeDelta::minutes(1))]);
+        let answered = async { Ok(Some(read.clone())) };
+        assert_eq!(
+            changed_within(CHANGES_BUDGET, id, answered).await,
+            Some(read)
+        );
     }
 }

@@ -176,7 +176,7 @@ change applies from the next notice. The body's `kind` is one of:
 | `member_left` | Someone left or was removed from the project. |
 | `connector_connected` | A destination was connected to the project. |
 | `connector_disconnected` | A destination stopped accepting notices. |
-| `incident_opened` | One of the project's alerts breached, or was told again: reopened within an hour of its recovery, risen from warning to alert, or held as long as its re-notification asks, a reminder's `body` opening `Still:`. Its `body` is lines: the alert's value against its threshold; on an opening, a reopening or a rise, the run that best shows it — for a loop, after how many runs of its agent called its tool as often in a row — with its last step, its error's type, its steps, its tokens and what it spent, the models it called that no price covers, and its link; and `Traces:` and the project's trace list as the alert read it, unless its filters run the link past a kilobyte. |
+| `incident_opened` | One of the project's alerts breached, or was told again: reopened within an hour of its recovery, risen from warning to alert, or held as long as its re-notification asks, a reminder's `body` opening `Still:`. Its `body` is lines: the alert's value against its threshold; on an opening, a reopening or a rise, the run that best shows it — for a loop, after how many runs of its agent called its tool as often in a row — with its last step, its error's type, its steps, its tokens and what it spent, the models it called that no price covers, and its link; `Traces:` and the project's trace list as the alert read it, unless its filters run the link past a kilobyte; and last, where its agents changed anything in the 24 hours before it opened, `Changed in the 24 hours before it opened:` and up to five lines, the newest first, each as `release 2026.11.3 in production, 14 minutes before` ([below](#an-incidents-changes)). |
 | `incident_resolved` | An alert's incident recovered, or a member resolved it or deleted its alert. |
 | `starter_alerts` | The project's first run made its [starter alerts](/docs/monitoring/alerts#starter-alerts), its `body` naming them, and any its plan had no room for. |
 | `organization_alert` | A notice for the organization's Owner and Admins, posted to the organization rather than a project: on the hosted service, when a subscription payment fails, when the organization is paused or takes things in again, once a day while the plan's ceiling refuses the organization its data out past the day's, its `body` saying how often the read API and exports were refused and since when, and once a day when its alerts have made the deliveries its plan holds a UTC day, after which their incidents reach the feed alone until midnight UTC; a self-hosted deployment raises none. One goes to every connection in the organization that takes the kind. |
@@ -188,6 +188,40 @@ level and in the hours it sets for each and outside its
 one which heard an incident hears it resolve whenever it does
 ([making an alert](/docs/monitoring/alerts#making-an-alert)); a webhook it
 links hears them only if it takes their kind.
+
+### An incident's changes
+
+An opening, a reopening or a rise names, in its `body`, what the incident's
+agents [changed to](/docs/monitoring/alerts#what-changed-before-it) in the 24
+hours before it opened, as the body's last lines, on a monitor's incident too:
+
+```text
+Changed in the 24 hours before it opened:
+release 2026.11.3 in production, 14 minutes before
+support: model gpt-4o-mini in production, 3 hours before, and more that day
+and 2 more on the incident
+```
+
+- A line is what changed, the environment where its spans named one, and how
+  long before the incident opened: under a minute, whole minutes under an
+  hour, whole hours past it. A prompt's reads `prompt triage version 3`.
+- A line opens with its agent and a colon where the alert reads no single
+  agent, and ends `, and more that day` where its agent's later changes of
+  that kind that UTC day were not marked.
+- Five lines at most, the newest first, each name cut to 120 characters. The
+  last line counts the changes the incident names beyond them, which names
+  up to 20 in all, and reads `and over 15 more on the incident` where it had
+  more than those.
+- They stand last, so a channel that cuts a long body cuts them and never the
+  run's link or the traces'.
+- The lines are a snapshot, read as the notice is made and waited on for two
+  seconds at most: a release still being read in is missing from them, and
+  the incident names it afterwards, on the Alerts page and in
+  [`GET /v1/incidents`](/docs/api/reference#get-v1incidents). A notice with no
+  such line says nothing changed, or that nothing had been found yet.
+
+They are text in `body`: the body's fields are the five above, as for every
+notice.
 
 **Send test** on the webhook's row posts one signed `connector_connected` body
 titled "Webhook is connected", whatever events you chose. It is not in the

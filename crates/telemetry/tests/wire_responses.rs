@@ -3,7 +3,7 @@
 //! schemas parse (`web/lib/server/entities/responses.test.ts`).
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ use telmoni_telemetry::handler::agents::{AGENTS_DAYS, AgentRow, Agents};
 use telmoni_telemetry::handler::changes::ChangeList;
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::{FieldInventory, Row};
-use telmoni_telemetry::handler::incidents::IncidentList;
+use telmoni_telemetry::handler::incidents::{IncidentAnswer, IncidentList};
 use telmoni_telemetry::handler::mutes::MuteList;
 use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
@@ -631,29 +631,45 @@ fn alerts_answer_as_the_console_reads() {
     );
 }
 
-/// The incidents lane, which a trace's page reads by run too.
+/// The incidents lane: an alert's with the changes before it, a monitor's whose could not be read.
 #[test]
 fn incidents_answer_as_the_console_reads() {
+    // Each two minutes earlier, so all came before the incident opened.
+    let before_it: Vec<Change> = changes()
+        .into_iter()
+        .map(|change| Change {
+            changed_at: change.changed_at - TimeDelta::minutes(2),
+            ..change
+        })
+        .collect();
     pin(
         "incidents",
         &IncidentList {
             incidents: vec![
-                incident(),
-                IncidentRow {
-                    id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b2a),
-                    rule_id: None,
-                    rule_name: None,
-                    monitor_id: Some(MONITOR),
-                    agent: Some("nightly-triage".into()),
-                    cause: Some(MonitorCause::Missed),
-                    status: IncidentStatus::Open,
-                    severity: Severity::Warning,
-                    value: None,
-                    acknowledged_at: None,
-                    acknowledged_by: None,
-                    reopened: 0,
-                    runs: Vec::new(),
-                    ..incident()
+                IncidentAnswer {
+                    row: incident(),
+                    changes: Some(before_it),
+                    changes_more: false,
+                },
+                IncidentAnswer {
+                    row: IncidentRow {
+                        id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b2a),
+                        rule_id: None,
+                        rule_name: None,
+                        monitor_id: Some(MONITOR),
+                        agent: Some("nightly-triage".into()),
+                        cause: Some(MonitorCause::Missed),
+                        status: IncidentStatus::Open,
+                        severity: Severity::Warning,
+                        value: None,
+                        acknowledged_at: None,
+                        acknowledged_by: None,
+                        reopened: 0,
+                        runs: Vec::new(),
+                        ..incident()
+                    },
+                    changes: None,
+                    changes_more: false,
                 },
             ],
         },

@@ -300,7 +300,19 @@ incidents whose notices showed that run.
       "resolved_by": null,
       "reopened": 0,
       "told_to": [],
-      "runs": ["0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01"]
+      "runs": ["0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01"],
+      "changes": [
+        {
+          "agent": "checkout",
+          "environment": "production",
+          "kind": "release",
+          "value": "2026.11.3",
+          "changed_at": "2026-11-01T08:51:00Z",
+          "run_id": "0191a3b4-6a1d-7c2e-9d3f-4a5b6c7d8e90",
+          "capped": false
+        }
+      ],
+      "changes_more": false
     }
   ]
 }
@@ -312,6 +324,13 @@ incidents whose notices showed that run.
   user ID, or `null`.
 - `told_to`: The connections its notices were sent to. `runs`: The runs its
   notices showed, oldest first.
+- `changes`: What the agents its alert or monitor reads
+  [changed to](/docs/monitoring/alerts#what-changed-before-it) in the 24
+  hours before it opened, each as [`GET /v1/changes`](#get-v1changes) answers
+  one, the newest first, 20 at most: `[]` where nothing changed, and `null`
+  where they could not be read, which is not that nothing changed. They are
+  read as the incident is answered, so a change found after it opened is
+  among them. `changes_more`: Whether it had more than are answered.
 
 `GET /v1/incidents/{id}` answers one incident in the same shape, or `404`
 for an ID the project does not hold.

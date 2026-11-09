@@ -17,6 +17,7 @@ import {
   SpanStatus,
 } from "@/lib/types/enums";
 
+import { ChangeSchema } from "./changes";
 import { MISSING, readLane } from "./traces";
 
 // The hours a linked connector hears an alert in: days 1 (Monday) to 7, from
@@ -101,6 +102,8 @@ export type Alert = z.infer<typeof AlertSchema>;
 // One incident: its alert or its monitor, where it stands, who took or
 // resolved it, where its notices went — the connections, the feed apart — and
 // the runs they showed, oldest first. A monitor's names its agent and cause.
+// Its changes are what the agents it watches changed to in the day before it
+// opened, the newest first: none where they could not be read.
 export const IncidentSchema = z.object({
   id: z.string(),
   rule_id: z.string().nullable(),
@@ -119,6 +122,9 @@ export const IncidentSchema = z.object({
   reopened: z.number().int(),
   told_to: z.array(z.string()),
   runs: z.array(z.string()),
+  changes: z.array(ChangeSchema).nullable(),
+  /** Whether it had more than are named. */
+  changes_more: z.boolean(),
 });
 export type Incident = z.infer<typeof IncidentSchema>;
 

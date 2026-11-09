@@ -10,7 +10,7 @@ use telmoni_shared::db::tenant_session::{HasProject, Maintenance, ProjectAndOrga
 use telmoni_shared::{OrganizationId, ProjectId, Severity};
 
 use crate::db::TelemetryLane;
-use crate::rules::{Definition, Rule};
+use crate::rules::{Definition, Rule, RuleFilters};
 
 /// An alert as its row keeps it: its definition, whether and why it is
 /// paused, and its last evaluation.
@@ -117,6 +117,19 @@ pub async fn rule<B: HasProject>(
     .bind(id)
     .fetch_optional(tx.conn())
     .await
+}
+
+/// The filters of those of the project's alerts `ids` names.
+pub async fn filters_of<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+    ids: &[Uuid],
+) -> sqlx::Result<Vec<(Uuid, sqlx::types::Json<RuleFilters>)>> {
+    sqlx::query_as("SELECT id, filters FROM telemetry.rules WHERE project_id = $1 AND id = ANY($2)")
+        .bind(project_id)
+        .bind(ids)
+        .fetch_all(tx.conn())
+        .await
 }
 
 /// How many alerts the organization holds across its projects, paused ones

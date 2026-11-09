@@ -7,8 +7,11 @@
 //! path. Acknowledging one stops its reminders; resolving one by hand
 //! is told as its recovery is, and an alert still past its threshold opens
 //! nothing new until it recovers and breaches again, or rises from the
-//! warning resolved to an alert.
+//! warning resolved to an alert. Each is answered with the changes its
+//! alert's or monitor's agents made in the day before it opened
+//! ([`crate::changes`]), read as it is answered, so one filed late is named.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -27,16 +30,30 @@ use telmoni_shared::{
 };
 
 use crate::AppState;
-use crate::handler::chain::{self, Change};
+use crate::changes::{self, Opened, Scope};
+use crate::handler::chain;
 use crate::rules::incidents::{self, IncidentRow};
 
 /// The most incidents the list answers.
 pub const INCIDENTS_MAX: i64 = 200;
 
+/// An incident as the lanes answer it: its row, and what its agents changed
+/// to in the [`changes::BEFORE_INCIDENT`] before it opened.
+#[derive(Debug, Serialize)]
+pub struct IncidentAnswer {
+    #[serde(flatten)]
+    pub row: IncidentRow,
+    /// The newest first, [`changes::INCIDENT_CHANGES_MAX`] at most; none
+    /// where they could not be read, which is not that nothing changed.
+    pub changes: Option<Vec<changes::Change>>,
+    /// Whether it had more than are named.
+    pub changes_more: bool,
+}
+
 /// What the list of incidents answers.
 #[derive(Debug, Serialize)]
 pub struct IncidentList {
-    pub incidents: Vec<IncidentRow>,
+    pub incidents: Vec<IncidentAnswer>,
 }
 
 /// The list's query: none, or the run whose incidents a trace's page links.
@@ -53,6 +70,97 @@ fn incident_id(given: &str) -> Result<Uuid, TelmoniError> {
 
 fn not_found() -> TelmoniError {
     AuthError::NotFound("no incident with that id in this project".into()).into()
+}
+
+/// Each incident's changes, by its id, in two reads however many there are:
+/// their alerts' filters, a monitor's agent being on its row, then the changes.
+async fn changes_of(
+    state: &AppState,
+    project_id: &ProjectId,
+    rows: &[IncidentRow],
+) -> Result<HashMap<Uuid, (Vec<changes::Change>, bool)>, TelmoniError> {
+    let mut tx = project_scope(&state.db, project_id).await?;
+    let alerts: Vec<Uuid> = rows.iter().filter_map(|row| row.rule_id).collect();
+    let filters: HashMap<Uuid, Scope> = crate::rules::db::filters_of(&mut tx, project_id, &alerts)
+        .await?
+        .into_iter()
+        .map(|(id, filters)| (id, Scope::of_alert(&filters.0)))
+        .collect();
+    let opened: Vec<Opened> = rows
+        .iter()
+        .filter_map(|row| {
+            let scope = match row.owner()? {
+                incidents::Owner::Rule(id) => filters.get(&id)?.clone(),
+                incidents::Owner::Monitor(_) => Scope::of_monitor(row.agent.as_deref()?),
+            };
+            Some(Opened {
+                incident_id: row.id,
+                opened_at: row.opened_at,
+                scope,
+            })
+        })
+        .collect();
+    let around = changes::around_incidents(&mut tx, project_id, &opened).await?;
+    tx.commit().await?;
+    Ok(around)
+}
+
+/// Each of `rows`' changes by its id; none, logged, where they cannot be
+/// read, since an incident is answered all the same.
+async fn changes_read(
+    state: &AppState,
+    project_id: &ProjectId,
+    rows: &[IncidentRow],
+) -> Option<HashMap<Uuid, (Vec<changes::Change>, bool)>> {
+    match changes_of(state, project_id, rows).await {
+        Ok(around) => Some(around),
+        Err(error) => {
+            tracing::warn!(
+                project_id = %project_id,
+                error = %error,
+                "telemetry: the changes before a project's incidents could not be read; \
+                 they are answered without"
+            );
+            None
+        }
+    }
+}
+
+/// `row` with what was read of its changes: none where nothing was.
+fn answer(
+    row: IncidentRow,
+    around: Option<&mut HashMap<Uuid, (Vec<changes::Change>, bool)>>,
+) -> IncidentAnswer {
+    let (changes, changes_more) = match around {
+        Some(around) => {
+            let (changes, more) = around.remove(&row.id).unwrap_or_default();
+            (Some(changes), more)
+        }
+        None => (None, false),
+    };
+    IncidentAnswer {
+        row,
+        changes,
+        changes_more,
+    }
+}
+
+/// `rows` as the lanes answer them, each with its changes.
+async fn with_changes(
+    state: &AppState,
+    project_id: &ProjectId,
+    rows: Vec<IncidentRow>,
+) -> Vec<IncidentAnswer> {
+    let mut around = changes_read(state, project_id, &rows).await;
+    rows.into_iter()
+        .map(|row| answer(row, around.as_mut()))
+        .collect()
+}
+
+/// One incident as the lanes answer it.
+async fn answered(state: &AppState, project_id: &ProjectId, row: IncidentRow) -> IncidentAnswer {
+    let mut around = changes_read(state, project_id, std::slice::from_ref(&row)).await;
+    answer(row, around.as_mut())
 }
 
 /// `GET /internal/v1/telemetry/incidents` — the project's incidents, those
@@ -90,7 +198,9 @@ pub(crate) async fn incident_list(
         None => incidents::incidents(&mut tx, project_id, INCIDENTS_MAX).await?,
     };
     tx.commit().await?;
-    Ok(IncidentList { incidents: rows })
+    Ok(IncidentList {
+        incidents: with_changes(state, project_id, rows).await,
+    })
 }
 
 /// `POST /internal/v1/telemetry/incidents/{id}/acknowledge` — one of the
@@ -100,12 +210,14 @@ pub async fn acknowledge_incident(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<IncidentRow>, TelmoniError> {
+) -> Result<Json<IncidentAnswer>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
-    acting.require_project(Verb::Update, Resource::Alert)?;
+    let project_id = &acting
+        .require_project(Verb::Update, Resource::Alert)?
+        .project_id;
     let id = incident_id(&id)?;
     let (row, _) = acknowledge(&state, &acting, id).await?;
-    Ok(Json(row))
+    Ok(Json(answered(&state, project_id, row).await))
 }
 
 /// One of the project's incidents taken by the person `acting` names, from
@@ -187,7 +299,7 @@ async fn moved(
     };
     let row = row.ok_or_else(not_found)?;
     if moved {
-        let change = Change {
+        let change = chain::Change {
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Incident,
             id,
@@ -216,7 +328,7 @@ pub async fn resolve_incident(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<IncidentRow>, TelmoniError> {
+) -> Result<Json<IncidentAnswer>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Update, Resource::Alert)?
@@ -230,7 +342,7 @@ pub async fn resolve_incident(
         tracing::info!(project_id = %project_id, incident_id = %id, "telemetry: an incident resolved by hand");
         crate::notify::resolved_by_hand(&state, &row).await;
     }
-    Ok(Json(row))
+    Ok(Json(answered(&state, project_id, row).await))
 }
 
 /// `GET /internal/v1/telemetry/incidents/{id}` — one of the project's
@@ -239,7 +351,7 @@ pub async fn get_incident(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-) -> Result<Json<IncidentRow>, TelmoniError> {
+) -> Result<Json<IncidentAnswer>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Read, Resource::Alert)?
@@ -252,12 +364,12 @@ pub(crate) async fn incident(
     state: &AppState,
     project_id: &ProjectId,
     id: &str,
-) -> Result<IncidentRow, TelmoniError> {
+) -> Result<IncidentAnswer, TelmoniError> {
     let id = incident_id(id)?;
     let mut tx = project_scope(&state.db, project_id).await?;
     let row = incidents::one(&mut tx, project_id, id)
         .await?
         .ok_or_else(not_found)?;
     tx.commit().await?;
-    Ok(row)
+    Ok(answered(state, project_id, row).await)
 }

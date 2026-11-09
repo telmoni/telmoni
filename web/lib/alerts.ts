@@ -1076,3 +1076,19 @@ export function toldWords(
 ): string[] {
   return ["the feed", ...incident.told_to.map((id) => names.get(id) ?? unknown)];
 }
+
+/** How long before its incident opened a change came, as the incident's
+ *  notice words it: whole minutes under an hour, whole hours past it. */
+export function beforeWords(openedAt: string, changedAt: string): string {
+  const minutes = Math.floor((Date.parse(openedAt) - Date.parse(changedAt)) / 60_000);
+  if (!(minutes >= 1)) return "under a minute before";
+  if (minutes === 1) return "1 minute before";
+  if (minutes < 60) return `${minutes} minutes before`;
+  return minutes < 120 ? "1 hour before" : `${Math.floor(minutes / 60)} hours before`;
+}
+
+/** Whether an alert's incidents name each change's agent: it reads no single
+ *  agent's runs, so a change is told from another's by whose it is. */
+export function changesNameAgent(alert: Pick<Alert, "filters">): boolean {
+  return alert.filters.agent?.length !== 1;
+}

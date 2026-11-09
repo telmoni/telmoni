@@ -69,6 +69,9 @@ vi.mock("./_incident-actions", () => ({
   ),
 }));
 
+vi.mock("@/lib/env", () => ({ env: { SERVER_URL: "http://server" } }));
+
+import { ChangeSchema } from "@/lib/server/entities/changes";
 import { Role } from "@/lib/types/enums";
 
 const NOW = Date.parse("2026-10-26T12:00:00Z");
@@ -94,8 +97,24 @@ function incident(id: string, over: Record<string, unknown> = {}) {
     reopened: 0,
     told_to: [],
     runs: [],
+    changes: [],
+    changes_more: false,
     ...over,
   };
+}
+
+/** A change as the lane answers it, read through the entity's own schema. */
+function change(over: Record<string, unknown> = {}) {
+  return ChangeSchema.parse({
+    agent: "support",
+    environment: "production",
+    kind: "release",
+    value: "2026.11.3",
+    changed_at: "2026-10-26T10:46:00Z",
+    run_id: RUN,
+    capped: false,
+    ...over,
+  });
 }
 
 const SLOW = {
@@ -504,6 +523,81 @@ describe("AlertsPage", () => {
 
     expect(within(done).getByText("Recovered")).toBeInTheDocument();
     expect(done).toHaveTextContent("reopened 2 times");
+  });
+
+  // ⚠ What changed and when, the reader left to judge: the newest first, as the server ordered them.
+  it("names under an incident what its alert's agents changed to before it opened", async () => {
+    const OTHER_RUN = "ab3e2074-0000-4000-8000-000000000009";
+    mockAlerts = {
+      ...(mockAlerts as object),
+      incidents: [
+        incident("i-open", {
+          changes: [
+            change(),
+            change({ kind: "model", value: "gpt-4o-mini", changed_at: "2026-10-26T08:00:00Z", capped: true }),
+            change({
+              agent: "triage",
+              environment: "",
+              kind: "prompt",
+              prompt: "reply",
+              value: "3",
+              changed_at: "2026-10-25T11:01:00Z",
+              run_id: OTHER_RUN,
+            }),
+          ],
+          changes_more: true,
+        }),
+        incident("i-quiet"),
+      ],
+    };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const open = incidentItem(RULE, 0);
+    const list = within(open).getByRole("list", { name: "Changed in the 24 hours before it opened" });
+    // SLOW reads every agent's model calls, so each change names whose it is.
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "support: release 2026.11.3 in production, 14 minutes before",
+      "support: model gpt-4o-mini in production; its later model changes that UTC day are not marked, 3 hours before",
+      "triage: prompt reply version 3, 23 hours before",
+    ]);
+    expect(
+      within(list).getByRole("link", { name: "support: release 2026.11.3 in production" }),
+    ).toHaveAttribute("href", `/acme/web/traces/${RUN}`);
+    expect(within(list).getByRole("link", { name: "triage: prompt reply version 3" })).toHaveAttribute(
+      "href",
+      `/acme/web/traces/${OTHER_RUN}`,
+    );
+    expect(open).toHaveTextContent("and more");
+
+    // Nothing changed: nothing is said.
+    const quiet = incidentItem(RULE, 1);
+    expect(within(quiet).queryByRole("list")).toBeNull();
+    expect(quiet).not.toHaveTextContent(/Changed in|and more|couldn/);
+  });
+
+  it("leaves a change's agent out under an alert held to one agent", async () => {
+    mockAlerts = {
+      ...(mockAlerts as object),
+      alerts: [{ ...SLOW, filters: { agent: ["support"] } }],
+      incidents: [incident("i-open", { changes: [change()] })],
+    };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const open = incidentItem(RULE, 0);
+    expect(within(open).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "release 2026.11.3 in production, 14 minutes before",
+    ]);
+    expect(open).not.toHaveTextContent("and more");
+  });
+
+  // ⚠ None read is not none changed.
+  it("says so where an incident's changes could not be read", async () => {
+    mockAlerts = {
+      ...(mockAlerts as object),
+      incidents: [incident("i-open", { changes: null })],
+    };
+    render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const open = incidentItem(RULE, 0);
+    expect(open).toHaveTextContent("Changes couldn\u2019t be read.");
+    expect(within(open).queryByRole("list")).toBeNull();
   });
 
   // ⚠ A trace links the incident it carries even past a full list.

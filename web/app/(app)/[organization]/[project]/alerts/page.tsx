@@ -23,6 +23,8 @@ import {
   STATUS_LABEL,
   alertHeading,
   amount,
+  beforeWords,
+  changesNameAgent,
   connectionChoices,
   filterWords,
   hoursWords,
@@ -57,7 +59,7 @@ import {
 } from "@/lib/server/data";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
-import { shortId, traceHref } from "@/lib/traces";
+import { changeWords, shortId, traceHref } from "@/lib/traces";
 import { IncidentStatus, RuleBaseline, RuleMeasure, Severity } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
@@ -463,6 +465,7 @@ function AlertCard({
                   slug={slug}
                   projectId={projectId}
                   told={toldWords(incident, connectionNames, unknownConnector).join(", ")}
+                  namesAgent={changesNameAgent(alert)}
                   who={who}
                 />
               ))}
@@ -475,7 +478,8 @@ function AlertCard({
 }
 
 /** One incident of an alert: its severity, where it stands and its controls,
- *  then when it opened, where its notices went and the run its last showed. */
+ *  then when it opened, where its notices went and the run its last showed,
+ *  and what the alert's agents changed to in the day before it opened. */
 function IncidentItem({
   incident,
   followed,
@@ -483,6 +487,7 @@ function IncidentItem({
   slug,
   projectId,
   told,
+  namesAgent,
   who,
 }: {
   incident: Incident;
@@ -493,6 +498,8 @@ function IncidentItem({
   projectId: string;
   /** Where its notices went, in words. */
   told: string;
+  /** Whether each change names its agent, the alert being held to no one agent. */
+  namesAgent: boolean;
   who: (id: string) => string;
 }) {
   const run = incident.runs.at(-1);
@@ -542,7 +549,58 @@ function IncidentItem({
           </>
         )}
       </span>
+      <IncidentChanges
+        incident={incident}
+        organization={organization}
+        slug={slug}
+        namesAgent={namesAgent}
+      />
     </li>
+  );
+}
+
+const CHANGED = "Changed in the 24 hours before it opened";
+
+/** What the incident's agents changed to in the day before it opened, the
+ *  newest first, each opening the run that first carried it: nothing where
+ *  nothing changed, and a line saying so where they could not be read. */
+function IncidentChanges({
+  incident,
+  organization,
+  slug,
+  namesAgent,
+}: {
+  incident: Incident;
+  organization: string;
+  slug: string;
+  namesAgent: boolean;
+}) {
+  if (incident.changes === null) {
+    return <span className="text-xs text-muted-foreground">Changes couldn&rsquo;t be read.</span>;
+  }
+  if (incident.changes.length === 0) return null;
+  return (
+    <div className="grid gap-0.5 text-xs text-muted-foreground">
+      <span>{CHANGED}:</span>
+      <ul aria-label={CHANGED} className="grid gap-0.5">
+        {incident.changes.map((change) => {
+          const words = namesAgent ? `${change.agent}: ${changeWords(change)}` : changeWords(change);
+          return (
+            <li key={`${change.run_id} ${change.agent} ${words}`}>
+              <Link
+                href={traceHref(organization, slug, change.run_id)}
+                className="underline-offset-4 hover:text-foreground hover:underline"
+                title="The run that first carried it"
+              >
+                {words}
+              </Link>
+              {`, ${beforeWords(incident.opened_at, change.changed_at)}`}
+            </li>
+          );
+        })}
+      </ul>
+      {incident.changes_more && <span>and more</span>}
+    </div>
   );
 }
 

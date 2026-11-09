@@ -40,6 +40,17 @@ const INCIDENT_ROW = {
   reopened: 0,
   told_to: [CONNECTION],
   runs: [RUN],
+  changes: [],
+  changes_more: false,
+};
+const CHANGE = {
+  agent: "support",
+  environment: "production",
+  kind: "release",
+  value: "1.4.2",
+  changed_at: "2026-10-26T02:46:00Z",
+  run_id: RUN,
+  capped: true,
 };
 const ALERT = {
   id: RULE,
@@ -190,6 +201,33 @@ describe("fetchIncident", () => {
     );
     answer(403, {});
     expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "forbidden" });
+  });
+
+  // ⚠ None read is not none changed: the page says which.
+  it("reads the changes before it, and none where the server could not read them", async () => {
+    const prompt = { ...CHANGE, kind: "prompt", prompt: "triage", value: "3", capped: false };
+    answer(200, { ...INCIDENT_ROW, changes: [CHANGE, prompt], changes_more: true });
+    expect(await fetchIncident(PROJECT, INCIDENT)).toMatchObject({
+      kind: "ok",
+      incident: { changes: [CHANGE, prompt], changes_more: true },
+    });
+    answer(200, { ...INCIDENT_ROW, changes: null });
+    expect(await fetchIncident(PROJECT, INCIDENT)).toMatchObject({
+      kind: "ok",
+      incident: { changes: null, changes_more: false },
+    });
+  });
+
+  it("refuses an incident without its changes, or with one that is no change", async () => {
+    answer(200, { ...INCIDENT_ROW, changes: undefined });
+    expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });
+    answer(200, { ...INCIDENT_ROW, changes_more: undefined });
+    expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });
+    answer(200, { ...INCIDENT_ROW, changes: [{ ...CHANGE, capped: undefined }] });
+    expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });
+    // A prompt's change names its prompt.
+    answer(200, { ...INCIDENT_ROW, changes: [{ ...CHANGE, kind: "prompt" }] });
+    expect(await fetchIncident(PROJECT, INCIDENT)).toEqual({ kind: "unavailable" });
   });
 
   it("answers an outage for an answer it cannot read, or a server it cannot reach", async () => {

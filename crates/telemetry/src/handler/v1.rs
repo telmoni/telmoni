@@ -31,11 +31,10 @@ use telmoni_shared::types::ApiKeyScope;
 use crate::AppState;
 use crate::content::{self, MEDIA_MAX};
 use crate::handler::changes::{self, ChangeList};
-use crate::handler::incidents::{self, IncidentList, IncidentQuery};
+use crate::handler::incidents::{self, IncidentAnswer, IncidentList, IncidentQuery};
 use crate::handler::scores;
 use crate::handler::traces::{self, Reader, TraceDetail, TraceList};
 use crate::rollups::{Metrics, MetricsAsked};
-use crate::rules::incidents::IncidentRow;
 
 /// One `/v1` lane this module serves: what it is, and which handler answers.
 pub struct V1Lane {
@@ -314,7 +313,9 @@ pub const V1_LANES: &[V1Lane] = &[
             summary: "The project's incidents",
             description: "The project's incidents, those not resolved first, \
                           then the newest, 200 at most; with `run`, those whose \
-                          notices showed that run.",
+                          notices showed that run. Each names the `changes` its \
+                          alert's or monitor's agents made in the 24 hours before \
+                          it opened, 20 at most.",
             params: &[Param {
                 name: "run",
                 in_query: true,
@@ -342,7 +343,9 @@ pub const V1_LANES: &[V1Lane] = &[
             bearer: true,
             path: "/v1/incidents/{id}",
             summary: "One incident",
-            description: "One of the project's incidents.",
+            description: "One of the project's incidents, with the `changes` its \
+                          alert's or monitor's agents made in the 24 hours before \
+                          it opened.",
             params: &[Param {
                 name: "id",
                 in_query: false,
@@ -515,7 +518,7 @@ pub async fn get_incident(
     State(state): State<Arc<AppState>>,
     key: ActingKey,
     Path(id): Path<String>,
-) -> Result<Json<IncidentRow>, TelmoniError> {
+) -> Result<Json<IncidentAnswer>, TelmoniError> {
     Ok(Json(
         incidents::incident(&state, &key.project_id, &id).await?,
     ))

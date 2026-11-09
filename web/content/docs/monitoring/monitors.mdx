@@ -86,6 +86,14 @@ the agent, where it stands and when its run was due — never a prompt, a
 completion or a tool payload — and are counted in the organization's alert
 deliveries a day as an alert's are.
 
+A monitor's incident names
+[what its agent changed to](/docs/monitoring/alerts#what-changed-before-it)
+in the 24 hours before it opened, as an alert's does: the releases, models
+and prompt versions its runs first carried, in every environment the agent
+runs in. The notice of its opening, a missed run's among them, names the
+newest five; [`GET /v1/incidents`](/docs/api/reference#get-v1incidents)
+answers them all.
+
 A maintenance window of the whole project holds its monitors' notices too,
 and one may mute a single monitor. A paused monitor is told nothing; its open
 incident stands until it is resumed and its agent runs. Deleting a monitor

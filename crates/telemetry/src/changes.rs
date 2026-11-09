@@ -27,6 +27,7 @@ use telmoni_shared::{ChangeKind, ProjectId, TelmoniError};
 
 use crate::AppState;
 use crate::db::{self, TelemetryLane};
+use crate::rules::RuleFilters;
 use crate::store::{Projects, micros};
 
 /// The loop's name in `telemetry.heartbeats` and `telemetry.reads`.
@@ -113,6 +114,47 @@ pub struct Change {
 const CHANGE_COLUMNS: &str = "agent, environment, kind, prompt, value, changed_at, run_id, \
      mark = 'capped' AS capped";
 
+/// How long before an incident opened a change is named on it.
+pub const BEFORE_INCIDENT: TimeDelta = TimeDelta::hours(24);
+
+/// The most changes an incident's answer names, the newest.
+pub const INCIDENT_CHANGES_MAX: usize = 20;
+
+/// Whose changes an incident names: the agents and environments its alert
+/// or monitor watches, each empty for every one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Scope {
+    pub agents: Vec<String>,
+    pub environments: Vec<String>,
+}
+
+impl Scope {
+    /// An alert's: its filters' agents and environments, an objective's one
+    /// agent among them.
+    #[must_use]
+    pub fn of_alert(filters: &RuleFilters) -> Self {
+        Self {
+            agents: filters.agent.clone(),
+            environments: filters.environment.clone(),
+        }
+    }
+
+    /// A monitor's: its agent, wherever it runs.
+    #[must_use]
+    pub fn of_monitor(agent: &str) -> Self {
+        Self {
+            agents: vec![agent.to_owned()],
+            environments: Vec::new(),
+        }
+    }
+
+    /// Whether a change must name its agent to be told from another's.
+    #[must_use]
+    pub const fn several(&self) -> bool {
+        self.agents.len() != 1
+    }
+}
+
 /// The project's changes over the last `days`, the newest first, narrowed to
 /// `agents` and `environments` where given, [`CHANGES_MAX`] at most, and
 /// whether the window held more.
@@ -146,6 +188,83 @@ pub async fn list<S: HasProject>(
     let more = changes.len() > usize::try_from(CHANGES_MAX).unwrap_or(usize::MAX);
     changes.truncate(usize::try_from(CHANGES_MAX).unwrap_or(usize::MAX));
     Ok((changes, more))
+}
+
+/// An incident whose changes are asked for: when it opened, and whose.
+#[derive(Debug, Clone)]
+pub struct Opened {
+    pub incident_id: Uuid,
+    pub opened_at: DateTime<Utc>,
+    pub scope: Scope,
+}
+
+/// One incident's change, as the read of many answers it.
+#[derive(Debug, sqlx::FromRow)]
+struct Around {
+    incident_id: Uuid,
+    #[sqlx(flatten)]
+    change: Change,
+}
+
+/// Each incident's newest [`INCIDENT_CHANGES_MAX`] changes in the
+/// [`BEFORE_INCIDENT`] before it opened, and whether it had more: one read for all.
+///
+/// # Errors
+///
+/// Postgres did not answer.
+pub async fn around_incidents<S: HasProject>(
+    tx: &mut Scoped<'_, S>,
+    project_id: &ProjectId,
+    incidents: &[Opened],
+) -> sqlx::Result<HashMap<Uuid, (Vec<Change>, bool)>> {
+    if incidents.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let ids: Vec<Uuid> = incidents.iter().map(|one| one.incident_id).collect();
+    let opened: Vec<DateTime<Utc>> = incidents.iter().map(|one| one.opened_at).collect();
+    let agents: Vec<serde_json::Value> = incidents
+        .iter()
+        .map(|one| serde_json::json!(one.scope.agents))
+        .collect();
+    let environments: Vec<serde_json::Value> = incidents
+        .iter()
+        .map(|one| serde_json::json!(one.scope.environments))
+        .collect();
+    let most = i64::try_from(INCIDENT_CHANGES_MAX).unwrap_or(i64::MAX);
+    let rows: Vec<Around> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT asked.incident_id, change.*
+           FROM unnest($2::uuid[], $3::timestamptz[], $4::jsonb[], $5::jsonb[])
+                AS asked(incident_id, opened_at, agents, environments)
+          CROSS JOIN LATERAL (
+                SELECT {CHANGE_COLUMNS} FROM telemetry.changes
+                 WHERE project_id = $1 AND mark <> 'hidden'
+                   AND changed_at > asked.opened_at - make_interval(hours => $6)
+                   AND changed_at <= asked.opened_at
+                   AND (jsonb_array_length(asked.agents) = 0 OR asked.agents ? agent)
+                   AND (jsonb_array_length(asked.environments) = 0
+                        OR asked.environments ? environment)
+                 ORDER BY changed_at DESC, id
+                 LIMIT $7) AS change"
+    )))
+    .bind(project_id)
+    .bind(ids)
+    .bind(opened)
+    .bind(agents)
+    .bind(environments)
+    .bind(i32::try_from(BEFORE_INCIDENT.num_hours()).unwrap_or(24))
+    .bind(most + 1)
+    .fetch_all(tx.conn())
+    .await?;
+    let mut around: HashMap<Uuid, (Vec<Change>, bool)> = HashMap::new();
+    for row in rows {
+        let (changes, more) = around.entry(row.incident_id).or_default();
+        if changes.len() < INCIDENT_CHANGES_MAX {
+            changes.push(row.change);
+        } else {
+            *more = true;
+        }
+    }
+    Ok(around)
 }
 
 /// Each agent's newest change of each kind over the last `days`.

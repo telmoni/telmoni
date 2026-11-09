@@ -86,6 +86,7 @@ resolved ones may not show. Each says:
 | Opened | When it opened, and how often it reopened |
 | Told | Where its notices went: the feed, then each connector they were sent to; one the project has removed since says so |
 | Run | The run its last notice showed, a link to the run's trace |
+| Changed | What the alert's agents [changed to](#what-changed-before-it) in the 24 hours before it opened, each a link to the run that first carried it; nothing where nothing changed |
 
 **Acknowledge** takes an open incident, and its reminders stop. **Resolve**
 ends it by hand, told to its alert's connectors as a recovery is; an alert
@@ -100,6 +101,42 @@ recovery reopens it rather than opening another, so an alert that flaps
 opens one incident an hour at most, and a rise from warning to alert follows
 the incident it is in. What each notice says is on
 [Notifications](/docs/integrations/notifications#notice-types).
+
+### What changed before it
+
+An incident names each [change](/docs/monitoring/traces#changes) its alert's
+agents made in the 24 hours before it opened: a release, a model or a
+prompt's version their runs had not carried, and how long before, as
+*release 2026.11.3 in production, 14 minutes before*. The newest stands
+first, 20 at most, and the incident says where there were more. Nothing is
+inferred: Telmoni says what changed and when, and whether it broke anything
+is yours to judge.
+
+- **Whose changes.** Those of the agents the alert's **Agent** filter names,
+  in the environments its **Environment** filter names; an objective's are
+  its agent's. An alert that names no agent, as every starter does, reads
+  every agent's, and each line then names its agent. The filters are read as
+  they stand: an alert edited since its incident opened names the changes of
+  the agents it reads now.
+- **The window is the opening's.** A change at the minute the incident opened
+  is named, and one after it is not. A reopening keeps the first opening's
+  window, so a release made after it and before the reopening is not named.
+- **Read as you look.** The page reads the changes each time, so one found
+  after the incident opened, as another exporter's is once its trace lands,
+  is named here though the incident's notice went without it. Where they
+  cannot be read, the incident says **Changes couldn't be read**, which is
+  not that nothing changed.
+- **Only what is marked.** A change past its agent's 24 of a kind in a UTC
+  day is marked nowhere, so it is not named here either; the 24th says its
+  day marked no more.
+- **As long as its runs are kept.** A change goes with its run's day once
+  the project's [retention](/docs/workspace/data-retention) passes it, so an
+  old incident names fewer.
+
+The opening's notice names the newest five the same way
+([Notifications](/docs/integrations/notifications#notice-types)), and
+[`GET /v1/incidents`](/docs/api/reference#get-v1incidents) answers them as
+`changes`.
 
 ## Making an alert
 

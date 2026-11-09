@@ -5,6 +5,8 @@ import {
   NEW_ALERT,
   alertWindowsFor,
   amount,
+  beforeWords,
+  changesNameAgent,
   connectionChoices,
   draftOf,
   filterFieldsFor,
@@ -527,6 +529,28 @@ describe("words", () => {
       "a removed connector",
     ]);
     expect(toldWords({ told_to: [] }, names, "a removed connector")).toEqual(["the feed"]);
+  });
+
+  // ⚠ The words its notice says, so the page and the notice read alike.
+  it("says how long before its incident opened a change came", () => {
+    const opened = "2026-10-26T12:00:00Z";
+    const before = (seconds: number) =>
+      beforeWords(opened, new Date(Date.parse(opened) - seconds * 1000).toISOString());
+    expect(before(0)).toBe("under a minute before");
+    expect(before(59)).toBe("under a minute before");
+    expect(before(60)).toBe("1 minute before");
+    expect(before(14 * 60)).toBe("14 minutes before");
+    expect(before(59 * 60 + 59)).toBe("59 minutes before");
+    expect(before(60 * 60)).toBe("1 hour before");
+    expect(before(3 * 60 * 60)).toBe("3 hours before");
+    expect(before(23 * 60 * 60 + 59 * 60)).toBe("23 hours before");
+  });
+
+  it("names a change's agent on the incidents of an alert held to no single agent", () => {
+    expect(changesNameAgent({ filters: {} })).toBe(true);
+    expect(changesNameAgent({ filters: { agent: [] } })).toBe(true);
+    expect(changesNameAgent({ filters: { agent: ["support", "triage"] } })).toBe(true);
+    expect(changesNameAgent({ filters: { agent: ["support"] } })).toBe(false);
   });
 
   // The form's switches and where an incident's notices went name each one apart.
