@@ -204,12 +204,12 @@ mod tests {
         let mut report = Report::default();
         report.sample_out(0, "never said");
         assert!(report.is_clean(), "nothing sampled out is nothing to say");
-        report.sample_out(9, "Move to Pro for $20 a month on its billing page.");
+        report.sample_out(9, "A larger plan holds more.");
         let partial = report.partial_success(ContentMode::Off).expect("not clean");
         assert_eq!(partial.rejected_spans, 9);
         assert_eq!(
             partial.error_message,
-            "9 spans sampled out: Move to Pro for $20 a month on its billing page."
+            "9 spans sampled out: A larger plan holds more."
         );
     }
 

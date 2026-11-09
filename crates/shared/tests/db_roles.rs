@@ -439,9 +439,8 @@ async fn no_lane_is_granted_a_future_table_by_default() {
 }
 
 /// Every other table the auth migration grants the lane less than full DML
-/// on, held to the migration's answer. A privilege that differs between a
-/// per-test database and a cloud tier once shipped a cross-tenant statement
-/// its own tests could not reach.
+/// on, held to the migration's answer: a privilege that differs between a
+/// per-test database and a deployed one is one its own tests cannot reach.
 #[tokio::test]
 async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
     let Some(pool) = harness().await else { return };

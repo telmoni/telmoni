@@ -54,7 +54,7 @@ impl Entitlements for Holds {
         Ok(Some(AlertCeilings {
             alerts: self.0,
             deliveries_per_day: 500,
-            entitlement: "pro".into(),
+            entitlement: "larger_plan".into(),
             detail: DETAIL.into(),
         }))
     }
@@ -285,12 +285,10 @@ async fn a_projects_first_run_makes_its_three_starters_once(pool: PgPool) {
     assert_eq!(told(&notices).len(), 1, "nor told again");
 }
 
-/// ⚠ A plan of ten holds a Hobby organization's two projects' six starters
-/// and four alerts of its own, the fifth refused in the plan's words.
+/// ⚠ A plan of ten holds an organization's two projects' six starters and
+/// four alerts of its own, the fifth refused in the plan's words.
 #[sqlx::test]
-async fn a_hobby_organizations_two_projects_are_watched_with_four_alerts_still_to_make(
-    pool: PgPool,
-) {
+async fn an_organizations_two_projects_are_watched_with_four_alerts_still_to_make(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;

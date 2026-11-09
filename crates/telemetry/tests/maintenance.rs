@@ -53,7 +53,7 @@ impl Entitlements for Ceiling {
         Ok(Some(AlertCeilings {
             alerts: self.0.load(Ordering::SeqCst),
             deliveries_per_day: 1_000,
-            entitlement: "teams".into(),
+            entitlement: "larger_plan".into(),
             detail: "The plan holds fewer alerts.".into(),
         }))
     }

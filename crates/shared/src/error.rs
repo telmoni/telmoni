@@ -837,19 +837,19 @@ mod tests {
     #[test]
     fn a_plan_limit_is_a_402_naming_what_lifts_it() {
         let pd = TelmoniError::from(PlanError::LimitReached {
-            entitlement: "pro".into(),
-            detail: "Move it to Pro.".into(),
+            entitlement: "larger_plan".into(),
+            detail: "Move it to a larger plan.".into(),
         })
         .to_problem_details();
         assert_eq!(pd.type_uri, "/errors/plan/limit-reached");
         assert_eq!(pd.status, 402);
         assert_eq!(pd.title, "plan limit reached");
-        assert_eq!(pd.detail.as_deref(), Some("Move it to Pro."));
+        assert_eq!(pd.detail.as_deref(), Some("Move it to a larger plan."));
         assert_eq!(
             pd.extensions
                 .get("entitlement")
                 .and_then(serde_json::Value::as_str),
-            Some("pro")
+            Some("larger_plan")
         );
     }
 

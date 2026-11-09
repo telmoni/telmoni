@@ -84,7 +84,7 @@ fn ceiling() -> RosterCeiling {
         limit: 3,
         held: 2,
         reached: false,
-        detail: "Hobby holds one member; move to Pro for more.".into(),
+        detail: "The plan holds three members; a larger one holds more.".into(),
     }
 }
 

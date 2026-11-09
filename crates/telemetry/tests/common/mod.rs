@@ -595,15 +595,14 @@ impl Entitlements for PausedOrganization {
         }
         Ok(Grants {
             paused: Some(Paused {
-                entitlement: "pro".into(),
+                entitlement: "larger_plan".into(),
                 detail: "This organization is paused.".into(),
             }),
         })
     }
 }
 
-/// A plan's data out a day, in bytes, for every organization: what billing
-/// answers for one on a plan.
+/// A plan's data out a day, in bytes, for every organization.
 pub(crate) struct DataOut(pub(crate) u64);
 
 #[async_trait]
@@ -623,8 +622,7 @@ impl Entitlements for DataOut {
 }
 
 /// A plan's month for every organization, begun a day ago: `spans` span
-/// units, `grace_days` past them, and `content_bytes` of content, what
-/// billing answers for one on a plan; each refusal in Hobby's words.
+/// units, `grace_days` past them, and `content_bytes` of content.
 pub(crate) struct PlanMonth {
     pub(crate) spans: u64,
     pub(crate) grace_days: u32,
@@ -643,8 +641,8 @@ impl Entitlements for PlanMonth {
     ) -> Result<Option<telmoni_shared::Capacity>, TelmoniError> {
         let allowance = |limit| telmoni_shared::Allowance {
             limit,
-            entitlement: "pro".into(),
-            detail: "Move to Pro for $20 a month on its billing page.".into(),
+            entitlement: "larger_plan".into(),
+            detail: "A larger plan holds more.".into(),
         };
         let today = chrono::Utc::now();
         // A month begun yesterday at midnight: the same start on every

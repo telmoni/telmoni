@@ -190,8 +190,7 @@ async fn hold_organization_spans(
         return (None, None);
     };
     let month = capacity.period_start.timestamp();
-    // The grace and its telling are the allowance's: an add-on that raises it
-    // starts both again.
+    // The grace and its telling are the allowance's: one raised starts both again.
     let limit = capacity.spans.limit;
     let used_key = format!("telemetry:spans:{organization_id}:{month}");
     let over_key = format!("telemetry:spans-over:{organization_id}:{month}:{limit}");

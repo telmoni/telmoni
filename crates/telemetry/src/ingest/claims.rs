@@ -180,7 +180,7 @@ mod tests {
             );
         }
         let held = Held {
-            sampled: Some("Move to Pro for $20 a month on its billing page.".into()),
+            sampled: Some("A larger plan holds more.".into()),
             content_full: true,
         };
         let value = answered(ContentMode::On, &held);

@@ -49,7 +49,7 @@ impl Entitlements for Deliveries {
         Ok(Some(AlertCeilings {
             alerts: 50,
             deliveries_per_day: self.0,
-            entitlement: "teams".into(),
+            entitlement: "larger_plan".into(),
             detail: "The plan holds 50 alerts.".into(),
         }))
     }

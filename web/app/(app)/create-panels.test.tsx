@@ -235,20 +235,20 @@ describe("New organization", () => {
   // `components/extension/create-organization-notice.tsx`: what a console
   // built on this one says a new organization starts on.
   it("opens with the notice it is handed, its name field focused, the host ahead of its URL", () => {
-    panels(<p data-testid="notice">A new one starts on Pro.</p>);
+    panels(<p data-testid="notice">A new one starts on a paid plan.</p>);
     const panel = screen.getByRole("dialog", { name: "New organization" });
     expect(document.activeElement).toBe(within(panel).getByLabelText("Name"));
-    expect(within(panel).getByTestId("notice")).toHaveTextContent("A new one starts on Pro.");
+    expect(within(panel).getByTestId("notice")).toHaveTextContent("A new one starts on a paid plan.");
     expect(panel).toHaveTextContent("console.test/");
   });
 
   it("hands the action the notice's own fields by name, and opens what it answers", async () => {
     createOrganizationAction.mockResolvedValue({ ok: true, href: "/acme-robotics" });
-    panels(<input type="hidden" name="plan" value="teams" />);
+    panels(<input type="hidden" name="plan" value="larger" />);
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme Robotics" } });
     fireEvent.click(screen.getByRole("button", { name: "Create organization" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/acme-robotics"));
-    expect(createOrganizationAction).toHaveBeenCalledWith("Acme Robotics", "", { plan: "teams" });
+    expect(createOrganizationAction).toHaveBeenCalledWith("Acme Robotics", "", { plan: "larger" });
     expect(closeCreate).toHaveBeenCalledTimes(1);
   });
 

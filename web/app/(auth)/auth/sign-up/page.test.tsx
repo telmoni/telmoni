@@ -39,8 +39,7 @@ describe("the sign-up page", () => {
   });
 
   // Its lane is not mounted with the form off, so a deployment on a provider
-  // alone, the hosted service among them, has no such page, whatever state
-  // the door sealed for the sign-in in progress.
+  // alone has no such page, whatever state the door sealed for the sign-in.
   it("is not found while the password form is off", async () => {
     mockConfig = { ...CONFIG, passwordSignIn: false };
     await expect(page()).rejects.toThrow("NEXT_NOT_FOUND");

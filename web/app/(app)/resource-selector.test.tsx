@@ -111,9 +111,9 @@ describe("the switcher", () => {
   });
 
   it("draws the badge it is handed beside the organization's name", () => {
-    renderSelector(<span data-testid="plan">Hobby</span>);
+    renderSelector(<span data-testid="badge">Plan</span>);
     const trigger = screen.getByRole("button", { name: /^Organization: acme/ });
-    expect(within(trigger).getByTestId("plan")).toHaveTextContent("Hobby");
+    expect(within(trigger).getByTestId("badge")).toHaveTextContent("Plan");
   });
 
   // The row a panel is opened from is gone once the menu shuts, so the panel

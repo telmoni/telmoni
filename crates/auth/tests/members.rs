@@ -2054,7 +2054,7 @@ async fn the_invitation_is_audited_without_its_secret(pool: PgPool) {
     );
 }
 
-/// P9's mail half: an invitation reaches an address the owner typed.
+/// An invitation reaches an address the owner typed.
 #[sqlx::test]
 async fn an_invitation_mails_the_address_the_owner_typed(pool: PgPool) {
     apply_audit_migrations(&pool).await;

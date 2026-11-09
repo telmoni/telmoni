@@ -916,7 +916,7 @@ async fn one_organizations_notices_never_appear_on_another_organization(pool: Pg
     assert_eq!(first, ["api is down"]);
 }
 
-/// P9's purge lane, driven at the PATH auth actually calls.
+/// The purge lane, driven at the path auth actually calls.
 #[sqlx::test]
 async fn the_purge_auth_calls_removes_every_trace_of_the_organization(pool: PgPool) {
     apply_audit_migrations(&pool).await;

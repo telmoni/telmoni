@@ -637,7 +637,7 @@ describe("AlertsPage", () => {
   });
 
   it("names the starters the plan had no room for, in the plan's own words", async () => {
-    const plan = "This organization is on Hobby, which holds 10 alerts across its projects.";
+    const plan = "This organization's plan holds 10 alerts across its projects.";
     mockAlerts = { ...(mockAlerts as object), startersWithheld: ["repeats", "stalled"], startersDetail: plan };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const notice = screen.getByText("Not made, past the plan's number: Looping runs and Stalled runs");

@@ -1,8 +1,6 @@
-//! An organization dividing its pool among its projects (roadmap 17.4): one
-//! project's caps set by the organization's owners and admins alone, each at
-//! most the plan's and audited, read by every member beside what each
-//! project has used; and a project past its cap on alerts, objectives or
-//! monitors refused alone, its organization's other projects untouched.
+//! An organization dividing its pool among its projects: the organization's
+//! owners and admins alone set a project's caps, each at most the plan's and
+//! audited; every member reads them, and a project past one is refused alone.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
 mod common;
@@ -46,7 +44,7 @@ impl Entitlements for TenAlerts {
         Ok(Some(AlertCeilings {
             alerts: 10,
             deliveries_per_day: 500,
-            entitlement: "pro".into(),
+            entitlement: "larger_plan".into(),
             detail: "This organization's plan holds ten alerts.".into(),
         }))
     }
@@ -491,7 +489,7 @@ impl Entitlements for Deliveries {
         Ok(Some(AlertCeilings {
             alerts: 10,
             deliveries_per_day: self.0,
-            entitlement: "pro".into(),
+            entitlement: "larger_plan".into(),
             detail: "This organization's plan holds its deliveries.".into(),
         }))
     }

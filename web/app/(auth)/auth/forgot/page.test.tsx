@@ -37,7 +37,7 @@ describe("the forgotten password page", () => {
   });
 
   // Its lane is not mounted with the form off, so a deployment on a provider
-  // alone, the hosted service among them, has no such page.
+  // alone has no such page.
   it("is not found while the password form is off", async () => {
     mockConfig = { ...CONFIG, passwordSignIn: false };
     await expect(ForgotPage()).rejects.toThrow("NEXT_NOT_FOUND");

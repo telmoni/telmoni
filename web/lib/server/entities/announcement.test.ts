@@ -61,11 +61,11 @@ describe("fetchProjectAnnouncement", () => {
 
   it("falls back to TELMONI_ANNOUNCEMENT environment variable when Redis is empty", async () => {
     mockGet.mockResolvedValue(null);
-    process.env.TELMONI_ANNOUNCEMENT = "Telmoni Cloud v2 is now live!";
+    process.env.TELMONI_ANNOUNCEMENT = "Maintenance tonight at 22:00 UTC.";
 
     const result = await fetchProjectAnnouncement();
     expect(result).toEqual({
-      message: "Telmoni Cloud v2 is now live!",
+      message: "Maintenance tonight at 22:00 UTC.",
     });
   });
 

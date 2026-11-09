@@ -835,9 +835,8 @@ pub async fn accept(
     {
         return Err(AuthzError::Forbidden("you are not a member of this project".into()).into());
     }
-    // Billing's ceiling read before the person's lock, as every other door
-    // reads it, for the destination as it stands now; asked again under the
-    // lock only if the person's organizations changed in between.
+    // The deployment's ceiling is read before the person's lock, as at every
+    // door, and asked again under it only if their organizations changed.
     let owned_before =
         organization_members::active_organizations_owned_by(&mut tx, &user_id).await?;
     let early = match resolve_destination_organization(named.clone(), &owned_before, &source) {

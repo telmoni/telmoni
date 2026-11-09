@@ -182,7 +182,7 @@ describe("createProjectAction — which organization the project lands in", () =
       // One a plan lifts, or a deployment that names nobody, is said as it came.
       mockExtractProblem.mockResolvedValueOnce({
         message: "This organization is paused.",
-        problem: { title: "plan limit reached", status: 402, entitlement: "pro" },
+        problem: { title: "plan limit reached", status: 402, entitlement: "larger_plan" },
       });
       expect(errorOf(await createProjectAction("Platform"))).toBe("This organization is paused.");
       mockEnv.SUPPORT_EMAIL = undefined;
@@ -347,13 +347,13 @@ describe("createOrganizationAction", () => {
   // take the founding elsewhere first, handed the name and URL as checked
   // and the notice's own fields by name, and auth is not asked.
   it("goes where a console built on this one takes the founding first, with the notice's fields", async () => {
-    mockElsewhere.mockResolvedValueOnce({ href: "https://checkout.stripe.test/c/pay_1" });
-    const r = await createOrganizationAction("  Acme  ", " acme-labs ", { plan: "pro" });
-    expect(r).toEqual({ ok: true, href: "https://checkout.stripe.test/c/pay_1" });
+    mockElsewhere.mockResolvedValueOnce({ href: "https://pay.example/c/pay_1" });
+    const r = await createOrganizationAction("  Acme  ", " acme-labs ", { plan: "larger" });
+    expect(r).toEqual({ ok: true, href: "https://pay.example/c/pay_1" });
     expect(mockElsewhere).toHaveBeenCalledWith({
       name: "Acme",
       slug: "acme-labs",
-      extras: { plan: "pro" },
+      extras: { plan: "larger" },
     });
     expect(mockFetch).not.toHaveBeenCalled();
   });

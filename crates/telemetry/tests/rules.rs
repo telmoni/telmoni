@@ -53,7 +53,7 @@ impl Entitlements for Holds {
         Ok(Some(AlertCeilings {
             alerts: self.0,
             deliveries_per_day: 500,
-            entitlement: "pro".into(),
+            entitlement: "larger_plan".into(),
             detail: "This organization's plan holds two alerts.".into(),
         }))
     }
@@ -454,7 +454,7 @@ async fn the_loop_evaluates_each_alert_and_holds_its_organization_to_its_plan(po
     assert_eq!(still, 0);
 }
 
-/// A plan that cannot answer its alerts' number, as billing during an outage.
+/// A plan that cannot answer its alerts' number, as during an outage.
 struct Unanswered;
 
 #[async_trait]
@@ -467,7 +467,7 @@ impl Entitlements for Unanswered {
         &self,
         _organization_id: &OrganizationId,
     ) -> Result<Option<AlertCeilings>, TelmoniError> {
-        Err(TelmoniError::Internal("billing cannot be reached".into()))
+        Err(TelmoniError::Internal("the plan cannot be read".into()))
     }
 }
 

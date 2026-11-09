@@ -48,11 +48,9 @@ function RailLink({
   );
 }
 
-// The public pages' shell. On framed pages with `rail` on (the default for
-// splash and plans), desktop (`lg+`) shows a left rail where the brand and
-// primary links stay sticky at the top. Legal links and theme/corner toggles
-// scroll into view at the bottom of the rail. Public surfaces (/,
-// /plans, /docs) frame with `rail={true}`.
+// The public pages' shell. A framed page has `rail` on by default: desktop
+// (`lg+`) shows a left rail, the brand and primary links sticky at its top,
+// the legal links and theme/corner toggles scrolling into view at its foot.
 export function PaperShell({
   children,
   signedIn,

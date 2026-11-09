@@ -18,8 +18,8 @@ use telmoni_telemetry::AppState;
 use telmoni_telemetry::ceilings;
 use telmoni_telemetry::seam::TelemetrySeam;
 
-/// Hobby's data out a day, in bytes.
-const HOBBY: u64 = 5_000_000;
+/// A plan's data out a day, in bytes.
+const A_DAY: u64 = 5_000_000;
 
 /// The module under `entitlements`, over no store, and the notices it hands
 /// over.
@@ -50,10 +50,10 @@ fn alerts(notices: &NoticeLog, organization: &OrganizationId) -> Vec<LoggedNotic
 #[sqlx::test]
 async fn data_out_past_the_day_is_refused_until_midnight(pool: PgPool) {
     let organization = OrganizationId::new();
-    let (state, notices) = module(&pool, AuthStub::new(), Arc::new(DataOut(HOBBY)));
+    let (state, notices) = module(&pool, AuthStub::new(), Arc::new(DataOut(A_DAY)));
     let seam = TelemetrySeam(state.clone());
     assert!(seam.admit_data_out(&organization).await.is_ok());
-    seam.spend_data_out(&organization, HOBBY - 1).await;
+    seam.spend_data_out(&organization, A_DAY - 1).await;
     assert!(seam.admit_data_out(&organization).await.is_ok());
     seam.spend_data_out(&organization, 1).await;
     let problem = seam
@@ -98,9 +98,9 @@ async fn an_organization_being_erased_is_told_nothing(pool: PgPool) {
     let organization = OrganizationId::new();
     let auth = AuthStub::new();
     auth.stand(&organization, Some(OrganizationStatus::PendingDeletion));
-    let (state, notices) = module(&pool, auth, Arc::new(DataOut(HOBBY)));
+    let (state, notices) = module(&pool, auth, Arc::new(DataOut(A_DAY)));
     let seam = TelemetrySeam(state.clone());
-    seam.spend_data_out(&organization, HOBBY).await;
+    seam.spend_data_out(&organization, A_DAY).await;
     assert!(seam.admit_data_out(&organization).await.is_err());
     ceilings::tell(&state).await;
     assert!(alerts(&notices, &organization).is_empty());
@@ -116,7 +116,7 @@ async fn the_ceiling_holds_over_redis_as_on_a_tier(pool: PgPool) {
         common::state_with_redis_under(
             &pool,
             AuthStub::new(),
-            Arc::new(DataOut(HOBBY)),
+            Arc::new(DataOut(A_DAY)),
             notices.clone(),
         )
     });
@@ -128,7 +128,7 @@ async fn the_ceiling_holds_over_redis_as_on_a_tier(pool: PgPool) {
         return;
     }
     TelemetrySeam(replicas[0].clone())
-        .spend_data_out(&organization, HOBBY)
+        .spend_data_out(&organization, A_DAY)
         .await;
     assert!(
         TelemetrySeam(replicas[1].clone())

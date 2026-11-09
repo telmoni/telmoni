@@ -262,7 +262,7 @@ mod tests {
     fn a_paused_organization_is_refused_with_the_deployments_words() {
         let grants = Grants {
             paused: Some(Paused {
-                entitlement: "pro".into(),
+                entitlement: "larger_plan".into(),
                 detail: "This organization is paused.".into(),
             }),
         };
@@ -277,7 +277,7 @@ mod tests {
             pd.extensions
                 .get("entitlement")
                 .and_then(serde_json::Value::as_str),
-            Some("pro")
+            Some("larger_plan")
         );
     }
 
@@ -294,8 +294,8 @@ mod tests {
     fn an_allowance_admits_until_it_is_spent_and_refuses_in_the_deployments_words() {
         let questions = Allowance {
             limit: 5,
-            entitlement: "pro".into(),
-            detail: "Hobby asks five a month.".into(),
+            entitlement: "larger_plan".into(),
+            detail: "The plan asks five a month.".into(),
         };
         assert!(questions.admit(4).is_ok());
         let pd = questions
@@ -306,7 +306,7 @@ mod tests {
             (pd.status, pd.type_uri.as_str()),
             (402, "/errors/plan/limit-reached")
         );
-        assert_eq!(pd.detail.as_deref(), Some("Hobby asks five a month."));
+        assert_eq!(pd.detail.as_deref(), Some("The plan asks five a month."));
         let renews = DateTime::from_timestamp(1_801_872_000, 0).expect("a day");
         let pd = questions
             .admit_until(5, renews)
@@ -314,7 +314,7 @@ mod tests {
             .to_problem_details();
         assert_eq!(
             pd.detail.as_deref(),
-            Some("Hobby asks five a month. It renews on 6 February 2027.")
+            Some("The plan asks five a month. It renews on 6 February 2027.")
         );
     }
 
@@ -323,8 +323,8 @@ mod tests {
         let ceilings = AlertCeilings {
             alerts: 2,
             deliveries_per_day: 500,
-            entitlement: "pro".into(),
-            detail: "Hobby holds two alerts.".into(),
+            entitlement: "larger_plan".into(),
+            detail: "The plan holds two alerts.".into(),
         };
         assert!(ceilings.admit(1).is_ok());
         let pd = ceilings
@@ -335,14 +335,14 @@ mod tests {
             (pd.status, pd.type_uri.as_str()),
             (402, "/errors/plan/limit-reached")
         );
-        assert_eq!(pd.detail.as_deref(), Some("Hobby holds two alerts."));
+        assert_eq!(pd.detail.as_deref(), Some("The plan holds two alerts."));
     }
 
     #[test]
     fn a_ceiling_admits_one_more_until_it_is_held_and_refuses_in_the_deployments_words() {
         let ceiling = MemberCeiling {
             limit: 2,
-            entitlement: "pro".into(),
+            entitlement: "larger_plan".into(),
             detail: "The plan holds two.".into(),
         };
         assert!(ceiling.admit(0).is_ok());
@@ -360,7 +360,7 @@ mod tests {
             pd.extensions
                 .get("entitlement")
                 .and_then(serde_json::Value::as_str),
-            Some("pro")
+            Some("larger_plan")
         );
         assert!(
             ceiling.admit(u64::MAX).is_err(),

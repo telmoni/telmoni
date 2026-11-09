@@ -2302,8 +2302,7 @@ async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool
         .as_str()
         .unwrap_or_default();
     assert!(
-        message
-            .starts_with("1 spans sampled out: Move to Pro for $20 a month on its billing page.\n"),
+        message.starts_with("1 spans sampled out: A larger plan holds more.\n"),
         "{message}"
     );
     assert!(

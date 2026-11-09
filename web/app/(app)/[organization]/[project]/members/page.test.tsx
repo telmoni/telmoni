@@ -319,13 +319,13 @@ describe("MembersPage: adding from the organization", () => {
   it("keeps the roster open at the organization's ceiling, the invitation closed with its sentence", async () => {
     mockMembers = {
       ...(mockMembers as object),
-      ceiling: { limit: 1, held: 3, reached: true, detail: "Hobby holds one member." },
+      ceiling: { limit: 1, held: 3, reached: true, detail: "The plan holds one member." },
     };
     const dialog = await asOwner();
     expect(within(dialog).getByRole("radio", { name: "By email" })).toBeDisabled();
-    expect(within(dialog).getByRole("note")).toHaveTextContent("Hobby holds one member.");
+    expect(within(dialog).getByRole("note")).toHaveTextContent("The plan holds one member.");
     expect(within(dialog).getByRole("radiogroup")).toHaveAccessibleDescription(
-      "Hobby holds one member.",
+      "The plan holds one member.",
     );
     await choose(dialog, "user_dana");
     await press("Add");
@@ -338,11 +338,11 @@ describe("MembersPage: adding from the organization", () => {
     mockRoster = { kind: "ok", members: ROSTER.members.slice(0, 2) };
     mockMembers = {
       ...(mockMembers as object),
-      ceiling: { limit: 1, held: 3, reached: true, detail: "Hobby holds one member." },
+      ceiling: { limit: 1, held: 3, reached: true, detail: "The plan holds one member." },
     };
     render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.queryByTestId("header-action")).toBeNull();
-    expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
+    expect(screen.getByTestId("member-ceiling")).toHaveTextContent("The plan holds one member.");
   });
 
   it("says so when the organization's members cannot be read, rather than offering nobody in silence", async () => {
@@ -397,18 +397,18 @@ describe("MembersPage", () => {
       mockProject = projectAs(Role.Owner);
       mockMembers = {
         ...(mockMembers as object),
-        ceiling: { limit: 1, held: 1, reached: true, detail: "Hobby holds one member." },
+        ceiling: { limit: 1, held: 1, reached: true, detail: "The plan holds one member." },
       };
       render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("header-action")).toBeNull();
-      expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
+      expect(screen.getByTestId("member-ceiling")).toHaveTextContent("The plan holds one member.");
     });
 
     it("says nothing of the ceiling to a member, who could not invite anyway", async () => {
       mockProject = projectAs(Role.Member);
       mockMembers = {
         ...(mockMembers as object),
-        ceiling: { limit: 1, held: 1, reached: true, detail: "Hobby holds one member." },
+        ceiling: { limit: 1, held: 1, reached: true, detail: "The plan holds one member." },
       };
       render(await MembersPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       expect(screen.queryByTestId("member-ceiling")).toBeNull();

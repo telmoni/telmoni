@@ -110,7 +110,7 @@ impl RecordingOwnership {
 /// The refusal a deployment answers, in its own words.
 fn limit_reached() -> TelmoniError {
     PlanError::LimitReached {
-        entitlement: "pro".into(),
+        entitlement: "larger_plan".into(),
         detail: "Its new owner already holds what a second would take.".into(),
     }
     .into()
@@ -201,7 +201,7 @@ fn owns_organizations(limit: u32) -> String {
 
 /// The sentence the double refuses a seat with.
 fn holds(limit: u32) -> String {
-    format!("Hobby holds {limit}.")
+    format!("The plan holds {limit}.")
 }
 
 #[async_trait::async_trait]
@@ -215,7 +215,7 @@ impl Entitlements for PausedEntitlements {
         {
             return Ok(Grants {
                 paused: Some(Paused {
-                    entitlement: "pro".into(),
+                    entitlement: "larger_plan".into(),
                     detail: "This organization is paused.".into(),
                 }),
             });
@@ -234,7 +234,7 @@ impl Entitlements for PausedEntitlements {
             .get(organization_id.as_str())
             .map(|&limit| MemberCeiling {
                 limit,
-                entitlement: "pro".into(),
+                entitlement: "larger_plan".into(),
                 detail: holds(limit),
             }))
     }
@@ -486,7 +486,7 @@ async fn a_founding_at_the_persons_asking_is_the_hooks_to_refuse_and_the_first_i
         .await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
     assert_eq!(body["type"], "/errors/plan/limit-reached");
-    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(body["entitlement"], "larger_plan");
     assert_eq!(
         body["detail"],
         "Its new owner already holds what a second would take."
@@ -603,9 +603,9 @@ async fn the_deployment_founds_an_organization_under_its_own_id_once(pool: PgPoo
     );
 }
 
-/// Two settlements of one founding at the founder's last place: the one that
+/// Two calls for one founding at the founder's last place: the one that
 /// waited on the person's lock answers the organization the other founded,
-/// never a refusal past the number, which would refund a founded organization.
+/// never a refusal past the number.
 #[sqlx::test]
 async fn a_founding_settled_twice_at_once_is_founded_once_and_refused_never(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -759,7 +759,7 @@ async fn a_refusal_stops_the_offer_and_the_accept(pool: PgPool) {
         .await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
     assert_eq!(body["type"], "/errors/plan/limit-reached");
-    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(body["entitlement"], "larger_plan");
     let offered: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM auth.organization_members
           WHERE organization_id = $1 AND transfer_offered_at IS NOT NULL",
@@ -1126,15 +1126,13 @@ impl Deployment {
 fn assert_past_the_ceiling(status: StatusCode, body: &Value, limit: u32) {
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
     assert_eq!(body["type"], "/errors/plan/limit-reached");
-    assert_eq!(body["entitlement"], "pro");
+    assert_eq!(body["entitlement"], "larger_plan");
     assert_eq!(body["detail"], holds(limit));
 }
 
-/// One member on Hobby, as the hosted service holds it: at its ceiling an
-/// organization promises no seat on either lane and writes no invitation,
-/// and both roster pages are told the ceiling and what stands against it —
-/// whoever could invite is; a member of the project, who reads its roster
-/// and nothing of the organization's, is not.
+/// At its plan's ceiling an organization promises no seat on either lane and
+/// writes no invitation, and both roster pages tell whoever could invite the
+/// ceiling and what stands against it, never a member of the project alone.
 #[sqlx::test]
 async fn an_organization_at_its_ceiling_promises_no_seat_and_its_rosters_say_so(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -1467,8 +1465,8 @@ async fn a_project_moves_into_no_organization_at_its_ceiling(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{body}");
 }
 
-/// A merge's moves, which billing makes through the seam rather than the
-/// route, are held to the destination's ceiling as the owner's own move is.
+/// A merge's moves, which a deployment makes through the seam rather than
+/// the route, are held to the destination's ceiling as the owner's own is.
 #[sqlx::test]
 async fn a_merges_move_is_held_to_the_destinations_ceiling(pool: PgPool) {
     apply_audit_migrations(&pool).await;

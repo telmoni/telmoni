@@ -201,17 +201,17 @@ describe("OrganizationMembersPage", () => {
   it("hides the invitation at the plan's ceiling, and says why", async () => {
     mockOrganizationMembers = {
       ...(mockOrganizationMembers as object),
-      ceiling: { limit: 1, held: 1, reached: true, detail: "Hobby holds one member." },
+      ceiling: { limit: 1, held: 1, reached: true, detail: "The plan holds one member." },
     };
     render(await OrganizationMembersPage());
     expect(screen.queryByTestId("header-action")).toBeNull();
-    expect(screen.getByTestId("member-ceiling")).toHaveTextContent("Hobby holds one member.");
+    expect(screen.getByTestId("member-ceiling")).toHaveTextContent("The plan holds one member.");
   });
 
   it("keeps the invitation while the ceiling has room, and says nothing of it", async () => {
     mockOrganizationMembers = {
       ...(mockOrganizationMembers as object),
-      ceiling: { limit: 5, held: 4, reached: false, detail: "Hobby holds five members." },
+      ceiling: { limit: 5, held: 4, reached: false, detail: "The plan holds five members." },
     };
     render(await OrganizationMembersPage());
     expect(screen.getByTestId("header-action")).toBeInTheDocument();

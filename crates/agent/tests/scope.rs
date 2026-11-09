@@ -985,9 +985,9 @@ impl telmoni_shared::seam::Entitlements for OneQuestion {
     ) -> Result<Option<telmoni_shared::Capacity>, TelmoniError> {
         let allowance = |limit| telmoni_shared::Allowance {
             limit,
-            entitlement: "pro".into(),
+            entitlement: "larger_plan".into(),
             detail: "Your organization has asked the agent the questions its plan holds this \
-                     month. Move to Pro for $20 a month on its billing page."
+                     month. A larger plan holds more."
                 .into(),
         };
         let today = Utc::now();
@@ -1049,7 +1049,7 @@ async fn a_question_past_the_plans_month_is_refused_until_it_renews(pool: PgPool
     );
     let detail = refused.detail.unwrap_or_default();
     assert!(
-        detail.contains("Move to Pro") && detail.contains("It renews on"),
+        detail.contains("A larger plan holds more.") && detail.contains("It renews on"),
         "{detail}"
     );
     let asked: i64 = sqlx::query_scalar(

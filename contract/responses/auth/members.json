@@ -1,6 +1,6 @@
 {
   "ceiling": {
-    "detail": "Hobby holds one member; move to Pro for more.",
+    "detail": "The plan holds three members; a larger one holds more.",
     "held": 2,
     "limit": 3,
     "reached": false

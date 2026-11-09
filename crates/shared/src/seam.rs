@@ -494,7 +494,7 @@ pub struct OwnerNotice<'a> {
     pub title: &'a str,
     /// The text, which names nobody.
     pub body: &'a str,
-    /// The console's page it is about, from its root (`/acme/billing`).
+    /// The console's page it is about, from its root (`/acme/limits`).
     pub path: &'a str,
 }
 

@@ -325,19 +325,19 @@ async fn the_heartbeat_names_the_loops_no_replica_has_beaten() {
     assert_eq!(answer.status(), StatusCode::OK);
     assert_eq!(body(answer).await, serde_json::json!({ "status": "ok" }));
 
-    let (app, _) = looping(&["billing.reconcile"]);
+    let (app, _) = looping(&["looping.sweep"]);
     let answer = app.router().oneshot(get("/heartbeat")).await.unwrap();
     assert_eq!(answer.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(
         body(answer).await,
-        serde_json::json!({ "status": "stale", "stale": ["billing.reconcile"] })
+        serde_json::json!({ "status": "stale", "stale": ["looping.sweep"] })
     );
 }
 
 /// A flood of the watchdog's asks reads the loops once a minute.
 #[tokio::test]
 async fn the_heartbeat_reads_the_loops_once_for_a_flood() {
-    let (app, module) = looping(&["billing.reconcile"]);
+    let (app, module) = looping(&["looping.sweep"]);
     for _ in 0..20 {
         let answer = app.router().oneshot(get("/heartbeat")).await.unwrap();
         assert_eq!(answer.status(), StatusCode::SERVICE_UNAVAILABLE);

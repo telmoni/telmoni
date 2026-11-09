@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A public HTTPS door to a receiver on this laptop, so an outbound webhook can
-# be tested end to end from `make up`. Dev tooling only: nothing here is
-# read by a service or by Terraform, so a deployed tier cannot pick it up.
+# be tested end to end from `make up`. Dev tooling only: no service reads
+# anything here, so a deployment cannot pick it up.
 #
 # Why a tunnel at all: the outbound guard refuses any endpoint that is
 # loopback, private or the metadata server — checked at registration, at dial

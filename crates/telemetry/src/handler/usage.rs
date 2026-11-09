@@ -35,7 +35,7 @@ pub struct DayUnits {
     pub units: u64,
 }
 
-/// A project the days name, as the billing page labels it.
+/// A project the days name, with the name a page labels it by.
 #[derive(Debug, Serialize)]
 pub struct UsageProject {
     pub id: String,

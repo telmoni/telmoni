@@ -70,6 +70,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 
 ## Agent Hygiene
 - **This repo only:** change nothing in another repository (`telmoni/telmoni-cli`, any other) unless the user says so for this task; that binds subagents too. Reading is fine.
+- **The core names no deployment's business:** outside the book, no code, comment or test names a plan, a price, a per-plan number, or a deployment's module, loop or vendor; a test double speaks in neutral words.
 - Edit `AGENTS.md` only when the user asks outright; otherwise propose a diff. Delete any Next.js-generated `web/AGENTS.md`.
 - Comments are for a person reading the code, and short: they say *why*, never *what* — a doc comment in a line or two, an inline comment in one, a test's doc in one line on what it proves. The reasoning behind a change (a race worked through, the designs turned down, its history) goes in `ARCHITECTURE.md` or the commit message, never above a function, and editing a comment means shortening its whole block. No AI signatures anywhere.
 - No scripted bulk edits: edit each file deliberately (formatters, generators and an approved lockfile write excepted). One-off scripts, backups and logs go in `/tmp/telmoni/`.
