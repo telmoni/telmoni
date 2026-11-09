@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { UnrecognizedActionError } from "next/dist/client/components/unrecognized-action-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActionResult } from "@/lib/action-result";
@@ -184,6 +185,17 @@ describe("ChangeEmail — asking for the codes", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Network error. Try again.",
+    );
+    expect(document.querySelector("#new-email")).not.toBeNull();
+  });
+
+  it("asks for a reload when the console was updated since the page loaded", async () => {
+    requestEmailChangeAction.mockRejectedValue(new UnrecognizedActionError("gone"));
+    mount("password");
+    await reachCodeStep();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The console was updated. Reload and try again.",
     );
     expect(document.querySelector("#new-email")).not.toBeNull();
   });

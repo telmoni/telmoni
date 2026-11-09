@@ -208,7 +208,7 @@ sequenceDiagram
   C-->>B: the page, a role notice, or a retryable outage
 ```
 
-A write takes the same path through a Server Action, its audit row committed with the change, and answers with the page drawn again, or with the next one when the write moves it (a rename, a deletion). A read a page makes after it loads — the search palette's index, the agent's history, a connector's deliveries, a trace or session opened over its list — takes it through a Route Handler under `/api/v1`, as a `GET`: an action is for writes, and a browser sends them one at a time.
+A write takes the same path through a Server Action, its audit row committed with the change, and answers with the page drawn again, or with the next one when the write moves it (a rename, a deletion). Each build gives its actions new ids, so a page loaded before a deploy is told to reload when it writes (`thrownWords`, `lib/use-action.ts`), and reloads by itself when it navigates. A read a page makes after it loads — the search palette's index, the agent's history, a connector's deliveries, a trace or session opened over its list — takes it through a Route Handler under `/api/v1`, as a `GET`: an action is for writes, and a browser sends them one at a time.
 
 Every way in:
 

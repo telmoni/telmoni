@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { projectPath } from "@/lib/slug";
 import { useRemoveGivenSeat } from "@/lib/store";
 import type { GivenSeat } from "@/lib/types/given-seat";
+import { thrownWords } from "@/lib/use-action";
 
 import { markSeatSeenAction } from "./seat-actions";
 
@@ -49,7 +50,7 @@ export function useGivenSeat(
         }
       } catch (err) {
         unstable_rethrow(err);
-        say("Couldn't update that. Try again.");
+        say(thrownWords(err, "Couldn't update that. Try again."));
       }
       // On to the project whatever the mark answered; the row stays unseen.
       then?.();

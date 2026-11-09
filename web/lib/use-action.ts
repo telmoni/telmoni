@@ -1,6 +1,6 @@
 "use client";
 
-import { unstable_rethrow } from "next/navigation";
+import { unstable_isUnrecognizedActionError, unstable_rethrow } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -8,9 +8,17 @@ import type { ActionResult } from "@/lib/action-result";
 
 export const NETWORK_ERROR = "Network error. Try again.";
 
+/** What a Server Action that threw says: `otherwise`, unless the page is from
+ *  before a deploy, whose action ids the new build no longer knows. */
+export function thrownWords(err: unknown, otherwise = NETWORK_ERROR): string {
+  return unstable_isUnrecognizedActionError(err)
+    ? "The console was updated. Reload and try again."
+    : otherwise;
+}
+
 /** Runs a Server Action in a transition: a refusal held as `error` for the
  *  control to say, the action's redirect left to the router, and anything
- *  else said as a network error. */
+ *  else said as `thrownWords` has it. */
 export function useAction() {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +39,7 @@ export function useAction() {
       } catch (err) {
         // The action's redirect rejects the call, and belongs to the router.
         unstable_rethrow(err);
-        setError(NETWORK_ERROR);
+        setError(thrownWords(err));
       }
     });
   }
@@ -59,7 +67,7 @@ export function useToastAction() {
         else done?.(r);
       } catch (err) {
         unstable_rethrow(err);
-        toast.error(NETWORK_ERROR);
+        toast.error(thrownWords(err));
       }
     });
   }

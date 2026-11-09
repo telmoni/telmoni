@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { UnrecognizedActionError } from "next/dist/client/components/unrecognized-action-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActionResult } from "@/lib/action-result";
@@ -117,6 +118,18 @@ describe("DefaultOrganization", () => {
     });
 
     expect(toastError).toHaveBeenCalledWith("Network error. Try again.");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("asks for a reload when the console was updated since the page loaded", async () => {
+    setDefaultOrganizationAction.mockRejectedValue(new UnrecognizedActionError("gone"));
+    render(<DefaultOrganization organizations={ORGANIZATIONS} current="org_1" />);
+    choose("org_2");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+
+    expect(toastError).toHaveBeenCalledWith("The console was updated. Reload and try again.");
     expect(refresh).not.toHaveBeenCalled();
   });
 });

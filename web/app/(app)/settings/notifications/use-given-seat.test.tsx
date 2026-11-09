@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
+import { UnrecognizedActionError } from "next/dist/client/components/unrecognized-action-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ActionResult } from "@/lib/action-result";
@@ -127,6 +128,14 @@ describe("useGivenSeat", () => {
     const { result } = renderHook(() => useGivenSeat(SEAT));
     await act(async () => result.current.dismiss());
     expect(result.current.error).toBe("Couldn't update that. Try again.");
+    expect(removeGivenSeat).not.toHaveBeenCalled();
+  });
+
+  it("asks on the row for a reload when the console was updated since the page loaded", async () => {
+    markSeatSeenAction.mockRejectedValue(new UnrecognizedActionError("gone"));
+    const { result } = renderHook(() => useGivenSeat(SEAT));
+    await act(async () => result.current.dismiss());
+    expect(result.current.error).toBe("The console was updated. Reload and try again.");
     expect(removeGivenSeat).not.toHaveBeenCalled();
   });
 });

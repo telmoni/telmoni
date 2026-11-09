@@ -23,6 +23,7 @@ import { agentSuggestions } from "@/lib/agent/suggestions";
 import { projectAt } from "@/lib/console-nav";
 import { AGENT_MODIFIER_KEY, inFront, isChord } from "@/lib/keys";
 import { useActiveOrganization, useProjects } from "@/lib/store";
+import { thrownWords } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
 type View = "conversation" | "history";
@@ -155,7 +156,7 @@ export function AgentPanel() {
       // not Next's own would otherwise go unhandled, with the confirm closed
       // and nothing said.
       unstable_rethrow(err);
-      res = refused("Couldn't delete that conversation — try again shortly.");
+      res = refused(thrownWords(err, "Couldn't delete that conversation — try again shortly."));
     }
     if (shown.current.projectId !== projectId) return;
     if (!res.ok) {

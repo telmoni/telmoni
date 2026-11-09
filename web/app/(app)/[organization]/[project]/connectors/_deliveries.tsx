@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { eventKindLabel } from "@/lib/notification-kinds";
 import type { DeliveryAttempt, DeliveryLogEntry } from "@/lib/server/data";
+import { thrownWords } from "@/lib/use-action";
 
 import { redeliverAction } from "./actions";
 
@@ -93,7 +94,7 @@ export function DeliveriesButton({
       await loadFirst();
     } catch (err) {
       unstable_rethrow(err);
-      toast.error("Network error. Try again.");
+      toast.error(thrownWords(err));
     } finally {
       setResending(null);
     }
