@@ -18,6 +18,10 @@ const actions = vi.hoisted(() => {
     updateOrganizationMemberRoleAction: vi.fn(ok),
   };
 });
+vi.mock("@/components/console-shell", () => ({
+  useConsoleShell: () => ({ element: null, cover: () => () => {} }),
+}));
+
 vi.mock("./actions", () => actions);
 
 vi.mock("@/components/page-header", () => ({

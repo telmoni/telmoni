@@ -6,6 +6,10 @@
 export { Badge } from "@/components/ui/badge";
 export { Button } from "@/components/ui/button";
 export { Card } from "@/components/ui/card";
+export { ChoiceGroup } from "@/components/choice-group";
+export { DataTable, THead, Td, Th } from "@/components/data-table";
+export { NoticeCard } from "@/components/notice-card";
+export { Section } from "@/components/section";
 export {
   ChartContainer,
   ChartLegend,

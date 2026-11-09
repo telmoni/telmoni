@@ -51,8 +51,6 @@ function NavRow({
   // Next sets as the page lands. Written on the click as well, it went up
   // before the page came, and wrong on a project's first page: the row says
   // Agents where the page is titled by the project's name.
-  //
-  // The icon box and label gap match the header's toggle and wordmark.
   if (!showLabel) {
     return (
       <Link
@@ -70,24 +68,18 @@ function NavRow({
           className,
         )}
       >
-        <item.icon className="size-4" />
+        <item.icon className="size-icon" />
       </Link>
     );
   }
   const rowClass = cn(
-    "flex h-control items-center gap-2 rounded-md text-sm [a+&]:mt-0.5",
+    "flex h-control items-center gap-gutter rounded-md px-gutter text-sm [a+&]:mt-0.5",
     item.isActive
       ? "bg-sidebar-accent text-sidebar-accent-foreground"
       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
     className,
   );
-  const icon = (
-    <span className="flex size-control shrink-0 items-center justify-center">
-      <item.icon
-        className="size-4"
-      />
-    </span>
-  );
+  const icon = <item.icon className="size-icon shrink-0" />;
   const label = (
     <span className="flex flex-1 items-center min-w-0 overflow-hidden pr-1">
       <span className="whitespace-nowrap truncate">{short ?? item.title}</span>

@@ -49,7 +49,7 @@ export function DefaultOrganization({
         </SelectContent>
       </Select>
       <div>
-        <Button variant="outline" onClick={onSave} disabled={pending || chosen === current}>
+        <Button variant="filled" onClick={onSave} disabled={pending || chosen === current}>
           {pending ? "Saving…" : "Save"}
         </Button>
       </div>

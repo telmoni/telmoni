@@ -6,16 +6,17 @@ import { LocalTime } from "@/components/local-time";
 import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { StatusBadge } from "@/components/status-badge";
+import { StatusMark } from "@/components/status-badge";
 import { openIncidentsOf, watchersOf } from "@/lib/agents";
 import { fetchProjectBySlug } from "@/lib/server/data";
 import { fetchAgents } from "@/lib/server/entities/agents";
 import { fetchAlerts } from "@/lib/server/entities/alerts";
 import { DOCS_URL } from "@/lib/site";
 import { projectPath } from "@/lib/slug";
-import { changeWords, formatCost, formatCount, tracesHref } from "@/lib/traces";
+import { changeWords, formatCost, formatCount, peekHref, tracesHref } from "@/lib/traces";
 import { ChangeKind } from "@/lib/types/enums";
 
+import { ConnectAgentAction } from "./_connect-agent";
 import { VersionsHost, VersionsOpener } from "./_versions-panel";
 
 // The tab is titled by the project's name, so a tab among several says which.
@@ -52,6 +53,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
     <>
       <PageHeader
         title="Agents"
+        action={<ConnectAgentAction />}
         info={`Every agent that ran in the last ${days} days: its last run, what that cost against what its runs usually cost, the alerts that watch it, and their open incidents. Under its name, the newest release, model and prompt version it changed to in those days, each opening the run that first carried it. Versions sets its releases, models and prompt versions side by side.`}
       />
       <div className="grid gap-page">
@@ -117,7 +119,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                         {changed.map((change) => (
                           <Link
                             key={change.kind}
-                            href={`${base}/traces/${change.run_id}`}
+                            href={peekHref(tracesHref(organization, project.slug, { agent: [agent.agent] }), change.run_id)}
                             title={changeWords(change)}
                             className="block max-w-64 truncate text-xs text-muted-foreground underline-offset-4 hover:underline"
                           >
@@ -127,9 +129,9 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                       </Td>
                       <Td className="whitespace-nowrap">
                         <span className="flex items-center gap-gutter">
-                          <StatusBadge status={agent.last_ended ? agent.last_status : null} />
+                          <StatusMark status={agent.last_ended ? agent.last_status : null} />
                           <Link
-                            href={`${base}/traces/${agent.last_run_id}`}
+                            href={peekHref(tracesHref(organization, project.slug, { agent: [agent.agent] }), agent.last_run_id)}
                             className="text-muted-foreground underline-offset-4 hover:underline"
                           >
                             <LocalTime iso={agent.last_started_at} />

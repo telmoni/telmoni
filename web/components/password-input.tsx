@@ -40,10 +40,9 @@ export function PasswordInput({
         className={cn(
           "absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-menu",
           "text-muted-foreground hover:text-foreground",
-          "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
         )}
       >
-        {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        {visible ? <EyeOff className="size-icon" /> : <Eye className="size-icon" />}
       </button>
     </div>
   );

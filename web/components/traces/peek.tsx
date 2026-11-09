@@ -20,13 +20,16 @@ import {
   usePeekEntry,
   usePeekRead,
 } from "@/components/traces/peek-read";
+import { TraceScores, TraceScoresProvider } from "@/components/traces/trace-scores";
 import { TraceBody, TraceMeta } from "@/components/traces/trace-view";
 import { MediaProjectProvider } from "@/components/traces/span-content";
 import { openPeek, peekedRun } from "@/lib/peek";
 import { summarizeTrace } from "@/lib/trace-tree";
+import { commentsOf } from "@/lib/scores";
 import { PEEK_PARAM, shortId, traceHref, traceReadHref } from "@/lib/traces";
 import { offerPageSteps } from "@/lib/use-page-steps";
 import { cn } from "@/lib/utils";
+import { ContentMode } from "@/lib/types/enums";
 
 // A trace opened from the list without leaving it: the console's side panel
 // (`side-panel.tsx`) over the list, which fills
@@ -49,6 +52,12 @@ type Props = {
   /** The page's runs in the list's order: what the ↑ and ↓ buttons, and `j`
    *  and `k`, step through. */
   runs: readonly string[];
+  /** The project's content mode, said on the run's line. */
+  contentMode?: ContentMode;
+  /** The person's own user id, and whether they may take back any member's
+   *  score, as the run's page has them. */
+  me: string;
+  administers: boolean;
 };
 
 export function TracePeek(props: Props) {
@@ -58,7 +67,7 @@ export function TracePeek(props: Props) {
   return createPortal(<PeekPanel {...props} run={run} />, element);
 }
 
-function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: string }) {
+function PeekPanel({ organization, slug, projectId, run, runs, contentMode, me, administers }: Props & { run: string }) {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const { full, width, toggleFull, edge } = usePanelWidth(panel);
@@ -91,7 +100,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
     if (runs.includes(now) && to) openPeek(to);
   });
   useEffect(
-    () => offerPageSteps({ noun: "trace", next: () => step(1), previous: () => step(-1) }),
+    () => offerPageSteps({ noun: "run", next: () => step(1), previous: () => step(-1) }),
     [],
   );
 
@@ -117,7 +126,7 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
         icon={ListTree}
         titleId={titleId}
         flush
-        title={summary ? summary.root.agent : "Trace"}
+        title={summary ? summary.root.agent : "Run"}
         beside={
           <>
             <span className="shrink-0 text-xs text-muted-foreground" title={shown}>
@@ -128,9 +137,9 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
         }
         actions={
           <>
-            <OpenPageAction href={traceHref(organization, slug, run)} label="Open the trace's page" />
+            <OpenPageAction href={traceHref(organization, slug, run)} label="Open the run's page" />
             <StepActions
-              noun="trace"
+              noun="run"
               previous={previous}
               next={next}
             />
@@ -140,7 +149,29 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
         onClose={close}
       >
         {trace && (
-          <TraceMeta trace={trace} organization={organization} slug={slug} />
+          <TraceMeta
+            trace={trace}
+            organization={organization}
+            slug={slug}
+            incidents={trace.incidents}
+            contentMode={contentMode}
+          />
+        )}
+        {/* Its scores, and a member's own to give, as on the run's page. */}
+        {trace?.scores && (
+          <div aria-label="Scores" role="group" className="flex flex-wrap items-center gap-1">
+            <TraceScores
+              projectId={projectId}
+              runId={trace.run_id}
+              scores={trace.scores}
+              comments={commentsOf(trace.content)}
+              spanNames={Object.fromEntries(trace.spans.map((span) => [span.span_id, span.name]))}
+              me={me}
+              administers={administers}
+              keepsContent={contentMode === ContentMode.On}
+              onChanged={again}
+            />
+          </div>
         )}
       </SidePanelHeader>
       <div
@@ -148,23 +179,25 @@ function PeekPanel({ organization, slug, projectId, run, runs }: Props & { run: 
         className={cn("flex min-h-0 flex-1 flex-col", stale && "opacity-60 transition-opacity")}
       >
         {read === null ? (
-          <PeekNote>Reading the trace&hellip;</PeekNote>
+          <PeekNote>Reading the run&hellip;</PeekNote>
         ) : read.kind === "ok" ? (
           <MediaProjectProvider projectId={projectId}>
-            <TraceBody
-              key={read.value.run_id}
-              trace={read.value}
-              organization={organization}
-              slug={slug}
-              className="min-h-0 flex-1"
-            />
+            <TraceScoresProvider scores={read.value.scores ?? []} comments={commentsOf(read.value.content)}>
+              <TraceBody
+                key={read.value.run_id}
+                trace={read.value}
+                organization={organization}
+                slug={slug}
+                className="min-h-0 flex-1"
+              />
+            </TraceScoresProvider>
           </MediaProjectProvider>
         ) : (
           <ReadFailure
             read={read}
-            noun="trace"
+            noun="run"
             missing={{
-              title: "No trace with this id in this project.",
+              title: "No run with this id in this project.",
               body: "It may have been deleted, its spans may have passed their retention, or the run belongs to another project.",
             }}
             retry={again}

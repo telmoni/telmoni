@@ -64,7 +64,7 @@ export function compactPadding(density: Density): string | undefined {
 
 /** A row's look: a pointer, and marked while it is the one open. */
 export function rowClass(current: boolean): string {
-  return cn("cursor-pointer", current ? "bg-muted" : "hover:bg-muted/50");
+  return cn("cursor-pointer", current ? "bg-muted" : "hover:bg-accent/50");
 }
 
 /** Whether a click on a row was a control's or a link's own, which keep
@@ -111,7 +111,7 @@ export function ColumnHint({
       <Tooltip>
         <TooltipTrigger asChild>
           <span className={cn("pointer-events-auto text-muted-foreground", className)} aria-hidden="true">
-            <InfoIcon className="size-3.5" />
+            <InfoIcon className="size-icon" />
           </span>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-56">

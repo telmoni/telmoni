@@ -1,0 +1,137 @@
+---
+title: "Connect an agent"
+description: "The four ways an agent's runs reach Telmoni, an SDK, a coding-agent plugin, a framework's own instrumentation or any OpenTelemetry exporter, each from the key to the first run."
+---
+
+Every way in starts with the same key. On your project's **API keys** page,
+select **Mint key** and keep **Send spans** on; a key that only sends is the one
+to give an agent's process, since a leak of it reads nothing. Copy it as it is
+shown: it is shown once ([API keys](/docs/api/api-keys)).
+
+Then pick the way that fits what you run:
+
+| You run | Use | Code to write |
+|---|---|---|
+| Your own agent in Python, TypeScript, Go or Rust | [An SDK](#an-sdk) | A few lines around each run |
+| Claude Code, Codex or Antigravity | [Its plugin](#a-coding-agent-plugin) | None |
+| The OpenAI or Anthropic SDK, LangChain or LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM or the Vercel AI SDK | [Its own instrumentation](#a-framework) | An exporter's three settings |
+| Anything else that speaks OpenTelemetry | [Any OTLP exporter](#any-opentelemetry-exporter) | An exporter's settings |
+
+Each run lists on the project's **Runs** page within a minute of ending, and
+its agent on **Agents**. Prompts, replies and tool payloads stay in your
+process unless you turn content on.
+
+---
+
+## An SDK
+
+Install it with your language's tool:
+
+<Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
+  <Tab value="Python">
+    ```console
+    $ pip install telmoni
+    ```
+  </Tab>
+  <Tab value="TypeScript">
+    ```console
+    $ npm install telmoni
+    ```
+  </Tab>
+  <Tab value="Go">
+    ```console
+    $ go get github.com/telmoni/telmoni/sdk/go
+    ```
+  </Tab>
+  <Tab value="Rust">
+    ```console
+    $ cargo add telmoni
+    ```
+  </Tab>
+</Tabs>
+
+Set the key where your agent runs:
+
+```console
+$ export TELMONI_API_KEY=tm_...
+```
+
+Then open a run around your agent's work, with a step, a model call and a tool
+call inside it for each piece: [A run](/docs/api/sdks#a-run) shows it in each
+language. The dialog that shows a new key also gives each SDK a first run to
+paste into a terminal, which sends one run named `my-agent`.
+
+---
+
+## A coding-agent plugin
+
+Each plugin records every turn of the coding agent as a run, with no code. Each
+needs [Node.js](https://nodejs.org) 22 or later on your `PATH`.
+
+**[Claude Code](/docs/api/coding-agents#claude-code):** add the marketplace and
+the plugin, then set the key in a session with
+`/plugin configure telmoni-observability@telmoni-plugins`, and start a new
+session.
+
+```sh
+claude plugin marketplace add telmoni/claude-code-observability-plugin
+claude plugin install telmoni-observability@telmoni-plugins
+```
+
+**[Codex](/docs/api/coding-agents#codex):** add the marketplace and the plugin,
+put `TELMONI_API_KEY=tm_…` in `~/.codex/.env`, then start Codex, run `/hooks`
+and trust the plugin's `Stop` and `SessionEnd` hooks.
+
+```sh
+codex plugin marketplace add telmoni/codex-observability-plugin
+codex plugin add telmoni-observability@telmoni-plugins
+```
+
+**[Antigravity](/docs/api/coding-agents#antigravity):** install the plugin, then
+put the key in `~/.gemini/config/telmoni.json` as `{"apiKey": "tm_…"}`, a file
+only you can read, or in `TELMONI_API_KEY` where the CLI starts.
+
+```sh
+agy plugin install https://github.com/telmoni/antigravity-observability-plugin
+```
+
+---
+
+## A framework
+
+A framework that already speaks OpenTelemetry's GenAI conventions sends its
+runs through OpenTelemetry's own OTLP exporter, with no SDK of ours. Set the
+exporter from the environment:
+
+```console
+$ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+$ export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer%20tm_..."
+$ export OTEL_SERVICE_NAME=support-bot
+```
+
+Then install your framework's instrumentation as
+[Frameworks](/docs/api/frameworks) shows for each.
+
+---
+
+## Any OpenTelemetry exporter
+
+Anything else sends OTLP over HTTP to one endpoint, with the key as a bearer
+token:
+
+```http
+POST https://api.telmoni.com/otlp/v1/traces
+Authorization: Bearer tm_...
+```
+
+Each span must carry what places it in a run:
+[What a span must carry](/docs/api/ingest#what-a-span-must-carry).
+
+---
+
+## On your own deployment
+
+A self-hosted Telmoni takes the same key on its own machine host: set
+`TELMONI_ENDPOINT` to that host for an SDK, give it as the endpoint beside a
+plugin's key ([Coding agents](/docs/api/coding-agents) says where for each), and
+use it in place of `https://api.telmoni.com` for an exporter.

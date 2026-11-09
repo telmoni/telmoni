@@ -1,7 +1,5 @@
 "use client";
 
-import { useId } from "react";
-
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -50,25 +48,27 @@ export function isChoiceEmpty(choice: EventChoice): boolean {
   return !choice.all && choice.kinds.length === 0;
 }
 
+/** The events a connector hears, for a panel's row named Events, whose
+ *  label names the select by `id`. */
 export function EventPicker({
+  id,
   value,
   onChange,
   disabled,
 }: {
+  id: string;
   value: EventChoice;
   onChange: (next: EventChoice) => void;
   disabled?: boolean;
 }) {
-  const id = useId();
   return (
-    <div className="grid gap-2">
-      <Label htmlFor={`${id}-mode`}>Events</Label>
+    <div className="grid max-w-md gap-1.5">
       <Select
         value={value.all ? "all" : "selected"}
         onValueChange={(mode) => onChange({ ...value, all: mode === "all" })}
         disabled={disabled}
       >
-        <SelectTrigger id={`${id}-mode`} className="w-full">
+        <SelectTrigger id={id} className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -86,7 +86,7 @@ export function EventPicker({
             const switchId = `${id}-${kind}`;
             const checked = value.kinds.includes(kind);
             return (
-              <li key={kind} className="flex items-start justify-between gap-4">
+              <li key={kind} className="flex items-start justify-between gap-gutter">
                 <div className="grid gap-0.5">
                   <Label htmlFor={switchId}>{eventKindLabel(kind)}</Label>
                   <p id={`${switchId}-hint`} className="text-xs text-muted-foreground">

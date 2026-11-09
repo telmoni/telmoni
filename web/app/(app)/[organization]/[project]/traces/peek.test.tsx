@@ -83,6 +83,8 @@ function peek() {
         slug="web"
         projectId="project_1"
         runs={[RUN_A, RUN_B]}
+        me="user_1"
+        administers={false}
       />
     </TooltipProvider>,
   );
@@ -131,13 +133,13 @@ describe("TracePeek", () => {
     peek();
     const panel = screen.getByRole("dialog");
     await within(panel).findByRole("tree");
-    const previous = within(panel).getByRole("button", { name: "Previous trace" });
+    const previous = within(panel).getByRole("button", { name: "Previous run" });
     expect(previous).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(previous);
     expect(peeked()).toBe(RUN_A);
 
     const length = window.history.length;
-    fireEvent.click(within(panel).getByRole("button", { name: "Next trace" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Next run" }));
     expect(peeked()).toBe(RUN_B);
     expect(window.history.length, "a step is the same entry").toBe(length);
     expect(new URLSearchParams(window.location.search).get("days")).toBe("30");
@@ -168,7 +170,7 @@ describe("TracePeek", () => {
     answers[RUN_A] = () => new Response("{}", { status: 404 });
     open(RUN_A);
     const { unmount } = peek();
-    expect(await screen.findByText("No trace with this id in this project.")).toBeInTheDocument();
+    expect(await screen.findByText("No run with this id in this project.")).toBeInTheDocument();
     unmount();
 
     answers[RUN_A] = () => new Response("{}", { status: 401 });

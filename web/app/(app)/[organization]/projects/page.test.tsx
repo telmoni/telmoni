@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IdentityContext } from "@/lib/server/entities/identity-context";
 import type { OrganizationEntry } from "@/lib/server/entities/organization";
-import { Role } from "@/lib/types/enums";
+import { ContentMode, Role } from "@/lib/types/enums";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -105,6 +105,7 @@ describe("OrganizationProjectsPage", () => {
         slug: "personal-project",
         name: "Personal Project",
         role: Role.Owner,
+        content_mode: ContentMode.Off,
       },
     ];
   });
@@ -129,8 +130,24 @@ describe("OrganizationProjectsPage", () => {
 
     // The tile is the link, named by the project; by the slugs the server
     // gave, it opens under its organization's.
-    const tile = screen.getByRole("link", { name: /^Personal Project/ });
+    const tile = screen.getByRole("link", { name: /^Personal Project(?! settings)/ });
     expect(tile.getAttribute("href")).toBe("/owned/personal-project");
+    // The gear beside it opens the project's settings, as its menu row's does.
+    const gear = screen.getByRole("link", { name: "Personal Project settings" });
+    expect(gear.getAttribute("href")).toBe("/owned/personal-project/settings");
+  });
+
+  it("shows on each tile whether its project keeps content", async () => {
+    mockProjects = [
+      { id: "project_kept", slug: "kept", name: "Kept", role: Role.Owner, content_mode: ContentMode.On },
+      { id: "project_bare", slug: "bare", name: "Bare", role: Role.Owner, content_mode: ContentMode.Off },
+    ];
+    render(
+      await OrganizationProjectsPage(),
+    );
+
+    expect(screen.getByRole("link", { name: /^Kept(?! settings)/ })).toHaveTextContent("Content on");
+    expect(screen.getByRole("link", { name: /^Bare(?! settings)/ })).toHaveTextContent("Content off");
   });
 
   it("says there are no projects yet, and how to make the first", async () => {
@@ -224,7 +241,7 @@ describe("OrganizationProjectsPage", () => {
     expect(screen.queryByTestId("projects-shared-with-you")).toBeNull();
     expect(
       screen.getAllByRole("link").map((l) => l.getAttribute("href")),
-    ).toEqual(["/owned/personal-project"]);
+    ).toEqual(["/owned/personal-project", "/owned/personal-project/settings"]);
   });
 
   // An admin promoted from a seat still holds its row, and Leave gives it up.

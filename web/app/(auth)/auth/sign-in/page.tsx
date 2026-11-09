@@ -52,7 +52,7 @@ export default async function SignInPage({
             // A Route Handler, not a page: it carries the pending sign-in on
             // to the provider, so a client-side navigation would lose it.
             // eslint-disable-next-line @next/next/no-html-link-for-pages
-            <a href="/auth/login/external" className={buttonVariants({ variant: "outline" })}>
+            <a href="/auth/login/external" className={buttonVariants({ variant: "filled" })}>
               Continue with {config.external.name}
             </a>
           )

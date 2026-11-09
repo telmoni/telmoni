@@ -38,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ALERTS_HEADING,
@@ -169,7 +170,7 @@ export function NewAlert({
         primary="New alert"
         onClick={(e) => (connections?.length === 0 ? setAsking(e.currentTarget) : open(e.currentTarget))}
       >
-        <BellPlus className="size-4" />
+        <BellPlus className="size-icon" />
         New alert
       </PageAction>
       <Dialog open={asking !== null} onOpenChange={(next) => { if (!next) setAsking(null); }}>
@@ -186,12 +187,12 @@ export function NewAlert({
           </DialogBody>
           <DialogFooter>
             {canConnect && (
-              <Button asChild>
+              <Button asChild variant="filled">
                 <Link href={connectorsHref}>Add a connector</Link>
               </Button>
             )}
             <Button
-              variant={canConnect ? "secondary" : "default"}
+              variant={canConnect ? "outline" : "filled"}
               onClick={() => {
                 const from = asking;
                 setAsking(null);
@@ -422,7 +423,7 @@ function AlertPanel({
                     <span aria-hidden="true" className="text-sm text-muted-foreground">
                       Status
                     </span>
-                    <div className="flex min-h-9 flex-wrap items-center gap-x-gutter gap-y-1.5">
+                    <div className="flex min-h-control flex-wrap items-center gap-x-gutter gap-y-1.5">
                       {FILTER_STATUSES.map((status) => (
                         <Label key={status} className="font-normal">
                           <Checkbox
@@ -482,18 +483,17 @@ function AlertPanel({
                 </p>
                 <div className="flex flex-wrap gap-gutter">
                   {suggestion.levels.map((level) => (
-                    <Button
+                    <Toggle
                       key={level.level}
-                      type="button"
                       variant="outline"
                       size="sm"
                       disabled={pending}
-                      aria-pressed={draft.alertThreshold.trim() === level.typed}
+                      pressed={draft.alertThreshold.trim() === level.typed}
                       aria-describedby={`${id}-history ${id}-replaces`}
-                      onClick={() => change({ ...draft, alertThreshold: level.typed })}
+                      onPressedChange={() => change({ ...draft, alertThreshold: level.typed })}
                     >
                       {level.level} · {level.shown}
-                    </Button>
+                    </Toggle>
                   ))}
                 </div>
                 <p id={`${id}-replaces`} className="text-muted-foreground">
@@ -575,7 +575,7 @@ function AlertPanel({
           )}
         </SidePanelBody>
         <SidePanelFooter>
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" variant="filled" disabled={pending}>
             {pending ? "Saving…" : ruleId ? "Save alert" : "Make alert"}
           </Button>
           <Button type="button" variant="outline" onClick={onClose}>

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 // Recharts measures a box jsdom has none of: the charts draw their frames alone.
@@ -7,78 +7,43 @@ vi.mock("@/lib/in-browser", () => ({ useInBrowser: () => false }));
 
 import { DashboardCharts } from "./_charts";
 
-const point = (value: string, spend: number, others = false) => ({
-  at: "2026-11-02T00:00:00Z",
-  value,
-  others,
-  spans: 3,
-  failed: 0,
-  runs: 1,
-  failed_runs: 0,
-  input_tokens: 10,
-  output_tokens: 5,
-  cache_read_input_tokens: 0,
-  cache_write_input_tokens: 0,
+const bar = (at: string, spend: number, failed: number) => ({
+  at,
   spend,
-  run_duration_ms: { p50: 1, p95: 2, p99: 3 },
+  input: 100,
+  output: 10,
+  ok: 3,
+  failed,
+  p50: 1_000,
+  p95: 2_000,
+  p99: 3_000,
 });
 
-function draw(group: "user" | "model", days: number) {
-  render(
-    <DashboardCharts
-      organization="acme"
-      slug="web"
-      charts={[{ measure: "spend", group }, { measure: "runs" }]}
-      days={90}
-      bars={[]}
-      firstToken={[]}
-      hourly={false}
-      firstTokenHourly={false}
-      splits={{
-        [`spend:${group}`]: {
-          kind: "ok",
-          days,
-          points: [point("u-1", 4), point("", 1), point("", 2, true)],
-        },
-      }}
-    />,
-  );
-}
-
 describe("DashboardCharts", () => {
-  it("totals a split under its chart, each user opening their runs, and says how far the spans reach", () => {
-    draw("user", 30);
-    const split = within(screen.getByRole("region", { name: "Spend by user" }));
-    expect(split.getByRole("link", { name: "u-1" })).toHaveAttribute("href", "/acme/web/traces?user=u-1&days=30");
-    expect(split.getByText("Other values")).toBeInTheDocument();
-    expect(split.getByText("None")).toBeInTheDocument();
-    expect(split.getAllByText(/^\$[\d.]+$/).map((cell) => cell.textContent)).toEqual(["$4.00", "$2.00", "$1.00"]);
-    expect(split.getByText(/^The last 30 days/)).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Runs" })).toBeInTheDocument();
-  });
-
-  it("links no model, and says nothing of retention for the totals", () => {
-    draw("model", 90);
-    const split = within(screen.getByRole("region", { name: "Spend by model" }));
-    expect(split.queryByRole("link")).toBeNull();
-    expect(split.queryByText(/^The last/)).toBeNull();
-  });
-
-  it("names a split it could not read, and draws the rest", () => {
+  it("draws the five charts in order, each said in words over the window", () => {
     render(
       <DashboardCharts
-        organization="acme"
-        slug="web"
-        charts={[{ measure: "spend", group: "tag", tag: "team" }]}
-        days={7}
-        bars={[]}
-        firstToken={[]}
+        bars={[bar("2026-11-01T00:00:00Z", 1.5, 1), bar("2026-11-02T00:00:00Z", 2.5, 0)]}
+        firstToken={[{ at: "2026-11-02T00:00:00Z", firstTokenP50: 300, firstTokenP95: 900 }]}
         hourly={false}
         firstTokenHourly={false}
-        splits={{ "spend:tag:team": { kind: "unread" } }}
       />,
     );
-    const split = within(screen.getByRole("region", { name: "Spend by tag team" }));
-    expect(split.getByText(/could not be read/)).toBeInTheDocument();
+    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-labelledby"))).toHaveLength(5);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      "Spend",
+      "Tokens",
+      "Runs",
+      "Latency",
+      "Time to first token",
+    ]);
+    expect(screen.getByText("$4.00 over the window.")).toBeInTheDocument();
+    expect(screen.getByText("200 input and 20 output over the window.")).toBeInTheDocument();
+    expect(screen.getByText("7 runs, 1 failed, over the window.")).toBeInTheDocument();
+  });
+
+  it("says a latency chart holds nothing where no bar read one", () => {
+    render(<DashboardCharts bars={[]} firstToken={[]} hourly={false} firstTokenHourly={false} />);
+    expect(screen.getAllByText("None read in the window.")).toHaveLength(2);
   });
 });

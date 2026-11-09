@@ -4,7 +4,7 @@ import { useRef, type KeyboardEvent } from "react";
 
 import { cn } from "@/lib/utils";
 
-export const SEGMENTED_TRACK = "flex shrink-0 items-center overflow-hidden rounded-md border border-border";
+export const SEGMENTED_TRACK = "flex w-fit shrink-0 items-center overflow-hidden rounded-md border border-border";
 
 export function segmentAppearance(selected: boolean): string {
   return selected

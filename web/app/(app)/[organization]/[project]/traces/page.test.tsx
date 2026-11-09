@@ -32,11 +32,7 @@ vi.mock("@/components/traces/charts", () => ({
   TraceCharts: ({ marks }: { marks: unknown }) => <div data-testid="charts" data-marks={JSON.stringify(marks)} />,
 }));
 
-vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
-  saveTraceViewAction: vi.fn(),
-  updateTraceViewAction: vi.fn(),
-  deleteTraceViewAction: vi.fn(),
-}));
+vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),

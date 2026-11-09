@@ -34,7 +34,7 @@ export type Edge = "n" | "e" | "s" | "w" | "ne" | "se" | "sw" | "nw";
 export const WINDOW_EDGE_PX = GUTTER_PX;
 
 // Match `--spacing-console-header` when the header cannot be measured.
-const HEADER_PX = 36 + 2 * GUTTER_PX + 1;
+const HEADER_PX = 32 + 2 * GUTTER_PX + 1;
 
 // The least the header's four controls, the title and the composer need.
 export const WINDOW_MIN = { width: 360, height: 420 } as const;

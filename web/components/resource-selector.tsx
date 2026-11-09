@@ -3,9 +3,11 @@
 import { useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Check, ChevronDown, Eye, EyeOff, Plus, Settings } from "lucide-react";
+import { Check, ChevronDown, Plus, Settings } from "lucide-react";
 
 import { type CreateKind, useConsoleUi } from "@/components/console-ui-context";
+import { ContentCue } from "@/components/content-cue";
+import { RoleBadge } from "@/components/role-badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,83 +31,73 @@ import {
 } from "@/lib/store";
 import { organizationRows, projectRows, type SwitcherRow } from "@/lib/switcher";
 import { useConsoleTrail, useLiveResources } from "@/lib/use-console-trail";
-import { ContentMode } from "@/lib/types/enums";
 import { cn, HEADER_MENU_OFFSET } from "@/lib/utils";
 
-// The header's two triggers: the one control in the header that gives way
-// (`shrink`, against Button's `shrink-0`), so a long name truncates instead
-// of pushing into the icon buttons. `gap-1.5` overrides Button's `gap-2`.
+// The header's two triggers, filled in a tint of the text colour with no
+// outline, as the splash's Contribute is: the one control in the header that
+// gives way (`shrink`, against Button's `shrink-0`), so a long name truncates
+// instead of pushing into the icon buttons. Open, it holds a hover's tint.
 const TRIGGER = cn(
-  "group h-control min-w-0 shrink justify-start gap-1.5 overflow-hidden rounded-md font-normal py-0 text-sm",
-  "transition-none hover:bg-sidebar-accent/50 data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground data-[state=open]:hover:bg-sidebar-accent",
+  "group h-control min-w-0 shrink justify-start overflow-hidden rounded-md font-normal py-0 text-sm",
+  "border-transparent bg-foreground/10 transition-none hover:border-transparent hover:bg-foreground/15",
+  "data-[state=open]:bg-foreground/15 data-[state=open]:text-foreground",
 );
 const CHEVRON =
-  "size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground";
+  "size-icon shrink-0 text-muted-foreground transition-colors group-hover:text-foreground group-data-[state=open]:text-foreground";
 
-// The header's bottom gutter puts menus directly under its rule.
-// Along the bar a menu starts where its trigger's name does, the trigger's
-// own padding (`px-2`, `px-2.5`) in from its unseen edge, so the
-// organization's stands on the content's padding line, with the page's title.
-const ORGANIZATIONS_MENU_ALIGN = 8;
-const PROJECTS_MENU_ALIGN = 10;
+// The header's bottom gutter puts menus directly under its rule, each hung
+// from its trigger's outlined edge, the organization's on the page's line.
 
 // A row with two targets, each a menu item of its own so both are reached
 // from the keyboard: the name opens the resource, the gear its settings.
-// Under the pointer, or with either target focused, the whole row fills —
-// one fill across the name and the gear, since the row is one thing — and
-// the gear's own small box, set 4px in from the row's top, bottom and right,
-// darkens a step more under the pointer. The one
-// you stand in carries a check after its name rather than a fill, so hover
-// and current never look alike. Neither item fills on its own: the menu's
-// per-item fill is turned off here and the row carries it.
-function ResourceRow({ row, settingsLabel }: { row: SwitcherRow; settingsLabel: string }) {
+// Under the pointer, or with either focused, the whole row fills, and the
+// gear's own box darkens a step more under the pointer. The one you stand
+// in carries a check after its name rather than a fill, so hover and
+// current never look alike. Between the two sit the badges a project tile
+// shows, in the tile's order and at its gaps.
+function ResourceRow({
+  row,
+  badge,
+  settingsLabel,
+}: {
+  row: SwitcherRow;
+  /** An organization's plan, where a console built on this one gives one. */
+  badge?: React.ReactNode;
+  settingsLabel: string;
+}) {
   return (
-    <div className="flex items-center gap-0.5 rounded-md hover:bg-accent/50 focus-within:bg-accent/50">
+    <div className="flex items-center rounded-md hover:bg-accent/50 focus-within:bg-accent/50">
       <DropdownMenuItem
         asChild
-        className="min-w-0 flex-1 cursor-pointer gap-2 px-2 focus:bg-transparent [&_svg]:size-3.5"
+        className="min-w-0 flex-1 cursor-pointer focus:bg-transparent"
       >
         <Link href={row.href} aria-current={row.active ? "true" : undefined}>
           <span className="min-w-0 flex-1 truncate">{row.label}</span>
           {row.active && <Check className="shrink-0" />}
         </Link>
       </DropdownMenuItem>
-      {row.contentMode && <ContentCue mode={row.contentMode} />}
+      <span className="mr-1 flex shrink-0 items-center gap-gutter">
+        {badge}
+        {row.role && <RoleBadge role={row.role} />}
+        {row.contentMode && <ContentCue mode={row.contentMode} />}
+      </span>
       {row.settingsHref && (
         <DropdownMenuItem
           asChild
           className={cn(
-            // Adjacent targets share a row, so suppress the stacked-item margin.
-            "mt-0! mr-1 size-control shrink-0 cursor-pointer justify-center p-0 [&_svg]:size-3.5",
+            // A square like a ghost icon button's, its gear a gutter from the
+            // panel's edge; `mt-0!` since adjacent targets share a row.
+            "mt-0! mr-1 size-control shrink-0 cursor-pointer justify-center px-0",
             "text-muted-foreground focus:bg-transparent hover:bg-foreground/10 hover:text-foreground",
             "focus-visible:bg-foreground/10 focus-visible:text-foreground",
           )}
         >
           <Link href={row.settingsHref} aria-label={settingsLabel} title={settingsLabel}>
-            <Settings className="size-4" />
+            <Settings className="size-icon" />
           </Link>
         </DropdownMenuItem>
       )}
     </div>
-  );
-}
-
-// Whether a project keeps its spans' content, read at a glance from the
-// menu: an eye when it does, a muted struck eye when it does not.
-function ContentCue({ mode }: { mode: ContentMode }) {
-  const on = mode === ContentMode.On;
-  const label = on ? "Content on" : "Content off";
-  return (
-    <span
-      title={label}
-      className={cn(
-        "flex size-5 shrink-0 items-center justify-center [&_svg]:size-3.5",
-        on ? "text-foreground" : "text-muted-foreground",
-      )}
-    >
-      {on ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
-      <span className="sr-only">{label}</span>
-    </span>
   );
 }
 
@@ -115,7 +107,7 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
     <>
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        className="cursor-pointer gap-2 px-2"
+        className="cursor-pointer"
         onSelect={(e) => {
           e.preventDefault();
           onSelect();
@@ -137,11 +129,12 @@ function NewRow({ onSelect, children }: { onSelect: () => void; children: string
 // each one's settings, and the one thing it creates at its foot, in a side
 // panel (`create-panels.tsx`).
 export function ResourceSelector({
-  organizationBadge,
+  organizationBadges,
 }: {
-  /// Drawn beside the organization's name: a console built on this one puts
-  /// the organization's plan there (`components/extension/organization-badge.tsx`).
-  organizationBadge?: React.ReactNode;
+  /// Drawn beside each organization's name, on the trigger and its row, by
+  /// the organization's id: a console built on this one puts the plan there
+  /// (`components/extension/organization-badge.tsx`).
+  organizationBadges?: Readonly<Record<string, React.ReactNode>>;
 }) {
   const [organizationsOpen, setOrganizationsOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
@@ -199,38 +192,41 @@ export function ResourceSelector({
   });
 
   return (
-    <div className="flex min-w-0 items-center gap-1">
+    <div className="flex min-w-0 items-center gap-2">
       <DropdownMenu modal={false} open={organizationsOpen} onOpenChange={setOrganizationsOpen}>
         <DropdownMenuTrigger asChild>
           <Button
             ref={organizationsTrigger}
-            variant="ghost"
+            variant="outline"
             size="default"
-            // The header offsets this inset to align the name with the page.
-            className={cn(TRIGGER, "px-2 has-[>svg]:px-2")}
+            className={TRIGGER}
           >
             {/* Named by what it shows, so a voice command can say it; the
                 kind before it is a screen reader's alone. */}
             <span className="sr-only">Organization:</span>{" "}
             <span className="truncate font-medium">{activeOrganizationName}</span>
-            {organizationBadge}
+            {active && organizationBadges?.[active.organizationId]}
             <ChevronDown className={CHEVRON} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           className="w-72 animate-none!"
           align="start"
-          alignOffset={ORGANIZATIONS_MENU_ALIGN}
           side="bottom"
           sideOffset={HEADER_MENU_OFFSET}
           onCloseAutoFocus={keepFocusForPanel}
         >
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
+            <DropdownMenuLabel>
               Organizations
             </DropdownMenuLabel>
             {organizationMenu.map((row) => (
-              <ResourceRow key={row.key} row={row} settingsLabel={`${row.label} settings`} />
+              <ResourceRow
+                key={row.key}
+                row={row}
+                badge={organizationBadges?.[row.key]}
+                settingsLabel={`${row.label} settings`}
+              />
             ))}
           </DropdownMenuGroup>
           {/* Offered to everyone signed in, whatever their roles: the new
@@ -253,18 +249,17 @@ export function ResourceSelector({
 
       {projectSlot && (
         <>
-          <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">
+          <span aria-hidden="true" className="shrink-0 text-muted-foreground">
             /
           </span>
           <DropdownMenu modal={false} open={projectsOpen} onOpenChange={setProjectsOpen}>
             <DropdownMenuTrigger asChild>
               <Button
                 ref={projectsTrigger}
-                variant="ghost"
+                variant="outline"
                 size="default"
                 className={cn(
                   TRIGGER,
-                  "px-2.5 has-[>svg]:px-2.5",
                   // The chevron alone on a phone: a whole square to tap,
                   // never squeezed by the organization's name beside it.
                   !activeProject && "max-md:shrink-0",
@@ -295,17 +290,16 @@ export function ResourceSelector({
             <DropdownMenuContent
               className="w-72 animate-none!"
               align="start"
-              alignOffset={PROJECTS_MENU_ALIGN}
               side="bottom"
               sideOffset={HEADER_MENU_OFFSET}
               onCloseAutoFocus={keepFocusForPanel}
             >
               <DropdownMenuGroup>
-                <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
+                <DropdownMenuLabel>
                   Projects
                 </DropdownMenuLabel>
                 {projectMenu.length === 0 && (
-                  <p className="flex h-control items-center px-2 text-sm text-muted-foreground">
+                  <p className="flex h-control items-center px-gutter text-sm text-muted-foreground">
                     {canCreate ? "No projects yet" : "No projects you can open"}
                   </p>
                 )}

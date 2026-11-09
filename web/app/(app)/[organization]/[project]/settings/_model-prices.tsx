@@ -125,7 +125,7 @@ export function ModelPricesForm({
           key={at}
           disabled={!canEdit || pending}
           aria-label={`Price ${at + 1}`}
-          className="grid gap-gutter rounded-md border border-border p-gutter sm:grid-cols-2 lg:grid-cols-4"
+          className="grid gap-gutter rounded-menu border border-border p-gutter sm:grid-cols-2 lg:grid-cols-4"
         >
           <Input
             aria-label="Provider"
@@ -173,13 +173,13 @@ export function ModelPricesForm({
         <div className="flex gap-gutter">
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
             disabled={pending}
             onClick={() => setDrafts((held) => [...held, EMPTY])}
           >
             Add a price
           </Button>
-          <Button type="submit" disabled={pending || !changed}>
+          <Button type="submit" variant="filled" disabled={pending || !changed}>
             {pending ? "Saving..." : "Save"}
           </Button>
           {changed && (

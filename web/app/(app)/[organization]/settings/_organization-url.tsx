@@ -53,7 +53,7 @@ export function OrganizationUrlForm({
             aria-label="Organization URL"
           />
         </div>
-        <Button type="submit" disabled={!isChanged || pending} variant="default">
+        <Button type="submit" disabled={!isChanged || pending} variant="filled">
           {pending ? "Saving..." : "Save"}
         </Button>
       </div>

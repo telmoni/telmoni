@@ -188,7 +188,7 @@ function Tile({
                     </span>
                   )}
                 </span>
-                <StatusBadge status={connection.status} />
+                <ConnectionBadge status={connection.status} />
               </div>
               <p className="text-xs text-muted-foreground">
                 {connection.status === "active" ? (
@@ -242,7 +242,7 @@ function Tile({
           canManage ? (
             start ? (
               // A plain anchor prevents prefetch from starting a handshake.
-              <Button asChild size="sm" variant="outline" className="w-fit">
+              <Button asChild size="sm" variant="filled" className="w-fit">
                 <a href={start} target="_blank" rel="noreferrer">
                   {connections.length > 0 ? `Connect another ${name} channel` : `Connect ${name}`}
                   <ArrowUpRight aria-hidden="true" />
@@ -283,7 +283,7 @@ function eventsSummary(kinds: Connection["event_kinds"]): string {
   return kinds.map(eventKindLabel).join(", ");
 }
 
-function StatusBadge({ status }: { status: Connection["status"] }) {
+function ConnectionBadge({ status }: { status: Connection["status"] }) {
   if (status === "active") {
     return (
       <Badge variant="outline">

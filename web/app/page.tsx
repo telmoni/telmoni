@@ -135,7 +135,7 @@ export default async function SplashPage() {
               title="SDK"
               description="Drive Telmoni from Python, TypeScript, Go, and Rust with native OpenTelemetry export and privacy guards."
               action={
-                <Button asChild size="sm" variant="filled">
+                <Button asChild size="sm" variant="outline">
                   <PaperLink href={docs("/api/sdks")}>Read docs</PaperLink>
                 </Button>
               }
@@ -149,7 +149,7 @@ export default async function SplashPage() {
           className="[&_[data-component=features]]:gap-gutter"
         >
           <p className={LEAD}>
-            Telmoni is an open-source monitoring platform for AI agents. Follow runs,
+            Telmoni is a privacy-first, open-source monitoring platform for AI agents. Follow runs,
             catch failures and control spend, with prompts kept in your process by default.{" "}
             <PaperLink href={DOCS_URL} className="text-foreground underline underline-offset-4 hover:no-underline">
               Read the docs.
@@ -222,18 +222,18 @@ export default async function SplashPage() {
             action={
               <>
                 {REPO_URL && (
-                  <Button asChild variant="filled" size="sm" className="gap-2">
-                    <PaperLink href={REPO_URL}>
-                      <Star className="size-3.5 fill-current" aria-hidden="true" />
+                  <Button asChild variant="filled" size="sm">
+                    <PaperLink href={REPO_URL} arrow={false}>
+                      <Star className="fill-current" aria-hidden="true" />
                       <span>Star on GitHub</span>
                     </PaperLink>
                   </Button>
                 )}
                 <Button
                   asChild
-                  variant="secondary"
+                  variant="outline"
                   size="sm"
-                  className="border-transparent bg-muted text-foreground hover:bg-muted/80"
+                  className="border-transparent bg-foreground/10 text-foreground hover:border-transparent hover:bg-foreground/15"
                 >
                   <PaperLink href={docs("/contributing/introduction")}>
                     Contribute

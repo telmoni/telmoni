@@ -10,9 +10,9 @@ export function ServiceUnavailable({
   retry?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-start gap-4 max-w-md py-8" role="alert">
+    <div className="flex max-w-md flex-col items-start gap-page py-page" role="alert">
       <p className="text-xs tracking-label text-brand-negative uppercase">unavailable</p>
-      <h1 className="text-xl font-light tracking-tight">{title}</h1>
+      <h1 className="text-xl font-medium tracking-tight">{title}</h1>
       <p className="text-sm text-muted-foreground leading-relaxed">{detail}</p>
       {retry && <RetryButton />}
     </div>

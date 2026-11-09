@@ -35,12 +35,12 @@ export function TerminalInstallMenu() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" size="sm" variant="filled" className="gap-1.5">
+        <Button type="button" size="sm" variant="outline">
           <span>Install</span>
           {open ? (
-            <ChevronUp className="size-3.5" aria-hidden="true" />
+            <ChevronUp aria-hidden="true" />
           ) : (
-            <ChevronDown className="size-3.5" aria-hidden="true" />
+            <ChevronDown aria-hidden="true" />
           )}
         </Button>
       </PopoverTrigger>
@@ -54,7 +54,7 @@ export function TerminalInstallMenu() {
           <div key={item.label} className="flex items-center justify-between gap-gutter">
             <div className="flex min-w-0 items-center gap-gutter">
               <span className="w-12 shrink-0 text-muted-foreground">{item.label}</span>
-              <code className="truncate font-mono text-foreground select-all" title={item.command}>
+              <code className="truncate text-foreground select-all" title={item.command}>
                 {item.command}
               </code>
             </div>

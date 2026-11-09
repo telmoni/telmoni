@@ -181,7 +181,7 @@ export function CreateOrganizationPanel({
           )}
         </SidePanelBody>
         <SidePanelFooter>
-          <Button type="submit" disabled={!canSubmit}>
+          <Button type="submit" variant="filled" disabled={!canSubmit}>
             {pending ? "Creating…" : "Create organization"}
           </Button>
           <Button type="button" variant="outline" onClick={onClose}>

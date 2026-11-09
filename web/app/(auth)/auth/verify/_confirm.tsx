@@ -19,7 +19,7 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
           {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
               would run it, starting a sign-in nobody asked for. */}
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/auth/login" className={buttonVariants()}>
+          <a href="/auth/login" className={buttonVariants({ variant: "filled" })}>
             Sign in
           </a>
         </div>
@@ -31,6 +31,7 @@ export function ConfirmEmail({ userId, token }: { userId: string; token: string 
     <div className="grid gap-gutter">
       <div>
         <Button
+          variant="filled"
           disabled={pending}
           onClick={() => run(() => verifyEmailAction({ userId, token }), () => setDone(true))}
         >

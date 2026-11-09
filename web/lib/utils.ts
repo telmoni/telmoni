@@ -6,7 +6,7 @@ const twMerge = extendTailwindMerge({
   extend: {
     theme: {
       radius: ["menu"],
-      spacing: ["gutter", "page", "control", "console-header", "sidebar", "sidebar-collapsed", "sidebar-inner"],
+      spacing: ["gutter", "page", "control", "icon", "row-text", "console-header", "sidebar", "sidebar-collapsed", "sidebar-inner"],
     },
   },
 });
@@ -17,7 +17,7 @@ export function cn(...inputs: ClassValue[]) {
 
 /** A control's gutter in pixels: `--spacing-gutter` (`p-gutter`,
  *  `gap-gutter`) in `app/globals.css`. */
-export const GUTTER_PX = 18;
+export const GUTTER_PX = 12;
 
 /** The page inset and section gap: `--spacing-page` in `app/globals.css`.
  *  @alias */

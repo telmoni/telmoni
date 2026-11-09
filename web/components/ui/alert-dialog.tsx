@@ -58,7 +58,7 @@ function AlertDialogContent({
       <AlertDialogPrimitive.Content
         data-slot="alert-dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid max-h-[85svh] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg bg-card text-card-foreground duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          "fixed top-[50%] left-[50%] z-50 grid max-h-[85svh] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-menu bg-card text-card-foreground duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className,
         )}
         {...props}
@@ -98,7 +98,7 @@ function AlertDialogHeader({
         data-slot="alert-dialog-close"
         className="ml-auto flex size-control shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <XIcon className="size-4" />
+        <XIcon className="size-icon" />
         <span className="sr-only">Close</span>
       </AlertDialogPrimitive.Cancel>
     </div>
@@ -112,7 +112,7 @@ function AlertDialogBody({
   return (
     <div
       data-slot="alert-dialog-body"
-      className={cn("grid min-h-0 content-start gap-4 overflow-y-auto px-gutter", className)}
+      className={cn("grid min-h-0 content-start gap-gutter overflow-y-auto px-gutter", className)}
       {...props}
     />
   );
@@ -162,7 +162,7 @@ function AlertDialogDescription({
 
 function AlertDialogAction({
   className,
-  variant = "default",
+  variant = "filled",
   size = "default",
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Action> &

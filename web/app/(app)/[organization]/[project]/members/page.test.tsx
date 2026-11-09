@@ -18,6 +18,10 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock("./actions", () => actions);
 
+vi.mock("@/components/console-shell", () => ({
+  useConsoleShell: () => ({ element: null, cover: () => () => {} }),
+}));
+
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({
     title,

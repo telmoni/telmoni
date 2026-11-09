@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { Card } from "@/components/ui/card";
+import { useOverflow } from "@/lib/use-overflow";
 import { cn } from "@/lib/utils";
 
 // The console's one table. Thirteen of them were hand-rolled across ten files
@@ -29,35 +30,9 @@ import { cn } from "@/lib/utils";
 // drifts out of step with the column beneath it.
 const CELL = "px-gutter py-gutter first:pl-0 last:pr-0";
 
-// Which way the table still runs past its card: a table wider than its card
-// scrolls inside it, and the scrollbar at the card's foot is out of sight
-// under a page of rows, so the clipped edge itself fades into the page where
-// there is more (`globals.css`, `[data-overflow]`). Measured again as the
-// card scrolls and as either the card or the table changes width.
-function useOverflow(wrapper: React.RefObject<HTMLDivElement | null>) {
-  const [overflow, setOverflow] = React.useState("");
-  React.useEffect(() => {
-    const card = wrapper.current?.firstElementChild;
-    if (!(card instanceof HTMLElement)) return;
-    const measure = () => {
-      const left = card.scrollLeft > 0;
-      const right = card.scrollLeft + card.clientWidth < card.scrollWidth - 1;
-      setOverflow(left && right ? "left right" : left ? "left" : right ? "right" : "");
-    };
-    measure();
-    card.addEventListener("scroll", measure, { passive: true });
-    const observer = new ResizeObserver(measure);
-    observer.observe(card);
-    if (card.firstElementChild) observer.observe(card.firstElementChild);
-    return () => {
-      card.removeEventListener("scroll", measure);
-      observer.disconnect();
-    };
-  }, [wrapper]);
-  return overflow;
-}
-
-// The Card shell and the table itself.
+// The Card shell and the table itself. A table wider than its card scrolls
+// inside it with no scrollbar, and the clipped edge fades into the page where
+// there is more (`useOverflow`, `globals.css`).
 //
 // `tabIndex={0}` is load-bearing: `globals.css` gives a Card containing a
 // table `overflow-x: auto`, and a scroll container that cannot be focused

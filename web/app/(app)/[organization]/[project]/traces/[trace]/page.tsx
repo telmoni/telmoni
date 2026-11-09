@@ -23,7 +23,7 @@ import { projectPath } from "@/lib/slug";
 import { summarizeTrace } from "@/lib/trace-tree";
 import { tracesHref } from "@/lib/traces";
 
-export const metadata = { title: "Trace" };
+export const metadata = { title: "Run" };
 
 // One trace: a run's record, named by the run's id, read as the list's peek
 // reads it (`components/traces/peek.tsx`) with the page's room: how it ended
@@ -58,9 +58,9 @@ export default async function TracePage({
   if (access.kind === "missing") {
     return (
       <>
-        <PageHeader title="Trace" backHref={list} backLabel="Runs" />
+        <PageHeader title="Run" backHref={list} backLabel="Runs" />
         <NoticeCard
-          title="No trace with this id in this project."
+          title="No run with this id in this project."
           body={
             <>
               It may have been deleted, its spans may have passed their retention, or the run belongs to another project.{" "}
@@ -90,15 +90,17 @@ export default async function TracePage({
       {/* As tall as the window leaves under the header and the page's title,
           both of a set height, so the spans and the span chosen scroll each
           on its own, as they do in the peek; never so short that neither
-          reads. The trace's line stands inside, where its wrapping on a
-          narrow window takes the panes' room rather than the page's. */}
-      <Card className="h-[calc(100svh-10rem)] min-h-[28rem] gap-0 overflow-hidden p-0">
+          reads, a short window scrolling the page instead. The trace's line
+          stands inside, where its wrapping on a narrow window takes the
+          panes' room rather than the page's. */}
+      <Card className="h-[calc(100svh-10rem)] min-h-[44rem] gap-0 overflow-hidden p-0">
         <div className="mx-gutter shrink-0 border-b border-border py-gutter">
           <TraceMeta
             trace={trace}
             organization={organization}
             slug={slug}
             incidents={incidents}
+            contentMode={mode?.content_mode}
           />
           {/* Its scores, and a member's own to give: none drawn where they could not be read. */}
           {scores.kind === "ok" && (

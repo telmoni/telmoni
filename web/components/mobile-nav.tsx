@@ -1,18 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { Menu, MessagesSquare, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 
+import { RailLink } from "@/components/rail-link";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Button } from "@/components/ui/button";
-import { PRIMARY_NAV, panelLinks, type NavLink } from "@/components/site-nav";
+import { PRIMARY_NAV, panelLinks } from "@/components/site-nav";
+import { INSET } from "@/lib/inset";
 import { DISCUSSIONS_URL } from "@/lib/site";
+import { cn } from "@/lib/utils";
 
-const NAV_TYPE = "text-sm font-normal w-full justify-start";
+// A row of the menu: a touch's height, the rail's spacing between lines.
+const ROW = "py-1.5";
 
 export function MobileNav({ signedIn }: { signedIn: boolean }) {
   const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -32,10 +36,16 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
 
     document.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
+    // The page under the sheet holds still while it is open: a scroll there
+    // moved what the sheet covers and nothing the eye can see.
+    const root = document.documentElement;
+    const overflow = root.style.overflow;
+    root.style.overflow = "hidden";
 
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
+      root.style.overflow = overflow;
     };
   }, [open]);
 
@@ -49,21 +59,24 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen(!open)}
       >
-        {open ? <X className="size-4" /> : <Menu className="size-4" />}
+        {open ? <X className="size-icon" /> : <Menu className="size-icon" />}
       </Button>
 
       {open && (
         <div
           data-slot="mobile-nav-backdrop"
-          className="fixed inset-x-0 top-15 bottom-0 z-50 overflow-y-auto bg-background/80 backdrop-blur-sm"
+          className="fixed inset-x-0 top-15 bottom-0 z-50 overflow-y-auto overscroll-contain bg-background/80 backdrop-blur-sm"
           onClick={() => setOpen(false)}
         >
           <div
             ref={menuRef}
-            className="flex w-full flex-col border-b bg-background px-4 pb-page pt-4"
+            className={cn("flex w-full flex-col border-b bg-background pt-4 pb-page", INSET)}
             onClick={(e) => e.stopPropagation()}
           >
-            <nav aria-label="Primary" className="flex flex-col gap-1 px-2">
+            {/* The desktop rail's list, as it draws it: plain links in one
+                column, the account's last, a new tab's arrow always shown,
+                since a touch has no hover to show it on. */}
+            <nav aria-label="Primary" className="flex flex-col text-sm">
               {/* ⚠ **No panels down here, and not for want of room.** A panel
                   opens on hover over a label that goes nowhere, and neither
                   half of that survives a touch screen — the hover does not
@@ -72,91 +85,44 @@ export function MobileNav({ signedIn }: { signedIn: boolean }) {
                   it would have opened are listed flat beneath it. */}
               {PRIMARY_NAV.map((item) =>
                 item.panel ? (
-                  <div key={item.label} className="flex flex-col gap-1">
-                    <span className="px-gutter pt-gutter pb-1 text-xs tracking-label text-muted-foreground uppercase">
+                  <div key={item.label} className="flex flex-col">
+                    <span className="pt-gutter pb-1 text-xs tracking-label text-muted-foreground uppercase">
                       {item.label}
                     </span>
                     {panelLinks(item.panel).map((link) => (
-                      <Row key={link.href} link={link} onDone={() => setOpen(false)} />
+                      <RailLink key={link.href} link={link} arrow="always" className={ROW} onDone={close} />
                     ))}
                   </div>
                 ) : (
-                  <Row key={item.href} link={item} onDone={() => setOpen(false)} />
+                  <RailLink key={item.href} link={item} arrow="always" className={ROW} onDone={close} />
                 ),
               )}
-
-              <span aria-hidden className="my-2 h-px bg-border" />
-
-              {/* The header's account actions, stacked for small screens. */}
               {signedIn ? (
-                <div className="flex flex-col gap-gutter">
-                  <Button asChild size="sm" variant="filled" className={NAV_TYPE}>
-                    <Link href="/console" onNavigate={() => setOpen(false)}>
-                      Console
-                    </Link>
-                  </Button>
-                  <SignOutButton className={NAV_TYPE} />
-                </div>
+                <>
+                  <RailLink link={{ label: "Console", href: "/console" }} className={ROW} onDone={close} />
+                  <SignOutButton
+                    variant="ghost"
+                    className={cn(ROW, "h-auto justify-start p-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground")}
+                  />
+                </>
               ) : (
-                <div className="flex flex-col gap-gutter">
-                  <Button asChild size="sm" variant="outline" className={NAV_TYPE}>
-                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                    <a href="/auth/login">
-                      Sign in
-                    </a>
-                  </Button>
-                  <Button asChild size="sm" variant="filled" className={NAV_TYPE}>
-                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-                    <a href="/auth/signup">
-                      Sign up
-                    </a>
-                  </Button>
-                </div>
+                <>
+                  <RailLink link={{ label: "Sign in", href: "/auth/login" }} handler className={ROW} onDone={close} />
+                  <RailLink link={{ label: "Sign up", href: "/auth/signup" }} handler className={ROW} onDone={close} />
+                </>
               )}
-
               {DISCUSSIONS_URL && (
-                <span aria-hidden className="my-2 h-px bg-border" />
-              )}
-
-              {DISCUSSIONS_URL && (
-                <Button asChild variant="ghost" size="sm" className={`${NAV_TYPE} text-muted-foreground hover:text-foreground`}>
-                  <a
-                    href={DISCUSSIONS_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setOpen(false)}
-                  >
-                    <MessagesSquare className="size-4" />
-                    Discussions
-                  </a>
-                </Button>
+                <RailLink
+                  link={{ label: "Discussions", href: DISCUSSIONS_URL, newTab: true }}
+                  arrow="always"
+                  className={ROW}
+                  onDone={close}
+                />
               )}
             </nav>
           </div>
         </div>
       )}
     </>
-  );
-}
-
-function Row({ link, onDone }: { link: NavLink; onDone: () => void }) {
-  return (
-    <Button
-      asChild
-      variant="ghost"
-      size="sm"
-      className={`${NAV_TYPE} text-muted-foreground hover:text-foreground`}
-    >
-      <Link
-        href={link.href}
-        // `onNavigate` closes the menu for a navigation in this tab alone, never
-        // for a ⌘-click; a new tab is no navigation here, so its click does.
-        {...(link.newTab
-          ? { target: "_blank", rel: "noreferrer", onClick: onDone }
-          : { onNavigate: onDone })}
-      >
-        {link.label}
-      </Link>
-    </Button>
   );
 }

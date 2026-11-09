@@ -12,7 +12,7 @@ import { AlertPanelHost, useOpening } from "./_alert-panel";
 import { MuteButton } from "./_mute";
 import { deleteAlertAction, hearAgainAction, pauseAlertAction } from "./actions";
 
-const ROW_BUTTON = "h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground";
+const ROW_BUTTON = "text-muted-foreground hover:text-foreground";
 
 /** An alert's own controls: edit it, an objective's in its own panel, pause
  *  or resume it, mute it for a while, or delete it with its incidents. One
@@ -79,9 +79,8 @@ export function AlertActions({
       <ConfirmDialog
         trigger={
           <Button
-            variant="outline"
+            variant="destructive"
             size="sm"
-            className="h-9 gap-1.5 text-xs text-destructive hover:text-destructive"
             disabled={pending}
             aria-label={`Delete ${alert.name}`}
           >

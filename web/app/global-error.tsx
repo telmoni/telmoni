@@ -24,10 +24,10 @@ export default function GlobalError({
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <title>{`Something went wrong · ${PRODUCT_NAME}`}</title>
-          <main className="flex min-h-svh w-full max-w-xl flex-col items-start gap-gutter px-page py-24">
-            <p className="text-xs tracking-label text-destructive uppercase">critical error</p>
-            <h1 className="text-3xl font-medium tracking-tight">Something went wrong.</h1>
-            <p className="text-sm text-muted-foreground">
+          <main className="flex min-h-svh w-full max-w-md flex-col items-start gap-page px-page py-24">
+            <p className="text-xs tracking-label text-brand-negative uppercase">critical error</p>
+            <h1 className="text-xl font-medium tracking-tight">Something went wrong.</h1>
+            <p className="text-sm text-muted-foreground leading-relaxed">
               {error.message || "A critical error occurred. We have been notified."}
             </p>
             {error.digest && <p className="text-xs text-muted-foreground">ref: {error.digest}</p>}

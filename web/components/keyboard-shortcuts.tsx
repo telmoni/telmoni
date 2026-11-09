@@ -209,7 +209,7 @@ export function KeyboardShortcuts() {
             {rows.map((s) => (
               <div
                 key={s.key}
-                className="flex h-8 items-center justify-between text-sm"
+                className="flex h-control items-center justify-between text-sm"
               >
                 <span>{s.label}</span>
                 <KbdGroup>
@@ -219,7 +219,7 @@ export function KeyboardShortcuts() {
               </div>
             ))}
             {extras.map((c) => (
-              <div key={c.label} className="flex h-8 items-center justify-between text-sm">
+              <div key={c.label} className="flex h-control items-center justify-between text-sm">
                 <span>{c.label}</span>
                 <span className="flex items-center gap-1.5">
                   {c.chords.map((chord, i) => (

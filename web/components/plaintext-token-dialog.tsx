@@ -38,7 +38,8 @@ export function DialogSection({
 export function CopyBox({ value, label, className }: { value: string; label: string; className?: string }) {
   return (
     <div className={cn("flex items-start gap-gutter rounded-md border border-border bg-muted/40 p-gutter", className)}>
-      <pre className="min-w-0 flex-1 font-mono text-sm break-all whitespace-pre-wrap select-all">
+      {/* Padded to the copy button's height, so the first line sits on its icon. */}
+      <pre className="min-w-0 flex-1 py-[calc((var(--spacing-control)_-_1lh)/2)] text-sm break-all whitespace-pre-wrap select-all">
         {value}
       </pre>
       <CopyButton value={value} label={label} />

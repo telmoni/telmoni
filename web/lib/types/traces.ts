@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { ScoreType, SpanKind, SpanStatus } from "@/lib/types/enums";
+import { ScoreSchema } from "@/lib/types/scores";
 
 // A trace as the server answers it, parsed on the server by its entity
 // (`lib/server/entities/traces.ts`) and in the browser by the peeks.
@@ -217,3 +218,14 @@ export const TraceDetailSchema = z.object({
   content: z.array(SpanFieldsSchema).nullable(),
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;
+
+/** A run as the trace list's peek reads it (`/api/v1/traces/[run]`): its
+ *  trace, the incidents whose notices showed it, as its line names them, and
+ *  its scores, `null` where they could not be read. */
+export const PeekRunSchema = TraceDetailSchema.extend({
+  incidents: z
+    // An alert's incident names no agent, a monitor's no alert.
+    .array(z.object({ id: z.string(), rule_name: z.string().nullable(), agent: z.string().nullable() }))
+    .default([]),
+  scores: z.array(ScoreSchema).nullable().default(null),
+});

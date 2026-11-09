@@ -23,7 +23,7 @@ export default async function ConfirmSignOutPage() {
       </CardHeader>
       <CardContent className="flex gap-gutter">
         <form method="post" action="/auth/logout">
-          <Button type="submit">Sign out</Button>
+          <Button type="submit" variant="filled">Sign out</Button>
         </form>
         <Button asChild variant="outline">
           <Link href="/console">Stay signed in</Link>

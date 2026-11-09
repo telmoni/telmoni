@@ -84,7 +84,7 @@ export function ExportAuditLog({ organization }: { organization: string }) {
           setOpen(true);
         }}
       >
-        <Download className="size-4" />
+        <Download className="size-icon" />
         Export
       </PageAction>
       <ExportDialog
@@ -274,7 +274,7 @@ function ExportDialog({
             )}
           </DialogBody>
           <DialogFooter>
-            <Button type="submit" disabled={!canSubmit}>
+            <Button type="submit" variant="filled" disabled={!canSubmit}>
               {pending ? "Starting…" : "Start export"}
             </Button>
             <Button
@@ -309,7 +309,7 @@ function RecentExports({ organization }: { organization: string }) {
       <span className="text-sm font-medium">Your recent exports</span>
       <ul className="grid gap-1">
         {recent.map((entry) => (
-          <li key={entry.id} className="flex min-h-9 items-center justify-between gap-gutter text-sm">
+          <li key={entry.id} className="flex min-h-control items-center justify-between gap-gutter text-sm">
             <span className="min-w-0 truncate text-muted-foreground">
               {exportSummary(entry, now)}
             </span>
@@ -321,12 +321,12 @@ function RecentExports({ organization }: { organization: string }) {
                 aria-label={`Download ${exportSummary(entry, now)}`}
                 onClick={() => take(organization, entry.id)}
               >
-                <Download className="size-4" />
+                <Download className="size-icon" />
                 Download
               </Button>
             ) : isBuilding(entry) ? (
-              <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 aria-hidden className="size-3.5 animate-spin" />
+              <span className="flex shrink-0 items-center gap-gutter text-xs text-muted-foreground">
+                <Loader2 aria-hidden className="size-icon animate-spin" />
                 Preparing
               </span>
             ) : (

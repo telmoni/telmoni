@@ -1,6 +1,6 @@
 ---
 title: "Spend"
-description: "A project's Spend page: its spend, tokens, runs and their failures, latency and time to first token over a window, spend split by model, agent, provider, environment, release, tag, user or session, its budgets this month above, and the dashboards owners and admins save for everyone on the project."
+description: "A project's Spend page: its spend, tokens, runs and their failures, latency and time to first token over a window, with its budgets this month above."
 ---
 
 A project's **Spend** page (`/{organization}/{project}/dashboards`) charts
@@ -22,41 +22,6 @@ what the month had spent of it when the budget last read it, or **Not read
 yet** for one that has not.
 
 Spend counts every model call the project's spans hold.
-
-## Spend split over time
-
-**Charts** beside the window adds or takes off each chart, and adds spend
-split by one of:
-
-| Split | Read from |
-|---|---|
-| Model, agent, provider, environment or release | The hourly totals, as far back as the window reaches |
-| Tag, by one key the window's traces carry | The spans, no further back than your plan keeps them |
-| User or session | The spans, no further back than your plan keeps them |
-
-A split chart stacks each hour's or day's spend by value: the seven values
-that spent most over the window each in a colour of their own, and the rest
-as **Other**. Under it, every value's spend, tokens, runs and failures, the
-costliest first; a user's row opens the Runs list narrowed to their runs, and
-a session's its runs in the order they started. A call counts for its run's
-value: a tag as the run's own span carries it, else as any of
-its spans does, and a run begun the day before the window still counts for
-its user, session or tag. Spans of a run that carries none count under
-**None**. A split from the spans names the ten values that spent most and
-sums the rest as **Other values**, so a project of many users stays readable;
-where your plan keeps the spans for less than the window, the chart says how
-far back it reads.
-
-## Saved dashboards
-
-The charts drawn are in the page's URL, so a link opens the same charts.
-**Dashboards** beside them saves the charts as a dashboard under a name, up
-to twelve charts each, for everyone on the project to open; owners and admins
-save, rename and delete them, and every role opens them (see
-[Roles](/docs/workspace/roles)). A dashboard keeps its charts and nothing
-else: the window is the picker's, and no user's or session's value is kept
-in it. With none named, the page opens on the cost dashboard: spend, tokens,
-runs, latency and time to first token.
 
 The same totals, by the hour or the day and split, are
 [`GET /v1/metrics`](/docs/api/reference#get-v1metrics).

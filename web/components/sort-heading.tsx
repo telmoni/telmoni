@@ -81,7 +81,7 @@ export function TagSortHeading({
             </>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuContent align="start" className="w-64">
           <DropdownMenuLabel>Sort by tag</DropdownMenuLabel>
           {offered.length === 0 ? (
             <DropdownMenuItem disabled>No tags in this window</DropdownMenuItem>
@@ -108,8 +108,8 @@ function ariaSort(active: boolean, dir: SortDirection): "none" | "ascending" | "
 
 function SortChevron({ dir }: { dir: SortDirection }) {
   return dir === SortDirection.Asc ? (
-    <ChevronUp className="size-3.5" aria-hidden="true" />
+    <ChevronUp className="size-icon" aria-hidden="true" />
   ) : (
-    <ChevronDown className="size-3.5" aria-hidden="true" />
+    <ChevronDown className="size-icon" aria-hidden="true" />
   );
 }

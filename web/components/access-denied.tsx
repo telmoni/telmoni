@@ -31,16 +31,16 @@ export function AccessDenied({
 }) {
   return (
     <div
-      className="flex max-w-md flex-col items-start gap-4 pb-8"
+      className="flex max-w-md flex-col items-start gap-page pb-page"
       role="alert"
       data-testid="access-denied"
     >
       {/* The height of `PageHeader`'s row, so the refusal starts where every
           other page's title does. */}
-      <p className="flex min-h-9 items-center text-xs tracking-label text-brand-negative uppercase">
+      <p className="flex min-h-control items-center text-xs tracking-label text-brand-negative uppercase">
         access denied
       </p>
-      <h1 className="text-xl font-light tracking-tight">
+      <h1 className="text-xl font-medium tracking-tight">
         Your role doesn&rsquo;t include {what}.
       </h1>
       <p className="text-sm leading-relaxed text-muted-foreground">

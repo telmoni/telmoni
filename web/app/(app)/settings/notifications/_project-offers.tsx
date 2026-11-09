@@ -106,6 +106,7 @@ function ProjectOfferCard({
           <>
             <Button
               size="sm"
+              variant="filled"
               disabled={pending}
               onClick={() => {
                 setError(null);
@@ -199,7 +200,7 @@ function AcceptDialog({
           )}
         </DialogBody>
         <DialogFooter>
-          <Button onClick={() => onConfirm(destination)} disabled={pending || !destination}>
+          <Button variant="filled" onClick={() => onConfirm(destination)} disabled={pending || !destination}>
             {pending ? "Taking it over…" : "Take it over"}
           </Button>
         </DialogFooter>

@@ -1,14 +1,14 @@
-/* eslint-disable @next/next/no-html-link-for-pages */
 "use client";
 
 import type * as PageTree from "fumadocs-core/page-tree";
 import { AnchorProvider, type TOCItemType, useActiveAnchor } from "fumadocs-core/toc";
 import { useSearchContext } from "fumadocs-ui/contexts/search";
-import { ArrowUpRight, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { GithubIcon } from "@/components/brand-icons";
 import { CornersToggle } from "@/components/corners-toggle";
 import {
   DropdownMenu,
@@ -17,13 +17,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BODY, LEAD, PaperHero } from "@/components/paper-page";
+import { RailLink } from "@/components/rail-link";
 import { RailShortcuts, type RailShortcut } from "@/components/rail-shortcuts";
 import { type NavLink } from "@/components/site-nav";
 import { TelmoniLockup } from "@/components/telmoni-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { type FooterLink } from "@/lib/footer";
 import { INSET } from "@/lib/inset";
 import { PRODUCT_NAME } from "@/lib/site";
+import { useOverflow } from "@/lib/use-overflow";
 import { useIsMac } from "@/lib/use-platform";
 import { cn } from "@/lib/utils";
 
@@ -83,48 +84,6 @@ const DOCS_SECTIONS = [
   },
 ] as const satisfies readonly DocsMenuSection[];
 
-function SiteLinkItem({
-  link,
-  onClick,
-}: {
-  link: { label: string; href: string; newTab?: boolean };
-  onClick?: () => void;
-}) {
-  const leaves = link.newTab || !link.href.startsWith("/");
-  // The public rail's cue for a new tab: drawn on hover or keyboard focus.
-  const content = (
-    <>
-      {link.label}
-      {leaves && (
-        <ArrowUpRight
-          aria-hidden="true"
-          className="ml-1 inline-block size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
-        />
-      )}
-    </>
-  );
-  const className =
-    "group text-sm text-muted-foreground transition-colors hover:text-foreground py-0.5";
-  if (leaves) {
-    return (
-      <a
-        href={link.href}
-        target="_blank"
-        rel="noreferrer"
-        onClick={onClick}
-        className={className}
-      >
-        {content}
-      </a>
-    );
-  }
-  return (
-    <Link href={link.href} onClick={onClick} className={className}>
-      {content}
-    </Link>
-  );
-}
-
 function DocsTreeLink({
   item,
   pathname,
@@ -176,7 +135,7 @@ function DocsTreeNodes({
           return (
             <p
               key={`sep-${i}`}
-              className="pt-6 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground/70"
+              className="pt-6 pb-1.5 font-mono text-xs uppercase tracking-wider text-muted-foreground/70"
             >
               {node.name}
             </p>
@@ -186,7 +145,7 @@ function DocsTreeNodes({
           return (
             <div key={node.$id ?? `folder-${i}`} className="flex flex-col">
               {node.name && (
-                <p className="pt-6 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground/70">
+                <p className="pt-6 pb-1.5 font-mono text-xs uppercase tracking-wider text-muted-foreground/70">
                   {node.name}
                 </p>
               )}
@@ -215,14 +174,12 @@ export function DocsShell({
   tree,
   signedIn,
   primaryLinks,
-  metaLinks,
   companyName,
   children,
 }: {
   tree: PageTree.Root;
   signedIn: boolean;
   primaryLinks: NavLink[];
-  metaLinks: FooterLink[];
   companyName: string;
   children: React.ReactNode;
 }) {
@@ -233,8 +190,8 @@ export function DocsShell({
     DOCS_SECTIONS.find((s) => s.match?.(pathname)) ?? DOCS_SECTIONS[0];
   const consoleHref = signedIn ? "/console" : "/auth/login";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const railContentRef = useRef<HTMLDivElement>(null);
-  const [railStickyTop, setRailStickyTop] = useState<number>(88);
+  const rail = useRef<HTMLDivElement>(null);
+  const railOverflow = useOverflow(rail, "y");
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -243,24 +200,6 @@ export function DocsShell({
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
-
-  useEffect(() => {
-    const el = railContentRef.current;
-    if (!el) return;
-    const updateStickyTop = () => {
-      // Keep a short tree below the brand; let a long tree scroll to its end.
-      const minTop = window.innerHeight - el.offsetHeight - 32;
-      setRailStickyTop(Math.min(88, minTop));
-    };
-    updateStickyTop();
-    const ro = new ResizeObserver(updateStickyTop);
-    ro.observe(el);
-    window.addEventListener("resize", updateStickyTop);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", updateStickyTop);
-    };
-  }, [tree]);
 
   const shortcuts: RailShortcut[] = primaryLinks.map((item, i) => ({
     key: String(i + 1),
@@ -288,10 +227,11 @@ export function DocsShell({
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col lg:flex-row">
         <RailShortcuts shortcuts={shortcuts} />
 
-        {/* Mobile top bar, framed as the splash's header is, so the mark stays put */}
+        {/* Mobile top bar, framed as the splash's header is, pinned so the mark
+            and the section menu stay put as the page scrolls. */}
         <header
           className={cn(
-            "flex h-15 items-center justify-between border-b border-border lg:hidden",
+            "sticky top-0 z-40 flex h-15 items-center justify-between border-b border-border bg-background lg:hidden",
             INSET,
           )}
         >
@@ -312,9 +252,9 @@ export function DocsShell({
               <span className="px-2">{activeSection.label}</span>
               <span className="flex h-full items-center border-l border-background px-1.5 text-muted-foreground">
                 {mobileMenuOpen ? (
-                  <ChevronUp className="size-3" aria-hidden="true" />
+                  <ChevronUp className="size-icon" aria-hidden="true" />
                 ) : (
-                  <ChevronDown className="size-3" aria-hidden="true" />
+                  <ChevronDown className="size-icon" aria-hidden="true" />
                 )}
               </span>
             </button>
@@ -322,7 +262,7 @@ export function DocsShell({
           <button
             type="button"
             onClick={() => setOpenSearch(true)}
-            className="cursor-pointer rounded-md bg-muted/80 px-3 py-1.5 font-mono text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="inline-flex h-control cursor-pointer items-center rounded-md bg-muted/80 px-gutter font-mono text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             Search
           </button>
@@ -339,50 +279,43 @@ export function DocsShell({
               />
             </nav>
             <div className="flex flex-col gap-2 pt-4 font-mono text-sm">
-              <p className="pb-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground/70">
+              <p className="pb-1 font-mono text-xs uppercase tracking-wider text-muted-foreground/70">
                 SITE
               </p>
               {primaryLinks.map((link) => (
-                <SiteLinkItem
+                <RailLink
                   key={link.href}
                   link={link}
-                  onClick={() => setMobileMenuOpen(false)}
+                  arrow="always"
+                  className="py-0.5"
+                  onDone={() => setMobileMenuOpen(false)}
                 />
               ))}
               {signedIn ? (
-                <Link
-                  href="/console"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="py-0.5 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Console
-                </Link>
+                <RailLink
+                  link={{ label: "Console", href: "/console" }}
+                  className="py-0.5"
+                  onDone={() => setMobileMenuOpen(false)}
+                />
               ) : (
                 <>
-                  <a
-                    href="/auth/login"
-                    className="py-0.5 text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    Sign in
-                  </a>
-                  <a
-                    href="/auth/signup"
-                    className="py-0.5 text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    Sign up
-                  </a>
+                  <RailLink link={{ label: "Sign in", href: "/auth/login" }} handler className="py-0.5" />
+                  <RailLink link={{ label: "Sign up", href: "/auth/signup" }} handler className="py-0.5" />
                 </>
               )}
             </div>
           </div>
         )}
 
-        {/* Desktop Left Rail: Brand Mark + DOCS switcher + [ ] / [-] Docs Tree */}
+        {/* Desktop Left Rail: Brand Mark + DOCS switcher + [ ] / [-] Docs Tree.
+            Pinned to the window, its tree scrolled on its own under the brand,
+            apart from the page, with no scrollbar: a bar between the rail and
+            the article reads as a wall, so the end with more fades instead. */}
         <aside
           aria-label="Documentation navigation"
-          className="hidden w-52 shrink-0 flex-col pb-8 pl-8 pr-4 lg:flex"
+          className="sticky top-0 hidden h-svh w-52 shrink-0 flex-col lg:flex"
         >
-          <div className="sticky top-0 z-20 flex items-center gap-2.5 bg-background pt-8 pb-4">
+          <div className="flex items-center gap-2.5 pt-8 pb-4 pl-8 pr-4">
             <Link
               href="/"
               aria-label={PRODUCT_NAME}
@@ -399,9 +332,9 @@ export function DocsShell({
                   <span className="px-2">{activeSection.label}</span>
                   <span className="flex h-full items-center border-l border-background px-1.5 text-muted-foreground">
                     {switcherOpen ? (
-                      <ChevronUp className="size-3" aria-hidden="true" />
+                      <ChevronUp className="size-icon" aria-hidden="true" />
                     ) : (
-                      <ChevronDown className="size-3" aria-hidden="true" />
+                      <ChevronDown className="size-icon" aria-hidden="true" />
                     )}
                   </span>
                 </button>
@@ -422,31 +355,24 @@ export function DocsShell({
             </DropdownMenu>
           </div>
 
-          <div
-            ref={railContentRef}
-            style={{ top: `${railStickyTop}px` }}
-            className="sticky mt-4 flex flex-col"
-          >
-            <nav aria-label="Book" className="flex flex-col">
-              <DocsTreeNodes nodes={tree.children} pathname={pathname} />
-            </nav>
-
-            <div className="flex flex-col gap-6 pt-12">
-              {metaLinks.length > 0 && (
-                <nav aria-label="Secondary" className="flex flex-col gap-2 font-mono text-sm">
-                  {metaLinks.map((link) => (
-                    <SiteLinkItem key={link.href} link={link} />
-                  ))}
+          <div ref={rail} className="relative min-h-0 flex-1" data-overflow={railOverflow || undefined}>
+            <div data-scroll-y="" className="h-full overflow-y-auto overscroll-contain pt-4 pb-8 pl-8 pr-4">
+              <div className="flex flex-col">
+                <nav aria-label="Book" className="flex flex-col">
+                  <DocsTreeNodes nodes={tree.children} pathname={pathname} />
                 </nav>
-              )}
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col items-start gap-2">
-                  <ThemeToggle />
-                  <CornersToggle />
+
+                <div className="flex flex-col gap-6 pt-12">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col items-start gap-2">
+                      <ThemeToggle />
+                      <CornersToggle />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      © {new Date().getFullYear()} {companyName}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  © {new Date().getFullYear()} {companyName}
-                </p>
               </div>
             </div>
           </div>
@@ -457,13 +383,6 @@ export function DocsShell({
           {children}
 
           <footer className={cn("flex flex-col gap-6 py-8 lg:hidden", INSET)}>
-            {metaLinks.length > 0 && (
-              <nav aria-label="Footer" className="flex flex-col gap-2 font-mono text-sm">
-                {metaLinks.map((link) => (
-                  <SiteLinkItem key={link.href} link={link} />
-                ))}
-              </nav>
-            )}
             <div className="flex flex-col gap-4">
               <div className="flex flex-col items-start gap-2">
                 <ThemeToggle />
@@ -505,15 +424,9 @@ function DocsRightRail({
               target="_blank"
               rel="noreferrer"
               aria-label="GitHub repository"
-              className="flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+              className="flex size-6 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
             >
-              <svg className="size-5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                />
-              </svg>
+              <GithubIcon className="size-6" />
             </a>
           )}
         </div>
@@ -522,7 +435,7 @@ function DocsRightRail({
         <button
           type="button"
           onClick={() => setOpenSearch(true)}
-          className="mt-8 flex w-full cursor-pointer items-center justify-between rounded-md bg-muted/70 px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="mt-8 flex h-control w-full cursor-pointer items-center justify-between rounded-md bg-muted/70 px-gutter text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <span>Search</span>
           <span className="text-muted-foreground/70">{isMac ? "⌘K" : "Ctrl K"}</span>
@@ -595,9 +508,10 @@ export function DocsPageView({
                 {neighbours.previous ? (
                   <Link
                     href={neighbours.previous.url}
-                    className="text-muted-foreground transition-colors hover:text-foreground"
+                    className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    <span className="text-muted-foreground/70">← Previous</span>{" "}
+                    <ArrowLeft className="size-icon text-muted-foreground/70" aria-hidden="true" />
+                    <span className="text-muted-foreground/70">Previous</span>
                     <span className="text-foreground">{neighbours.previous.name}</span>
                   </Link>
                 ) : (
@@ -606,10 +520,11 @@ export function DocsPageView({
                 {neighbours.next ? (
                   <Link
                     href={neighbours.next.url}
-                    className="text-muted-foreground transition-colors hover:text-foreground"
+                    className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    <span className="text-muted-foreground/70">Next</span>{" "}
-                    <span className="text-foreground">{neighbours.next.name} →</span>
+                    <span className="text-muted-foreground/70">Next</span>
+                    <span className="text-foreground">{neighbours.next.name}</span>
+                    <ArrowRight className="size-icon text-foreground" aria-hidden="true" />
                   </Link>
                 ) : (
                   <span />

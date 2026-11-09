@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ArrowUpRight, ChevronRight } from "lucide-react";
 import { NavigationMenu } from "radix-ui";
 
 import { PRIMARY_NAV, type NavLink, type NavPanel } from "@/components/site-nav";
@@ -14,7 +14,6 @@ const ROW = cn(
   "text-sm font-normal whitespace-nowrap transition-colors",
   "text-muted-foreground hover:text-foreground",
   "data-[state=open]:bg-accent data-[state=open]:text-accent-foreground",
-  "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
 );
 
 // ⚠ **No `NavigationMenu.Viewport`, and the shrinking panel is why.** A
@@ -43,6 +42,16 @@ const ROW = cn(
 //
 function outbound(link: NavLink) {
   return link.newTab ? { target: "_blank", rel: "noreferrer" } : {};
+}
+
+// A new tab's arrow after its label, on hover or focus, as the rail draws it.
+function NewTab({ link }: { link: NavLink }) {
+  return link.newTab ? (
+    <ArrowUpRight
+      aria-hidden="true"
+      className="ml-1 inline-block size-icon opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
+    />
+  ) : null;
 }
 
 function Panel({ panel }: { panel: NavPanel }) {
@@ -77,9 +86,13 @@ function Panel({ panel }: { panel: NavPanel }) {
               {...outbound(feature)}
               className="flex flex-col gap-1.5 p-page transition-colors hover:bg-accent"
             >
-              <span className="flex items-center gap-1.5 text-base text-foreground">
+              <span className="flex items-center gap-gutter text-base text-foreground">
                 {feature.label}
-                <ChevronRight className="size-3.5 text-muted-foreground" />
+                {feature.newTab ? (
+                  <ArrowUpRight className="size-icon text-muted-foreground" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="size-icon text-muted-foreground" aria-hidden="true" />
+                )}
               </span>
               <span className="text-sm text-muted-foreground">{feature.detail}</span>
             </Link>
@@ -104,9 +117,10 @@ function Panel({ panel }: { panel: NavPanel }) {
                   <Link
                     href={link.href}
                     {...outbound(link)}
-                    className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                    className="group text-sm text-muted-foreground transition-colors hover:text-foreground"
                   >
                     {link.label}
+                    <NewTab link={link} />
                   </Link>
                 </NavigationMenu.Link>
               ))}
@@ -125,12 +139,12 @@ export function SiteNavMenu() {
       delayDuration={100}
     >
       <NavigationMenu.List
-        className="flex h-9 list-none items-center gap-gutter"
+        className="flex h-control list-none items-center gap-gutter"
       >
         {PRIMARY_NAV.map((item) => (
           <NavigationMenu.Item
             key={item.label}
-            className="relative flex h-9 items-center"
+            className="relative flex h-control items-center"
           >
             {item.panel ? (
               <>
@@ -146,8 +160,9 @@ export function SiteNavMenu() {
               </>
             ) : (
               <NavigationMenu.Link asChild>
-                <Link href={item.href} {...outbound(item)} className={ROW}>
+                <Link href={item.href} {...outbound(item)} className={cn("group", ROW)}>
                   {item.label}
+                  <NewTab link={item} />
                 </Link>
               </NavigationMenu.Link>
             )}

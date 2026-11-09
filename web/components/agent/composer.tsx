@@ -71,12 +71,13 @@ export function Composer({
       }}
     >
       <div className="mx-auto w-full max-w-3xl">
+        {/* The box is the field: its focus outline goes around the whole of
+            it, the line under the text and the send button too (`globals.css`). */}
         <div
+          data-focus-box=""
           className={cn(
-            "rounded-lg border border-input bg-transparent",
+            "rounded-md border border-input bg-transparent",
             "dark:bg-input/30 dark:border-transparent",
-            "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
-            "transition-[color,box-shadow]",
           )}
         >
           <textarea
@@ -94,9 +95,9 @@ export function Composer({
               "placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
             )}
           />
-          <div className="flex items-center justify-between gap-gutter px-2 pb-2">
-            <p className="flex min-w-0 items-center gap-1.5 pl-1.5 text-xs text-muted-foreground">
-              <Info aria-hidden className="size-3.5 shrink-0" />
+          <div className="flex items-center justify-between gap-gutter px-gutter pb-2">
+            <p className="flex min-w-0 items-center gap-gutter text-xs text-muted-foreground">
+              <Info aria-hidden className="size-icon shrink-0" />
               <span className="truncate">{about}</span>
             </p>
             {/* `maxLength` cuts a paste past the ceiling short without a
@@ -108,7 +109,7 @@ export function Composer({
             )}
             {/* Keep one non-submit button so Send/Stop retains focus; an empty draft uses aria-disabled. */}
             <Button
-              size="icon-sm"
+              size="icon"
               type="button"
               aria-label={streaming ? "Stop the reply" : "Send"}
               title={streaming ? "Stop" : "Send"}
@@ -121,14 +122,14 @@ export function Composer({
               )}
             >
               {streaming ? (
-                <Square className="size-3 fill-current" />
+                <Square className="fill-current" />
               ) : (
-                <ArrowUp className="size-4" />
+                <ArrowUp className="size-icon" />
               )}
             </Button>
           </div>
         </div>
-        <p className="pt-2.5 text-center text-[11px] text-muted-foreground">
+        <p className="pt-2 text-center text-xs text-muted-foreground">
           Telmoni Agent is AI and can make mistakes.
         </p>
       </div>

@@ -74,7 +74,7 @@ export function KeysActions({
         primary="Mint key"
         onClick={(e) => open(e.currentTarget, null)}
       >
-        <KeyRound className="size-4" />
+        <KeyRound className="size-icon" />
         Mint key
       </PageAction>
 
@@ -264,7 +264,7 @@ function MintKeyPanel({
           )}
         </SidePanelBody>
         <SidePanelFooter>
-          <Button type="submit" disabled={!canSubmit}>
+          <Button type="submit" variant="filled" disabled={!canSubmit}>
             {pending ? "Minting…" : "Mint key"}
           </Button>
           <Button type="button" variant="outline" onClick={onClose}>

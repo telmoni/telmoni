@@ -76,7 +76,7 @@ function EventDetails({ event }: { event: AuditEvent }) {
     <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
       {fields.map(([label, value]) => (
         <div key={label} className="contents">
-          <dt className="text-muted-foreground/70">{label}</dt>
+          <dt className="text-muted-foreground">{label}</dt>
           <dd className="break-all">{value}</dd>
         </div>
       ))}

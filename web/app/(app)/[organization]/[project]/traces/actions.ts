@@ -8,33 +8,14 @@ import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { type Ceiling, admitProject } from "@/lib/server/admit";
-import {
-  DashboardQuerySchema,
-  DashboardViewSchema,
-  type DashboardView,
-} from "@/lib/server/entities/traces";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
 import { COMMENT_MAX, SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "@/lib/scores";
-import { FILTER_VALUE_MAX, SCORE_NAME_MAX, VIEW_NAME_MAX } from "@/lib/traces";
+import { FILTER_VALUE_MAX, SCORE_NAME_MAX } from "@/lib/traces";
 import { ScoreType } from "@/lib/types/enums";
 
-// A project's saved dashboards, saved, saved over and deleted; a run's
-// deletion; an end user's erasure: each through its lane in
-// telemetry, which holds the role each takes and checks every value. What
-// this checks is the shape the browser sent.
-
-export type ViewResult = ActionResult<{ view?: DashboardView }>;
-
-/** What a dashboard's save sends: what the browser could send, before the
- *  server checks its every value. */
-const ViewInputSchema = z.strictObject({
-  name: z.string().max(VIEW_NAME_MAX),
-  query: DashboardQuerySchema,
-});
-
-/** Saves a person makes in a minute: far more than a hand makes, few enough
- *  that a loop cannot fill a project's hundred views in one. */
-const SAVES: Ceiling = { call: "traces:views", limit: 20 };
+// A run's deletion, an end user's erasure and a member's scores: each through
+// its lane in telemetry, which holds the role each takes and checks every
+// value. What this checks is the shape the browser sent.
 
 /** Deletions a person asks for in a minute: each one a mark the span store
  *  queues, so a hand's pace and no loop's. */
@@ -52,8 +33,8 @@ async function call(
   method: Method,
   lane: string,
   projectId: string,
-  body?: unknown,
-  ceiling: Ceiling = SAVES,
+  body: unknown,
+  ceiling: Ceiling,
   waitMs?: number,
 ): Promise<ActionResult<{ res: Response }>> {
   const gate = await admitProject(ceiling, projectId);
@@ -87,70 +68,6 @@ async function callAs(
     return refused(message);
   }
   return { ok: true, res };
-}
-
-async function send(
-  method: "POST" | "PUT" | "DELETE",
-  path: string,
-  projectId: string,
-  body?: z.infer<typeof ViewInputSchema>,
-): Promise<ViewResult> {
-  const sent = await call(method, `/views${path}`, projectId, body);
-  if (!sent.ok) return sent;
-  if (sent.res.status === 204) return { ok: true };
-  const parsed = DashboardViewSchema.safeParse(await sent.res.json().catch(() => null));
-  if (!parsed.success) {
-    // Saved all the same: the page is drawn again, its menu with it.
-    refresh();
-    return refused("Unexpected response from telemetry.");
-  }
-  return { ok: true, view: parsed.data };
-}
-
-/** A new dashboard of the project, which the page then opens on: the page it
- *  was saved from, with the dashboard named, drawn with this answer. */
-export async function saveTraceViewAction(projectId: string, input: unknown): Promise<ViewResult> {
-  const parsed = ViewInputSchema.safeParse(input);
-  if (!parsed.success) return refused("That dashboard could not be read.");
-  const result = await send("POST", "", projectId, parsed.data);
-  if (!result.ok) return result;
-  if (!result.view) {
-    refresh();
-    return result;
-  }
-  const here = await requestUrl();
-  here.searchParams.set("view", result.view.id);
-  redirect(pathAndQuery(here));
-}
-
-/** One of the project's dashboards, saved over with its charts as they are now. */
-export async function updateTraceViewAction(
-  projectId: string,
-  viewId: string,
-  input: unknown,
-): Promise<ViewResult> {
-  if (!z.guid().safeParse(viewId).success) return refused("Invalid dashboard id.");
-  const parsed = ViewInputSchema.safeParse(input);
-  if (!parsed.success) return refused("That dashboard could not be read.");
-  const result = await send("PUT", `/${viewId}`, projectId, parsed.data);
-  // Saved over or renamed: the page is drawn again, its menu with it.
-  if (result.ok) refresh();
-  return result;
-}
-
-/** One of the project's dashboards, gone. A page opened on it goes back to
- *  the page without it; any other is drawn again, its menu without it. */
-export async function deleteTraceViewAction(projectId: string, viewId: string): Promise<ViewResult> {
-  if (!z.guid().safeParse(viewId).success) return refused("Invalid dashboard id.");
-  const result = await send("DELETE", `/${viewId}`, projectId);
-  if (!result.ok) return result;
-  const here = await requestUrl();
-  if (here.searchParams.get("view") !== viewId) {
-    refresh();
-    return result;
-  }
-  here.searchParams.delete("view");
-  redirect(pathAndQuery(here));
 }
 
 /** One trace deleted, by its run's id: the page then goes back to the list,

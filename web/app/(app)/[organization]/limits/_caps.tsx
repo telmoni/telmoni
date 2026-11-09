@@ -1,19 +1,18 @@
 "use client";
 
+import { Gauge } from "lucide-react";
 import { startTransition, useId, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SidePanel,
+  SidePanelBody,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+  usePanelOpening,
+} from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { CAP_FIELDS as FIELDS, capTyped } from "@/lib/limits";
 import type { Caps } from "@/lib/server/entities/limits";
 import { useAction } from "@/lib/use-action";
@@ -22,7 +21,7 @@ import { setProjectCapsAction } from "./actions";
 
 const ROW_BUTTON = "text-muted-foreground hover:text-foreground";
 
-/** Opens the dialog that sets one project's caps. */
+/** Opens the panel that sets one project's caps, as New project's opens. */
 export function EditCaps({
   organizationId,
   projectId,
@@ -34,52 +33,54 @@ export function EditCaps({
   name: string;
   caps: Caps;
 }) {
-  const [open, setOpen] = useState(false);
-  const button = useRef<HTMLButtonElement>(null);
+  const { opening, open, close, place } = usePanelOpening();
   return (
     <>
       <Button
-        ref={button}
         variant="outline"
         size="sm"
         className={ROW_BUTTON}
-        onClick={() => setOpen(true)}
+        onClick={(e) => open(e.currentTarget, null)}
         aria-label={`Set ${name}'s caps`}
       >
         Set caps
       </Button>
-      <CapsDialog
-        key={`caps-${open}`}
-        organizationId={organizationId}
-        projectId={projectId}
-        name={name}
-        caps={caps}
-        open={open}
-        onOpenChange={setOpen}
-        returnFocus={() => button.current?.focus()}
-      />
+      {place(
+        opening && (
+          <CapsPanel
+            key={opening.at}
+            organizationId={organizationId}
+            projectId={projectId}
+            name={name}
+            caps={caps}
+            onClose={close}
+            returnFocus={() => opening.returnTo}
+          />
+        ),
+      )}
     </>
   );
 }
 
-function CapsDialog({
+function CapsPanel({
   organizationId,
   projectId,
   name,
   caps,
-  open,
-  onOpenChange,
+  onClose,
   returnFocus,
 }: {
   organizationId: string;
   projectId: string;
   name: string;
   caps: Caps;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  returnFocus: () => void;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
 }) {
   const id = useId();
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const first = useRef<HTMLInputElement>(null);
   const [typed, setTyped] = useState<Record<keyof Caps, string>>(() => {
     const shown = {} as Record<keyof Caps, string>;
     for (const { key, unit } of FIELDS) {
@@ -102,67 +103,58 @@ function CapsDialog({
     }
     run(
       () => setProjectCapsAction(organizationId, projectId, next),
-      () => startTransition(() => onOpenChange(false)),
+      () => startTransition(onClose),
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        onCloseAutoFocus={(e) => {
+    <SidePanel panel={panel} titleId={titleId} onClose={onClose} full initialFocus={first} returnFocus={returnFocus}>
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
           e.preventDefault();
-          returnFocus();
+          if (!pending) submit();
         }}
       >
-        <form
-          className="contents"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!pending) submit();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{`Caps on "${name}"`}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <DialogDescription>
-              What this project may use of the organization&apos;s pool, each at most the
-              plan&apos;s. Leave one empty to share the pool. Past a cap, this project alone is
-              held as the organization is past its plan.
-            </DialogDescription>
-            {FIELDS.map(({ key, label, unit }) => (
-              <div key={key} className="grid gap-2">
-                <Label htmlFor={`${id}-${key}`}>{label}</Label>
-                <Input
-                  id={`${id}-${key}`}
-                  inputMode={unit ? "decimal" : "numeric"}
-                  placeholder="Shares the pool"
-                  value={typed[key]}
-                  onChange={(e) => {
-                    setTyped({ ...typed, [key]: e.target.value });
-                    setError(null);
-                  }}
-                  disabled={pending}
-                />
-              </div>
-            ))}
-            {error && (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save caps"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        <SidePanelHeader icon={Gauge} titleId={titleId} title={`Caps on "${name}"`} onClose={onClose}>
+          <p className="text-sm text-muted-foreground">
+            What this project may use of the organization&apos;s pool, each at most the plan&apos;s.
+            Leave one empty to share the pool. Past a cap, this project alone is held as the
+            organization is past its plan.
+          </p>
+        </SidePanelHeader>
+        <SidePanelBody>
+          {FIELDS.map(({ key, label, unit }, i) => (
+            <SidePanelRow key={key} label={label} htmlFor={`${id}-${key}`}>
+              <Input
+                ref={i === 0 ? first : undefined}
+                id={`${id}-${key}`}
+                inputMode={unit ? "decimal" : "numeric"}
+                placeholder="Shares the pool"
+                value={typed[key]}
+                onChange={(e) => {
+                  setTyped({ ...typed, [key]: e.target.value });
+                  setError(null);
+                }}
+                disabled={pending}
+              />
+            </SidePanelRow>
+          ))}
+          {error && (
+            <p className="py-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </SidePanelBody>
+        <SidePanelFooter>
+          <Button type="submit" variant="filled" disabled={pending}>
+            {pending ? "Saving…" : "Save caps"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }

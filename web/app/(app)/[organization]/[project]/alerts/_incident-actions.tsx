@@ -11,7 +11,7 @@ import { IncidentStatus } from "@/lib/types/enums";
 import { useAct } from "./_act";
 import { incidentAction } from "./actions";
 
-const ROW_BUTTON = "h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground";
+const ROW_BUTTON = "text-muted-foreground hover:text-foreground";
 
 /** An incident taken by a member, which stops its reminders, or resolved by
  *  hand, which its channels are told as a recovery is. */

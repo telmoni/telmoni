@@ -70,7 +70,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
       <Td className="font-medium">
         <div className="flex items-center gap-gutter">
           <span>{invite.targetName}</span>
-          <Badge variant="secondary" className="uppercase tracking-wider">
+          <Badge variant="secondary">
             {invite.scope}
           </Badge>
         </div>
@@ -78,7 +78,7 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
       <Td className="text-muted-foreground">
         <span>{inviter}</span>
         {invite.inviterEmail && inviter !== invite.inviterEmail && (
-          <span className="block text-xs text-muted-foreground/70">
+          <span className="block text-xs text-muted-foreground">
             {invite.inviterEmail}
           </span>
         )}
@@ -94,11 +94,11 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
           {error && <span className="text-xs text-destructive mr-2">{error}</span>}
           <Button
             size="sm"
-            className="gap-1"
+            variant="filled"
             disabled={pending}
             onClick={() => settle(() => acceptIncomingInviteAction(invite.id))}
           >
-            <Check className="size-3.5" />
+            <Check />
             Accept
           </Button>
           <ConfirmDialog
@@ -106,10 +106,10 @@ function IncomingInviteRow({ invite }: { invite: IncomingInvite }) {
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-1 text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground"
                 disabled={pending}
               >
-                <X className="size-3.5" />
+                <X />
                 Decline
               </Button>
             }

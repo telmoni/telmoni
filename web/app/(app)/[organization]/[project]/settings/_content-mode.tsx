@@ -135,6 +135,8 @@ export function ContentModeForm({
         />
         <Button
           type="submit"
+          // At the code step, Keep content below is the one main action.
+          variant={leavingOff && flow.step.step === "code" ? "outline" : "filled"}
           aria-disabled={held || flow.sending}
           className={cn((held || flow.sending) && "cursor-not-allowed opacity-50")}
         >
@@ -169,7 +171,7 @@ export function ContentModeForm({
             disabled={flow.sending || flow.confirming}
           />
           <div className="flex items-center gap-gutter">
-            <Button type="submit" disabled={!flow.canConfirm}>
+            <Button type="submit" variant="filled" disabled={!flow.canConfirm}>
               {flow.confirming ? "Saving..." : "Keep content"}
             </Button>
             <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />

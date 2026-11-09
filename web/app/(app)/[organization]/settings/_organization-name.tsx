@@ -47,7 +47,7 @@ export function OrganizationNameForm({
           className="max-w-md"
           aria-label="Organization name"
         />
-        <Button type="submit" disabled={!isChanged || pending} variant="default">
+        <Button type="submit" disabled={!isChanged || pending} variant="filled">
           {pending ? "Saving..." : "Save"}
         </Button>
       </div>

@@ -114,7 +114,7 @@ export function ChangeEmail({
           with the new one is what confirms the change took.
         </p>
         <div>
-          <Button onClick={signOut}>Sign in again</Button>
+          <Button variant="filled" onClick={signOut}>Sign in again</Button>
         </div>
       </div>
     );
@@ -124,7 +124,7 @@ export function ChangeEmail({
     <div className="grid gap-gutter">
       {sentTo === null ? (
         <form
-          className="grid gap-4"
+          className="grid gap-gutter"
           onSubmit={(e) => {
             e.preventDefault();
             if (canSend) send();
@@ -151,14 +151,14 @@ export function ChangeEmail({
             />
           </div>
           <div>
-            <Button type="submit" variant="outline" disabled={!canSend}>
+            <Button type="submit" variant="filled" disabled={!canSend}>
               {sending ? "Sending…" : "Send confirmation codes"}
             </Button>
           </div>
         </form>
       ) : (
         <form
-          className="grid gap-4"
+          className="grid gap-gutter"
           onSubmit={(e) => {
             e.preventDefault();
             if (canConfirm) confirm();
@@ -186,7 +186,7 @@ export function ChangeEmail({
             autoFill={false}
           />
           <div className="flex items-center gap-gutter">
-            <Button type="submit" disabled={!canConfirm}>
+            <Button type="submit" variant="filled" disabled={!canConfirm}>
               {confirming ? "Changing…" : "Change my email"}
             </Button>
             <Button

@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, History, Plug, Users, type LucideIcon } from "lucide-react";
+import { ArrowRight, History, MessageCircleText, Plug, Users, type LucideIcon } from "lucide-react";
 
 import type { AgentSuggestion, SuggestionTopic } from "@/lib/agent/suggestions";
 
@@ -24,7 +24,7 @@ export function Welcome({
   return (
     <div className="my-auto grid justify-items-center gap-page py-4 text-center">
       <div className="grid justify-items-center gap-2">
-        <Bot aria-hidden className="size-6 text-muted-foreground" />
+        <MessageCircleText aria-hidden className="size-6 text-muted-foreground" />
         <h3 className="text-base font-medium wrap-break-word">Ask about {project}</h3>
         <p className="max-w-sm text-sm text-muted-foreground">
           It looks things up as you, so it sees what you can see, and it changes nothing.
@@ -39,16 +39,16 @@ export function Welcome({
                 type="button"
                 disabled={disabled}
                 onClick={() => onAsk(s.question)}
-                className="flex w-full cursor-pointer items-center gap-gutter rounded-lg border border-border px-gutter py-2.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex w-full cursor-pointer items-center gap-gutter rounded-md border border-border px-gutter py-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                  <Icon aria-hidden className="size-4" />
+                  <Icon aria-hidden className="size-icon" />
                 </span>
                 <span className="grid min-w-0 flex-1 gap-0.5">
                   <span className="text-sm font-medium">{s.title}</span>
                   <span className="text-xs text-muted-foreground">{s.description}</span>
                 </span>
-                <ArrowRight aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                <ArrowRight aria-hidden className="size-icon shrink-0 text-muted-foreground" />
               </button>
             </li>
           );

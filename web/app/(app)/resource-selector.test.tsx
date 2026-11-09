@@ -57,7 +57,7 @@ function renderSelector(
       projects={projects}
       projectsElsewhere={[elsewhere]}
     >
-      <ResourceSelector organizationBadge={badge} />
+      <ResourceSelector organizationBadges={badge ? { org_acme: badge } : undefined} />
     </StoreProvider>,
   );
 }
@@ -110,10 +110,18 @@ describe("the switcher", () => {
     expect(container).toHaveTextContent("/");
   });
 
-  it("draws the badge it is handed beside the organization's name", () => {
+  it("draws an organization's badge beside its name, on the trigger and on its row", () => {
     renderSelector(<span data-testid="badge">Plan</span>);
     const trigger = screen.getByRole("button", { name: /^Organization: acme/ });
     expect(within(trigger).getByTestId("badge")).toHaveTextContent("Plan");
+    const menu = open(trigger);
+    const onRow = within(menu).getAllByTestId("badge")[0]!;
+    expect(onRow.parentElement!.previousElementSibling).toBe(
+      within(menu).getByRole("menuitem", { name: "acme" }),
+    );
+    expect(onRow.parentElement!.nextElementSibling).toBe(
+      within(menu).getByRole("menuitem", { name: "acme settings" }),
+    );
   });
 
   // The row a panel is opened from is gone once the menu shuts, so the panel
@@ -163,17 +171,25 @@ describe("the switcher", () => {
     expect(within(menu).getByRole("menuitem", { name: "New project" })).toBeInTheDocument();
   });
 
-  it("shows each project's content mode between its name and its settings", () => {
+  it("shows each project's role and content mode between its name and its settings", () => {
     pathname = "/acme/atlas";
     renderSelector(undefined, [
-      { ...project("p1", "Atlas"), content_mode: "on" },
+      { ...project("p1", "Atlas"), role: "owner", content_mode: "on" },
       project("p2", "Beacon"),
     ]);
     const menu = open(screen.getByRole("button", { name: "Project: Atlas" }));
-    const on = within(menu).getByTitle("Content on");
-    const off = within(menu).getByTitle("Content off");
-    expect(on.previousElementSibling).toBe(within(menu).getByRole("menuitem", { name: "Atlas" }));
-    expect(on.nextElementSibling).toBe(
+    // The cue holds its words for a screen reader, its sentence as a title.
+    const on = within(menu).getByText("Content on").parentElement!;
+    const off = within(menu).getByText("Content off").parentElement!;
+    // A badge's text sits in a span of its own, trimmed to its capitals.
+    const owner = within(menu).getByText("Owner").closest("[data-slot=badge]")!;
+    // The badges and the cue share one box between the name and the gear.
+    expect(on.parentElement!.previousElementSibling).toBe(
+      within(menu).getByRole("menuitem", { name: "Atlas" }),
+    );
+    expect(on.previousElementSibling).toBe(owner);
+    expect(off.previousElementSibling).toBe(within(menu).getByText("Member").closest("[data-slot=badge]"));
+    expect(on.parentElement!.nextElementSibling).toBe(
       within(menu).getByRole("menuitem", { name: "Atlas settings" }),
     );
     expect(on).toHaveClass("text-foreground");

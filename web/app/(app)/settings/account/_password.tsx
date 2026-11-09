@@ -37,7 +37,7 @@ export function PasswordReset({ method }: { method: string | null }) {
         session ends when you use it, this one included.
       </p>
       <div>
-        <Button variant="outline" onClick={onPress} disabled={pending || sent}>
+        <Button variant="filled" onClick={onPress} disabled={pending || sent}>
           {pending
             ? "Sending…"
             : sent

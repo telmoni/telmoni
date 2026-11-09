@@ -50,15 +50,13 @@ as a **Member**.
 ## Project roles
 
 Inside each project, a project role decides what you can do with project
-resources: API keys, connectors, saved dashboards, its alerts, and project
+resources: API keys, connectors, its alerts, and project
 audit events.
 
 | Permission | Owner | Admin | Member |
 |---|---|---|---|
 | View the project's agents and resources | Yes | Yes | Yes |
 | Read the project's notices on its Notifications page, and mark them read for everyone on it | Yes | Yes | Yes |
-| Open the project's [saved dashboards](/docs/monitoring/dashboards#saved-dashboards) | Yes | Yes | Yes |
-| Save, rename, and delete saved dashboards | Yes | Yes | No |
 | Make, edit, pause, mute, and delete the project's [alerts](/docs/monitoring/alerts), [monitors](/docs/monitoring/monitors) and [objectives](/docs/monitoring/objectives); acknowledge and resolve incidents | Yes | Yes | Yes |
 | Add, change, and remove own scores on traces (take back any member's: Owner/Admin) | Yes | Yes | Yes |
 | View API keys (names and dates, never the raw key) | Yes | Yes | Yes |
@@ -79,12 +77,12 @@ audit events.
   organization Owner holds Owner privileges across all projects in the
   organization.
 - **Admin**: Operates the project: creates, rotates, and revokes API keys;
-  manages Slack and webhook connectors; manages project seats; saves the
-  dashboards; and reads the project audit log. Cannot change the project's content mode, or
+  manages Slack and webhook connectors; manages project seats;
+  and reads the project audit log. Cannot change the project's content mode, or
   delete or transfer the project.
 - **Member**: Read-only access to project resources but its alerts, monitors, objectives, and scores. Can
   inspect active connectors, delivery logs, and API key metadata (name,
-  creation date, last used date), and open the project's saved dashboards.
+  creation date, last used date).
   Cannot view the project audit log, and changes nothing but the
   project's alerts, monitors, objectives, and their incidents, as every role can;
   their own scores on traces; whether the project's notices are marked read, which is the same for everyone on the
@@ -109,7 +107,7 @@ do and the one you hold:
 ```
 
 Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
-is refused and to whom: connectors, saved dashboards and the audit log (decided by
+is refused and to whom: connectors and the audit log (decided by
 the same role matrix), the console agent, a project's transfer and, on the hosted service,
 billing; and what is the organization's own, decided by your role on it, which `detail`
 names with the least role that may: its name and URL, creating a project, its roster and

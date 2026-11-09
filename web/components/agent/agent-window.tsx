@@ -197,7 +197,7 @@ export function AgentWindow({
         data-mode={full ? "full" : "float"}
         className={cn(
           "group/agent flex size-full flex-col overflow-hidden bg-card text-card-foreground outline-none",
-          !compact && "rounded-lg border border-border shadow-menu",
+          !compact && "rounded-menu border border-border shadow-menu",
         )}
       >
         <div
@@ -222,20 +222,20 @@ export function AgentWindow({
         >
           <h2
             id={titleId}
-            className="flex min-w-0 items-center gap-2 text-base leading-snug font-semibold"
+            className="flex min-w-0 items-center gap-gutter text-base font-medium"
           >
             {title}
           </h2>
           <TooltipProvider>
-            <div className="ml-auto flex shrink-0 items-center gap-1">
+            <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {actions}
               {!compact && (
                 <PanelAction label={full ? "Exit full size" : "Full size"} onClick={toggleFull}>
-                  {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                  {full ? <Minimize2 className="size-icon" /> : <Maximize2 className="size-icon" />}
                 </PanelAction>
               )}
               <PanelAction label="Minimize the agent" onClick={onClose}>
-                <Minus className="size-4" />
+                <Minus className="size-icon" />
               </PanelAction>
             </div>
           </TooltipProvider>

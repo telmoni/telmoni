@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode, useId, useState, useTransition } from "react";
+import { Fragment, type ReactNode, useId, useRef, useState, useTransition } from "react";
 import {
   ChartColumnIcon,
   ChevronRightIcon,
@@ -68,6 +68,7 @@ import {
 } from "@/lib/traces";
 import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
+import { useOverflow } from "@/lib/use-overflow";
 import { cn } from "@/lib/utils";
 
 type Common = {
@@ -182,29 +183,40 @@ type ListToolbarProps = Common & {
 export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
   const { organization, slug, ui, days } = props;
   const { go, pending } = useListNavigation();
+  const strip = useRef<HTMLDivElement>(null);
+  const overflow = useOverflow(strip);
   const presets = <Presets spec={TRACES} query={props.query} go={go} at={[organization, slug, ui]} />;
 
   return (
     // The room the title leaves, its controls at its end; too narrow for them,
     // it scrolls from the first (a safe end, so none is pushed out of reach),
-    // its padding keeping the focus rings from being clipped.
-    <ButtonGroup
-      className="-m-1 min-w-0 flex-1 justify-end-safe overflow-x-auto p-1 [&>*]:shrink-0"
-      aria-busy={pending}
-      data-pending={pending ? "" : undefined}
+    // its padding keeping the focus rings from being clipped. No scrollbar: a
+    // bar under one row of controls reads as a frame around them, so the edge
+    // with more beyond it fades instead (`useOverflow`).
+    <div
+      ref={strip}
+      className="relative -m-1 min-w-0 flex-1"
+      data-overflow={overflow || undefined}
     >
-      <RefreshControl />
-      <WindowPicker days={days} />
-      {presets}
-      {extra?.((href) => go(href))}
-      <ListControls
-        list={props.list}
-        organization={organization}
-        slug={slug}
-        query={props.query}
-        total={total}
-      />
-    </ButtonGroup>
+      <ButtonGroup
+        data-scroll-x=""
+        className="justify-end-safe overflow-x-auto p-1 [&>*]:shrink-0"
+        aria-busy={pending}
+        data-pending={pending ? "" : undefined}
+      >
+        <RefreshControl />
+        <WindowPicker days={days} />
+        {presets}
+        {extra?.((href) => go(href))}
+        <ListControls
+          list={props.list}
+          organization={organization}
+          slug={slug}
+          query={props.query}
+          total={total}
+        />
+      </ButtonGroup>
+    </div>
   );
 }
 
@@ -395,7 +407,7 @@ function ColumnItem({
       aria-checked={checked}
       aria-describedby={hint ? hintId : undefined}
       disabled={disabled}
-      className={cn(inset && "pl-7")}
+      className={cn(inset && "pl-row-text")}
       onSelect={(event) => {
         event.preventDefault();
         onToggle?.();
@@ -432,7 +444,7 @@ function DownloadMenu({ list, organization, slug, query, total }: ListControlsPr
         <TooltipContent>Download</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel className="font-normal text-muted-foreground">
+        <DropdownMenuLabel>
           {total > DOWNLOAD_MAX
             ? `The first ${formatCount(DOWNLOAD_MAX)} of ${formatCount(total)} ${many}`
             : `${formatCount(total)} ${total === 1 ? one : many}, as the list is sorted`}

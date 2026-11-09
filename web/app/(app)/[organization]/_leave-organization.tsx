@@ -1,8 +1,8 @@
 "use client";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Section } from "@/components/section";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { useAction } from "@/lib/use-action";
 
 import { leaveOrganizationAction } from "./members/actions";
@@ -34,15 +34,11 @@ export function LeaveOrganization({
   const { pending, error, run } = useAction();
 
   return (
-    <Card className="gap-gutter">
-      <div className="grid gap-1">
-        <p className="text-sm font-medium">Leave {name}</p>
-        <p className="text-sm text-muted-foreground">
-          You will be removed from this organization and from every project in it.
-          Organizations you own are not affected. An owner or admin can invite you
-          back.
-        </p>
-      </div>
+    <Section
+      card
+      title={`Leave ${name}`}
+      description="You will be removed from this organization and from every project in it. Organizations you own are not affected. An owner or admin can invite you back."
+    >
       {error && (
         <p className="text-sm text-destructive" role="alert">
           {error}
@@ -67,6 +63,6 @@ export function LeaveOrganization({
           onConfirm={() => run(() => leaveOrganizationAction(organizationId))}
         />
       </div>
-    </Card>
+    </Section>
   );
 }

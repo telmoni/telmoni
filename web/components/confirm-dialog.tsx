@@ -84,7 +84,7 @@ export function ConfirmDialog({
         </AlertDialogBody>
         <AlertDialogFooter>
           <AlertDialogAction
-            variant={destructive ? "destructive" : "default"}
+            variant={destructive ? "destructive" : "filled"}
             disabled={!unlocked}
             onClick={onConfirm}
           >

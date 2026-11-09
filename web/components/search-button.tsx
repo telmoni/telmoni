@@ -32,10 +32,9 @@ export function SearchButton() {
         "rounded-md text-muted-foreground hover:text-foreground",
         "hover:bg-sidebar-accent/50",
         searchOpen && "bg-sidebar-accent text-foreground hover:bg-sidebar-accent",
-        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
-      <Search className="size-4" />
+      <Search className="size-icon" />
     </Button>
   );
 }

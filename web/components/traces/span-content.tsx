@@ -41,7 +41,7 @@ function roleLabel(role: string): string {
 /** Text a person reads in a block, wrapped and scrolled within its width. */
 function Pre({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-md bg-muted p-gutter font-mono text-xs leading-5 break-all whitespace-pre-wrap">
+    <pre className="overflow-x-auto rounded-md bg-muted p-gutter text-xs break-all whitespace-pre-wrap">
       {children}
     </pre>
   );

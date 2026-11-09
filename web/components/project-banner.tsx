@@ -38,10 +38,10 @@ export function ProjectBanner({
   return (
     <div
       role="status"
-      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-primary/20 bg-primary/5 px-4 py-2.5 text-sm"
+      className="flex flex-wrap items-center justify-between gap-x-gutter gap-y-2 border-b border-primary/20 bg-primary/5 px-gutter py-2 text-sm"
     >
       <div className="flex items-center gap-2 text-foreground">
-        <span className="font-semibold text-primary">Telmoni Project:</span>
+        <span className="font-medium text-primary">Telmoni Project:</span>
         <p>{activeNotification.message}</p>
       </div>
 
@@ -58,9 +58,9 @@ export function ProjectBanner({
           type="button"
           onClick={() => setDismissed(true)}
           aria-label="Close notification"
-          className="flex size-control shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex size-control shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
-          <X className="size-4" />
+          <X className="size-icon" />
         </button>
       </div>
     </div>

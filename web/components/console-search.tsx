@@ -5,6 +5,8 @@ import { useSearchIndex } from "@/components/search/use-search-index";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   ArrowUpRight,
   BookOpen,
   History,
@@ -217,8 +219,8 @@ export function ConsoleSearch() {
 
         {/* The palette's header is its input row: the field and the close
             button on one row, inside the same gutter every modal keeps. */}
-        <DialogHeader className="items-center gap-2.5">
-          <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <DialogHeader className="items-center gap-gutter">
+          <Search aria-hidden className="size-icon shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
             type="text"
@@ -305,7 +307,11 @@ export function ConsoleSearch() {
           aria-hidden
           className="justify-start text-xs text-muted-foreground"
         >
-          <span>↑↓ to navigate</span>
+          <span className="inline-flex items-center gap-0.5">
+            <ArrowUp className="size-icon" />
+            <ArrowDown className="size-icon" />
+            <span className="ml-1">to navigate</span>
+          </span>
           <span>·</span>
           <span>Enter to select</span>
           <span>·</span>
@@ -363,11 +369,11 @@ function Row({
       }}
       onMouseEnter={onHover}
       className={cn(
-        "flex w-full items-center gap-2.5 px-gutter py-2 text-left",
+        "flex w-full items-center gap-gutter px-gutter py-2 text-left",
         item.id === activeId && "bg-accent",
       )}
     >
-      <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+      <Icon aria-hidden className="size-icon shrink-0 text-muted-foreground" />
       <span className="grid min-w-0 flex-1 gap-0.5">
         <span className="truncate text-sm">{item.label}</span>
         {item.hint && (
@@ -379,7 +385,7 @@ function Row({
       {item.external && (
         <ArrowUpRight
           aria-label="Opens in a new tab"
-          className="size-4 shrink-0 text-muted-foreground"
+          className="size-icon shrink-0 text-muted-foreground"
         />
       )}
     </button>

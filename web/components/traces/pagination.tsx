@@ -75,7 +75,7 @@ export function ListPagination({ list, organization, slug, query, ui = {}, total
             );
           }}
         >
-          <SelectTrigger size="sm" aria-label="Rows per page">
+          <SelectTrigger aria-label="Rows per page">
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper" align="end">

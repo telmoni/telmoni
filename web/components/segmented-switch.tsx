@@ -61,7 +61,7 @@ export function SegmentedSwitch<T extends string>({
               segmentAppearance(active),
             )}
           >
-            <Icon className="size-3.5" aria-hidden />
+            <Icon aria-hidden />
           </Button>
         );
       })}

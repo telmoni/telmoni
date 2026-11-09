@@ -30,7 +30,7 @@ describe("the focus indicator", () => {
 
   it("draws keyboard focus unless it was explicitly turned off", () => {
     expect(block("html:not(.a11y-no-focus-rings) *:focus-visible")).toMatch(
-      /outline:\s*2px solid var\(--color-foreground\)/,
+      /box-shadow:\s*0 0 0 1px var\(--color-foreground\)/,
     );
   });
 

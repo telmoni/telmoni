@@ -1,24 +1,22 @@
 "use client";
 
 import { UserPlus } from "lucide-react";
-import { startTransition, useState } from "react";
+import { startTransition, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { EnumSelect } from "@/components/enum-select";
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 import { PageAction } from "@/components/page-action";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SidePanel,
+  SidePanelBody,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+  usePanelOpening,
+} from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import type { GivenRole } from "@/lib/roles";
 import { OrganizationRole } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
@@ -30,84 +28,103 @@ import { inviteOrganizationMemberAction } from "./actions";
 // one: the page has gone stale since.
 
 export function AddOrganizationMember({ organizationId }: { organizationId: string }) {
-  const [open, setOpen] = useState(false);
+  const { opening, open, close, place } = usePanelOpening();
+  const [sent, setSent] = useState<{ email: string; link: string } | null>(null);
   return (
     <>
-      <PageAction primary="Invite member" onClick={() => setOpen(true)}>
-        <UserPlus className="size-4" />
+      <PageAction primary="Invite member" onClick={(e) => open(e.currentTarget, null)}>
+        <UserPlus className="size-icon" />
         Invite member
       </PageAction>
-      <AddOrganizationMemberDialog
-        key={`add-organization-member-${open}`}
-        organizationId={organizationId}
-        open={open}
-        onOpenChange={setOpen}
-      />
+      {place(
+        opening && (
+          <InvitePanel
+            key={opening.at}
+            organizationId={organizationId}
+            onClose={close}
+            returnFocus={() => opening.returnTo}
+            onInvited={(email, link) => {
+              close();
+              if (link) setSent({ email, link });
+            }}
+          />
+        ),
+      )}
+      {sent && (
+        <InviteSentDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setSent(null);
+          }}
+          email={sent.email}
+          link={sent.link}
+          scope="organization"
+        />
+      )}
     </>
   );
 }
 
-function AddOrganizationMemberDialog({
+function InvitePanel({
   organizationId,
-  open,
-  onOpenChange,
+  onClose,
+  returnFocus,
+  onInvited,
 }: {
   organizationId: string;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
+  /** An invitation sent, with the link it carries where there is one. */
+  onInvited: (email: string, link: string | null) => void;
 }) {
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<GivenRole>(OrganizationRole.Member);
-  const [link, setLink] = useState<string | null>(null);
   const { pending, error, run } = useAction();
+  const ready = !pending && email.trim().length > 0;
 
   function submit() {
     run(
       () => inviteOrganizationMemberAction(organizationId, email, role),
       (r) => {
         // In the transition, with the invitations the action drew again.
-        startTransition(() => setLink(r.link ?? null));
+        startTransition(() => onInvited(email, r.link ?? null));
         toast.success(`Invitation sent to ${email}`);
       },
     );
   }
 
-  if (link) {
-    return (
-      <InviteSentDialog
-        open={open}
-        onOpenChange={onOpenChange}
-        email={email}
-        link={link}
-        scope="organization"
-      />
-    );
-  }
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Invite an organization member</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <DialogDescription>
+    <SidePanel panel={panel} titleId={titleId} onClose={onClose} full initialFocus={field} returnFocus={returnFocus}>
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) submit();
+        }}
+      >
+        <SidePanelHeader icon={UserPlus} titleId={titleId} title="Invite an organization member" onClose={onClose}>
+          <p className="text-sm text-muted-foreground">
             Invite a colleague to this organization. They get a link and can join as an
             admin or a member.
-          </DialogDescription>
-          <div className="grid gap-1.5">
-            <Label htmlFor="organization-member-email">Email address</Label>
+          </p>
+        </SidePanelHeader>
+        <SidePanelBody>
+          <SidePanelRow label="Email address" htmlFor="organization-member-email">
             <Input
+              ref={field}
               id="organization-member-email"
               type="email"
               autoComplete="off"
+              className="max-w-md"
               value={email}
               placeholder="alex@example.com"
               onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="organization-member-role">Organization role</Label>
+          </SidePanelRow>
+          <SidePanelRow label="Organization role" htmlFor="organization-member-role">
             <EnumSelect
               id="organization-member-role"
               value={role}
@@ -118,20 +135,24 @@ function AddOrganizationMemberDialog({
                   : "Member — project-level access only; no organization-wide powers"
               }
               onChange={setRole}
-              className="w-full"
+              className="w-full max-w-md"
             />
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-        </DialogBody>
-        <DialogFooter>
-          <Button
-            onClick={submit}
-            disabled={pending || email.trim().length === 0}
-          >
+          </SidePanelRow>
+          {error && (
+            <p className="py-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </SidePanelBody>
+        <SidePanelFooter>
+          <Button type="submit" variant="filled" disabled={!ready}>
             {pending ? "Sending…" : "Send invitation"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }

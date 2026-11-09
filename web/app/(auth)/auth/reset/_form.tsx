@@ -23,7 +23,7 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
           {/* A Route Handler, not a page, so never a <Link>: a link's prefetch
               would run it, starting a sign-in nobody asked for. */}
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-          <a href="/auth/login" className={buttonVariants()}>
+          <a href="/auth/login" className={buttonVariants({ variant: "filled" })}>
             Sign in
           </a>
         </div>
@@ -73,7 +73,7 @@ export function ResetForm({ userId, token }: { userId: string; token: string }) 
           {error}
         </p>
       )}
-      <Button type="submit" disabled={pending || password.length < 8 || again !== password}>
+      <Button type="submit" variant="filled" disabled={pending || password.length < 8 || again !== password}>
         {pending ? "Saving…" : "Change password"}
       </Button>
     </form>

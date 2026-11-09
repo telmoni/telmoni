@@ -12,11 +12,15 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { ArrowUpRight, ChevronRight, PanelLeft, SearchIcon } from "lucide-react";
+import { ArrowUpRight, ChevronRight, ListIndentDecrease, ListIndentIncrease, Maximize2, Minimize2, SearchIcon } from "lucide-react";
 import Link from "next/link";
+import { createPortal } from "react-dom";
 
+import { ContentCue } from "@/components/content-cue";
+import { FadeScroll } from "@/components/fade-scroll";
 import { LocalTime } from "@/components/local-time";
-import { StatusBadge } from "@/components/status-badge";
+import { PanelAction } from "@/components/side-panel";
+import { StatusMark } from "@/components/status-badge";
 import {
   INDENT_MAX,
   KindIcon,
@@ -67,7 +71,7 @@ import {
   sessionRunsHref,
   tracesHref,
 } from "@/lib/traces";
-import { SpanKind, SpanStatus } from "@/lib/types/enums";
+import { type ContentMode, SpanKind, SpanStatus } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
 // One trace read a span at a time: its
@@ -77,8 +81,8 @@ import { cn } from "@/lib/utils";
 // are what ingest kept as metadata under their own names.
 
 /** How a span ended, the error's class beside it where it failed. */
-function SpanStatusBadge({ span }: { span: Pick<TraceSpan, "status" | "error_type"> }) {
-  return <StatusBadge status={span.status} detail={span.error_type} />;
+function SpanStatusMark({ span }: { span: Pick<TraceSpan, "status" | "error_type"> }) {
+  return <StatusMark status={span.status} detail={span.error_type} />;
 }
 
 /** A value with a page of its own, linked there, with the arrow that says
@@ -91,7 +95,7 @@ function MetaLink({ href, title, children }: { href: string; title?: string; chi
       className="inline-flex min-w-0 items-center gap-0.5 underline-offset-4 hover:text-foreground hover:underline"
     >
       <span className="truncate">{children}</span>
-      <ArrowUpRight className="size-3 shrink-0" aria-hidden="true" />
+      <ArrowUpRight className="size-icon shrink-0" aria-hidden="true" />
     </Link>
   );
 }
@@ -136,11 +140,14 @@ export const TraceMeta = memo(function TraceMeta({
   organization,
   slug,
   incidents = [],
+  contentMode,
 }: {
   trace: TraceDetail;
   organization: string;
   slug: string;
   incidents?: readonly Pick<Incident, "id" | "rule_name" | "agent">[];
+  /** The project's content mode, said on the line; none where it could not be read. */
+  contentMode?: ContentMode;
 }) {
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
   const { run, root } = summary;
@@ -148,7 +155,7 @@ export const TraceMeta = memo(function TraceMeta({
   const tokens = summary.inputTokens + summary.outputTokens;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-gutter gap-y-1.5 text-xs text-muted-foreground">
-      <StatusBadge status={run?.status ?? null} detail={run?.error_type} />
+      <StatusMark status={run?.status ?? null} detail={run?.error_type} />
       <LocalTime iso={summary.startedAt} />
       <span className="tabular-nums">{formatDuration(summary.durationMs)}</span>
       <span
@@ -194,6 +201,7 @@ export const TraceMeta = memo(function TraceMeta({
           incident: {incident.rule_name ?? incident.agent}
         </MetaLink>
       ))}
+      {contentMode && <ContentCue mode={contentMode} labelled />}
     </div>
   );
 });
@@ -223,7 +231,7 @@ function SpansButton({
           aria-expanded={shown}
           onClick={onClick}
         >
-          <PanelLeft />
+          {shown ? <ListIndentDecrease /> : <ListIndentIncrease />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -348,7 +356,7 @@ export const TraceBody = memo(function TraceBody({
         <div
           className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border md:max-h-none md:w-2/5 md:max-w-sm md:min-w-60 md:border-r md:border-b-0"
         >
-          <div className="flex shrink-0 items-center gap-2 px-gutter pt-gutter pb-2">
+          <div className="flex shrink-0 items-center gap-gutter px-gutter pt-gutter pb-2">
             <SpansButton
               ref={hideSpans}
               shown
@@ -375,7 +383,7 @@ export const TraceBody = memo(function TraceBody({
           <div className="shrink-0 px-gutter pb-2">
             <div className="relative">
               <SearchIcon
-                className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+                className="pointer-events-none absolute top-1/2 left-gutter size-icon -translate-y-1/2 text-muted-foreground"
                 aria-hidden="true"
               />
               <Input
@@ -391,37 +399,40 @@ export const TraceBody = memo(function TraceBody({
                 }}
                 placeholder="Search spans"
                 aria-label="Search spans"
-                className="pl-8"
+                className="pl-[calc(2*var(--spacing-gutter)+var(--spacing-icon)-1px)]"
               />
             </div>
           </div>
           {rows.length === 0 ? (
             <p className="px-gutter py-2 text-xs text-muted-foreground">No span matches.</p>
           ) : (
-            <div
-              ref={tree}
-              role="tree"
-              aria-label="Spans"
-              onKeyDown={onKeyDown}
-              className="min-h-0 flex-1 overflow-y-auto px-2 pb-gutter"
-            >
-              {rows.map((node) => {
-                const id = node.span.span_id;
-                const bar = bars.get(id);
-                return (
-                  <SpanRow
-                    key={id}
-                    node={node}
-                    chosen={id === span.span_id}
-                    tabStop={id === tabStop}
-                    branch={!searching && node.children.length > 0}
-                    open={!shut.has(id)}
-                    bar={timeline && bar ? bar : null}
-                    dispatch={dispatch}
-                  />
-                );
-              })}
-            </div>
+            <FadeScroll axis="y" className="min-h-0 flex-1">
+              <div
+                ref={tree}
+                role="tree"
+                aria-label="Spans"
+                onKeyDown={onKeyDown}
+                data-scroll-y=""
+                className="h-full overflow-y-auto px-gutter pb-gutter"
+              >
+                {rows.map((node) => {
+                  const id = node.span.span_id;
+                  const bar = bars.get(id);
+                  return (
+                    <SpanRow
+                      key={id}
+                      node={node}
+                      chosen={id === span.span_id}
+                      tabStop={id === tabStop}
+                      branch={!searching && node.children.length > 0}
+                      open={!shut.has(id)}
+                      bar={timeline && bar ? bar : null}
+                      dispatch={dispatch}
+                    />
+                  );
+                })}
+              </div>
+            </FadeScroll>
           )}
           <TruncatedNote trace={trace} className="shrink-0 border-t border-border px-gutter py-2" />
         </div>
@@ -484,7 +495,7 @@ const SpanRow = memo(function SpanRow({
       className={cn(
         "relative flex cursor-pointer items-start gap-1.5 rounded-md py-1.5 pr-2 outline-none",
         bar && "pb-5",
-        chosen ? "bg-muted" : "hover:bg-muted/50",
+        chosen ? "bg-muted" : "hover:bg-accent/50",
       )}
       style={indentStyle(depth)}
     >
@@ -505,7 +516,7 @@ const SpanRow = memo(function SpanRow({
       >
         {branch && (
           <ChevronRight
-            className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-90")}
+            className={cn("size-icon text-muted-foreground transition-transform", open && "rotate-90")}
           />
         )}
       </span>
@@ -527,7 +538,7 @@ const SpanRow = memo(function SpanRow({
  *  name and value. */
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-gutter border-b border-border py-2 last:border-b-0">
+    <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-gutter border-b border-border py-gutter last:border-b-0">
       <dt className="min-w-0 wrap-break-word text-muted-foreground">{label}</dt>
       <dd className="min-w-0 wrap-break-word">{children}</dd>
     </div>
@@ -548,7 +559,7 @@ function FilterField({ label, href, children }: { label: string; href: string; c
 /** A value as the server sent it. */
 function Raw({ value }: { value: unknown }) {
   return (
-    <pre className="overflow-x-auto rounded-md bg-muted p-gutter font-mono text-xs leading-5 break-all whitespace-pre-wrap">
+    <pre className="overflow-x-auto rounded-md bg-muted p-gutter text-xs break-all whitespace-pre-wrap">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -587,6 +598,8 @@ function SpanDetail({
 }) {
   const [tab, setTab] = useState(keptContent ? "content" : "details");
   const [raw, setRaw] = useState(false);
+  // Over the whole window to read a long span; Esc, or the button, puts it back.
+  const [full, setFull] = useState(false);
   const attributes = Object.entries(span.attributes).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const reaching = useWindowReaching(span.started_at);
   const tokens = span.input_tokens + span.output_tokens;
@@ -596,10 +609,20 @@ function SpanDetail({
   const source = found ? retrievalSource(span) : null;
   const tags = Object.entries(span.tags);
 
-  return (
-    <section aria-label="The span chosen" className={cn("flex flex-col", className)}>
+  const pane = (
+    <section
+      aria-label="The span chosen"
+      className={cn("flex flex-col", className, full && "fixed inset-0 z-50 bg-background")}
+      onKeyDown={(event) => {
+        if (full && event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setFull(false);
+        }
+      }}
+    >
       <div className="grid shrink-0 gap-1.5 border-b border-border p-gutter">
-        <div className="flex min-h-control min-w-0 items-center gap-2">
+        <div className="flex min-h-control min-w-0 items-center gap-gutter">
           {!spansShown && <SpansButton ref={showSpansRef} shown={false} onClick={onShowSpans} />}
           <KindIcon span={span} />
           <h3 className="min-w-0 truncate text-sm font-medium" title={span.name}>
@@ -608,7 +631,7 @@ function SpanDetail({
           <span className="shrink-0 text-xs text-muted-foreground">{KIND_LABEL[span.kind]}</span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-x-gutter gap-y-1 text-xs tabular-nums text-muted-foreground">
-          <SpanStatusBadge span={span} />
+          <SpanStatusMark span={span} />
           <LocalTime iso={span.started_at} mode="precise" />
           <span>{formatDuration(spanMillis(span))}</span>
           {span.kind === SpanKind.ModelCall && (
@@ -629,7 +652,8 @@ function SpanDetail({
         {!run && <SpanScores spanId={span.span_id} />}
       </div>
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <div className="flex shrink-0 items-center gap-2 border-b border-border px-gutter py-1.5">
+        {/* Narrow, Formatted and Raw go under the tabs rather than past the edge. */}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border px-gutter py-1.5">
           <TabsList variant="line">
             <TabsTrigger value="content">Content</TabsTrigger>
             <TabsTrigger value="details">Details</TabsTrigger>
@@ -652,183 +676,191 @@ function SpanDetail({
             <ToggleGroupItem value="formatted">Formatted</ToggleGroupItem>
             <ToggleGroupItem value="raw">Raw</ToggleGroupItem>
           </ToggleGroup>
+          <PanelAction label={full ? "Exit full size" : "Full size"} onClick={() => setFull(!full)}>
+            {full ? <Minimize2 /> : <Maximize2 />}
+          </PanelAction>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-gutter py-2">
-          <TabsContent value="content">
-            {raw ? (
-              <Raw value={fields ?? null} />
-            ) : fields === null ? (
-              <p className="py-2 text-sm text-muted-foreground">
-                This span&apos;s content could not be read. Reload to try again.
-              </p>
-            ) : fields ? (
-              <div className="grid gap-4">
-                <ScrubbedNote attributes={span.attributes} />
-                <SpanContent fields={fields} />
-              </div>
-            ) : (
-              <p className="py-2 text-sm text-muted-foreground">This span kept no content.</p>
-            )}
-          </TabsContent>
-          <TabsContent value="details">
-            {raw ? (
-              <Raw value={span} />
-            ) : (
-              <dl className="text-sm">
-                <Field label="Kind">{KIND_LABEL[span.kind]}</Field>
-                <Field label="Status">
-                  <SpanStatusBadge span={span} />
-                </Field>
-                {run && <Field label="Agent">{span.agent}</Field>}
-                {run && (
-                  <Field label="Calls">
-                    {formatCount(summary.steps)} {summary.steps === 1 ? "step" : "steps"},{" "}
-                    {formatCount(calls)} {calls === 1 ? "call" : "calls"}:{" "}
-                    <span className="text-muted-foreground">
-                      {formatCount(summary.modelCalls)} to a model, {formatCount(summary.toolCalls)} to a tool,{" "}
-                      {formatCount(summary.retrievals)} {summary.retrievals === 1 ? "retrieval" : "retrievals"}
-                    </span>
+        <FadeScroll axis="y" className="min-h-0 flex-1">
+          <div data-scroll-y="" className="h-full overflow-y-auto px-gutter py-2">
+            <TabsContent value="content">
+              {raw ? (
+                <Raw value={fields ?? null} />
+              ) : fields === null ? (
+                <p className="py-2 text-sm text-muted-foreground">
+                  This span&apos;s content could not be read. Reload to try again.
+                </p>
+              ) : fields ? (
+                <div className="grid gap-4">
+                  <ScrubbedNote attributes={span.attributes} />
+                  <SpanContent fields={fields} />
+                </div>
+              ) : (
+                <p className="py-2 text-sm text-muted-foreground">This span kept no content.</p>
+              )}
+            </TabsContent>
+            <TabsContent value="details">
+              {raw ? (
+                <Raw value={span} />
+              ) : (
+                <dl className="text-sm">
+                  <Field label="Kind">{KIND_LABEL[span.kind]}</Field>
+                  <Field label="Status">
+                    <SpanStatusMark span={span} />
                   </Field>
-                )}
-                {run && (
-                  <Field label="Tokens">
-                    {formatCount(summary.inputTokens + summary.outputTokens)}{" "}
-                    <span className="text-muted-foreground">
-                      ({formatCount(summary.inputTokens)} in, {formatCount(summary.outputTokens)} out)
-                    </span>
+                  {run && <Field label="Agent">{span.agent}</Field>}
+                  {run && (
+                    <Field label="Calls">
+                      {formatCount(summary.steps)} {summary.steps === 1 ? "step" : "steps"},{" "}
+                      {formatCount(calls)} {calls === 1 ? "call" : "calls"}:{" "}
+                      <span className="text-muted-foreground">
+                        {formatCount(summary.modelCalls)} to a model, {formatCount(summary.toolCalls)} to a tool,{" "}
+                        {formatCount(summary.retrievals)} {summary.retrievals === 1 ? "retrieval" : "retrievals"}
+                      </span>
+                    </Field>
+                  )}
+                  {run && (
+                    <Field label="Tokens">
+                      {formatCount(summary.inputTokens + summary.outputTokens)}{" "}
+                      <span className="text-muted-foreground">
+                        ({formatCount(summary.inputTokens)} in, {formatCount(summary.outputTokens)} out)
+                      </span>
+                    </Field>
+                  )}
+                  {span.model && (
+                    <FilterField
+                      label="Model"
+                      href={tracesHref(organization, slug, { model: [span.model], days: reaching })}
+                    >
+                      {span.model}
+                    </FilterField>
+                  )}
+                  {span.provider && <Field label="Provider">{span.provider}</Field>}
+                  {span.environment && (
+                    <FilterField
+                      label="Environment"
+                      href={tracesHref(organization, slug, { environment: [span.environment], days: reaching })}
+                    >
+                      {span.environment}
+                    </FilterField>
+                  )}
+                  {span.release && (
+                    <FilterField
+                      label="Release"
+                      href={tracesHref(organization, slug, { release: [span.release], days: reaching })}
+                    >
+                      {span.release}
+                    </FilterField>
+                  )}
+                  {span.kind === SpanKind.ToolCall && (
+                    <FilterField
+                      label="Tool"
+                      href={tracesHref(organization, slug, { tool: [span.name], days: reaching })}
+                    >
+                      {span.name}
+                    </FilterField>
+                  )}
+                  {/* The list has no filter by source, so it links nowhere. */}
+                  {found && (
+                    <>
+                      {source !== null && <Field label="Source">{source}</Field>}
+                      {found.asked !== null && <Field label="Asked for">{formatCount(found.asked)}</Field>}
+                      {found.returned !== null && <Field label="Returned">{formatCount(found.returned)}</Field>}
+                    </>
+                  )}
+                  {(span.kind === SpanKind.ModelCall || tokens > 0) && (
+                    <>
+                      <Field label="Input tokens">{formatCount(span.input_tokens)}</Field>
+                      <Field label="Output tokens">{formatCount(span.output_tokens)}</Field>
+                      <Field label="Cache read">{formatCount(span.cache_read_input_tokens)}</Field>
+                      <Field label="Cache write">{formatCount(span.cache_write_input_tokens)}</Field>
+                    </>
+                  )}
+                  {span.cost !== null && <Field label="Cost">{formatCost(span.cost)}</Field>}
+                  <Field label="Started">
+                    <LocalTime iso={span.started_at} mode="precise" />
                   </Field>
-                )}
-                {span.model && (
-                  <FilterField
-                    label="Model"
-                    href={tracesHref(organization, slug, { model: [span.model], days: reaching })}
-                  >
-                    {span.model}
-                  </FilterField>
-                )}
-                {span.provider && <Field label="Provider">{span.provider}</Field>}
-                {span.environment && (
-                  <FilterField
-                    label="Environment"
-                    href={tracesHref(organization, slug, { environment: [span.environment], days: reaching })}
-                  >
-                    {span.environment}
-                  </FilterField>
-                )}
-                {span.release && (
-                  <FilterField
-                    label="Release"
-                    href={tracesHref(organization, slug, { release: [span.release], days: reaching })}
-                  >
-                    {span.release}
-                  </FilterField>
-                )}
-                {span.kind === SpanKind.ToolCall && (
-                  <FilterField
-                    label="Tool"
-                    href={tracesHref(organization, slug, { tool: [span.name], days: reaching })}
-                  >
-                    {span.name}
-                  </FilterField>
-                )}
-                {/* The list has no filter by source, so it links nowhere. */}
-                {found && (
-                  <>
-                    {source !== null && <Field label="Source">{source}</Field>}
-                    {found.asked !== null && <Field label="Asked for">{formatCount(found.asked)}</Field>}
-                    {found.returned !== null && <Field label="Returned">{formatCount(found.returned)}</Field>}
-                  </>
-                )}
-                {(span.kind === SpanKind.ModelCall || tokens > 0) && (
-                  <>
-                    <Field label="Input tokens">{formatCount(span.input_tokens)}</Field>
-                    <Field label="Output tokens">{formatCount(span.output_tokens)}</Field>
-                    <Field label="Cache read">{formatCount(span.cache_read_input_tokens)}</Field>
-                    <Field label="Cache write">{formatCount(span.cache_write_input_tokens)}</Field>
-                  </>
-                )}
-                {span.cost !== null && <Field label="Cost">{formatCost(span.cost)}</Field>}
-                <Field label="Started">
-                  <LocalTime iso={span.started_at} mode="precise" />
-                </Field>
-                <Field label="Ended">
-                  <LocalTime iso={span.ended_at} mode="precise" />
-                </Field>
-                <Field label="Duration">{formatDuration(spanMillis(span))}</Field>
-                {span.time_to_first_token !== null && (
-                  <Field label="Time to first token">{formatDuration(span.time_to_first_token * 1000)}</Field>
-                )}
-                {run && span.user_id && (
-                  <FilterField
-                    label="User"
-                    href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
-                  >
-                    {span.user_id}
-                  </FilterField>
-                )}
-                {run && span.session_id && (
-                  <FilterField
-                    label="Session"
-                    href={sessionRunsHref(organization, slug, span.session_id, reaching)}
-                  >
-                    {span.session_id}
-                  </FilterField>
-                )}
-                {tags.length > 0 && (
-                  <Field label="Tags">
-                    <span className="flex flex-wrap gap-1">
-                      {tags.map(([key, value]) => (
-                        <Badge key={key} variant="secondary">
-                          {key}={value}
-                        </Badge>
-                      ))}
-                    </span>
+                  <Field label="Ended">
+                    <LocalTime iso={span.ended_at} mode="precise" />
                   </Field>
-                )}
-                {span.sample_rate !== null && span.sample_rate !== 1 && (
-                  <Field label="Sample rate">{span.sample_rate}</Field>
-                )}
-                {run && (
-                  <Field label="Run id">
-                    {runId}
+                  <Field label="Duration">{formatDuration(spanMillis(span))}</Field>
+                  {span.time_to_first_token !== null && (
+                    <Field label="Time to first token">{formatDuration(span.time_to_first_token * 1000)}</Field>
+                  )}
+                  {run && span.user_id && (
+                    <FilterField
+                      label="User"
+                      href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
+                    >
+                      {span.user_id}
+                    </FilterField>
+                  )}
+                  {run && span.session_id && (
+                    <FilterField
+                      label="Session"
+                      href={sessionRunsHref(organization, slug, span.session_id, reaching)}
+                    >
+                      {span.session_id}
+                    </FilterField>
+                  )}
+                  {tags.length > 0 && (
+                    <Field label="Tags">
+                      <span className="flex flex-wrap gap-1">
+                        {tags.map(([key, value]) => (
+                          <Badge key={key} variant="secondary">
+                            {key}={value}
+                          </Badge>
+                        ))}
+                      </span>
+                    </Field>
+                  )}
+                  {span.sample_rate !== null && span.sample_rate !== 1 && (
+                    <Field label="Sample rate">{span.sample_rate}</Field>
+                  )}
+                  {run && (
+                    <Field label="Run id">
+                      {runId}
+                    </Field>
+                  )}
+                  <Field label="Span id">
+                    {span.span_id}
                   </Field>
-                )}
-                <Field label="Span id">
-                  {span.span_id}
-                </Field>
-                {span.parent_span_id && (
-                  <Field label="Parent span id">
-                    {span.parent_span_id}
+                  {span.parent_span_id && (
+                    <Field label="Parent span id">
+                      {span.parent_span_id}
+                    </Field>
+                  )}
+                  <Field label="Trace id">
+                    {span.trace_id}
                   </Field>
-                )}
-                <Field label="Trace id">
-                  {span.trace_id}
-                </Field>
-                <Field label="Received">
-                  <LocalTime iso={span.received_at} mode="precise" />
-                </Field>
-              </dl>
-            )}
-          </TabsContent>
-          <TabsContent value="attributes">
-            {attributes.length === 0 ? (
-              <p className="py-2 text-sm text-muted-foreground">
-                No other attributes were kept with this span.
-              </p>
-            ) : raw ? (
-              <Raw value={span.attributes} />
-            ) : (
-              <dl className="text-sm">
-                {attributes.map(([key, value]) => (
-                  <Field key={key} label={key}>
-                    {value}
+                  <Field label="Received">
+                    <LocalTime iso={span.received_at} mode="precise" />
                   </Field>
-                ))}
-              </dl>
-            )}
-          </TabsContent>
-        </div>
+                </dl>
+              )}
+            </TabsContent>
+            <TabsContent value="attributes">
+              {attributes.length === 0 ? (
+                <p className="py-2 text-sm text-muted-foreground">
+                  No other attributes were kept with this span.
+                </p>
+              ) : raw ? (
+                <Raw value={span.attributes} />
+              ) : (
+                <dl className="text-sm">
+                  {attributes.map(([key, value]) => (
+                    <Field key={key} label={key}>
+                      {value}
+                    </Field>
+                  ))}
+                </dl>
+              )}
+            </TabsContent>
+          </div>
+        </FadeScroll>
       </Tabs>
     </section>
   );
+  // Full size over the window, out of a panel whose slide-in transform would
+  // otherwise hold `fixed` inside it.
+  return full ? createPortal(pane, document.body) : pane;
 }

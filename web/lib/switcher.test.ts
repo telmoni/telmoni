@@ -6,8 +6,8 @@ import { organizationRows, projectRows } from "./switcher";
 const ACME = { organizationId: "org_acme", slug: "acme", name: "Acme" };
 const BOLT = { organizationId: "org_bolt", slug: "bolt", name: "Bolt" };
 const ZED = { organizationId: "org_zed", organizationSlug: "zed", organizationName: "Zed" };
-const WEB = { id: "project_web", slug: "web", name: "Web", content_mode: "on" as const };
-const API = { id: "project_api", slug: "api", name: "API", content_mode: "off" as const };
+const WEB = { id: "project_web", slug: "web", name: "Web", role: "owner" as const, content_mode: "on" as const };
+const API = { id: "project_api", slug: "api", name: "API", role: "member" as const, content_mode: "off" as const };
 
 /** Walk the console the way the recorder does: one push per navigation. */
 function walk(...paths: string[]): ConsoleTrail {
@@ -79,6 +79,7 @@ describe("projectRows", () => {
         href: "/acme/web/traces",
         settingsHref: "/acme/web/settings",
         active: false,
+        role: "owner",
         contentMode: "on",
       },
       {
@@ -87,6 +88,7 @@ describe("projectRows", () => {
         href: "/acme/api",
         settingsHref: "/acme/api/settings",
         active: true,
+        role: "member",
         contentMode: "off",
       },
     ]);

@@ -1,5 +1,7 @@
 import { Fragment, useMemo } from "react";
 import Link from "next/link";
+
+import { FadeScroll } from "@/components/fade-scroll";
 import {
   allowedHref,
   opensInConsole,
@@ -32,7 +34,7 @@ function BlockView({ block, citations }: { block: Block; citations: AgentCitatio
       );
     case "heading":
       return (
-        <p className="font-semibold">
+        <p className="font-medium">
           <Inlines nodes={block.children} citations={citations} />
         </p>
       );
@@ -52,9 +54,11 @@ function BlockView({ block, citations }: { block: Block; citations: AgentCitatio
     }
     case "code":
       return (
-        <pre className="overflow-x-auto rounded-md bg-muted px-gutter py-2 font-mono text-xs">
-          <code>{block.text}</code>
-        </pre>
+        <FadeScroll className="rounded-md [--fade:var(--muted)]">
+          <pre data-scroll-x="" className="overflow-x-auto rounded-md bg-muted px-gutter py-2 text-xs">
+            <code>{block.text}</code>
+          </pre>
+        </FadeScroll>
       );
   }
 }
@@ -76,10 +80,10 @@ function InlineView({ node, citations }: { node: Inline; citations: AgentCitatio
     case "text":
       return node.text;
     case "code":
-      return <code className="rounded-xs bg-muted px-1 py-0.5 font-mono text-xs">{node.text}</code>;
+      return <code className="rounded-xs bg-muted px-1 py-0.5 text-xs">{node.text}</code>;
     case "strong":
       return (
-        <strong className="font-semibold">
+        <strong className="font-medium">
           <Inlines nodes={node.children} citations={citations} />
         </strong>
       );

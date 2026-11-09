@@ -17,6 +17,7 @@ import { useAgentStatus } from "@/components/agent/use-agent-status";
 import { useAgentTurn } from "@/components/agent/use-agent-turn";
 import { useStickToEnd } from "@/components/agent/use-stick-to-end";
 import { PanelAction } from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { agentReducer, initialAgentState } from "@/lib/agent/stream";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { agentSuggestions } from "@/lib/agent/suggestions";
@@ -244,7 +245,7 @@ export function AgentPanel() {
   const actions = (
     <>
       <PanelAction label="New conversation" disabled={!canAsk} onClick={newConversation}>
-        <Plus className="size-4" />
+        <Plus className="size-icon" />
       </PanelAction>
       <PanelAction
         label={view === "history" ? "Back to the conversation" : "Conversation history"}
@@ -252,9 +253,9 @@ export function AgentPanel() {
         onClick={toggleHistory}
       >
         {view === "history" ? (
-          <MessageSquare className="size-4" />
+          <MessageSquare className="size-icon" />
         ) : (
-          <HistoryIcon className="size-4" />
+          <HistoryIcon className="size-icon" />
         )}
       </PanelAction>
     </>
@@ -276,18 +277,19 @@ export function AgentPanel() {
     content = (
       <Notice
         action={
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => {
               // The button goes as the check begins: focus waits on the
               // window, and moves to the field if the agent answers.
               panelRef.current?.focus();
               agent.retry();
             }}
-            className="cursor-pointer rounded-md border border-border px-gutter py-1.5 text-sm hover:bg-accent"
           >
             Try again
-          </button>
+          </Button>
         }
       >
         The agent couldn&rsquo;t be reached.

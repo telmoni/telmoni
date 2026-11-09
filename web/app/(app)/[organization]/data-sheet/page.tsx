@@ -7,6 +7,7 @@ import { DataTable, THead, Td, Th } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
+import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { Card } from "@/components/ui/card";
 import {
@@ -121,16 +122,16 @@ export default async function DataSheetPage() {
           </h2>
           <p className="text-sm text-muted-foreground">
             This drawing is row {drawn.drawn.seq} of the organization&apos;s audit log, whose hash is{" "}
-            <code className="break-all font-mono text-xs">{drawn.drawn.rowHash}</code>. Export the log
+            <code className="break-all text-xs">{drawn.drawn.rowHash}</code>. Export the log
             from that row on and check it with{" "}
             <Link className="underline" href="/docs/workspace/audit-log#exporting-and-verifying">
               the book&apos;s script
             </Link>
-            : <code className="font-mono text-xs">node verify-audit.mjs export.json {drawn.drawn.rowHash}</code>.
+            : <code className="text-xs">node verify-audit.mjs export.json {drawn.drawn.rowHash}</code>.
           </p>
         </section>
 
-        <Section id="sheet-stores" title="Where it is kept, under which key">
+        <Section headingId="sheet-stores" title="Where it is kept, under which key">
           <Facts
             facts={[
               [
@@ -150,7 +151,7 @@ export default async function DataSheetPage() {
           />
         </Section>
 
-        <Section id="sheet-projects" title="Each project">
+        <Section headingId="sheet-projects" title="Each project">
           {projects.length === 0 ? (
             <NoticeCard title="No projects yet." body="Each project this organization makes appears here." />
           ) : (
@@ -180,11 +181,11 @@ export default async function DataSheetPage() {
           )}
         </Section>
 
-        <Section id="sheet-inventory" title="What a project keeps">
+        <Section headingId="sheet-inventory" title="What a project keeps">
           <Inventory inventory={inventory} />
         </Section>
 
-        <Section id="sheet-scrubbers" title="What the SDKs scrub before content leaves">
+        <Section headingId="sheet-scrubbers" title="What the SDKs scrub before content leaves">
           <Facts
             facts={[
               [
@@ -203,7 +204,7 @@ export default async function DataSheetPage() {
           />
         </Section>
 
-        <Section id="sheet-subprocessors" title="Subprocessors">
+        <Section headingId="sheet-subprocessors" title="Subprocessors">
           {RESIDENCY && RESIDENCY.subprocessors.length > 0 ? (
             <DataTable>
               <THead>
@@ -230,17 +231,6 @@ export default async function DataSheetPage() {
         </Section>
       </div>
     </>
-  );
-}
-
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
-  return (
-    <section className="grid gap-gutter" aria-labelledby={id}>
-      <h2 id={id} className="text-base font-medium">
-        {title}
-      </h2>
-      {children}
-    </section>
   );
 }
 
@@ -364,7 +354,7 @@ function Inventory({ inventory }: { inventory: FieldInventory | null }) {
         <tbody>
           {inventory.rows.map((row) => (
             <tr key={row.attribute}>
-              <Td className="font-mono text-xs">{row.attribute}</Td>
+              <Td className="text-xs">{row.attribute}</Td>
               <Td className="whitespace-normal">{row.kept}</Td>
               <Td>{row.needs === "on" ? "On" : "Any"}</Td>
               <Td className="whitespace-normal">{PERSON_LABEL[row.person]}</Td>

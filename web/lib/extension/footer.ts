@@ -9,6 +9,8 @@ export interface ExtraFooterLink {
   newTab?: boolean;
   /** The link it goes before, by label; last in its column when absent. */
   before?: string;
+  /** What a status page it links says of each service now, a bar each. */
+  services?: readonly { name: string; state: "normal" | "disrupted" }[];
 }
 
 export const EXTRA_FOOTER_LINKS: readonly ExtraFooterLink[] = [];

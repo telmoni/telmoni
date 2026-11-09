@@ -25,7 +25,7 @@ import { useUser } from "@/lib/store";
 import { displayName } from "@/lib/user-display";
 import { HEADER_MENU_OFFSET } from "@/lib/utils";
 
-const ROW = "gap-2 px-2 cursor-pointer";
+const ROW = "cursor-pointer";
 
 export function NavUser() {
   const user = useUser();
@@ -60,7 +60,7 @@ export function NavUser() {
             size="icon"
             className="shrink-0 rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground data-[state=open]:hover:bg-sidebar-accent"
           >
-            <User aria-hidden className="size-4" />
+            <User aria-hidden className="size-icon" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -72,7 +72,7 @@ export function NavUser() {
           {/* The head is the address alone, a row the foot's height, as the
               switchers head their menus with one line: the name is the
               account page's to show, not the menu's. */}
-          <DropdownMenuLabel className="flex h-7 items-center px-2 py-0 text-xs font-normal text-muted-foreground">
+          <DropdownMenuLabel className="flex h-control items-center py-0">
             <span className="truncate">{user.email}</span>
           </DropdownMenuLabel>
 
@@ -127,7 +127,7 @@ export function NavUser() {
           {/* Every header menu ends with the same ruled action row. */}
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="cursor-pointer gap-2 px-2"
+            className="cursor-pointer"
             onSelect={(event) => {
               event.preventDefault();
               signOut();

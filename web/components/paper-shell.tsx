@@ -1,52 +1,22 @@
-/* eslint-disable @next/next/no-html-link-for-pages */
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 
+import { GithubIcon } from "@/components/brand-icons";
 import { CornersToggle } from "@/components/corners-toggle";
+import { StatusLabel } from "@/components/status-label";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { SignOutButton } from "@/components/sign-out-button";
+import { RailLink } from "@/components/rail-link";
 import { RailShortcuts, type RailShortcut } from "@/components/rail-shortcuts";
-import { navLinks, type NavLink } from "@/components/site-nav";
+import { navLinks } from "@/components/site-nav";
 import { TelmoniLockup } from "@/components/telmoni-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { footerColumns, type FooterLink } from "@/lib/footer";
+import { footerColumns } from "@/lib/footer";
 import { INSET } from "@/lib/inset";
 import { branding } from "@/lib/server/branding";
 import { PRODUCT_NAME, REPO_URL } from "@/lib/site";
 import { cn } from "@/lib/utils";
-
-
-function RailLink({
-  link,
-  className,
-}: {
-  link: NavLink | FooterLink;
-  className?: string;
-}) {
-  const content = <>{link.label}{(link.newTab || !link.href.startsWith("/")) && <ArrowUpRight aria-hidden="true" className="ml-1 inline-block size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" />}</>;
-  if (link.href.startsWith("/")) {
-    return (
-      <Link
-        href={link.href}
-        {...(link.newTab && { target: "_blank", rel: "noreferrer" })}
-        className={cn("group text-muted-foreground hover:text-foreground transition-colors", className)}
-      >
-        {content}
-      </Link>
-    );
-  }
-  return (
-    <a
-      href={link.href}
-      target="_blank"
-      rel="noreferrer"
-      className={cn("group text-muted-foreground hover:text-foreground transition-colors", className)}
-    >
-      {content}
-    </a>
-  );
-}
 
 // The public pages' shell. A framed page has `rail` on by default: desktop
 // (`lg+`) shows a left rail, the brand and primary links sticky at its top,
@@ -125,9 +95,8 @@ export function PaperShell({
       rel="noreferrer"
       className="group inline-flex items-center gap-1 font-mono text-sm text-muted-foreground transition-colors hover:text-foreground"
     >
-      {/* No health is claimed: nothing measures it yet. */}
-      {statusLink.label}
-      <ArrowUpRight className="size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" aria-hidden="true" />
+      <StatusLabel label={statusLink.label} services={statusLink.services} />
+      <ArrowUpRight className="size-icon opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" aria-hidden="true" />
     </a>
   ) : null;
   const language = (
@@ -164,28 +133,13 @@ export function PaperShell({
               ))}
               {signedIn ? (
                 <>
-                <Link
-                  href="/console"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Console
-                </Link>
+                <RailLink link={{ label: "Console", href: "/console" }} />
                 <SignOutButton variant="ghost" className="h-auto justify-start p-0 font-mono text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground" />
                 </>
               ) : (
                 <>
-                  <a
-                    href="/auth/login"
-                    className="text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    Sign in
-                  </a>
-                  <a
-                    href="/auth/signup"
-                    className="text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    Sign up
-                  </a>
+                  <RailLink link={{ label: "Sign in", href: "/auth/login" }} handler />
+                  <RailLink link={{ label: "Sign up", href: "/auth/signup" }} handler />
                 </>
               )}
             </nav>
@@ -215,7 +169,9 @@ export function PaperShell({
         </aside>
 
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <div className="lg:hidden">
+          {/* Pinned on a phone, so the brand and the menu stay where the
+              menu's sheet (`mobile-nav.tsx`, under the bar) expects them. */}
+          <div className="sticky top-0 z-50 lg:hidden">
             <SiteHeader signedIn={signedIn} inset />
           </div>
 
@@ -227,15 +183,9 @@ export function PaperShell({
                 target="_blank"
                 rel="noreferrer"
                 aria-label="GitHub repository"
-                className="pointer-events-auto flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                className="pointer-events-auto flex size-6 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
               >
-                <svg className="size-5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    fillRule="evenodd"
-                    clipRule="evenodd"
-                    d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                  />
-                </svg>
+                <GithubIcon className="size-6" />
               </a>
             </div>
           )}

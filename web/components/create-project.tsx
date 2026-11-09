@@ -212,7 +212,7 @@ export function CreateProjectPanel({
         <SidePanelFooter>
           {made ? (
             <>
-              <Button type="submit" disabled={flow.sending || (flow.step.step === "code" && !flow.canConfirm)}>
+              <Button type="submit" variant="filled" disabled={flow.sending || (flow.step.step === "code" && !flow.canConfirm)}>
                 {flow.confirming
                   ? "Saving…"
                   : flow.step.step === "code"
@@ -228,7 +228,7 @@ export function CreateProjectPanel({
             </>
           ) : (
             <>
-              <Button type="submit" disabled={!canSubmit}>
+              <Button type="submit" variant="filled" disabled={!canSubmit}>
                 {pending ? "Creating…" : "Create project"}
               </Button>
               <Button type="button" variant="outline" onClick={onClose}>
@@ -250,7 +250,7 @@ export function CreateProjectAction() {
 
   return (
     <PageAction primary="New project" onClick={(e) => openCreate("project", e.currentTarget)}>
-      <FolderPlus className="size-4" />
+      <FolderPlus className="size-icon" />
       New project
     </PageAction>
   );

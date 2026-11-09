@@ -53,7 +53,7 @@ export function OverviewCard({
     <Card className="gap-0 overflow-hidden py-0" role="region" aria-labelledby={heading}>
       <div className="flex items-center justify-between gap-gutter py-gutter">
         <h2 id={heading} className="flex min-w-0 items-center gap-gutter text-base font-medium">
-          {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+          {Icon && <Icon className="size-icon shrink-0 text-muted-foreground" aria-hidden="true" />}
           <span className="truncate">{title}</span>
         </h2>
         {action}
@@ -66,7 +66,7 @@ export function OverviewCard({
           href={link.href}
           className="flex items-center gap-gutter border-t border-border py-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
         >
-          <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+          <ArrowRight className="size-icon shrink-0" aria-hidden="true" />
           {link.label}
         </Link>
       ))}

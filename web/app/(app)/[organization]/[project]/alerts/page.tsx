@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowUpRight, Webhook } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Webhook } from "lucide-react";
 import Link from "next/link";
 import { z } from "zod";
 
@@ -12,6 +12,7 @@ import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
+import { SeverityMark } from "@/components/severity-mark";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
@@ -32,7 +33,6 @@ import {
   inForce,
   metricWords,
   renotifyWords,
-  severityVariant,
   starterWords,
   thresholdWords,
   toldWords,
@@ -343,14 +343,13 @@ function AlertCard({
             <h2 id={alertHeading(alert.id)} tabIndex={-1} className="min-w-0 truncate text-base font-medium">
               {alert.name}
             </h2>
-            <Badge variant={severityVariant(alert.severity)}>
-              {/* Read, an alert keeping its last severity can still have none to keep. */}
-              {alert.severity === Severity.Unknown && read ? "No severity" : SEVERITY_LABEL[alert.severity]}
-            </Badge>
+            {/* Read, an alert keeping its last severity can still have none to keep. */}
+            <SeverityMark
+              severity={alert.severity}
+              label={alert.severity === Severity.Unknown && read ? "No severity" : SEVERITY_LABEL[alert.severity]}
+            />
             {alert.starter && (
-              <Badge variant="secondary">
-                Starter
-              </Badge>
+              <Badge variant="secondary">Starter</Badge>
             )}
           </div>
           <p className="text-sm text-muted-foreground">{metricWords(alert)}</p>
@@ -515,9 +514,7 @@ function IncidentItem({
       tabIndex={followed ? -1 : undefined}
     >
       <div className="flex flex-wrap items-center gap-x-gutter gap-y-1.5">
-        <Badge variant={severityVariant(incident.severity)}>
-          {SEVERITY_LABEL[incident.severity]}
-        </Badge>
+        <SeverityMark severity={incident.severity} label={SEVERITY_LABEL[incident.severity]} />
         <IncidentState incident={incident} who={who} />
         <div className="ml-auto">
           <IncidentActions
@@ -544,7 +541,7 @@ function IncidentItem({
               title="The run its last notice showed"
             >
               run {shortId(run)}
-              <ArrowUpRight className="size-3" aria-hidden="true" />
+              <ArrowRight className="size-icon" aria-hidden="true" />
             </Link>
           </>
         )}

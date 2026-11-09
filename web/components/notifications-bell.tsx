@@ -117,17 +117,16 @@ export function NotificationsBell() {
         className={cn(
           "relative flex size-control shrink-0 items-center justify-center",
           "rounded-md text-muted-foreground hover:text-foreground",
-          "outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "hover:bg-sidebar-accent/50",
           "data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground data-[state=open]:hover:bg-sidebar-accent",
         )}
       >
-        <Bell className="size-4" />
+        <Bell className="size-icon" />
         {badge && (
           <span
             aria-hidden
             data-testid="notifications-bell-count"
-            className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground ring-2 ring-background"
+            className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-xs leading-none font-medium text-primary-foreground ring-2 ring-background"
           >
             {badge}
           </span>
@@ -143,7 +142,7 @@ export function NotificationsBell() {
       >
         {/* The head is the account menu's: one 28px line in the label's small
             muted type, then the rule, so the header's menus open alike. */}
-        <DropdownMenuLabel className="flex h-7 items-center justify-between gap-2 px-2 py-0 text-xs font-normal text-muted-foreground">
+        <DropdownMenuLabel className="flex h-control items-center justify-between gap-2 py-0">
           <span>Notifications</span>
           {count > 0 && (
             <Badge variant="secondary">
@@ -155,7 +154,7 @@ export function NotificationsBell() {
 
         {count === 0 && exportsBuilding.length === 0 && notices.length === 0 ? (
           <p
-            className="px-2 py-page text-center text-sm text-muted-foreground"
+            className="px-gutter py-page text-center text-sm text-muted-foreground"
             data-testid="notifications-menu-empty"
           >
             {reading ? "Reading…" : "You\u2019re all caught up."}
@@ -190,9 +189,9 @@ export function NotificationsBell() {
 
         {/* Match the other header menus' ruled action row. */}
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="cursor-pointer gap-2 px-2">
+        <DropdownMenuItem asChild className="cursor-pointer">
           <Link href={seeAll} onClick={() => setOpen(false)} data-testid="notifications-menu-all">
-            <Bell className="size-4 shrink-0 text-muted-foreground" />
+            <Bell className="size-icon shrink-0 text-muted-foreground" />
             See all
           </Link>
         </DropdownMenuItem>
@@ -226,11 +225,11 @@ function NoticeRow({ item, scope, onLeave }: { item: FeedItem; scope: BellScope;
             {unread && <span className="sr-only"> Unread</span>}
           </span>
           <span className="line-clamp-2 text-xs text-muted-foreground">{item.body}</span>
-          <span className="text-xs text-muted-foreground/70">
+          <span className="text-xs text-muted-foreground">
             <LocalTime iso={item.created_at} mode="datetime" />
           </span>
         </span>
-        <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <ChevronRight className="mt-0.5 size-icon shrink-0 text-muted-foreground" />
       </Link>
     </DropdownMenuItem>
   );
@@ -255,7 +254,7 @@ function ExportReadyRow({ entry, organization }: { entry: AuditExport; organizat
           {exportSummary(entry, now)}
         </span>
       </span>
-      <Download className="size-4 shrink-0 text-muted-foreground" />
+      <Download className="size-icon shrink-0 text-muted-foreground" />
     </DropdownMenuItem>
   );
 }
@@ -280,7 +279,7 @@ function ExportBuildingRow({ entry, organization }: { entry: AuditExport; organi
             {exportSummary(entry, now)}
           </span>
         </span>
-        <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-muted-foreground" />
+        <Loader2 aria-hidden className="size-icon shrink-0 animate-spin text-muted-foreground" />
       </Link>
     </DropdownMenuItem>
   );
@@ -302,7 +301,7 @@ function OfferRow({ offer }: { offer: OrganizationEntry }) {
             Ownership offered to you · review
           </span>
         </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <ChevronRight className="size-icon shrink-0 text-muted-foreground" />
       </Link>
     </DropdownMenuItem>
   );
@@ -320,7 +319,7 @@ function ProjectOfferRow({ offer }: { offer: ProjectOffer }) {
             Project offered to you · review
           </span>
         </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <ChevronRight className="size-icon shrink-0 text-muted-foreground" />
       </Link>
     </DropdownMenuItem>
   );
@@ -353,7 +352,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
         <span className="truncate text-xs text-muted-foreground">
           You were added · {seatSubtitle(seat)}
         </span>
-        <span className="truncate text-xs text-muted-foreground/70">by {giverText(seat)}</span>
+        <span className="truncate text-xs text-muted-foreground">by {giverText(seat)}</span>
       </div>
 
       {error && (
@@ -377,7 +376,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
             aria-label={`Open ${named}`}
             aria-describedby={about}
           >
-            <ChevronRight className="size-3.5" />
+            <ChevronRight />
             Open
           </Link>
         </DropdownMenuItem>
@@ -395,7 +394,7 @@ function GivenSeatRow({ seat, onLeave }: { seat: GivenSeat; onLeave: () => void 
             "mt-0! flex-1 gap-1 text-muted-foreground hover:text-foreground focus:text-foreground [&_svg:not([class*='text-'])]:text-current",
           )}
         >
-          <X className="size-3.5" />
+          <X />
           Dismiss
         </DropdownMenuItem>
       </div>
@@ -443,7 +442,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
         <span className="truncate text-xs text-muted-foreground">
           {inviteSubtitle(invite)}
         </span>
-        <span className="truncate text-xs text-muted-foreground/70">
+        <span className="truncate text-xs text-muted-foreground">
           from {inviterText(invite)}
         </span>
       </div>
@@ -461,7 +460,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
           disabled={pending}
           onClick={() => settle(() => acceptIncomingInviteAction(invite.id))}
         >
-          <Check className="size-3.5" />
+          <Check />
           Accept
         </Button>
         {/* No confirmation step here, unlike the page's table. A dropdown that
@@ -474,7 +473,7 @@ function InviteRow({ invite }: { invite: IncomingInvite }) {
           disabled={pending}
           onClick={() => settle(() => declineIncomingInviteAction(invite.id))}
         >
-          <X className="size-3.5" />
+          <X />
           Decline
         </Button>
       </div>

@@ -120,16 +120,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <Suspense fallback={null}>
                   <ExtensionBanner />
                 </Suspense>
-                {/* The badge beside the organization's name, and what New
+                {/* The badge beside each organization's name, and what New
                     organization says, are slots, filled by a console built on
                     this one; the console's host goes ahead of a new
                     organization's URL, as its Settings show it. */}
                 <ConsoleHeader
-                  organizationBadge={
-                    <Suspense fallback={null}>
-                      <ExtensionOrganizationBadge />
-                    </Suspense>
-                  }
+                  organizationBadges={Object.fromEntries(
+                    (ctx?.organizations ?? []).map((organization) => [
+                      organization.organizationId,
+                      <Suspense key={organization.organizationId} fallback={null}>
+                        <ExtensionOrganizationBadge organizationId={organization.organizationId} />
+                      </Suspense>,
+                    ]),
+                  )}
                 />
                 <div className="flex min-h-0 flex-1">
                   <ConsoleSidebar version={VERSION} />

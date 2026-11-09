@@ -18,11 +18,11 @@ import { cn } from "@/lib/utils";
 
 // The brand opens the compact rail; expanded controls stand beside it.
 export function ConsoleHeader({
-  organizationBadge,
+  organizationBadges,
 }: {
-  /// Drawn beside the organization's name in the switcher: a console built
-  /// on this one puts the organization's plan there.
-  organizationBadge?: React.ReactNode;
+  /// Drawn beside each organization's name in the switcher, by its id: a
+  /// console built on this one puts the organization's plan there.
+  organizationBadges?: Readonly<Record<string, React.ReactNode>>;
 }) {
   const { collapsed, toggle } = useSidebar();
   const organization = useActiveOrganization();
@@ -70,7 +70,7 @@ export function ConsoleHeader({
           }}
           aria-label={PRODUCT_NAME}
           className={cn(
-            "hidden min-w-0 shrink-0 items-center gap-2 hover:opacity-70 md:flex",
+            "hidden min-w-0 shrink-0 items-center gap-2 transition-colors hover:text-muted-foreground md:flex",
             collapsed && "md:hidden",
           )}
         >
@@ -92,18 +92,18 @@ export function ConsoleHeader({
           {collapsed && (
             <ListIndentIncrease
               aria-hidden="true"
-              className="hidden size-5 text-muted-foreground opacity-0 group-hover/toggle:opacity-100 group-focus-visible/toggle:opacity-100 md:block"
+              className="hidden size-icon text-muted-foreground opacity-0 group-hover/toggle:opacity-100 group-focus-visible/toggle:opacity-100 md:block"
             />
           )}
           <ListIndentDecrease
             aria-hidden="true"
-            className={cn("hidden size-5 text-muted-foreground", !collapsed && "md:block")}
+            className={cn("hidden size-icon text-muted-foreground", !collapsed && "md:block")}
           />
         </button>
       </div>
-      {/* Account for the switcher's 8px inset so its name aligns with the page. */}
-      <div className="flex min-w-0 flex-1 items-center gap-gutter pl-[calc(var(--spacing-page)-0.5rem)] pr-gutter">
-        <ResourceSelector organizationBadge={organizationBadge} />
+      {/* The switcher's outlined edge stands on the page's line. */}
+      <div className="flex min-w-0 flex-1 items-center gap-gutter pl-page pr-gutter">
+        <ResourceSelector organizationBadges={organizationBadges} />
       </div>
       <div className="flex shrink-0 items-center justify-end gap-0.5 pr-page">
         <SearchButton />

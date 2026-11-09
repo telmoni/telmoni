@@ -10,7 +10,8 @@ import {
   TWITTER_URL,
 } from "@/lib/site";
 
-export type FooterLink = { label: string; href: string; newTab?: boolean };
+export type ServiceState = NonNullable<ExtraFooterLink["services"]>[number];
+export type FooterLink = { label: string; href: string; newTab?: boolean; services?: readonly ServiceState[] };
 export type FooterColumn = { title: string; links: FooterLink[] };
 
 type FooterDeployment = { legalUrl?: string; supportEmail?: string };
@@ -110,6 +111,7 @@ function withExtras(
       label: extra.label,
       href: extra.href,
       ...(extra.newTab ? { newTab: true } : {}),
+      ...(extra.services ? { services: extra.services } : {}),
     };
     const at = extra.before ? column.links.findIndex((l) => l.label === extra.before) : -1;
     if (at === -1) {

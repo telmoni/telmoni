@@ -37,7 +37,7 @@ export function DeleteAccountForm({
 
   if (flow.step.step === "done") {
     return (
-      <div className="grid gap-4">
+      <div className="grid gap-gutter">
         <h3 className="text-base font-medium">Sorry to see you go</h3>
         <p className="text-sm text-muted-foreground">
           {flow.step.done.deleted === true
@@ -50,7 +50,7 @@ export function DeleteAccountForm({
           Signing you out and taking you to the home page&hellip;
         </p>
         <div>
-          <Button variant="destructive" onClick={signOut}>
+          <Button variant="filled" onClick={signOut}>
             Sign out now
           </Button>
         </div>
@@ -59,7 +59,7 @@ export function DeleteAccountForm({
   }
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-gutter">
       <p className="text-sm text-muted-foreground">
         Deleting your account is permanent and can&rsquo;t be undone. Your
         sign-in is erased and you leave every organization you belong to;
@@ -93,7 +93,7 @@ export function DeleteAccountForm({
         </div>
       ) : (
         <form
-          className="grid gap-4"
+          className="grid gap-gutter"
           onSubmit={(e) => {
             e.preventDefault();
             if (flow.canConfirm) flow.confirmCode();

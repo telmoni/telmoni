@@ -31,7 +31,6 @@ hourly totals keep their 13 months whatever the project chose.
 | An agent's [changes](/docs/monitoring/traces#changes): the agent, its environment, what changed and to what, when, and the run that first carried it, in Postgres | While any span within retention carries what changed; one whose run's day is past retention is listed no more | `rotate` deletes it once no span within retention carries it; purged with the project |
 | The claim on an export's bytes, which answers a retry with the first answer rather than writing twice | 1 hour | Expires |
 | A project's telemetry settings: its content mode, its retention, the key its end-user and session ids are hashed under, and the key its content is sealed under | While the project exists | Purged with the project |
-| A project's saved dashboards: each one's name and charts | Until an Owner or Admin deletes it, or the project goes | Purged with the project |
 | A project's [alerts](/docs/monitoring/alerts): each one's definition, the connectors it tells and its last value | Until a member deletes it, or the project goes | Deleted with its incidents and its maintenance windows, or purged with the project |
 | An alert's incidents: their severity, who acknowledged or resolved them, where their notices went and the runs they showed | While their alert exists | Deleted with the alert |
 | Maintenance windows, kept after they end as the record of who muted what | While their alert, or their project, exists | Deleted with it |

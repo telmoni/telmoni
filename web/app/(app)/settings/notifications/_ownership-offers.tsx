@@ -67,7 +67,7 @@ function OwnershipOffer({ offer }: { offer: OrganizationEntry }) {
       <div className="flex items-center gap-gutter">
         <ConfirmDialog
           trigger={
-            <Button size="sm" disabled={pending}>
+            <Button size="sm" variant="filled" disabled={pending}>
               Accept
             </Button>
           }

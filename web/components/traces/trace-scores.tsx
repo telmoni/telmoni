@@ -29,9 +29,13 @@ export function TraceScores({
   me,
   administers,
   keepsContent,
+  onChanged,
 }: {
   projectId: string;
   runId: string;
+  /** After a score is given or taken back: the peek reads its run again, as
+   *  the run's page is drawn again by the action's refresh. */
+  onChanged?: () => void;
   /** Whether the project keeps content, so a comment may be given. */
   keepsContent: boolean;
   scores: readonly Score[];
@@ -56,7 +60,7 @@ export function TraceScores({
           takeBack={
             score.source === ScoreSource.Member && (score.scorer === me || administers)
               ? () => {
-                  if (!pending) run(() => deleteScoreAction(projectId, score.score_id), () => {});
+                  if (!pending) run(() => deleteScoreAction(projectId, score.score_id), () => onChanged?.());
                 }
               : undefined
           }
@@ -65,17 +69,20 @@ export function TraceScores({
       ))}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" size="xs" className="text-muted-foreground hover:text-foreground">
+          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
             <PlusIcon />
             Score
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" aria-label="Score this trace" className="w-64 p-gutter">
+        <PopoverContent align="start" aria-label="Score this trace" className="w-64">
           <ScoreForm
             pending={pending}
             keepsContent={keepsContent}
             onScore={(score) =>
-              run(() => putScoreAction(projectId, { run_id: runId, ...score }), () => setOpen(false))
+              run(() => putScoreAction(projectId, { run_id: runId, ...score }), () => {
+                setOpen(false);
+                onChanged?.();
+              })
             }
           />
         </PopoverContent>
@@ -114,9 +121,9 @@ function ScoreBadge({
           aria-label={`Take back score ${score.name}`}
           aria-disabled={pending || undefined}
           onClick={takeBack}
-          className="inline-flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset aria-disabled:cursor-not-allowed"
+          className="inline-flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground aria-disabled:cursor-not-allowed"
         >
-          <XIcon className="size-3" />
+          <XIcon className="size-icon" />
         </button>
       )}
     </Badge>
@@ -165,12 +172,12 @@ function Comment({ name, text }: { name: string; text: string }) {
         <button
           type="button"
           aria-label={`The comment on ${name}`}
-          className="inline-flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+          className="inline-flex size-4 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
         >
-          <MessageSquareText className="size-3" />
+          <MessageSquareText className="size-icon" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" aria-label={`The comment on ${name}`} className="w-80 p-gutter">
+      <PopoverContent align="start" aria-label={`The comment on ${name}`} className="w-80">
         <p className="whitespace-pre-wrap break-words text-sm">{text}</p>
       </PopoverContent>
     </Popover>
@@ -279,14 +286,14 @@ function ScoreForm({
             rows={3}
             maxLength={COMMENT_MAX}
             aria-describedby={`${id}comment-hint`}
-            className="rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="rounded-md border border-input bg-transparent px-gutter py-2 text-sm"
           />
           <p id={`${id}comment-hint`} className="text-xs text-muted-foreground">
             Optional. Content, kept as this run&rsquo;s is, and read with it.
           </p>
         </div>
       )}
-      <Button type="submit" disabled={pending || !given}>
+      <Button type="submit" variant="filled" disabled={pending || !given}>
         Score
       </Button>
     </form>

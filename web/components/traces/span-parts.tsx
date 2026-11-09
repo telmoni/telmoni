@@ -43,7 +43,7 @@ export function KindIcon({
     <Icon
       aria-hidden="true"
       className={cn(
-        "size-4 shrink-0",
+        "size-icon shrink-0",
         span.status === SpanStatus.Error ? "text-destructive" : "text-muted-foreground",
         className,
       )}
@@ -58,9 +58,12 @@ export const INDENT_MAX = 8;
 /** How far each level steps in, in rem; the guides stand on the same measure. */
 const INDENT_REM = 1.25;
 
+/** The row's own inset before its first level, as its right side's `pr-2`. */
+const INSET_REM = 0.5;
+
 /** The row stepped in to its depth. */
 export function indentStyle(depth: number): CSSProperties {
-  return { paddingLeft: `${depth * INDENT_REM}rem` };
+  return { paddingLeft: `${INSET_REM + depth * INDENT_REM}rem` };
 }
 
 /** A guide standing for each span the row ran inside. */
@@ -70,7 +73,7 @@ export function SpanGuides({ depth }: { depth: number }) {
       key={level}
       aria-hidden="true"
       className="absolute inset-y-0 border-l border-border"
-      style={{ left: `${level * INDENT_REM + 0.5}rem` }}
+      style={{ left: `${INSET_REM + level * INDENT_REM + 0.5}rem` }}
     />
   ));
 }
@@ -90,7 +93,7 @@ export function SpanBar({
   return (
     <span
       aria-hidden="true"
-      className={cn("absolute right-2 left-11 h-1.5 rounded-full bg-border", className)}
+      className={cn("absolute right-2 left-13 h-1.5 rounded-full bg-border", className)}
     >
       <span
         className={cn("absolute inset-y-0 rounded-full", failed ? "bg-destructive" : "bg-foreground/60")}

@@ -45,7 +45,7 @@ export function InstallTabs({
   }
 
   return (
-    <div className={cn("rounded-md border border-border font-mono", compact ? "text-xs" : "text-sm lg:text-base")}>
+    <div className={cn("rounded-md border border-border", compact ? "text-xs" : "text-sm lg:text-base")}>
       <div
         role="tablist"
         aria-label={name}

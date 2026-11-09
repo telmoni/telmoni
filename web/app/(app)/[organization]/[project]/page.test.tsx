@@ -3,9 +3,10 @@ import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/page-header", () => ({
-  PageHeader: ({ title }: { title?: string }) => (
+  PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
     <div data-testid="page-header">
       <h1>{title}</h1>
+      {action}
     </div>
   ),
 }));
@@ -95,6 +96,13 @@ describe("a project's Agents page", () => {
     expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument();
   });
 
+  it("opens how to connect another agent in a tab of its own", async () => {
+    render(await AgentsPage({ params: PARAMS } as never));
+    const connect = screen.getByRole("link", { name: /Connect an agent/ });
+    expect(connect).toHaveAttribute("href", "/docs/getting-started/connect-an-agent");
+    expect(connect).toHaveAttribute("target", "_blank");
+  });
+
   // The first run made the project's starter alerts, each over every agent.
   it("reads a project with one run as watched", async () => {
     mockAgents = agentsOk([agent("support-bot")]);
@@ -145,7 +153,7 @@ describe("a project's Agents page", () => {
     expect(within(support).getByText("Usually $0.050")).toBeInTheDocument();
     expect(support.querySelector('time[datetime="2026-11-05T09:00:00Z"]')?.closest("a")).toHaveAttribute(
       "href",
-      "/acme/web/traces/0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "/acme/web/traces?agent=support-bot&peek=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
     );
   });
 
@@ -167,9 +175,9 @@ describe("a project's Agents page", () => {
     const support = within(screen.getByRole("link", { name: "support-bot" }).closest("td")!);
     expect(support.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
       ["support-bot", "/acme/web/traces?agent=support-bot"],
-      ["release 1.4.2 in production", `/acme/web/traces/${release}`],
-      ["model gpt-4o-mini", `/acme/web/traces/${model}`],
-      ["prompt triage version 3 in production", `/acme/web/traces/${prompt}`],
+      ["release 1.4.2 in production", `/acme/web/traces?agent=support-bot&peek=${release}`],
+      ["model gpt-4o-mini", `/acme/web/traces?agent=support-bot&peek=${model}`],
+      ["prompt triage version 3 in production", `/acme/web/traces?agent=support-bot&peek=${prompt}`],
     ]);
     const nightly = within(screen.getByRole("link", { name: "nightly-report" }).closest("td")!);
     expect(nightly.getAllByRole("link")).toHaveLength(1);

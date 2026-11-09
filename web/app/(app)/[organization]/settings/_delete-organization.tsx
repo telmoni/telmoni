@@ -37,7 +37,7 @@ export function DeleteOrganizationForm({
   if (flow.step.step === "done") {
     const done = flow.step.done;
     return (
-      <div className="grid gap-4">
+      <div className="grid gap-gutter">
         <h3 className="text-base font-medium">{done.organization} is deleted</h3>
         <p className="text-sm text-muted-foreground">
           Everyone in it has lost access and its API keys have stopped working.
@@ -47,7 +47,7 @@ export function DeleteOrganizationForm({
           within the hour. Your own account is untouched.
         </p>
         <div>
-          <Button onClick={() => window.location.replace("/console")}>
+          <Button variant="filled" onClick={() => window.location.replace("/console")}>
             Continue
           </Button>
         </div>
@@ -56,7 +56,7 @@ export function DeleteOrganizationForm({
   }
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-gutter">
       <p className="text-sm text-muted-foreground">
         Everyone in it loses access and its API keys stop working the moment
         you confirm, and its projects and data are erased for good within the
@@ -72,7 +72,7 @@ export function DeleteOrganizationForm({
         </div>
       ) : (
         <form
-          className="grid gap-4"
+          className="grid gap-gutter"
           onSubmit={(e) => {
             e.preventDefault();
             if (flow.canConfirm) flow.confirmCode();

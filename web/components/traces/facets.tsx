@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type CSSProperties } from "react";
-import { ChevronRightIcon, PanelLeftIcon, SearchIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, ListIndentDecrease, ListIndentIncrease, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 
 import { LinkPending } from "@/components/link-pending";
@@ -113,7 +113,7 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
       aria-busy={pending}
       data-pending={pending ? "" : undefined}
     >
-      <div className="flex h-control items-center gap-2">
+      <div className="flex h-control items-center gap-gutter">
         <PanelButton shown />
         <h2 className="min-w-0 truncate text-sm font-medium">Filters</h2>
         {ticked > 0 && (
@@ -124,7 +124,7 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
         {ticked > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button asChild variant="ghost" size="icon-xs" className="ml-auto">
+              <Button asChild variant="ghost" size="icon" className="ml-auto">
                 <Link
                   href={href(unfiltered(query))}
                   scroll={false}
@@ -141,7 +141,7 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
       </div>
       <div className="relative">
         <SearchIcon
-          className="pointer-events-none absolute top-1/2 left-1.5 size-4 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none absolute top-1/2 left-gutter size-icon -translate-y-1/2 text-muted-foreground"
           aria-hidden="true"
         />
         <Input
@@ -150,7 +150,8 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search filters"
           aria-label="Search filters"
-          className="pl-7"
+          // Its text a gutter past the icon, the border's pixel counted.
+          className="pl-[calc(2*var(--spacing-gutter)+var(--spacing-icon)-1px)]"
         />
       </div>
       {/* Score in the same gap-free stack as the facets, so it sits one rule below the last. */}
@@ -200,7 +201,8 @@ function PanelButton({ shown }: { shown: boolean }) {
           aria-expanded={shown}
           onClick={() => setTracePrefs({ filters: !shown })}
         >
-          <PanelLeftIcon />
+          {/* The main rail's toggle: in while shown, out while hidden. */}
+          {shown ? <ListIndentDecrease /> : <ListIndentIncrease />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -249,8 +251,7 @@ function FacetSection({
 
   return (
     <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border">
-      {/* The header's contents sit 6px in (px-1.5), matching rail and icon buttons,
-          and its Clear is an X: a word at the panel's edge stretched the row. */}
+      {/* Its Clear is an X: a word at the panel's edge stretched the row. */}
       <div className="flex items-center gap-gutter">
         <CollapsibleTrigger asChild>
           <Button variant="ghost" size="sm" className="min-w-0 flex-1 justify-start">
@@ -269,7 +270,7 @@ function FacetSection({
         {ticked.length > 0 && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button asChild variant="ghost" size="icon-xs">
+              <Button asChild variant="ghost" size="icon">
                 <Link
                   href={clearHref}
                   scroll={false}
@@ -308,7 +309,7 @@ function FacetSection({
         {mode === "text" ? (
           <TypedValue filter={filter} label={label} onAdd={onToggle} />
         ) : values.length === 0 ? (
-          <p className="px-1.5 text-xs text-muted-foreground">
+          <p className="px-gutter text-xs text-muted-foreground">
             No {label.toLowerCase()} among the window&rsquo;s runs.
           </p>
         ) : (
@@ -330,7 +331,8 @@ function FacetSection({
                     key={v.value}
                     value={v.value}
                     onSelect={() => onToggle(v.value)}
-                    className="data-[selected=true]:bg-transparent data-[selected=true]:text-foreground data-[selected=true]:hover:bg-accent/50 group-focus-visible/facet:data-[selected=true]:bg-accent/50 group-has-focus-visible/facet:data-[selected=true]:bg-accent/50"
+                    // The box under the heading's chevron, the value under its label.
+                    className="gap-gutter px-gutter data-[selected=true]:bg-transparent data-[selected=true]:text-foreground data-[selected=true]:hover:bg-accent/50 group-focus-visible/facet:data-[selected=true]:bg-accent/50 group-has-focus-visible/facet:data-[selected=true]:bg-accent/50"
                   >
                     <Checkbox checked={on} tabIndex={-1} aria-hidden="true" className="pointer-events-none" />
                     <span className="min-w-0 flex-1 truncate" title={v.value}>
@@ -345,7 +347,7 @@ function FacetSection({
           </Command>
         )}
         {facet.more && mode === "select" && (
-          <p className="px-1.5 text-xs text-muted-foreground">
+          <p className="px-gutter text-xs text-muted-foreground">
             The {FACET_VALUES_MAX} with the most {rows}
             {typed ? "; type one in to find another" : ""}.
           </p>
@@ -405,7 +407,7 @@ function ScoreSection({
         {set && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button asChild variant="ghost" size="icon-xs">
+              <Button asChild variant="ghost" size="icon">
                 <Link href={clearHref} scroll={false} aria-label="Clear the score filter">
                   <XIcon />
                   <LinkPending />

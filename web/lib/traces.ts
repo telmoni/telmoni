@@ -268,6 +268,12 @@ export function traceHref(organization: string, project: string, runId: string):
   return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
 }
 
+/** A run opened in the peek over the Runs list of `listHref`, so the list
+ *  stands around it and its neighbours are a step away. */
+export function peekHref(listHref: string, runId: string): string {
+  return `${listHref}${listHref.includes("?") ? "&" : "?"}${PEEK_PARAM}=${encodeURIComponent(runId)}`;
+}
+
 /** A run's spans, through the console's own route. */
 export function traceReadHref(runId: string, projectId: string): string {
   return `/api/v1/traces/${encodeURIComponent(runId)}?project=${encodeURIComponent(projectId)}`;

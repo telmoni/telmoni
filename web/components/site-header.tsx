@@ -27,7 +27,7 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
   return (
     <header
       className={cn(
-        "relative z-50 h-15 shrink-0 border-b border-border bg-background",
+        "sticky top-0 z-50 h-15 shrink-0 border-b border-border bg-background",
         inset && "lg:h-24",
       )}
     >
@@ -36,7 +36,7 @@ export function SiteHeader({ signedIn, inset = false }: { signedIn: boolean; ins
           <Link
             href="/"
             aria-label={PRODUCT_NAME}
-            className={cn("flex min-w-0 items-center hover:opacity-70", !inset && "pl-1")}
+            className={cn("flex min-w-0 items-center transition-colors hover:text-muted-foreground", !inset && "pl-1")}
           >
             <TelmoniLockup className="shrink-0" />
           </Link>

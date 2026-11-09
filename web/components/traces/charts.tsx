@@ -269,7 +269,7 @@ export function TraceHistogramStrip({
   const metric = drawn(histogram).includes(picked) ? picked : "runs";
   return (
     <div role="region" className="grid gap-1" aria-label="Over the window">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-gutter">
         <Select
           value={metric}
           onValueChange={(next) => {
@@ -277,7 +277,7 @@ export function TraceHistogramStrip({
           }}
         >
           {/* The console's control height, so its row centers on the Filters heading beside it. */}
-          <SelectTrigger size="sm" className="border-none px-2 shadow-none" aria-label="What the chart shows">
+          <SelectTrigger className="border-none shadow-none" aria-label="What the chart shows">
             <SelectValue />
           </SelectTrigger>
           <SelectContent position="popper" align="start">
@@ -311,7 +311,7 @@ export function TraceCharts({
         <div
           key={metric}
           role="region"
-          className="grid gap-2 rounded-xl border border-border p-gutter"
+          className="grid gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border"
           aria-label={METRIC_LABEL[metric]}
         >
           <h2 className="text-base font-medium">

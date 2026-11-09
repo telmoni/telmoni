@@ -21,6 +21,7 @@ import {
 } from "@/lib/server/data";
 import { fetchChanges } from "@/lib/server/entities/changes";
 import { projectPage } from "@/lib/server/project-page";
+import { fetchContentMode } from "@/lib/server/entities/content-mode";
 import { projectPath } from "@/lib/slug";
 import { AGENT_PROMPT } from "@/lib/first-run";
 import { MAX_DAYS } from "@/lib/list-query";
@@ -48,12 +49,14 @@ export default async function TracesPage({
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
-  const [access, facets, histogram, changes] = await Promise.all([
+  const [access, facets, histogram, changes, mode] = await Promise.all([
     fetchTraces(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
     fetchTraceFacets(project.id, query),
     fetchTraceHistogram(project.id, query, utcOffset),
     // By agent and environment alone: a change explains the bars whatever else narrows them.
     fetchChanges(project.id, query.days, query.agent ?? [], query.environment ?? []),
+    // Said on an opened run's line, the peek's.
+    fetchContentMode(project.id),
   ]);
   const marks =
     histogram.kind === "ok" && changes.kind === "ok"
@@ -231,6 +234,9 @@ export default async function TracesPage({
             slug={slug}
             projectId={project.id}
             runs={access.list.traces.map((t) => t.run_id)}
+            contentMode={mode?.content_mode}
+            me={gate.person.userId}
+            administers={administers(project.role)}
           />
         )}
       </ListPage>

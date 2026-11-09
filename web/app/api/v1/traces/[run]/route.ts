@@ -4,16 +4,17 @@ import { z } from "zod";
 import { privateJson, privateProblem } from "@/lib/api/respond";
 import { isProjectId } from "@/lib/ids";
 import { type Ceiling, admit } from "@/lib/server/admit";
-import { fetchTrace } from "@/lib/server/data";
+import { fetchRunIncidents, fetchTrace } from "@/lib/server/data";
+import { fetchScores } from "@/lib/server/entities/scores";
 
 /** Reads a person may make in a minute: a list stepped through with `j` and
  *  `k` reads a trace a press, and a script looping here would have the server
  *  read thousands of spans a time. */
 const READS: Ceiling = { call: "traces:read", limit: 120 };
 
-// One trace's spans, for the trace list's peek (`components/traces/peek.tsx`),
-// which reads a trace only once it is opened; the trace's own page reads the
-// same fetcher as it renders. A read, so a Route Handler, and the project
+// One run, for the trace list's peek (`components/traces/peek.tsx`), which
+// reads it only once it is opened: its spans, the incidents whose notices
+// showed it and its scores, as the run's own page reads them as it renders. A read, so a Route Handler, and the project
 // named by its id as every read here names it; telemetry decides whether the
 // person may read the project's traces.
 export async function GET(request: NextRequest, { params }: RouteContext<"/api/v1/traces/[run]">) {
@@ -28,10 +29,18 @@ export async function GET(request: NextRequest, { params }: RouteContext<"/api/v
   // admits.
   if (!z.guid().safeParse(run).success) return privateProblem(404, "No such trace.");
 
-  const access = await fetchTrace(projectId, run, true);
+  const [access, incidents, scores] = await Promise.all([
+    fetchTrace(projectId, run, true),
+    fetchRunIncidents(projectId, run),
+    fetchScores(projectId, run),
+  ]);
   switch (access.kind) {
     case "ok":
-      return privateJson(access.trace);
+      return privateJson({
+        ...access.trace,
+        incidents: incidents.map(({ id, rule_name, agent }) => ({ id, rule_name, agent })),
+        scores: scores.kind === "ok" ? scores.scores : null,
+      });
     case "missing":
       return privateProblem(404, "No such trace.");
     case "forbidden":

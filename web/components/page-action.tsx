@@ -51,7 +51,7 @@ export function usePagePrimaryAction(): PagePrimaryAction | null {
 
 export function PageAction({
   className,
-  variant = "outline",
+  variant,
   primary,
   children,
   ...props
@@ -75,17 +75,22 @@ export function PageAction({
     return () => set((prev) => (prev === mine ? null : prev));
   }, [primary, disabled, set]);
 
+  // The page's main action is its one filled button; the rest are outlined.
+  const surface = variant ?? (primary ? "filled" : "outline");
   const buttonProps = {
     ref,
-    variant,
+    variant: surface,
     size: "sm" as const,
-    className: cn("text-muted-foreground hover:text-foreground", className),
+    className: cn(surface !== "filled" && "text-muted-foreground hover:text-foreground", className),
     "aria-keyshortcuts": primary && !disabled && letterKeys ? PAGE_ACTION_KEY : undefined,
     ...props,
   };
 
   const hint = primary && !disabled && letterKeys
-    ? <Kbd aria-hidden="true" className="size-5 shrink-0 p-0">{PAGE_ACTION_KEY.toUpperCase()}</Kbd>
+    ? <Kbd
+        aria-hidden="true"
+        className="size-5 shrink-0 p-0 in-data-[variant=filled]:bg-primary-foreground/15 in-data-[variant=filled]:text-primary-foreground"
+      ><span className="trim-cap">{PAGE_ACTION_KEY.toUpperCase()}</span></Kbd>
     : null;
   const content = props.asChild && isValidElement<{ children?: ReactNode }>(children)
     ? cloneElement(children, {}, <>{children.props.children}{hint}</>)

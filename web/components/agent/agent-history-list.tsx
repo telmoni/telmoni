@@ -60,16 +60,16 @@ function HistoryItem({
   return (
     <li
       className={cn(
-        "group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+        "group flex items-center justify-between gap-gutter rounded-md px-gutter py-1.5 text-sm transition-colors",
         isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
       )}
     >
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        className="flex min-w-0 flex-1 items-center gap-gutter text-left"
       >
-        <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+        <MessageSquare className="size-icon shrink-0 text-muted-foreground" />
         <span className="truncate">{item.title || "Untitled conversation"}</span>
         <span className="shrink-0 text-xs text-muted-foreground">
           <LocalTime iso={item.updatedAt} />
@@ -88,7 +88,7 @@ function HistoryItem({
             aria-label="Delete conversation"
             className={cn(ICON_BUTTON, "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
           >
-            <Trash2 className="size-3.5" />
+            <Trash2 className="size-icon" />
           </button>
         }
       />

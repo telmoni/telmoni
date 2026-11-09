@@ -60,7 +60,7 @@ export function RenameProjectForm({
           <Button
             type="submit"
             disabled={!isChanged || pending}
-            variant="default"
+            variant="filled"
           >
             {pending ? "Saving..." : "Save"}
           </Button>

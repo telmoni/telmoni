@@ -87,7 +87,7 @@ export default async function OrganizationSettingsPage() {
         >
           {/* The card's title names it; the body is the value alone. */}
           <div className="flex items-center gap-2">
-            <code className="min-w-0 break-all font-mono">{organization.organizationId}</code>
+            <code className="min-w-0 break-all">{organization.organizationId}</code>
             <CopyButton value={organization.organizationId} label="Organization ID" />
           </div>
         </Section>

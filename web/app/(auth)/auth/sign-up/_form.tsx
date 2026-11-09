@@ -137,7 +137,7 @@ export function SignUpForm({
           {error}
         </p>
       )}
-      <Button type="submit" disabled={pending || !email.trim() || password.length < 8 || again !== password}>
+      <Button type="submit" variant="filled" disabled={pending || !email.trim() || password.length < 8 || again !== password}>
         {pending ? "Creating…" : verifyEmail ? "Create account" : "Create account and sign in"}
       </Button>
     </form>

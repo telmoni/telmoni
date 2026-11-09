@@ -1,19 +1,18 @@
 "use client";
 
+import { BellOff } from "lucide-react";
 import { startTransition, useId, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SidePanel,
+  SidePanelBody,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+  usePanelOpening,
+} from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -31,9 +30,9 @@ import { endMuteAction, muteAction } from "./actions";
 // now or a set time for a length the lane holds to thirty days: its incidents
 // still open and resolve in the feed, and no connector hears them meanwhile.
 
-const ROW_BUTTON = "h-9 gap-1.5 text-xs text-muted-foreground hover:text-foreground";
+const ROW_BUTTON = "text-muted-foreground hover:text-foreground";
 
-/** Opens the window's dialog: for the alert `ruleId`, or every alert. */
+/** Opens the window's panel: for the alert `ruleId`, or every alert. */
 export function MuteButton({
   projectId,
   ruleId,
@@ -46,56 +45,58 @@ export function MuteButton({
   name: string | null;
   disabled?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const button = useRef<HTMLButtonElement>(null);
+  const { opening, open, close, place } = usePanelOpening();
   return (
     <>
       <Button
-        ref={button}
         variant="outline"
         size="sm"
-        className={ROW_BUTTON}
+        // Every alert's sits beside the page's actions, and takes their type.
+        className={name === null ? "text-muted-foreground hover:text-foreground" : ROW_BUTTON}
         disabled={disabled}
-        onClick={() => setOpen(true)}
+        onClick={(e) => open(e.currentTarget, null)}
         aria-label={name === null ? undefined : `Mute ${name}`}
       >
         {name === null ? "Mute every alert" : "Mute"}
       </Button>
-      <MuteDialog
-        key={`mute-${open}`}
-        projectId={projectId}
-        ruleId={ruleId}
-        name={name}
-        open={open}
-        onOpenChange={setOpen}
-        returnFocus={() => button.current?.focus()}
-      />
+      {place(
+        opening && (
+          <MutePanel
+            key={opening.at}
+            projectId={projectId}
+            ruleId={ruleId}
+            name={name}
+            onClose={close}
+            returnFocus={() => opening.returnTo}
+          />
+        ),
+      )}
     </>
   );
 }
 
-function MuteDialog({
+function MutePanel({
   projectId,
   ruleId,
   name,
-  open,
-  onOpenChange,
+  onClose,
   returnFocus,
 }: {
   projectId: string;
   ruleId: string | null;
   name: string | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Opened by no trigger of its own, it hands the focus back by hand. */
-  returnFocus: () => void;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
 }) {
   const id = useId();
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const first = useRef<HTMLButtonElement>(null);
   const [starts, setStarts] = useState<"now" | "later">("now");
   const [at, setAt] = useState("");
   const [minutes, setMinutes] = useState<number>(60);
   const { pending, error, setError, run } = useAction();
-  // An alert's dialog goes with its card.
+  // An alert's panel goes with its card.
   const { gone } = useLanding(ALERTS_HEADING);
 
   function submit() {
@@ -112,108 +113,102 @@ function MuteDialog({
           starts_at: startsAt?.toISOString() ?? null,
           minutes,
         });
-        // What is gone takes the dialog with it.
+        // What is gone takes the panel with it.
         return gone(r) ? { ok: true, close: false } : r.ok ? { ok: true, close: true } : r;
       },
-      ({ close }) => close && startTransition(() => onOpenChange(false)),
+      ({ close }) => close && startTransition(onClose),
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-md"
-        onCloseAutoFocus={(e) => {
+    <SidePanel panel={panel} titleId={titleId} onClose={onClose} full initialFocus={first} returnFocus={returnFocus}>
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
           e.preventDefault();
-          returnFocus();
+          if (!pending) submit();
         }}
       >
-        <form
-          className="contents"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!pending) submit();
-          }}
+        <SidePanelHeader
+          icon={BellOff}
+          titleId={titleId}
+          title={name === null ? "Mute every alert" : `Mute "${name}"`}
+          onClose={onClose}
         >
-          <DialogHeader>
-            <DialogTitle>{name === null ? "Mute every alert" : `Mute "${name}"`}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <DialogDescription>
-              {name === null ? "Every alert of this project goes on" : "The alert goes on"} being
-              evaluated, and its incidents open and resolve in the feed, but no connector hears
-              them until the window ends.
-            </DialogDescription>
-            <div className="grid gap-2">
-              <Label htmlFor={`${id}-starts`}>Starts</Label>
-              <Select
-                value={starts}
-                onValueChange={(next) => {
-                  setStarts(next as "now" | "later");
+          <p className="text-sm text-muted-foreground">
+            {name === null ? "Every alert of this project goes on" : "The alert goes on"} being
+            evaluated, and its incidents open and resolve in the feed, but no connector hears
+            them until the window ends.
+          </p>
+        </SidePanelHeader>
+        <SidePanelBody>
+          <SidePanelRow label="Starts" htmlFor={`${id}-starts`}>
+            <Select
+              value={starts}
+              onValueChange={(next) => {
+                setStarts(next as "now" | "later");
+                setError(null);
+              }}
+              disabled={pending}
+            >
+              <SelectTrigger ref={first} id={`${id}-starts`} className="w-full max-w-md">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="now">Now</SelectItem>
+                <SelectItem value="later">At a set time</SelectItem>
+              </SelectContent>
+            </Select>
+          </SidePanelRow>
+          {starts === "later" && (
+            <SidePanelRow label="Starts at" htmlFor={`${id}-at`}>
+              <Input
+                id={`${id}-at`}
+                type="datetime-local"
+                className="max-w-md"
+                value={at}
+                onChange={(e) => {
+                  setAt(e.target.value);
                   setError(null);
                 }}
                 disabled={pending}
-              >
-                <SelectTrigger id={`${id}-starts`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="now">Now</SelectItem>
-                  <SelectItem value="later">At a set time</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {starts === "later" && (
-              <div className="grid gap-2">
-                <Label htmlFor={`${id}-at`}>Starts at</Label>
-                <Input
-                  id={`${id}-at`}
-                  type="datetime-local"
-                  value={at}
-                  onChange={(e) => {
-                    setAt(e.target.value);
-                    setError(null);
-                  }}
-                  disabled={pending}
-                />
-              </div>
-            )}
-            <div className="grid gap-2">
-              <Label htmlFor={`${id}-lasts`}>Lasts</Label>
-              <Select
-                value={String(minutes)}
-                onValueChange={(next) => setMinutes(Number(next))}
-                disabled={pending}
-              >
-                <SelectTrigger id={`${id}-lasts`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MUTE_LENGTHS.map((length) => (
-                    <SelectItem key={length.minutes} value={String(length.minutes)}>
-                      {length.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {error && (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Muting…" : "Mute"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              />
+            </SidePanelRow>
+          )}
+          <SidePanelRow label="Lasts" htmlFor={`${id}-lasts`}>
+            <Select
+              value={String(minutes)}
+              onValueChange={(next) => setMinutes(Number(next))}
+              disabled={pending}
+            >
+              <SelectTrigger id={`${id}-lasts`} className="w-full max-w-md">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MUTE_LENGTHS.map((length) => (
+                  <SelectItem key={length.minutes} value={String(length.minutes)}>
+                    {length.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SidePanelRow>
+          {error && (
+            <p className="py-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </SidePanelBody>
+        <SidePanelFooter>
+          <Button type="submit" variant="filled" disabled={pending}>
+            {pending ? "Muting…" : "Mute"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }
 

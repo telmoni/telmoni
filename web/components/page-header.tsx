@@ -64,7 +64,7 @@ export function PageHeader({
             ref={heading}
             id={headingId}
             tabIndex={-1}
-            className="min-w-0 truncate text-base font-medium leading-7 outline-none"
+            className="min-w-0 truncate text-base font-medium outline-none"
           >
             {title}
           </h1>
@@ -77,7 +77,7 @@ export function PageHeader({
                     className="shrink-0 cursor-help rounded-sm text-muted-foreground hover:text-foreground"
                     aria-label={`About ${title}`}
                   >
-                    <InfoIcon className="size-3.5" />
+                    <InfoIcon className="size-icon" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs">{info}</TooltipContent>
@@ -101,9 +101,9 @@ export function PageHeader({
     <div className="grid w-full min-w-0 gap-2">
       <Link
         href={backHref}
-        className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        className="flex w-fit items-center gap-gutter text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ArrowLeft className="size-4" />
+        <ArrowLeft className="size-icon" />
         {backLabel}
       </Link>
       {row}

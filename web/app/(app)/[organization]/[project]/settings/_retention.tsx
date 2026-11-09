@@ -57,7 +57,7 @@ export function RetentionForm({
           <span className="text-sm text-muted-foreground">days, up to {max}</span>
         </div>
       </div>
-      <Button type="submit" disabled={!changed || pending}>
+      <Button type="submit" variant="filled" disabled={!changed || pending}>
         {pending ? "Saving…" : "Save"}
       </Button>
     </form>

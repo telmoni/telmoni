@@ -4,6 +4,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { AuditTable } from "@/components/audit-table";
 import { PageHeader } from "@/components/page-header";
 import { NoticeCard } from "@/components/notice-card";
+import { Section } from "@/components/section";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import type { AuditAccess } from "@/lib/server/entities/audit";
 
@@ -47,18 +48,13 @@ export function AuditLog({
     <>
       <PageHeader title="Audit log" action={action} />
       <div className="grid gap-page">
-        <section className="grid gap-gutter">
-          <div className="grid gap-1">
-            <h2 className="text-base font-medium">Activity</h2>
-            <p className="text-sm text-muted-foreground">{description}</p>
-          </div>
-
+        <Section title="Activity" description={description}>
           {events.length === 0 ? (
             <NoticeCard title="No events yet." body={empty} />
           ) : (
             <AuditTable events={events} />
           )}
-        </section>
+        </Section>
       </div>
     </>
   );

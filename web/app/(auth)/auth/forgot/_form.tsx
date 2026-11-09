@@ -49,7 +49,7 @@ export function ForgotForm() {
           {error}
         </p>
       )}
-      <Button type="submit" disabled={pending || !email.trim()}>
+      <Button type="submit" variant="filled" disabled={pending || !email.trim()}>
         {pending ? "Sending…" : "Email me a link"}
       </Button>
     </form>

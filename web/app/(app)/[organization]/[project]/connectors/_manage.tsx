@@ -1,9 +1,18 @@
 "use client";
 
-import { startTransition, useState } from "react";
+import { Webhook } from "lucide-react";
+import { startTransition, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import {
+  SidePanel,
+  SidePanelBody,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+  usePanelOpening,
+} from "@/components/side-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -51,7 +60,7 @@ export function ConnectionActions({
   const { pending, run } = useToastAction();
   const [rotated, setRotated] = useState<SigningSecret | null>(null);
   const [rotating, setRotating] = useState(false);
-  const [editingEvents, setEditingEvents] = useState(false);
+  const events = usePanelOpening();
   const isWebhook = connection.provider === "webhook";
 
   function sendTest() {
@@ -81,18 +90,22 @@ export function ConnectionActions({
             size="sm"
             disabled={pending}
             aria-label={`Choose the events sent to ${label}`}
-            onClick={() => setEditingEvents(true)}
+            onClick={(e) => events.open(e.currentTarget, null)}
           >
             Events
           </Button>
-          <EventsDialog
-            key={`events-${editingEvents}`}
-            projectId={projectId}
-            connection={connection}
-            label={label}
-            open={editingEvents}
-            onOpenChange={setEditingEvents}
-          />
+          {events.place(
+            events.opening && (
+              <EventsPanel
+                key={events.opening.at}
+                projectId={projectId}
+                connection={connection}
+                label={label}
+                onClose={events.close}
+                returnFocus={() => events.opening?.returnTo ?? null}
+              />
+            ),
+          )}
           {/* Offered in every status: rotating is also how an errored
               endpoint comes back. */}
           <Button
@@ -128,9 +141,8 @@ export function ConnectionActions({
       <ConfirmDialog
         trigger={
           <Button
-            variant="outline"
+            variant="destructive"
             size="sm"
-            className="text-destructive hover:text-destructive"
             disabled={pending}
             aria-label={`Disconnect ${label}`}
           >
@@ -151,19 +163,22 @@ export function ConnectionActions({
   );
 }
 
-function EventsDialog({
+function EventsPanel({
   projectId,
   connection,
   label,
-  open,
-  onOpenChange,
+  onClose,
+  returnFocus,
 }: {
   projectId: string;
   connection: Connection;
   label: string;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
 }) {
+  const titleId = useId();
+  const eventsId = useId();
+  const panel = useRef<HTMLDivElement>(null);
   const [events, setEvents] = useState<EventChoice>(() => choiceFrom(connection.event_kinds));
   const { pending, error, setError, run } = useAction();
 
@@ -174,31 +189,31 @@ function EventsDialog({
       () => updateWebhookEventsAction(projectId, connection.id, kindsFrom(events)),
       () => {
         // In the transition, with the list the action drew again.
-        startTransition(() => onOpenChange(false));
+        startTransition(onClose);
         toast.success(`Events updated for ${label}.`);
       },
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <form
-          className="contents"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSubmit) submit();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Events for {label}</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <DialogDescription>
-              Only the chosen events are posted to this endpoint. A change applies to
-              notices raised from now on.
-            </DialogDescription>
+    <SidePanel panel={panel} titleId={titleId} onClose={onClose} full returnFocus={returnFocus}>
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSubmit) submit();
+        }}
+      >
+        <SidePanelHeader icon={Webhook} titleId={titleId} title={`Events for ${label}`} onClose={onClose}>
+          <p className="text-sm text-muted-foreground">
+            Only the chosen events are posted to this endpoint. A change applies to
+            notices raised from now on.
+          </p>
+        </SidePanelHeader>
+        <SidePanelBody>
+          <SidePanelRow label="Events" htmlFor={eventsId}>
             <EventPicker
+              id={eventsId}
               value={events}
               onChange={(next) => {
                 setEvents(next);
@@ -206,23 +221,23 @@ function EventsDialog({
               }}
               disabled={pending}
             />
-            {error && (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="submit" disabled={!canSubmit}>
-              {pending ? "Saving…" : "Save"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          </SidePanelRow>
+          {error && (
+            <p className="py-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </SidePanelBody>
+        <SidePanelFooter>
+          <Button type="submit" variant="filled" disabled={!canSubmit}>
+            {pending ? "Saving…" : "Save"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }
 
@@ -319,7 +334,7 @@ function RotateDialog({
             )}
           </DialogBody>
           <DialogFooter>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" variant="filled" disabled={pending}>
               {pending ? "Rotating…" : "Rotate"}
             </Button>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

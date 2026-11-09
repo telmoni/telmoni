@@ -1,7 +1,7 @@
 import { resourceUrl, type ConsoleTrail } from "@/lib/console-trail";
 import { organizationLabel } from "@/lib/identity";
 import { organizationPath, projectPath } from "@/lib/slug";
-import type { ContentMode } from "@/lib/types/enums";
+import type { ContentMode, Role } from "@/lib/types/enums";
 
 /** A row of the header's two menus: where its name leads, its settings
  *  where the person has standing to open them, and whether it is the one
@@ -13,7 +13,8 @@ export type SwitcherRow = {
   /** Absent for an organization reached through a project alone. */
   settingsHref: string | null;
   active: boolean;
-  /** A project's alone: whether its content is kept. */
+  /** A project's alone: the person's role on it, and whether its content is kept. */
+  role?: Role;
   contentMode?: ContentMode;
 };
 
@@ -79,7 +80,7 @@ export function projectRows({
   trail,
 }: {
   active: { slug: string } | null;
-  projects: readonly { id: string; slug: string; name: string; content_mode: ContentMode }[];
+  projects: readonly { id: string; slug: string; name: string; role: Role; content_mode: ContentMode }[];
   activeProjectId: string | null;
   trail: ConsoleTrail;
 }): SwitcherRow[] {
@@ -94,6 +95,7 @@ export function projectRows({
     }),
     settingsHref: projectPath(active.slug, project.slug, "/settings"),
     active: project.id === activeProjectId,
+    role: project.role,
     contentMode: project.content_mode,
   }));
 }

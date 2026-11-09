@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { INSET } from "@/lib/inset";
-import { ArrowUpRight, Play } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // The pieces of a framed public page (`paper-shell.tsx`, `framed`): the
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 // The small line a section opens with: its number, as a document's
 // sections are numbered, or what a page is, over a title in the console's
 // own face.
-export const EYEBROW = "text-[11px] uppercase tracking-label text-muted-foreground";
+export const EYEBROW = "text-xs uppercase tracking-label text-muted-foreground";
 
 // A paragraph of a section.
 export const BODY = "text-sm leading-[1.65] text-muted-foreground";
@@ -134,12 +134,14 @@ export function PaperPoint({ title, children }: { title?: string; children: Reac
 }
 
 // A link into the console — the book among its pages — is routed; one out
-// of it opens in a new tab, so the page stays.
+// of it opens in a new tab, so the page stays, and says so with an arrow, as
+// the rail's do, unless the caller marks it with an icon of its own (`arrow`).
 export function PaperLink({
   href,
   children,
+  arrow = true,
   ...rest
-}: Omit<React.ComponentProps<"a">, "href" | "target" | "rel"> & { href: string }) {
+}: Omit<React.ComponentProps<"a">, "href" | "target" | "rel"> & { href: string; arrow?: boolean }) {
   if (href.startsWith("/")) {
     return (
       <Link href={href} {...rest}>
@@ -150,6 +152,7 @@ export function PaperLink({
   return (
     <a href={href} target="_blank" rel="noreferrer" {...rest}>
       {children}
+      {arrow && <ArrowUpRight aria-hidden="true" className="ml-0.5 inline-block size-icon align-[-0.125em]" />}
     </a>
   );
 }
@@ -158,7 +161,10 @@ export function PaperLink({
 export function PaperGo({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Button asChild variant="outline" size="sm" className="w-fit font-normal">
-      <PaperLink href={href}>{children} →</PaperLink>
+      <PaperLink href={href}>
+        {children}
+        <ArrowRight aria-hidden="true" />
+      </PaperLink>
     </Button>
   );
 }
@@ -190,13 +196,14 @@ export function FeatureItem({
         {href && linkText && (
           <PaperLink
             href={href}
+            arrow={false}
             className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground underline underline-offset-4 hover:text-foreground"
           >
-            {linkText} <ArrowUpRight className="size-4" aria-hidden="true" />
+            {linkText} <ArrowUpRight className="size-icon" aria-hidden="true" />
           </PaperLink>
         )}
       </div>
-      <p className="text-sm text-muted-foreground">{description}</p>
+      <p className={BODY}>{description}</p>
     </li>
   );
 }
@@ -263,7 +270,7 @@ export function SurfaceCard({
         <h3 className="text-base font-medium text-foreground">
           {title}
         </h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <p className={BODY}>{description}</p>
       </div>
       <div className="mt-auto pt-1">{action}</div>
     </div>
@@ -278,7 +285,7 @@ function VideoPlayOverlay() {
         className="pointer-events-none absolute inset-0 flex items-center justify-center bg-foreground/20 transition-all duration-300 group-hover:bg-foreground/5"
       >
         <div className="flex h-12 w-12 items-center justify-center rounded-full border border-background/20 bg-background/10 text-background backdrop-blur-md shadow-2xl transition-transform duration-300 group-hover:scale-110">
-          <Play className="h-4 w-4 fill-background ml-0.5" />
+          <Play className="size-icon fill-background ml-0.5" />
         </div>
       </div>
       <div

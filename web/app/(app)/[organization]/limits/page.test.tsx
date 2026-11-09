@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IdentityContext } from "@/lib/server/entities/identity-context";
@@ -20,6 +20,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("./actions", () => ({ setProjectCapsAction: vi.fn() }));
+
+vi.mock("@/components/console-shell", () => ({
+  useConsoleShell: () => ({ element: null, cover: () => () => {} }),
+}));
 
 let mockContext: unknown;
 let mockIdentity: IdentityContext | null = null;
@@ -109,6 +113,17 @@ describe("the Limits page", () => {
     render(await LimitsPage());
     expect(screen.getByRole("button", { name: "Set Support bot's caps" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set Research's caps" })).toBeInTheDocument();
+  });
+
+  // New project's panel, a field a row, rather than a dialog over the page.
+  it("sets a project's caps in a panel, its held caps filled in", async () => {
+    asRole("admin");
+    render(await LimitsPage());
+    fireEvent.click(screen.getByRole("button", { name: "Set Support bot's caps" }));
+    const panel = screen.getByRole("dialog", { name: 'Caps on "Support bot"' });
+    expect(panel).toHaveAttribute("aria-modal", "false");
+    expect(within(panel).getByRole("button", { name: "Save caps" })).toBeInTheDocument();
+    expect(within(panel).getAllByRole("textbox").some((field) => (field as HTMLInputElement).value === "200000")).toBe(true);
   });
 
   it("says when the limits could not be read", async () => {

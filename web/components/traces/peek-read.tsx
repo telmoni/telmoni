@@ -21,7 +21,7 @@ import {
 } from "@/lib/peek";
 import type { RouteRead } from "@/lib/route-read";
 import { PEEK_NUDGED } from "@/lib/traces";
-import { TraceDetailSchema } from "@/lib/types/traces";
+import { PeekRunSchema } from "@/lib/types/traces";
 
 // The trace peek's parts: the read of a lane, its entry in the history, the
 // rows beside the one open, the header's actions, and what a panel says when
@@ -43,7 +43,7 @@ async function readHolding<T>(
 
 /** A run's spans, through the trace list's own route: none is a run missing. */
 export const readTrace = (url: string, signal: AbortSignal) =>
-  readHolding(url, TraceDetailSchema, signal, (trace) => trace.spans.length > 0);
+  readHolding(url, PeekRunSchema, signal, (trace) => trace.spans.length > 0);
 
 /** `read` of `url` started, and the cleanup that ends it, after which `settle`
  *  is not called. One controller, aborted by its timer or the cleanup: joining
@@ -150,7 +150,7 @@ export function ReadFailure({
   retry,
 }: {
   read: Exclude<RouteRead<unknown>, { kind: "ok" }>;
-  noun: "trace";
+  noun: "run";
   missing: { title: string; body: ReactNode };
   retry: () => void;
 }) {

@@ -33,7 +33,7 @@ export default async function RefusedPage({
       <CardContent>
         {/* A Route Handler, not a page: a <Link>'s prefetch would start a sign-in. */}
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-        <a href="/auth/login" className={buttonVariants({ variant: "outline" })}>
+        <a href="/auth/login" className={buttonVariants({ variant: "filled" })}>
           Try again
         </a>
       </CardContent>

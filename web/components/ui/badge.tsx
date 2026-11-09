@@ -4,9 +4,10 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-// Keep badge density here so roles, counts and statuses share one shape.
+// Keep badge density here so roles, counts and statuses share one shape: a
+// 20px tag, the kbd's height, its text centred on its capitals (`trim-cap`).
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border border-transparent px-2 py-0.5 text-[10px] leading-4 font-normal whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-sm border border-transparent px-2 text-xs font-normal whitespace-nowrap transition-[color,box-shadow] aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-icon",
   {
     variants: {
       variant: {
@@ -14,7 +15,7 @@ const badgeVariants = cva(
         secondary:
           "bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
         destructive:
-          "bg-destructive text-destructive-foreground focus-visible:ring-destructive/20 dark:bg-destructive-fill dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90 dark:[a&]:hover:bg-destructive-fill/90",
+          "bg-destructive text-destructive-foreground dark:bg-destructive-fill [a&]:hover:bg-destructive/90 dark:[a&]:hover:bg-destructive-fill/90",
         outline:
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
@@ -35,14 +36,20 @@ function Badge({
 }: React.ComponentProps<"span"> &
   VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
   const Comp = asChild ? Slot.Root : "span"
+  const { children, ...rest } = props
+  // Text alone is trimmed to its capitals; anything else sits as it is.
+  const plain = (c: unknown) => typeof c === "string" || typeof c === "number"
+  const text = plain(children) || (Array.isArray(children) && children.every(plain))
 
   return (
     <Comp
       data-slot="badge"
       data-variant={variant}
       className={cn(badgeVariants({ variant }), className)}
-      {...props}
-    />
+      {...rest}
+    >
+      {text && !asChild ? <span className="trim-cap">{children}</span> : children}
+    </Comp>
   )
 }
 

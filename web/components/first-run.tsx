@@ -26,7 +26,7 @@ export function FirstRun({
     <section aria-labelledby="first-run" className="grid gap-gutter md:max-w-3xl">
       {status}
       <div>
-        <h2 id="first-run" className="text-lg font-medium">
+        <h2 id="first-run" className="text-base font-medium">
           {title}
         </h2>
         <p className="text-sm text-muted-foreground">{lead}</p>
@@ -54,7 +54,7 @@ export function FirstRunStep({
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-gutter rounded-md border border-border p-gutter">
       <StepNumber aria-hidden="true">
-        {done ? <Check className="size-4 text-brand-positive" /> : n}
+        {done ? <Check className="size-icon text-brand-positive" /> : n}
       </StepNumber>
       <div className="grid min-w-0 gap-gutter">
         <div>

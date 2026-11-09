@@ -1,4 +1,5 @@
 import { PaperShell } from "@/components/paper-shell";
+import { Section } from "@/components/section";
 import { SessionHeartbeat } from "@/components/session-heartbeat";
 import { SignOutButton } from "@/components/sign-out-button";
 import { Card } from "@/components/ui/card";
@@ -36,7 +37,7 @@ export function AccountOnly({
       <SessionHeartbeat expiresAt={expiresAt} />
       <main className="mx-auto grid w-full max-w-xl gap-page px-gutter py-10">
         <Card data-testid="account-only">
-          <h1 className="text-lg font-semibold">You&apos;re not in an organization</h1>
+          <h1 className="text-base font-medium">You&apos;re not in an organization</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {signupsOpen ? (
               <>
@@ -60,28 +61,24 @@ export function AccountOnly({
         )}
 
         {canChangeEmail(authMethod) && (
-          <Card className="grid gap-gutter text-sm">
-            <h2 className="text-base font-medium">Email</h2>
+          <Section card title="Email">
             <ChangeEmail method={authMethod} email={email} />
-          </Card>
+          </Section>
         )}
 
         {canResetPassword(authMethod) && (
-          <Card className="grid gap-gutter text-sm">
-            <h2 className="text-base font-medium">Password</h2>
+          <Section card title="Password">
             <PasswordReset method={authMethod} />
-          </Card>
+          </Section>
         )}
 
-        <div className="grid gap-2">
-          <h2 className="text-base font-medium">Active sessions</h2>
+        <Section card title="Active sessions">
           <ActiveSessions sessions={sessions} currentId={currentSessionId} />
-        </div>
+        </Section>
 
-        <Card className="grid gap-gutter bg-destructive/5 text-sm">
-          <h2 className="text-base font-medium">Delete your account</h2>
+        <Section card danger title="Delete your account">
           <DeleteAccountForm email={email} ownedOrganizations={ownedOrganizations} />
-        </Card>
+        </Section>
 
         <div className="text-sm">
           <SignOutButton

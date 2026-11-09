@@ -1,25 +1,23 @@
 "use client";
 
 import { UserPlus } from "lucide-react";
-import { startTransition, useState } from "react";
+import { startTransition, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ChoiceGroup, type Choice } from "@/components/choice-group";
 import { EnumSelect } from "@/components/enum-select";
 import { InviteSentDialog } from "@/components/members/invite-sent-dialog";
 import { PageAction } from "@/components/page-action";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SidePanel,
+  SidePanelBody,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+  usePanelOpening,
+} from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -60,22 +58,42 @@ export function AddMember({
    *  when it would: the roster's seats stay open. */
   inviteClosed?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const { opening, open, close, place } = usePanelOpening();
+  const [sent, setSent] = useState<{ email: string; link: string } | null>(null);
   return (
     <>
-      <PageAction primary="Add member" onClick={() => setOpen(true)}>
-        <UserPlus className="size-4" />
+      <PageAction primary="Add member" onClick={(e) => open(e.currentTarget, null)}>
+        <UserPlus className="size-icon" />
         Add member
       </PageAction>
-      <AddDialog
-        key={`add-${open}`}
-        projectId={projectId}
-        candidates={candidates}
-        rosterUnread={rosterUnread}
-        inviteClosed={inviteClosed}
-        open={open}
-        onOpenChange={setOpen}
-      />
+      {place(
+        opening && (
+          <AddPanel
+            key={opening.at}
+            projectId={projectId}
+            candidates={candidates}
+            rosterUnread={rosterUnread}
+            inviteClosed={inviteClosed}
+            onClose={close}
+            returnFocus={() => opening.returnTo}
+            onInvited={(email, link) => {
+              close();
+              if (link) setSent({ email, link });
+            }}
+          />
+        ),
+      )}
+      {sent && (
+        <InviteSentDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setSent(null);
+          }}
+          email={sent.email}
+          link={sent.link}
+          scope="project"
+        />
+      )}
     </>
   );
 }
@@ -84,30 +102,35 @@ export function AddMember({
 // to accept — offered while there is one left to seat, to the organization's
 // owner and admins, who alone are handed its roster. Anybody else is invited
 // by email, as before. One role serves both.
-function AddDialog({
+function AddPanel({
   projectId,
   candidates,
   rosterUnread,
   inviteClosed,
-  open,
-  onOpenChange,
+  onClose,
+  returnFocus,
+  onInvited,
 }: {
   projectId: string;
   candidates: readonly Candidate[];
   rosterUnread: boolean;
   inviteClosed: string | undefined;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
+  /** An invitation sent, with the link it carries where there is one. */
+  onInvited: (email: string, link: string | null) => void;
 }) {
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
   const [way, setWay] = useState<Way>(candidates.length > 0 ? "roster" : "email");
   // Nobody chosen until somebody is: a seat given mails its person.
   const [memberId, setMemberId] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<GivenRole>(Role.Member);
-  const [link, setLink] = useState<string | null>(null);
   const { pending, error, setError, run } = useAction();
   const chosen = candidates.find((c) => c.memberId === memberId);
   const fromRoster = way === "roster" && candidates.length > 0;
+  const ready = !pending && (fromRoster ? chosen !== undefined : email.trim().length > 0);
 
   function submit() {
     if (fromRoster) {
@@ -118,7 +141,7 @@ function AddDialog({
           toast.success(
             `Added ${personName(chosen)} as ${role === Role.Admin ? "an admin" : "a member"}.`,
           );
-          startTransition(() => onOpenChange(false));
+          startTransition(onClose);
         },
       );
       return;
@@ -127,111 +150,90 @@ function AddDialog({
       () => inviteMemberAction(projectId, email, role),
       (r) => {
         // In the transition, with the invitations the action drew again.
-        startTransition(() => setLink(r.link ?? null));
+        startTransition(() => onInvited(email, r.link ?? null));
         toast.success(`Invitation sent to ${email}`);
       },
     );
   }
 
-  if (link) {
-    return (
-      <InviteSentDialog
-        open={open}
-        onOpenChange={onOpenChange}
-        email={email}
-        link={link}
-        scope="project"
-      />
-    );
-  }
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add a member</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
+    <SidePanel panel={panel} titleId={titleId} onClose={onClose} full returnFocus={returnFocus}>
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) submit();
+        }}
+      >
+        <SidePanelHeader icon={UserPlus} titleId={titleId} title="Add a member" onClose={onClose}>
+          <p className="text-sm text-muted-foreground">
+            {fromRoster
+              ? "Somebody already in the organization is added at once, with nothing to accept, and told by email and in their notifications."
+              : "By email address. They get a link, and nothing changes here until they accept it — whether or not they already have an organization."}
+          </p>
+        </SidePanelHeader>
+        <SidePanelBody>
           {candidates.length > 0 && (
-            <div className="grid gap-1.5">
-              <span id="member-way" className="text-sm leading-none font-medium">
-                Who
-              </span>
-              <div className="flex">
-                <ChoiceGroup
-                  labelledBy="member-way"
-                  describedBy={inviteClosed ? "member-way-closed" : undefined}
-                  options={
-                    inviteClosed
-                      ? WAYS.map((w) => (w.value === "email" ? { ...w, disabled: true } : w))
-                      : WAYS
-                  }
-                  value={way}
-                  onChange={(next) => {
-                    // Held while an add is under way: its answer is that way's.
-                    if (pending) return;
-                    setWay(next);
-                    setError(null);
-                  }}
-                />
-              </div>
+            <SidePanelRow label="Who" labelId="member-way">
+              <ChoiceGroup
+                labelledBy="member-way"
+                describedBy={inviteClosed ? "member-way-closed" : undefined}
+                options={
+                  inviteClosed
+                    ? WAYS.map((w) => (w.value === "email" ? { ...w, disabled: true } : w))
+                    : WAYS
+                }
+                value={way}
+                onChange={(next) => {
+                  // Held while an add is under way: its answer is that way's.
+                  if (pending) return;
+                  setWay(next);
+                  setError(null);
+                }}
+              />
               {inviteClosed && (
-                <p id="member-way-closed" className="text-sm text-muted-foreground" role="note">
+                <p id="member-way-closed" className="text-muted-foreground" role="note">
                   {inviteClosed}
                 </p>
               )}
-            </div>
+            </SidePanelRow>
           )}
           {fromRoster ? (
-            <>
-              <DialogDescription>
-                Somebody already in the organization is added at once, with
-                nothing to accept, and told by email and in their notifications.
-              </DialogDescription>
-              <div className="grid gap-1.5">
-                <Label htmlFor="member-person">Person</Label>
-                <Select value={memberId} onValueChange={setMemberId}>
-                  <SelectTrigger id="member-person" className="w-full">
-                    <SelectValue placeholder="Choose somebody" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {candidates.map((c) => (
-                      <SelectItem key={c.memberId} value={c.memberId}>
-                        {personName(c)}
-                        {personDetail(c) ? ` — ${personDetail(c)}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
+            <SidePanelRow label="Person" htmlFor="member-person">
+              <Select value={memberId} onValueChange={setMemberId}>
+                <SelectTrigger id="member-person" className="w-full max-w-md">
+                  <SelectValue placeholder="Choose somebody" />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidates.map((c) => (
+                    <SelectItem key={c.memberId} value={c.memberId}>
+                      {personName(c)}
+                      {personDetail(c) ? ` — ${personDetail(c)}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SidePanelRow>
           ) : (
-            <>
-              <DialogDescription>
-                By email address. They get a link, and nothing changes here until
-                they accept it — whether or not they already have an organization.
-              </DialogDescription>
+            <SidePanelRow label="Email address" htmlFor="member-email">
+              <Input
+                id="member-email"
+                type="email"
+                autoComplete="off"
+                className="max-w-md"
+                value={email}
+                placeholder="dana@example.com"
+                onChange={(e) => setEmail(e.target.value)}
+              />
               {rosterUnread && (
-                <p className="text-sm text-muted-foreground" role="note">
+                <p className="text-muted-foreground" role="note">
                   The organization&rsquo;s members can&rsquo;t be read right now, so
                   adding one of them waits; reload in a moment.
                 </p>
               )}
-              <div className="grid gap-1.5">
-                <Label htmlFor="member-email">Email address</Label>
-                <Input
-                  id="member-email"
-                  type="email"
-                  autoComplete="off"
-                  value={email}
-                  placeholder="dana@example.com"
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-            </>
+            </SidePanelRow>
           )}
-          <div className="grid gap-1.5">
-            <Label htmlFor="member-role">Role</Label>
+          <SidePanelRow label="Role" htmlFor="member-role">
             <EnumSelect
               id="member-role"
               value={role}
@@ -240,20 +242,17 @@ function AddDialog({
                 given === Role.Admin ? "Admin — read access and the audit log" : "Member — read-only access"
               }
               onChange={setRole}
-              className="w-full"
+              className="w-full max-w-md"
             />
-          </div>
+          </SidePanelRow>
           {error && (
-            <p className="text-sm text-destructive" role="alert">
+            <p className="py-2 text-sm text-destructive" role="alert">
               {error}
             </p>
           )}
-        </DialogBody>
-        <DialogFooter>
-          <Button
-            onClick={submit}
-            disabled={pending || (fromRoster ? !chosen : email.trim().length === 0)}
-          >
+        </SidePanelBody>
+        <SidePanelFooter>
+          <Button type="submit" variant="filled" disabled={!ready}>
             {fromRoster
               ? pending
                 ? "Adding…"
@@ -262,8 +261,11 @@ function AddDialog({
                 ? "Sending…"
                 : "Send invitation"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }

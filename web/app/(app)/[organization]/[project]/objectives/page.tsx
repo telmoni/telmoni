@@ -5,8 +5,8 @@ import { DataTable, THead, Td, Th } from "@/components/data-table";
 import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { Badge } from "@/components/ui/badge";
-import { SEVERITY_LABEL, amount, connectionChoices, promiseWords, severityVariant } from "@/lib/alerts";
+import { SeverityMark } from "@/components/severity-mark";
+import { SEVERITY_LABEL, amount, connectionChoices, promiseWords } from "@/lib/alerts";
 import { ownerContact } from "@/lib/identity";
 import { OBJECTIVES_HEADING, lastsWords } from "@/lib/objectives";
 import {
@@ -101,9 +101,7 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
                       <Td className="font-medium whitespace-nowrap">
                         <span className="flex items-center gap-gutter">
                           {alert.name}
-                          <Badge variant={severityVariant(alert.severity)}>
-                            {SEVERITY_LABEL[alert.severity]}
-                          </Badge>
+                          <SeverityMark severity={alert.severity} label={SEVERITY_LABEL[alert.severity]} />
                         </span>
                         <Link
                           href={`${alertsHref}#alert-${alert.id}`}

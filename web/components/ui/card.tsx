@@ -9,7 +9,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
       className={cn(
         // The shared gutter insets content and dividers. A ring preserves
         // the half-pixel outline that browsers round up on a border.
-        "flex flex-col gap-page rounded-xl ring-[0.5px] ring-border p-gutter text-card-foreground",
+        "flex flex-col gap-page rounded-menu ring-[0.5px] ring-border p-gutter text-card-foreground",
         className
       )}
       {...props}

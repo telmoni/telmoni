@@ -4,6 +4,7 @@ import { startTransition, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Target } from "lucide-react";
 
+import { ChoiceGroup } from "@/components/choice-group";
 import { useConsoleShell } from "@/components/console-shell";
 import { EnumSelect } from "@/components/enum-select";
 import { PageAction } from "@/components/page-action";
@@ -16,7 +17,7 @@ import {
 } from "@/components/side-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Toggle } from "@/components/ui/toggle";
 import { amount, historyDays, type ConnectionChoice } from "@/lib/alerts";
 import {
   FAST_BURN,
@@ -84,7 +85,7 @@ export function NewObjective({
   return (
     <>
       <PageAction primary="New objective" onClick={(e) => open(e.currentTarget)}>
-        <Target className="size-4" />
+        <Target className="size-icon" />
         New objective
       </PageAction>
       <ObjectivePanelHost
@@ -210,22 +211,17 @@ function ObjectivePanel({
               </datalist>
             )}
           </SidePanelRow>
-          <SidePanelRow label="Its runs">
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              size="sm"
+          <SidePanelRow label="Its runs" labelId={`${id}-promise`}>
+            <ChoiceGroup
+              labelledBy={`${id}-promise`}
               value={draft.promise}
-              onValueChange={(promise) => promise && change({ ...draft, promise: promise as Promised })}
-              aria-label="What its runs are promised to do"
-              disabled={pending}
-            >
-              {(["success", "latency"] as const).map((promise) => (
-                <ToggleGroupItem key={promise} value={promise}>
-                  {PROMISE_LABEL[promise]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+              onChange={(promise: Promised) => change({ ...draft, promise })}
+              options={(["success", "latency"] as const).map((promise) => ({
+                value: promise,
+                label: PROMISE_LABEL[promise],
+                disabled: pending,
+              }))}
+            />
           </SidePanelRow>
           {draft.promise === "latency" && (
             <SidePanelRow label="Inside" htmlFor={`${id}-latency`}>
@@ -251,18 +247,17 @@ function ObjectivePanel({
                   </p>
                   <div className="flex flex-wrap gap-gutter">
                     {levels.map(({ level, ms }) => (
-                      <Button
+                      <Toggle
                         key={level}
-                        type="button"
                         variant="outline"
                         size="sm"
                         disabled={pending}
-                        aria-pressed={draft.latencyMs.trim() === String(ms)}
+                        pressed={draft.latencyMs.trim() === String(ms)}
                         aria-describedby={`${id}-history`}
-                        onClick={() => change({ ...draft, latencyMs: String(ms) })}
+                        onPressedChange={() => change({ ...draft, latencyMs: String(ms) })}
                       >
                         {level} · {amount(RuleMeasure.Duration, RuleAggregation.Avg, ms)}
-                      </Button>
+                      </Toggle>
                     ))}
                   </div>
                   {draft.latencyMs.trim() && (
@@ -338,7 +333,7 @@ function ObjectivePanel({
           )}
         </SidePanelBody>
         <SidePanelFooter>
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" variant="filled" disabled={pending}>
             {pending ? "Saving…" : ruleId ? "Save objective" : "Make objective"}
           </Button>
           <Button type="button" variant="outline" onClick={onClose}>

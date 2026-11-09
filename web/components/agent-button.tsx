@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot } from "lucide-react";
+import { MessageCircleText } from "lucide-react";
 
 import { useConsoleUi } from "@/components/console-ui-context";
 import { Button } from "@/components/ui/button";
@@ -33,10 +33,9 @@ export function AgentButton() {
         "rounded-md text-muted-foreground hover:text-foreground",
         "hover:bg-sidebar-accent/50",
         agentOpen && "bg-sidebar-accent text-foreground hover:bg-sidebar-accent",
-        "outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
-      <Bot className="size-4" />
+      <MessageCircleText className="size-icon" />
     </Button>
   );
 }

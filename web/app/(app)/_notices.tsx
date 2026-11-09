@@ -34,7 +34,7 @@ function NoticeRow({ item, place }: { item: FeedItem; place: NoticePlace }) {
         <span
           className={cn(
             "block min-w-0 truncate",
-            unread ? "font-bold text-foreground" : "font-normal text-muted-foreground",
+            unread ? "font-medium text-foreground" : "font-normal text-muted-foreground",
           )}
         >
           <Link href={noticeHref(item, place)} className="underline-offset-4 hover:underline">
@@ -49,7 +49,7 @@ function NoticeRow({ item, place }: { item: FeedItem; place: NoticePlace }) {
           <span
             className={cn(
               "whitespace-pre-line wrap-anywhere",
-              unread ? "text-foreground/80" : "text-muted-foreground",
+              unread ? "text-foreground" : "text-muted-foreground",
             )}
           >
             {item.body}

@@ -34,7 +34,7 @@ export function FilterBar({
   if (chips.length === 0) return null;
   return (
     <div
-      className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-border px-2 py-1"
+      className="flex min-h-control flex-wrap items-center gap-gutter rounded-md border border-border px-gutter py-1"
       aria-label="Filters in force"
     >
       {chips.map((chip) => (
@@ -49,7 +49,7 @@ export function FilterBar({
             aria-label={`Clear ${chip.label.toLowerCase()} ${chip.text}`}
             className="rounded-sm text-muted-foreground hover:text-foreground"
           >
-            <XIcon className="size-3" aria-hidden="true" />
+            <XIcon className="size-icon" aria-hidden="true" />
             <LinkPending />
           </Link>
         </Badge>

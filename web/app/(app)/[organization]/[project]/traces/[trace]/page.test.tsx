@@ -29,11 +29,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
-  saveTraceViewAction: vi.fn(),
-  updateTraceViewAction: vi.fn(),
-  deleteTraceViewAction: vi.fn(),
-}));
+vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({}));
 
 import { testSpan } from "@/lib/span-fixture";
 import { Role, SpanKind } from "@/lib/types/enums";
@@ -241,6 +237,11 @@ describe("TracePage", () => {
     expect(scores.getByRole("button", { name: "Score" })).toBeInTheDocument();
   });
 
+  it("says on the run's line whether the project keeps content", async () => {
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByTitle(/This project keeps prompts, replies and tool payloads/)).toHaveTextContent("Content on");
+  });
+
   it("links each of the run's tags to the traces that carry it", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tag = screen.getByRole("link", { name: "team:search" });
@@ -264,7 +265,10 @@ describe("TracePage", () => {
 
     fireEvent.click(within(tree).getByText("search_docs"));
     expect(within(chosen()).getByRole("heading", { name: "search_docs" })).toBeInTheDocument();
-    expect(within(chosen()).getAllByText("Error: TimeoutError").length).toBeGreaterThan(0);
+    // A red square, its error's class beside it, the whole of it its title.
+    const failed = within(chosen()).getAllByTitle("Error: TimeoutError");
+    expect(failed.length).toBeGreaterThan(0);
+    expect(failed[0]).toHaveTextContent("Error: TimeoutError");
     expect(within(chosen()).getAllByText("200 ms").length).toBeGreaterThan(0);
 
     fireEvent.click(within(tree).getByText("chat claude-sonnet-5-5"));
@@ -503,7 +507,7 @@ describe("TracePage", () => {
   it("says when there is no such trace here, and leads back to the list", async () => {
     mockTrace = { kind: "missing" };
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByText("No trace with this id in this project.")).toBeInTheDocument();
+    expect(screen.getByText("No run with this id in this project.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to the traces" })).toHaveAttribute(
       "href",
       "/acme/web/traces",

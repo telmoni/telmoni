@@ -1,20 +1,19 @@
 "use client";
 
-import { startTransition, useState, type ReactNode } from "react";
+import { Webhook } from "lucide-react";
+import { startTransition, useId, useRef, useState, type ReactNode } from "react";
 
 import { PlaintextTokenDialog } from "@/components/plaintext-token-dialog";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SidePanel,
+  SidePanelBody,
+  SidePanelFooter,
+  SidePanelHeader,
+  SidePanelRow,
+  usePanelOpening,
+} from "@/components/side-panel";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { DOCS_URL } from "@/lib/site";
 import { useAction } from "@/lib/use-action";
 
@@ -26,21 +25,28 @@ import { createWebhookConnectorAction, type SigningSecret } from "./actions";
 // secret is shown exactly once on the way back. Slack is a link to a GET
 // route instead, because the browser has to leave for the vendor.
 export function ConnectWebhookButton({ projectId, label }: { projectId: string; label: ReactNode }) {
-  const [open, setOpen] = useState(false);
+  const { opening, open, close, place } = usePanelOpening();
   const [minted, setMinted] = useState<SigningSecret | null>(null);
 
   return (
     <>
-      <Button size="sm" variant="outline" className="w-fit" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="filled" className="w-fit" onClick={(e) => open(e.currentTarget, null)}>
         {label}
       </Button>
-      <AddEndpointDialog
-        key={`add-${open}`}
-        projectId={projectId}
-        open={open}
-        onOpenChange={setOpen}
-        onConnected={setMinted}
-      />
+      {place(
+        opening && (
+          <AddEndpointPanel
+            key={opening.at}
+            projectId={projectId}
+            onClose={close}
+            returnFocus={() => opening.returnTo}
+            onConnected={(r) => {
+              close();
+              setMinted(r);
+            }}
+          />
+        ),
+      )}
       {minted && <SigningSecretDialog result={minted} onClose={() => setMinted(null)} />}
     </>
   );
@@ -90,17 +96,21 @@ function SecretDescription(): ReactNode {
   );
 }
 
-function AddEndpointDialog({
+function AddEndpointPanel({
   projectId,
-  open,
-  onOpenChange,
+  onClose,
+  returnFocus,
   onConnected,
 }: {
   projectId: string;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
   onConnected: (r: SigningSecret) => void;
 }) {
+  const titleId = useId();
+  const eventsId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [events, setEvents] = useState<EventChoice>({ all: true, kinds: [] });
@@ -114,68 +124,64 @@ function AddEndpointDialog({
       (r) =>
         // In the transition, with the list the action drew again: after the
         // `await` it would be an update of its own, a frame ahead of it.
-        startTransition(() => {
-          onOpenChange(false);
-          onConnected(r);
-        }),
+        startTransition(() => onConnected(r)),
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <form
-          className="contents"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSubmit) submit();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Connect a webhook</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <DialogDescription>
-              HTTPS only, and it must resolve to a public address. The events you choose
-              are posted there as signed JSON; the signing secret is shown exactly once,
-              after the endpoint is checked.
-            </DialogDescription>
-            <div className="grid gap-2">
-              <Label htmlFor="webhook-url">Endpoint URL</Label>
-              <Input
-                id="webhook-url"
-                type="url"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setError(null);
-                }}
-                placeholder="https://example.com/telmoni/events"
-                spellCheck={false}
-                autoComplete="off"
-                maxLength={2048}
-                required
-                disabled={pending}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="webhook-name">
-                Name <span className="text-muted-foreground">(optional)</span>
-              </Label>
-              <Input
-                id="webhook-name"
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  setError(null);
-                }}
-                placeholder="e.g. On-call bot"
-                autoComplete="off"
-                maxLength={100}
-                disabled={pending}
-              />
-            </div>
+    <SidePanel panel={panel} titleId={titleId} onClose={onClose} full initialFocus={field} returnFocus={returnFocus}>
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSubmit) submit();
+        }}
+      >
+        <SidePanelHeader icon={Webhook} titleId={titleId} title="Connect a webhook" onClose={onClose}>
+          <p className="text-sm text-muted-foreground">
+            HTTPS only, and it must resolve to a public address. The events you choose
+            are posted there as signed JSON; the signing secret is shown exactly once,
+            after the endpoint is checked.
+          </p>
+        </SidePanelHeader>
+        <SidePanelBody>
+          <SidePanelRow label="Endpoint URL" htmlFor="webhook-url">
+            <Input
+              ref={field}
+              id="webhook-url"
+              type="url"
+              className="max-w-md"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setError(null);
+              }}
+              placeholder="https://example.com/telmoni/events"
+              spellCheck={false}
+              autoComplete="off"
+              maxLength={2048}
+              required
+              disabled={pending}
+            />
+          </SidePanelRow>
+          <SidePanelRow label="Name (optional)" htmlFor="webhook-name">
+            <Input
+              id="webhook-name"
+              className="max-w-md"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError(null);
+              }}
+              placeholder="e.g. On-call bot"
+              autoComplete="off"
+              maxLength={100}
+              disabled={pending}
+            />
+          </SidePanelRow>
+          <SidePanelRow label="Events" htmlFor={eventsId}>
             <EventPicker
+              id={eventsId}
               value={events}
               onChange={(next) => {
                 setEvents(next);
@@ -183,22 +189,22 @@ function AddEndpointDialog({
               }}
               disabled={pending}
             />
-            {error && (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="submit" disabled={!canSubmit}>
-              {pending ? "Connecting…" : "Connect"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          </SidePanelRow>
+          {error && (
+            <p className="py-2 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </SidePanelBody>
+        <SidePanelFooter>
+          <Button type="submit" variant="filled" disabled={!canSubmit}>
+            {pending ? "Connecting…" : "Connect"}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </SidePanelFooter>
+      </form>
+    </SidePanel>
   );
 }

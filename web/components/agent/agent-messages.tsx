@@ -15,7 +15,7 @@ export function Conversation({ messages, turn }: { messages: AgentMessage[]; tur
         m.role === "user" ? (
           <p
             key={m.id}
-            className="ml-8 justify-self-end rounded-lg bg-muted px-gutter py-2 text-sm whitespace-pre-wrap wrap-break-word"
+            className="ml-8 justify-self-end rounded-md bg-muted px-gutter py-2 text-sm whitespace-pre-wrap wrap-break-word"
           >
             {m.content}
           </p>

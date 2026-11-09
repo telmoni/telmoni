@@ -69,7 +69,7 @@ function GivenSeatRow({ seat }: { seat: GivenSeat }) {
           </span>
         )}
         <div className="inline-flex items-center gap-gutter">
-          <Button asChild size="sm">
+          <Button asChild size="sm" variant="filled">
             <Link
               href={href}
               onClick={open}

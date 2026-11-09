@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { EXTRA_FOOTER_LINKS } from "./extension/footer";
 import { footerColumns, type FooterColumn } from "./footer";
 import { DOCS_URL, REPO_URL } from "./site";
 
@@ -60,7 +61,16 @@ describe("footerColumns", () => {
       "Legal",
       "Partners",
     ]);
-    // The core's own slot is empty, so the default draws the core alone.
-    expect(labels(footerColumns(configured), "Product")).not.toContain("Plans");
+    // The default draws what the slot holds: nothing in the core, a console's
+    // own links where one is laid over it.
+    expect(footerColumns(configured)).toEqual(footerColumns(configured, EXTRA_FOOTER_LINKS));
+  });
+
+  it("carries what an extra status link says of each service, and nothing on links without it", () => {
+    const services = [{ name: "Ingest", state: "disrupted" as const }];
+    const extras = [{ column: "Resources", label: "Status", href: "/docs/status", services }];
+    const links = footerColumns(configured, extras).flatMap((column) => column.links);
+    expect(links.find((link) => link.label === "Status")?.services).toEqual(services);
+    expect(links.filter((link) => link.services !== undefined)).toHaveLength(1);
   });
 });

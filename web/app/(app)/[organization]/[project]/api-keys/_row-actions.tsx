@@ -45,7 +45,7 @@ export function TokenRowActions({
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5 text-xs h-9 text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground"
             disabled={pending}
             aria-label={`Rotate ${name}`}
           >
@@ -60,9 +60,8 @@ export function TokenRowActions({
       <ConfirmDialog
         trigger={
           <Button
-            variant="outline"
+            variant="destructive"
             size="sm"
-            className="gap-1.5 text-xs h-9 text-destructive hover:text-destructive"
             disabled={pending}
             aria-label={`Revoke ${name}`}
           >

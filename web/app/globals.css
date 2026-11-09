@@ -10,7 +10,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --control-size: 2.25rem;
+  --control-size: 2rem;
   /* The cursor over a closed rail: a bar and an arrow, black with a white
      outline as the system pointer is, the same
      in both themes so it reads as a cursor and never as a theme's icon.
@@ -54,20 +54,13 @@
 
   --border: oklch(0.912 0.002 286);
   --input: oklch(0.9 0.004 250);
-  /* ⚠ **The focused BORDER colour, and nothing else now.** Every ring shadow
-     and outline that used to spend this token is suppressed by the unlayered
-     `*:focus` rule below, so `--ring` reaches the screen through exactly one
-     thing: `focus-visible:border-ring` on input, select, switch, badge and
-     button.
-     It sits under `--input` (0.9) on purpose: a field keeps one light grey
-     outline whether or not it holds the caret, and focus reads as a small
-     darkening rather than a second, heavier frame. 0.2 drew a black box,
-     0.65 was still a mid grey, and 0.88 was indistinguishable from the
-     resting border. */
+  /* Focus no longer spends this token: the one focus rule below draws a ring
+     and a field's border in the text colour. It stays for shadcn's charts
+     and any primitive that still names it. */
   --ring: oklch(0.8 0 0);
 
   --brand-positive: oklch(0.56 0.17 145);
-  --brand-negative: oklch(0.55 0.22 25);
+  --brand-negative: var(--destructive);
   /* The logo's unit square, #F2A93B, one amber in every theme. */
   --brand-unit: oklch(0.787 0.147 73);
   /* The marker is cyan, lightened at its hue on a light page; the words on
@@ -137,7 +130,7 @@
   --ring: oklch(0.92 0 0);
 
   --brand-positive: oklch(0.65 0.17 145);
-  --brand-negative: oklch(0.65 0.22 25);
+  --brand-negative: var(--destructive);
   --highlight: #22d3ee;
   --highlight-foreground: #161616;
 
@@ -196,7 +189,7 @@
   --ring: oklch(0.8 0 0);
 
   --brand-positive: oklch(0.52 0.15 150);
-  --brand-negative: oklch(0.55 0.21 27);
+  --brand-negative: var(--destructive);
 
   /* Restated with the surface: the home page puts `dark` on this element
      itself, where `.dark`'s light shades would vanish into light paper. */
@@ -242,7 +235,7 @@
   --ring: oklch(0.88 0.004 260);
 
   --brand-positive: oklch(0.68 0.14 150);
-  --brand-negative: oklch(0.65 0.2 27);
+  --brand-negative: var(--destructive);
 
   --mark-ink: #e4e4e4;
   --mark-mid: #a1a1aa;
@@ -287,7 +280,7 @@
   --ring: oklch(0.8 0 0);
 
   --brand-positive: oklch(0.52 0.15 150);
-  --brand-negative: oklch(0.55 0.21 27);
+  --brand-negative: var(--destructive);
 
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.33 0.005 260);
@@ -333,7 +326,7 @@
   --ring: oklch(0.92 0 0);
 
   --brand-positive: oklch(0.68 0.14 150);
-  --brand-negative: oklch(0.65 0.2 27);
+  --brand-negative: var(--destructive);
 
   --sidebar: var(--background);
   --sidebar-foreground: oklch(0.93 0.003 250);
@@ -420,20 +413,43 @@
    `app/layout.tsx`. Unlayered, as the focus rule above is, so they beat
    Tailwind's utilities whatever their specificity. */
 
-/* Keyboard focus is visible by default; only an explicit saved choice hides it. */
+/* Keyboard focus is shown by default, as Claude and Gemini show it: a thin
+   ring hugging the control in the text colour, with a faint glow, never a
+   heavy outline standing off it; only an explicit saved choice hides it. The
+   outline stays, transparent, so a forced-colours display, which drops box
+   shadows, still draws one. */
 html:not(.a11y-no-focus-rings) *:focus-visible {
-  outline: 2px solid var(--color-foreground);
+  outline: 2px solid transparent;
   outline-offset: 2px;
+  box-shadow:
+    0 0 0 1px var(--color-foreground),
+    0 0 6px 1px color-mix(in oklab, var(--color-foreground) 12%, transparent);
   /* Drawn at once: a control that transitions every property (a button's
-     `transition-all`) would otherwise grow the ring in from the default
-     3px over its duration. */
+     `transition-all`) would otherwise grow the ring in over its duration. */
   transition-property: color, background-color, border-color, opacity, box-shadow;
 }
-html:not(.a11y-no-focus-rings) :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"], [data-slot="card"] table, [data-slot="table-scroll"]) *:focus-visible {
-  outline-offset: -2px;
-}
+/* Inside a box that clips what stands past it, the ring is drawn inside. */
+html:not(.a11y-no-focus-rings) :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"], [data-slot="card"] table, [data-slot="table-scroll"]) *:focus-visible,
 html:not(.a11y-no-focus-rings) :is([data-slot="card"], [data-slot="card"] > a, [data-slot="table-scroll"]):focus-visible {
   outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px var(--color-foreground);
+}
+/* A field you type in shows its focus as its own border turning the text
+   colour, however it was reached, and no ring around it: clicking into it is
+   where you type, not a place to find. The agent's composer is one field with
+   more inside it, so its box takes the border. */
+html:not(.a11y-no-focus-rings) :is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select):focus-visible {
+  box-shadow: none;
+  border-color: var(--color-foreground);
+}
+html:not(.a11y-no-focus-rings) [data-focus-box]:has(> textarea:focus-visible) {
+  border-color: var(--color-foreground);
+}
+/* What takes the focus only to hand it on, a menu, a dialog or a panel as it
+   opens or a heading a page lands on, draws nothing, however it was opened. */
+html:not(.a11y-no-focus-rings) :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], h1, h2, h3, main)[tabindex="-1"]:focus-visible {
+  outline-color: transparent;
+  box-shadow: none;
 }
 
 /* Reduce motion: every animation and transition finishes at once rather than
@@ -570,26 +586,50 @@ html.a11y-more-contrast.dark [data-slot="input"] {
 .theme-console [data-slot="card"]:has(> table) {
   overflow-x: auto;
 }
-/* While a table runs past its card on a side, that edge fades into the page,
-   which says there is more where the eye is; the scrollbar at the card's
-   foot (`::-webkit-scrollbar`, below) is under a page of rows. The fade stops
-   short of the scrollbar's row. `data-table.tsx` measures which side. */
-.theme-console [data-overflow~="left"]::before,
-.theme-console [data-overflow~="right"]::after {
+/* What scrolls sideways shows no scrollbar, a table, a list's toolbar or a
+   block of code (`data-scroll-x`): a bar under one row reads as a frame, and
+   at a table's foot it sits under a page of rows. While it runs past a side,
+   that edge fades into what is behind it (`--fade`, the page unless the box
+   says otherwise), which says there is more where the eye is. `useOverflow`
+   measures which side. */
+:is(.theme-console :is([data-slot="card"]:has(> table), [data-slot="table-scroll"]), [data-scroll-x], [data-scroll-y]) {
+  scrollbar-width: none;
+}
+[data-overflow~="left"]::before,
+[data-overflow~="right"]::after {
   content: "";
   position: absolute;
   top: 0;
-  bottom: 0.5rem;
+  bottom: 0;
   width: 3rem;
   pointer-events: none;
 }
-.theme-console [data-overflow~="left"]::before {
+[data-overflow~="left"]::before {
   left: 0;
-  background: linear-gradient(to right, var(--background), transparent);
+  background: linear-gradient(to right, var(--fade, var(--background)), transparent);
 }
-.theme-console [data-overflow~="right"]::after {
+[data-overflow~="right"]::after {
   right: 0;
-  background: linear-gradient(to left, var(--background), transparent);
+  background: linear-gradient(to left, var(--fade, var(--background)), transparent);
+}
+/* A rail that scrolls on its own, the book's tree, fades at the end with
+   more beyond it, as a table's sides do. */
+[data-overflow~="top"]::before,
+[data-overflow~="bottom"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3rem;
+  pointer-events: none;
+}
+[data-overflow~="top"]::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--background), transparent);
+}
+[data-overflow~="bottom"]::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--background), transparent);
 }
 
 .theme-console :is([data-slot="card"], [data-slot="table-scroll"]) table {
@@ -672,26 +712,27 @@ html.a11y-more-contrast.dark [data-slot="input"] {
      to be the same 8px — a second name for one value, which is how two things
      that must agree quietly stop agreeing.
 
-     The panels — the two dropdowns, the select's list, the splash's nav
-     panel — and the bordered boxes a page lays rows in. Smaller than the
-     content pane at `1rem`, because these are 256-320px wide against its
-     full column, and a radius that reads as a soft edge at that width reads
-     as a lozenge at this one.
+     Every panel: the dropdowns, the select's list, popovers, dialogs, the
+     splash's nav panel, the agent's window, and the cards and bordered boxes
+     a page lays rows in.
 
      ⚠ **A panel's radius, and nothing a person presses.** Every button,
      field, row and link takes `rounded-md`, the scale's own 8px: on a 32px
      control, 12px read as a lozenge, which is exactly what it was brought in
-     to replace when every row was `rounded-full`. The `p-1` inset is what
-     makes the two agree — a row's 8px corner sits 4px inside the panel's
-     12px one, which is the concentric curve, not a coincidence. */
+     to replace when every row was `rounded-full`. */
   --radius-menu: 0.75rem;
 
   --tracking-label: 0.4em;
 
   /* Cards, controls and page sections share one spacing value. */
-  --spacing-gutter: 1.125rem;
+  --spacing-gutter: 0.75rem;
   --spacing-page: var(--spacing-gutter);
   --spacing-control: var(--control-size);
+  /* Every icon's size (`size-icon`): 16px, Lucide's own beside 14px text. */
+  --spacing-icon: 1rem;
+  /* Where text after a row's icon starts (`pl-row-text`): a gutter, the icon
+     and a gutter, in a menu, a select or the command list alike. */
+  --spacing-row-text: calc(2 * var(--spacing-gutter) + var(--spacing-icon));
   --spacing-console-header: calc(var(--control-size) + 2 * var(--spacing-gutter) + 1px);
 
   /* The wider rail keeps its link area while sharing the page's inset;
@@ -706,7 +747,13 @@ html.a11y-more-contrast.dark [data-slot="input"] {
   --font-mono:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
-  --text-sm--line-height: 1.65;
+  /* Each step 2px under Tailwind's: 14px titles, 12px body, 10px small. */
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.25rem;
+  --text-sm: 0.75rem;
+  --text-sm--line-height: 1rem;
+  --text-xs: 0.625rem;
+  --text-xs--line-height: 0.875rem;
 
   --color-sidebar-ring: var(--sidebar-ring);
 
@@ -737,11 +784,6 @@ html.a11y-more-contrast.dark [data-slot="input"] {
 @utility trim-cap {
   display: block;
   text-box: trim-both cap alphabetic;
-}
-
-@utility text-2xs {
-  font-size: 0.625rem;
-  line-height: 1rem;
 }
 
 /* `w-filters`: the filters beside the trace list, at the width they were

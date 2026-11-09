@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { Toggle as TogglePrimitive } from "radix-ui"
 
 const toggleVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-transparent text-xs font-medium whitespace-nowrap transition-[color,box-shadow] outline-none hover:border-foreground/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[state=on]:bg-secondary data-[state=on]:text-foreground data-[state=on]:hover:bg-secondary dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex items-center justify-center gap-gutter rounded-md border border-border bg-transparent text-sm font-medium whitespace-nowrap transition-[color,box-shadow] hover:border-foreground/40 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[state=on]:bg-secondary data-[state=on]:text-foreground data-[state=on]:hover:bg-secondary [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-icon",
   {
     variants: {
       variant: {
@@ -15,9 +15,8 @@ const toggleVariants = cva(
           "border-input",
       },
       size: {
-        default: "h-control min-w-control px-gutter text-sm",
-        sm: "h-8 min-w-8 px-2 text-xs",
-        lg: "h-11 min-w-11 px-gutter",
+        default: "h-control min-w-control px-gutter",
+        sm: "h-control min-w-control px-gutter",
       },
     },
     defaultVariants: {

@@ -57,7 +57,7 @@ export function DeviceForm({ code: initialCode }: { code: string }) {
         </p>
       )}
       <div className="flex gap-gutter">
-        <Button type="submit" disabled={pending || !code.trim()}>
+        <Button type="submit" variant="filled" disabled={pending || !code.trim()}>
           {pending ? "Working…" : "Approve"}
         </Button>
         <Button

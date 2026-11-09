@@ -1,25 +1,11 @@
-import Link from "next/link";
-
 import { CornersToggle } from "@/components/corners-toggle";
+import { RailLink } from "@/components/rail-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 
-import { footerColumns, type FooterLink } from "@/lib/footer";
+import { footerColumns } from "@/lib/footer";
 import { INSET } from "@/lib/inset";
 import { branding } from "@/lib/server/branding";
 import { cn } from "@/lib/utils";
-
-// A link into the console is routed; one out of it opens in a new tab.
-function FooterAnchor({ link, className }: { link: FooterLink; className: string }) {
-  return link.href.startsWith("/") ? (
-    <Link href={link.href} {...(link.newTab && { target: "_blank" })} className={className}>
-      {link.label}
-    </Link>
-  ) : (
-    <a href={link.href} target="_blank" rel="noreferrer" className={className}>
-      {link.label}
-    </a>
-  );
-}
 
 // The columns a product site draws, four or five where a deployment has legal
 // documents, and the copyright at the foot: what each holds is
@@ -41,10 +27,8 @@ export function SiteFooter({ inset = false }: { inset?: boolean }) {
             <ul className="mt-gutter flex flex-col gap-2">
               {column.links.map((link) => (
                 <li key={link.href}>
-                  <FooterAnchor
-                    link={link}
-                    className="text-sm text-muted-foreground hover:text-foreground"
-                  />
+                  {/* The rail's link: a new tab's arrow on hover, as there. */}
+                  <RailLink link={link} className="text-sm" />
                 </li>
               ))}
             </ul>

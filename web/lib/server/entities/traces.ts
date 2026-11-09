@@ -127,7 +127,6 @@ export const DashboardViewSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
-export type DashboardView = z.infer<typeof DashboardViewSchema>;
 
 export const DashboardViewListSchema = z.object({ views: z.array(DashboardViewSchema) });
 

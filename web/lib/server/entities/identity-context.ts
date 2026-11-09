@@ -103,8 +103,12 @@ export function sessionHeaders(
   return bearerHeaders(session.accessToken, organizationId, projectId);
 }
 
-export function organizationHeaders(ctx: IdentityContext): Record<string, string> {
-  return bearerHeaders(ctx.accessToken, ctx.organizationId);
+/** For the organization the request acts in, or another the person is in. */
+export function organizationHeaders(
+  ctx: IdentityContext,
+  organizationId: string = ctx.organizationId,
+): Record<string, string> {
+  return bearerHeaders(ctx.accessToken, organizationId);
 }
 
 export function projectHeaders(ctx: IdentityContext, projectId: string): Record<string, string> {

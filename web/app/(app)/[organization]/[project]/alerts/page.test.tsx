@@ -461,7 +461,7 @@ describe("AlertsPage", () => {
       mockAlerts = { ...(mockAlerts as object), alerts: [{ ...SLOW, ...over }] };
       render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
       const card = document.getElementById(`alert-${RULE}`)!;
-      return { badge: card.querySelector('[data-slot="badge"]'), now: detail(RULE, "Now") };
+      return { badge: card.querySelector('[data-slot="severity"]'), now: detail(RULE, "Now") };
     };
     const kept = {
       missing_data: "keep",

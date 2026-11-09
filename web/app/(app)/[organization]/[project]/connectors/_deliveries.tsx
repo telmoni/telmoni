@@ -1,23 +1,15 @@
 "use client";
 
 import { unstable_rethrow } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { Send } from "lucide-react";
+import { useId, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { readDeliveries } from "@/components/connectors/reads";
 import { LocalTime } from "@/components/local-time";
+import { SidePanel, SidePanelBody, SidePanelHeader, usePanelOpening } from "@/components/side-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { eventKindLabel } from "@/lib/notification-kinds";
 import type { DeliveryAttempt, DeliveryLogEntry } from "@/lib/server/data";
 import { thrownWords } from "@/lib/use-action";
@@ -43,7 +35,9 @@ export function DeliveriesButton({
   label: string;
   canResend: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const { opening, open, close, place } = usePanelOpening();
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [olderError, setOlderError] = useState<string | null>(null);
   const [loadingOlder, startOlder] = useTransition();
@@ -100,102 +94,94 @@ export function DeliveriesButton({
     }
   }
 
+  // Drops any read still in flight: its answer is for a panel no longer showing.
+  function shut() {
+    seq.current++;
+    close();
+  }
+
   return (
     <>
       <Button
         variant="outline"
         size="sm"
         aria-label={`Show deliveries to ${label}`}
-        onClick={() => {
-          setOpen(true);
+        onClick={(e) => {
+          open(e.currentTarget, null);
           void loadFirst();
         }}
       >
         Deliveries
       </Button>
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          setOpen(next);
-          // Drops any read still in flight: its answer is for a dialog that
-          // is no longer showing.
-          if (!next) seq.current++;
-        }}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Deliveries to {label}</DialogTitle>
-          </DialogHeader>
-          {/* The body is the scrolling part of the chassis, so the list needs
-              no scroll container of its own. */}
-          <DialogBody>
-            <DialogDescription>
-              Newest first. Each notice is kept for 30 days, with every attempt to post it.
-            </DialogDescription>
-            {load.state === "loading" ? (
-              <p role="status" className="py-2 text-sm text-muted-foreground">
-                Loading deliveries…
+      {place(
+        opening && (
+          <SidePanel panel={panel} titleId={titleId} onClose={shut} returnFocus={() => opening.returnTo}>
+            <SidePanelHeader icon={Send} titleId={titleId} title={`Deliveries to ${label}`} onClose={shut}>
+              <p className="text-sm text-muted-foreground">
+                Newest first. Each notice is kept for 30 days, with every attempt to post it.
               </p>
-            ) : load.state === "error" ? (
-              <div className="grid gap-2 py-2">
-                <p role="alert" className="text-sm text-destructive">
-                  {load.message}
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 w-fit text-xs"
-                  onClick={() => void loadFirst()}
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : load.entries.length === 0 ? (
-              <p role="status" className="py-2 text-sm text-muted-foreground">
-                No deliveries yet.
-              </p>
-            ) : (
-              <div className="grid gap-gutter">
-                <ul className="grid gap-gutter">
-                  {load.entries.map((entry) => (
-                    <DeliveryRow
-                      key={entry.id}
-                      entry={entry}
-                      canResend={canResend}
-                      resending={resending === entry.id}
-                      busy={resending !== null}
-                      onResend={() => void resend(entry.id)}
-                    />
-                  ))}
-                </ul>
-                {olderError && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {olderError}
+            </SidePanelHeader>
+            <SidePanelBody>
+              <div className="py-gutter">
+                {load.state === "loading" ? (
+                  <p role="status" className="text-sm text-muted-foreground">
+                    Loading deliveries…
                   </p>
-                )}
-                {load.nextBefore !== null && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 w-fit text-xs"
-                    disabled={loadingOlder}
-                    onClick={loadOlder}
-                  >
-                    {loadingOlder ? "Loading…" : "Load older"}
-                  </Button>
+                ) : load.state === "error" ? (
+                  <div className="grid gap-2">
+                    <p role="alert" className="text-sm text-destructive">
+                      {load.message}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-fit text-muted-foreground hover:text-foreground"
+                      onClick={() => void loadFirst()}
+                    >
+                      Try again
+                    </Button>
+                  </div>
+                ) : load.entries.length === 0 ? (
+                  <p role="status" className="text-sm text-muted-foreground">
+                    No deliveries yet.
+                  </p>
+                ) : (
+                  <div className="grid gap-gutter">
+                    <ul className="grid gap-gutter">
+                      {load.entries.map((entry) => (
+                        <DeliveryRow
+                          key={entry.id}
+                          entry={entry}
+                          canResend={canResend}
+                          resending={resending === entry.id}
+                          busy={resending !== null}
+                          onResend={() => void resend(entry.id)}
+                        />
+                      ))}
+                    </ul>
+                    {olderError && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {olderError}
+                      </p>
+                    )}
+                    {load.nextBefore !== null && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-fit text-muted-foreground hover:text-foreground"
+                        disabled={loadingOlder}
+                        onClick={loadOlder}
+                      >
+                        {loadingOlder ? "Loading…" : "Load older"}
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </DialogBody>
-          {/* Nothing to act on here, and the footer stays: every modal keeps
-              its way out where the others keep theirs. */}
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button>Done</Button>
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </SidePanelBody>
+          </SidePanel>
+        ),
+      )}
     </>
   );
 }
@@ -235,7 +221,7 @@ function DeliveryRow({
       )}
       <details className="text-xs">
         <summary className="w-fit cursor-pointer text-muted-foreground">Details</summary>
-        <pre className="mt-2 max-h-48 overflow-auto rounded-menu bg-muted p-2 font-mono text-xs whitespace-pre-wrap wrap-break-word">
+        <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-muted px-gutter py-2 text-xs whitespace-pre-wrap wrap-break-word">
           {entry.body}
         </pre>
         {entry.attempts.length === 0 ? (
@@ -254,7 +240,7 @@ function DeliveryRow({
         <Button
           variant="outline"
           size="sm"
-          className="h-9 w-fit text-xs"
+          className="w-fit text-muted-foreground hover:text-foreground"
           disabled={busy}
           aria-label={`Resend ${entry.subject}`}
           onClick={onResend}

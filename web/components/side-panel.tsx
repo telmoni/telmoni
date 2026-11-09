@@ -201,8 +201,8 @@ export function SidePanelHeader({
   return (
     <div className={cn("shrink-0 px-gutter", flush && "border-b border-border")}>
       <div className={cn("grid gap-1.5 py-gutter", !flush && "border-b border-border")}>
-        <div className="flex min-h-control min-w-0 items-center gap-2">
-          <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <div className="flex min-h-control min-w-0 items-center gap-gutter">
+          <Icon className="size-icon shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 id={titleId} className="min-w-0 truncate text-base font-medium">
             {title}
           </h2>
@@ -266,7 +266,7 @@ export function SidePanelRow({
       )}
       {/* Its first line as tall as the label's, centred: text beside the label
           sits on the label's line, as a control does. */}
-      <div className="grid min-w-0 content-start items-center gap-1.5 text-sm sm:grid-rows-[minmax(--spacing(7),auto)]">
+      <div className="grid min-w-0 content-start items-center gap-1.5 text-sm sm:grid-rows-[minmax(var(--spacing-control),auto)]">
         {children}
       </div>
     </div>

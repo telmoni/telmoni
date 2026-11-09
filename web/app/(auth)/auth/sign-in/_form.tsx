@@ -46,7 +46,7 @@ export function SignInForm({
     // eslint-disable-next-line @next/next/no-html-link-for-pages
     <a
       href="/auth/login/external"
-      className={buttonVariants({ variant: sso ? "default" : "outline" })}
+      className={buttonVariants({ variant: sso ? "filled" : "outline" })}
     >
       Continue with {provider}
     </a>
@@ -100,7 +100,7 @@ export function SignInForm({
             {error}
           </p>
         )}
-        <Button type="submit" disabled={pending || !email.trim() || !password}>
+        <Button type="submit" variant="filled" disabled={pending || !email.trim() || !password}>
           {pending ? "Signing in…" : "Sign in"}
         </Button>
       </form>

@@ -35,7 +35,7 @@ export default async function AccountNotificationsPage() {
         {nothing && (
           <NoticeCard
             data-testid="notifications-empty"
-            title="No notifications"
+            title="No notifications."
             body="Invitations to join an organization or a project, offers to take one over, and projects you were added to show up here."
           />
         )}

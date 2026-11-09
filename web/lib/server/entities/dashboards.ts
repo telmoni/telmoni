@@ -3,15 +3,11 @@ import { z } from "zod";
 
 import { MetricsGroup } from "@/lib/types/enums";
 
-import { DashboardViewListSchema, readLane, type DashboardView } from "./traces";
+import { readLane } from "./traces";
 
-// One hour's or day's totals, of one group's value where grouped, as
-// telemetry's rollups lane answers them.
+// One hour's or day's totals, as telemetry's rollups lane answers them.
 const PointSchema = z.object({
   at: z.string(),
-  value: z.string().optional(),
-  /** The values past the top that spent most, summed: a split from the spans. */
-  others: z.boolean().optional(),
   spans: z.number(),
   failed: z.number(),
   runs: z.number(),
@@ -45,32 +41,9 @@ export type RollupsAccess =
   | { kind: "unavailable" };
 
 /** The project's hourly totals over the last `days`, by the hour for a day
- *  and by the day for longer, split where `split` names a spend chart's
- *  group; a split by a tag, a user or a session no further back than the
- *  plan keeps the spans, its answer's `days` saying how far. */
-export const fetchRollups = cache(
-  async (projectId: string, days: number, split?: MetricsGroup, tag?: string): Promise<RollupsAccess> => {
-    const query = new URLSearchParams({ days: String(days), step: days <= 1 ? "hour" : "day" });
-    if (split) query.set("group", split);
-    if (tag) query.set("tag", tag);
-    const read = await readLane("fetchRollups", projectId, `/rollups?${query}`, RollupsSchema);
-    return read.kind === "ok" ? { kind: "ok", rollups: read.value } : read;
-  },
-);
-
-
-export type DashboardsAccess =
-  | { kind: "ok"; dashboards: DashboardView[] }
-  | { kind: "forbidden" }
-  | { kind: "unavailable" };
-
-/** The project's saved dashboards, by name. */
-export const fetchDashboards = cache(async (projectId: string): Promise<DashboardsAccess> => {
-  const read = await readLane(
-    "fetchDashboards",
-    projectId,
-    "/views",
-    DashboardViewListSchema,
-  );
-  return read.kind === "ok" ? { kind: "ok", dashboards: read.value.views } : read;
+ *  and by the day for longer. */
+export const fetchRollups = cache(async (projectId: string, days: number): Promise<RollupsAccess> => {
+  const query = new URLSearchParams({ days: String(days), step: days <= 1 ? "hour" : "day" });
+  const read = await readLane("fetchRollups", projectId, `/rollups?${query}`, RollupsSchema);
+  return read.kind === "ok" ? { kind: "ok", rollups: read.value } : read;
 });

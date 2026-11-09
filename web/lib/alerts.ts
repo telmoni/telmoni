@@ -394,23 +394,16 @@ export const SEVERITY_LABEL: Record<Severity, string> = {
   [Severity.Paused]: "Paused",
 };
 
-/** A severity's badge: an alert in the error's colour, a warning filled, a
- *  pause or no data muted, the rest outlined. */
-export function severityVariant(
-  severity: Severity,
-): "destructive" | "default" | "secondary" | "outline" {
-  switch (severity) {
-    case Severity.Alert:
-      return "destructive";
-    case Severity.Warning:
-      return "default";
-    case Severity.NoData:
-    case Severity.Paused:
-      return "secondary";
-    default:
-      return "outline";
-  }
-}
+/** A severity's mark (`SeverityMark`): OK green, an alert red, a warning in
+ *  the text colour, no data or a pause muted, one not yet evaluated hollow. */
+export const SEVERITY_MARK: Record<Severity, string> = {
+  [Severity.Unknown]: "border border-muted-foreground",
+  [Severity.Ok]: "bg-brand-positive",
+  [Severity.Warning]: "bg-foreground",
+  [Severity.Alert]: "bg-brand-negative",
+  [Severity.NoData]: "bg-muted-foreground/50",
+  [Severity.Paused]: "bg-muted-foreground/50",
+};
 
 export const STATUS_LABEL: Record<IncidentStatus, string> = {
   [IncidentStatus.Open]: "Open",
