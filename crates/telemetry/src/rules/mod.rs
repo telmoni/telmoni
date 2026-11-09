@@ -643,10 +643,12 @@ impl RuleInput {
 /// them: [`LINKS_MAX`] at most, each once, its hours checked.
 pub(crate) fn checked_links(links: Vec<Link>, whose: &str) -> Result<Vec<Link>, TelmoniError> {
     let bad = |why: String| TelmoniError::BadRequest(why);
-    if links.len() > LINKS_MAX {
+    // One count for the check and the size, so code scanning sees the bound.
+    let count = links.len();
+    if count > LINKS_MAX {
         return Err(bad(format!("{whose} links up to {LINKS_MAX} connectors")));
     }
-    let mut connectors: Vec<Link> = Vec::with_capacity(links.len());
+    let mut connectors: Vec<Link> = Vec::with_capacity(count);
     for link in links {
         if connectors
             .iter()
