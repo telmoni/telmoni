@@ -115,6 +115,10 @@ query, each parameter repeatable where the page lets you pick several values:
   `model`, `tool`, `environment`, `release`, `prompt`, `tag` as `key:value`,
   and `prompt_version` as `name:version`, a prompt's version under its name:
   each narrows the list to runs that match one of its values.
+- `score`: A score's name, up to 64 characters, with `score_min` and
+  `score_max`, each optional, bounding its value: narrows the list to runs
+  carrying a score of that name within them. A bound without `score` is a
+  `400`.
 - `sort` and `dir` (`asc` or `desc`): The column and the direction, as the page
   sorts.
 - `limit` and `page`: The page's size and which page, from 1.

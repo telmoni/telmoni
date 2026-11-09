@@ -154,9 +154,10 @@ The [field inventory](/docs/api/field-inventory) names, on a span, `gen_ai.respo
 `gen_ai.request.reasoning.level`, `gen_ai.agent.version`,
 `gen_ai.tool.call.id`,
 `gen_ai.tool.type`, `gen_ai.output.type`, `gen_ai.prompt.name`,
-`gen_ai.prompt.version`, `gen_ai.data_source.id` and `server.address`, and on
-the resource `service.name` and every `telemetry.sdk.*` and
-`telemetry.distro.*`; the resource's `deployment.environment.name` and
+`gen_ai.prompt.version`, `gen_ai.data_source.id`, `gen_ai.memory.store.id`,
+`gen_ai.retrieval.top_k`, `gen_ai.memory.record.count`, `server.address`,
+`telmoni.scrubbed` and `telmoni.retrieval.returned`, and on the resource
+`service.name` and every `telemetry.sdk.*` and `telemetry.distro.*`; the resource's `deployment.environment.name` and
 `service.version` are the `environment` and `release` columns above, never
 attributes.
 

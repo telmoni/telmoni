@@ -218,8 +218,8 @@ back.
 **Ten failed sends in a row** also mark the endpoint **Needs attention**, and
 the project's other channels are told. Sends that fail within 30 seconds of
 each other count once, so a burst of notices raised together during your
-deploy is one failure, not one per notice. With the default five attempts, two
-notices that each run through them trip it; one bad hour on one notice does
+deploy is one failure, not one per notice. With five attempts each, two
+notices that run through them trip it; one bad hour on one notice does
 not. One success anywhere in that run resets the count. A failed resend from the
 delivery log, or a failed **Send test**, does not count toward it.
 

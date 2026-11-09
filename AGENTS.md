@@ -13,7 +13,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 | Path | What |
 |---|---|
 | `crates/telmoni` | The `telmoni-server` binary: `serve` (every module on `PORT` 8082, the sweeps and the agent's indexer on timers), the machine door (`door.rs`) and one-shot admin subcommands (`command.rs`). `App::assemble` is what a deployment's own binary calls. |
-| `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, export and deletion, `/cli/v1` and `/v1`. |
+| `crates/auth` | Sign-in (password form, OIDC), identities, organizations, projects, members, invitations, transfers, API keys, sessions, flags, audit exports and deletion, `/cli/v1` and `/v1`. |
 | `crates/notifications` | The in-app feed, the Slack and webhook connectors, the delivery queue. |
 | `crates/agent` | The console agent, read-only: model adapters, embeddings, the index, hybrid search, tools. Needs the `vector` extension, which a superuser installs. Off until `AGENT_MODEL_PROVIDER` is set. |
 | `crates/telemetry` | Ingest at `/otlp/v1/traces` (`ingest/`, `handler/ingest.rs`), and the module's `/v1` lanes, the files and scores an SDK sends among them (`handler/v1.rs`); each project's settings, content mode, the content and files it keeps sealed, and saved dashboards in Postgres (`db.rs`, `content.rs`, `handler/`), and its alerts with their incidents, mutes and deliveries (`rules/`); the model price table (`prices.rs`, `model_prices.json`); the spans, their hourly totals and the scores in ClickHouse, read and written only through `store.rs`, each read naming its projects. `clickhouse/` holds ClickHouse's one migration file, which `migrate` applies (`schema.rs`), its settings and its local users; `rotate` drops the expired days and months (`retention.rs`), both as the migrator's user. |
@@ -28,7 +28,7 @@ The open-source Telmoni platform ([`telmoni/telmoni`](https://github.com/telmoni
 | `ARCHITECTURE.md` | How the platform is built, and why, on one page: the repository's one internal document. |
 | `scratch/` | The maintainer's notes, gitignored. Never write to it. |
 | [`telmoni/telmoni-cli`](https://github.com/telmoni/telmoni-cli) | Sibling repo, checked out as `../telmoni-cli`: the CLI, a client of the `/cli/v1` and `/v1` lanes and nothing else. |
-| `telmoni/<agent>-observability-plugin` | Sibling repos, checked out as `../<agent>-observability-plugin` (`claude-code`, `antigravity`): the Claude Code and Antigravity plugins, clients of the TypeScript SDK. A change to a lane, an SDK or a page's path names what it leaves wrong there. |
+| `telmoni/<agent>-observability-plugin` | Sibling repos, checked out as `../<agent>-observability-plugin` (`claude-code`, `codex`, `antigravity`): the Claude Code, Codex and Antigravity plugins, clients of the TypeScript SDK. A change to a lane, an SDK or a page's path names what it leaves wrong there. |
 
 ## Commands
 - **After every change** (no permission needed; report failures verbatim): `make check` (typecheck, cargo check, fmt, clippy, rustdoc), then `make lint`.

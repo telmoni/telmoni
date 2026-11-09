@@ -148,7 +148,7 @@ docker compose -f deploy/compose/docker-compose.yml ps -a
 
 **Sign in to the console**
 
-Open your browser and navigate to `http://localhost:3000`. Sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you configured in `deploy/compose/.env`. At your first sign-in, Telmoni provisions your organization. It is named your `ADMIN_EMAIL` address before the `@` ("admin" for `admin@acme.com`), and the console opens on its Projects page, at `http://localhost:3000/admin/projects`; create the first project from its **Projects** page or the switcher in the console header. Rename the organization, or change its URL, on its **Settings** page.
+Open your browser and navigate to `http://localhost:3000`. Sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you configured in `deploy/compose/.env`. At your first sign-in, Telmoni provisions your organization. It is named your `ADMIN_EMAIL` address before the `@` ("admin" for `admin@acme.com`), and the console opens on its Projects page. Since `admin` is one of the console's own words, the organization's URL takes a random tail, such as `http://localhost:3000/admin-k3x9q2/projects`. Create the first project from its **Projects** page or the switcher in the console header. Rename the organization, or change its URL, on its **Settings** page.
 
 </Step>
 

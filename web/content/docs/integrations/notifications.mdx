@@ -77,7 +77,7 @@ configured on the project's **Connectors** page
 Connectors deliver notices asynchronously. Each delivery is a queued row of its
 own: a send that fails for a reason a retry can fix (a network error, a timeout,
 a rate limit, a server error) goes back in the queue behind a backoff, up to five
-attempts by default, and the notice on the feed is a separate row that no
+attempts, and the notice on the feed is a separate row that no
 delivery outcome changes. Where the `connectors` feature flag is off for the
 deployment, starting a Slack handshake, or connecting a webhook, is
 refused (a handshake already under way still completes), and retries wait until

@@ -18,9 +18,9 @@ the one you gave at sign-up, or the one your identity provider sends with each
 sign-in; the console has no field to change it. It appears on your member row,
 on the invitations you send and in the mail telling somebody you added them to
 a project; the audit log records your user ID. Your
-first sign-in named your organization after its first word ("Ada's
-organization"), or "My organization" when you had none; a different name at a
-later sign-in does not rename it.
+first sign-in named your organization after the part of your address before
+the `@` ("ada" for `ada@acme.com`), never after this name, so no later sign-in
+renames it.
 
 ## Changing your email address
 
@@ -65,8 +65,8 @@ single-use link valid for **60 minutes** is emailed to you, at most five a
 day. Using it ends all existing sessions, updates the stored Argon2id password
 hash, and records your address as verified, since the link came from it.
 
-The hosted service holds no password: you sign in with a code emailed to you
-or through Google, and the section does not appear.
+The hosted service holds no password: you sign in with a code emailed to you,
+through Google or through single sign-on, and the section does not appear.
 
 ## Default organization
 

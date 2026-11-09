@@ -2,17 +2,9 @@
 
 The mark, wordmark, lockup, icons, social cards and platform uploads for Telmoni, built to the file contract. Every raster is rendered from the SVG masters at exactly its canvas. `MANIFEST.md` lists every file with its format, canvas or `viewBox`, alpha, palette and size in bytes, each checked against the contract. `proof/` shows the favicon in browser tabs and the small sizes at real pixels.
 
-## What changed from today's pack
-
-- **Mark:** redrawn as the fused "tm" with the found unit. It now has **two tones** instead of three. `viewBox` is `0 0 1305 1000` (1.305:1), previously `40 125 955 740`.
-- **Colours:** pinned to `#0A0A0A` (dark) and `#FAFAFA` (light) everywhere, with the unit in amber, `#F2A93B`. These replace `#09090B`, `#F7F7F8` and the drifted `#0A0A0B`.
-- **Wordmark:** `viewBox` is now `0 -1000 4614.38 1010.5`.
-- **Lockup:** `viewBox` is now `0 -820 4546.17 827.35`, at **5.49:1**. The Stripe and WorkOS logo images are therefore **1024 × 186**.
-- **Favicons:** `icon.svg`, `favicon.ico` and `icon.png` use a small-size cut of the mark, fitted to whole pixels at 16, 32 and 48 px (see below).
-- **Optional preview:** `uploads/github-social-1280x640.png` is included.
-- **Card text:** both card pairs say exactly the lines in the contract, so no alt text is needed.
-
 ## The mark
+
+`viewBox="0 0 1305 1000"`, aspect 1.305:1.
 
 Two tones:
 

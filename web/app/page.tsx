@@ -44,8 +44,8 @@ const FEATURES: readonly {
   link: { label: string; href: string };
 }[] = [
   {
-    title: "Failures, retries and rate limits",
-    body: "See when errors or retries climb on a model, tool or provider, and which run failed.",
+    title: "Failing runs and calls",
+    body: "See when errors climb on a model, tool or provider, and which run failed.",
     link: { label: "Alerts", href: docs("/monitoring/alerts") },
   },
   {
@@ -65,7 +65,7 @@ const FEATURES: readonly {
   },
   {
     title: "Hard caps in your process",
-    body: "Stop a run in the SDK when it reaches the step, token or spend ceiling you set.",
+    body: "Stop a run in the SDK when it reaches the step or spend ceiling you set.",
     link: { label: "The guard", href: docs("/api/sdks#the-guard") },
   },
   {
@@ -110,7 +110,7 @@ export default async function SplashPage() {
           <SurfaceGrid>
             <SurfaceCard
               title="Console"
-              description="Runs and the steps inside them, live alerts to Slack and webhooks, in-process step and spend caps, and audit logs."
+              description="Runs and the steps inside them, live alerts to Slack and webhooks, spend and budgets, and audit logs."
               action={
                 signedIn ? (
                   <Button asChild size="sm" variant="filled">
