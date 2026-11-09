@@ -23,6 +23,16 @@ vi.mock("@/lib/server/entities/agents", () => ({ fetchAgents: async () => mockAg
 let mockAlerts: unknown;
 vi.mock("@/lib/server/entities/alerts", () => ({ fetchAlerts: async () => mockAlerts }));
 
+// The panel reads once opened, and is proved by its own suite.
+vi.mock("./_versions-panel", () => ({
+  VersionsHost: ({ projectId, days, children }: { projectId: string; days: number; children: React.ReactNode }) => (
+    <div data-testid="versions-host" data-project={projectId} data-days={days}>
+      {children}
+    </div>
+  ),
+  VersionsOpener: ({ agent }: { agent: string }) => <button type="button">{`Versions of ${agent}`}</button>,
+}));
+
 import AgentsPage, { generateMetadata } from "./page";
 
 const PARAMS = Promise.resolve({ organization: "acme", project: "web" });
@@ -101,6 +111,19 @@ describe("a project's Agents page", () => {
     expect(within(row).getByText("$0.012")).toBeInTheDocument();
     expect(within(row).getByText("Usually $0.012")).toBeInTheDocument();
     expect(screen.queryByText(/No agent has run/)).toBeNull();
+  });
+
+  it("gives each agent's row a Versions button under the table's one panel, the name still its runs' link", async () => {
+    mockAgents = agentsOk([agent("support-bot"), agent("..")]);
+    render(await AgentsPage({ params: PARAMS } as never));
+
+    for (const name of ["support-bot", ".."]) {
+      const row = screen.getByRole("link", { name }).closest("tr")!;
+      const opener = within(row).getByRole("button", { name: `Versions of ${name}` });
+      const host = opener.closest("[data-testid='versions-host']");
+      expect(host).toHaveAttribute("data-project", "prj_1");
+      expect(host).toHaveAttribute("data-days", "14");
+    }
   });
 
   it("links each agent's last run, and counts its failures and what it cost against its usual", async () => {

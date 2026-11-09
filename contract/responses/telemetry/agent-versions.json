@@ -1,0 +1,75 @@
+{
+  "by": "release",
+  "days": 14,
+  "environment": "production",
+  "environments": [
+    {
+      "runs": 23,
+      "value": "production"
+    },
+    {
+      "runs": 2,
+      "value": ""
+    }
+  ],
+  "more": false,
+  "prompt": null,
+  "prompts": [],
+  "scores": [
+    "helpful"
+  ],
+  "versions": [
+    {
+      "failed_runs": 0,
+      "first_at": "2027-01-15T10:00:00Z",
+      "median_spend": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "runs": 1,
+      "scores": [],
+      "value": "1.4.3"
+    },
+    {
+      "failed_runs": 4,
+      "first_at": "2027-01-15T09:00:00Z",
+      "median_spend": 0.042,
+      "p50_ms": 2400,
+      "p95_ms": 9100,
+      "runs": 10,
+      "scores": [
+        {
+          "count": 5,
+          "mean": 0.6,
+          "name": "helpful"
+        }
+      ],
+      "value": "1.4.2"
+    },
+    {
+      "failed_runs": 2,
+      "first_at": "2027-01-15T08:00:00Z",
+      "median_spend": 0.031,
+      "p50_ms": 2100,
+      "p95_ms": 6000,
+      "runs": 10,
+      "scores": [
+        {
+          "count": 5,
+          "mean": 0.8,
+          "name": "helpful"
+        }
+      ],
+      "value": "1.4.1"
+    },
+    {
+      "failed_runs": 0,
+      "first_at": "2027-01-15T08:01:00Z",
+      "median_spend": 0.0,
+      "p50_ms": 1900,
+      "p95_ms": 1900,
+      "runs": 2,
+      "scores": [],
+      "value": ""
+    }
+  ]
+}

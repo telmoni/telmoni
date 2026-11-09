@@ -47,6 +47,7 @@ import {
   ProjectSchema,
 } from "./projects";
 import { ApiTokenListSchema, MintedTokenSchema } from "./token";
+import { VersionsSchema } from "./versions";
 import {
   AuthorizeSchema,
   ConnectionAnswerSchema,
@@ -127,6 +128,7 @@ const READERS: Record<string, z.ZodType> = {
   "notifications/sent.json": SendAnswerSchema,
   "notifications/signing-secret.json": SigningSecretSchema,
   "notifications/slack-identities.json": SlackIdentitiesSchema,
+  "telemetry/agent-versions.json": VersionsSchema,
   "telemetry/agents.json": AgentListSchema,
   "telemetry/alerts.json": AlertListSchema,
   "telemetry/changes.json": ChangeListSchema,

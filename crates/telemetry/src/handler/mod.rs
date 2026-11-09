@@ -23,6 +23,7 @@ pub mod traces;
 pub mod usage;
 pub mod users;
 pub mod v1;
+pub mod versions;
 pub mod views;
 
 /// Refused where the project keeps no content, `why` saying what that leaves

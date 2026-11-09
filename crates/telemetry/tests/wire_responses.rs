@@ -27,12 +27,14 @@ use telmoni_telemetry::handler::traces::{
     FacetValue, FacetValues, Facets, RunSpend, SpanFields, TraceDetail, TraceHistogram, TraceList,
     TraceSpan, UnpricedModel,
 };
+use telmoni_telemetry::handler::versions::Versions;
 use telmoni_telemetry::handler::views::{DashboardChart, DashboardOptions, View, ViewList};
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
 use telmoni_telemetry::rules::{Definition, Hours, Link, RuleFilters};
 use telmoni_telemetry::traces::{Bar, ListSort, TraceRow};
+use telmoni_telemetry::versions::{Choice, ScoreMean, Version};
 
 /// A run's own span's turn, as content keeps it: the person's message and
 /// the agent's answer, in the conventions' parts.
@@ -233,6 +235,78 @@ fn the_agents_answer_as_the_console_reads() {
                 },
             ],
             changes: changes(),
+        },
+    );
+}
+
+/// An agent's releases side by side: the newer failing more and scoring
+/// lower, one whose only run has not ended, and the runs that named none.
+#[test]
+fn the_versions_answer_as_the_console_reads() {
+    let choice = |value: &str, runs| Choice {
+        value: value.into(),
+        runs,
+    };
+    let score = |mean, count| {
+        vec![ScoreMean {
+            name: "helpful".into(),
+            mean,
+            count,
+        }]
+    };
+    pin(
+        "agent-versions",
+        &Versions {
+            days: AGENTS_DAYS,
+            by: ChangeKind::Release,
+            environment: "production".into(),
+            environments: vec![choice("production", 23), choice("", 2)],
+            prompt: None,
+            prompts: Vec::new(),
+            versions: vec![
+                Version {
+                    value: "1.4.3".into(),
+                    first_at: at(7_200),
+                    runs: 1,
+                    failed_runs: 0,
+                    p50_ms: None,
+                    p95_ms: None,
+                    median_spend: None,
+                    scores: Vec::new(),
+                },
+                Version {
+                    value: "1.4.2".into(),
+                    first_at: at(3_600),
+                    runs: 10,
+                    failed_runs: 4,
+                    p50_ms: Some(2_400),
+                    p95_ms: Some(9_100),
+                    median_spend: Some(0.042),
+                    scores: score(0.6, 5),
+                },
+                Version {
+                    value: "1.4.1".into(),
+                    first_at: at(0),
+                    runs: 10,
+                    failed_runs: 2,
+                    p50_ms: Some(2_100),
+                    p95_ms: Some(6_000),
+                    median_spend: Some(0.031),
+                    scores: score(0.8, 5),
+                },
+                Version {
+                    value: String::new(),
+                    first_at: at(60),
+                    runs: 2,
+                    failed_runs: 0,
+                    p50_ms: Some(1_900),
+                    p95_ms: Some(1_900),
+                    median_spend: Some(0.0),
+                    scores: Vec::new(),
+                },
+            ],
+            scores: vec!["helpful".into()],
+            more: false,
         },
     );
 }

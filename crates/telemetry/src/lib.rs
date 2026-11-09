@@ -74,6 +74,7 @@ pub mod starters;
 pub mod store;
 pub mod sweep;
 pub mod traces;
+pub mod versions;
 
 pub use config::Config;
 
@@ -244,6 +245,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/telemetry/history", get(handler::history::get_history))
         .route("/telemetry/agents", get(handler::agents::get_agents))
+        .route(
+            "/telemetry/agent-versions",
+            get(handler::versions::get_versions),
+        )
         .route("/telemetry/changes", get(handler::changes::list_changes))
         .route(
             "/telemetry/objectives",
