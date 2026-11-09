@@ -13,10 +13,9 @@ import {
 } from "@/components/ui/select";
 import { windowLabel, windowsOffered } from "@/lib/list-query";
 
-// The window a list reads: a pick
-// is the page's URL with the new window in it, everything else the URL holds
-// — the sort, the filters, a saved view — kept, and the list back on its
-// first page, which the new window may not reach past.
+// The window a list reads: a pick is the page's URL with the new window in
+// it, all else the URL holds — the sort, the filters, a dashboard — kept, and
+// the list back on its first page, which the new window may not reach past.
 //
 // Never disabled while the new window loads: the trigger holds the focus the
 // pick left on it, and a disabled control drops it to the page. A second pick

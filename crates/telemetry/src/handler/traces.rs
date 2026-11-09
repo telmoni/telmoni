@@ -90,10 +90,9 @@ pub enum Reading {
     Export,
 }
 
-/// A list lane's query string — the traces', the sessions' or the users' —
-/// every value text until it is checked. A filter may be given again, each
-/// value one more the list admits, an empty one admitting nothing; any other
-/// parameter is given once at most, and one the lane does not take is a 400.
+/// The trace list's query string, text until checked. A filter may repeat,
+/// each value one more the list admits, an empty one admitting nothing; any
+/// other parameter comes once at most, and one the lane does not take is a 400.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TraceQuery {
     /// The runs' agents.
@@ -1431,8 +1430,7 @@ async fn spend_of(state: &AppState, projects: &Projects, run_id: Uuid) -> Option
 }
 
 /// ClickHouse did not answer a read: an outage the console says so about, or
-/// a shape of ours it refused, which retrying will not mend. The users and
-/// sessions lanes answer the same way.
+/// a shape of ours it refused, which retrying will not mend.
 pub(crate) fn read_failed(error: clickhouse::error::Error) -> TelmoniError {
     store::failed(
         &error,

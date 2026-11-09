@@ -193,7 +193,7 @@ pub(crate) struct CountRow {
 }
 
 /// The list's filters, which are its facets: each one word, the URL's
-/// parameter, a saved view's key and the facets read's first column.
+/// parameter and the facets read's first column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(try_from = "String")]
 pub enum Facet {

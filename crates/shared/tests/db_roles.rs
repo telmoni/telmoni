@@ -569,8 +569,8 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry.project_settings",
             &["SELECT", "DELETE"],
         ),
-        // The purges delete a project's saved views with it; a transfer
-        // moves none, since a view names no organization.
+        // The purges delete a project's dashboards with it; a transfer
+        // moves none, since one names no organization.
         (
             "telemetry_maintenance",
             "telemetry.trace_views",

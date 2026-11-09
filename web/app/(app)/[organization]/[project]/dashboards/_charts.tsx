@@ -167,7 +167,7 @@ function labelOf(value: GroupValue): string {
 
 /** Spend split by a group over time, its values that spent most each a
  *  colour, and every value's totals under it, which also say what the
- *  colours cannot. A user's and a session's rows open their own pages. */
+ *  colours cannot. A user's or a session's row opens its runs. */
 function SplitChart({
   chart,
   split,

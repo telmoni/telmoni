@@ -174,12 +174,11 @@ pub async fn settings_after(
     .await
 }
 
-/// Every settings row of an organization's projects, and their saved views,
-/// found through those rows before they go, since a view names no
-/// organization: each project held alone first, in id order so that two
+/// Every settings row of an organization's projects, and their saved
+/// dashboards, found through those rows before they go, since a dashboard
+/// names no organization: each project held alone first, in id order so two
 /// purges agree. ⚠ Each hold is a lock-table entry until commit: an
-/// organization of thousands of projects needs `max_locks_per_transaction`
-/// raised.
+/// organization of thousands of projects needs `max_locks_per_transaction` raised.
 pub async fn purge_organization(
     tx: &mut Scoped<'_, Maintenance<TelemetryLane>>,
     organization_id: &OrganizationId,
@@ -251,7 +250,7 @@ async fn hold_alone(
     Ok(())
 }
 
-/// One project's saved views and settings row, the project held alone
+/// One project's saved dashboards and settings row, the project held alone
 /// first, as a move holds it. ⚠ It waits at most `PURGE_LOCK_WAIT`; a purge
 /// that times out is left to the sweep.
 pub async fn purge_project(

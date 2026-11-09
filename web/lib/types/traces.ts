@@ -43,8 +43,7 @@ const Values = z.array(z.string()).optional();
 /** What narrows a list as the URL carries it, in the sidebar's order: a
  *  filter is the values any of which admits a run, a key left out narrowing
  *  nothing; a session or a user is admitted by a run of theirs. The one list
- *  of the keys: the facets, a saved view and every lane's query take them
- *  from here. */
+ *  of the keys: the facets and every lane's query take them from here. */
 export const ListFiltersSchema = z.object({
   agent: Values,
   status: z.array(z.enum(SpanStatus)).optional(),
@@ -74,8 +73,8 @@ export function filtersIn(query: ListFilters): ListFilters {
 export const TAG_KEY_MAX = 64;
 export const TAG_VALUE_MAX = 256;
 
-/** A sort by one tag's value, `tag:` and its key: the trace and sessions
- *  lists take one beside their columns' words. */
+/** A sort by one tag's value, `tag:` and its key: the trace list takes one
+ *  beside its columns' words. */
 export type TagSort = `tag:${string}`;
 
 /** `text` as a tag sort, as the server reads one: `tag:` and a key of 1 to
@@ -92,7 +91,7 @@ export function tagSortKey(sort: string): string | undefined {
   return readTagSort(sort)?.slice("tag:".length);
 }
 
-/** A tag sort, as a list answers one and a saved view keeps it. */
+/** A tag sort, as a list answers one. */
 export const TagSortSchema = z.custom<TagSort>(
   (value) => typeof value === "string" && readTagSort(value) !== undefined,
 );

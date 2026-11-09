@@ -45,13 +45,12 @@ pub enum Resource {
     /// members do not; the resource exists to deny the write verbs structurally.
     Audit,
     /// A project's traces: the runs its agents recorded, which every role on
-    /// the project reads. Ingest alone writes a span; any member edits a
-    /// run's tags, and its owners and admins delete a trace or an end user's.
+    /// the project reads. Ingest alone writes a span; any member scores a run,
+    /// and its owners and admins delete a trace or an end user's.
     Trace,
-    /// A project's saved views of its trace list: a filter, a sort and the
-    /// columns shown, under a name. Every role on the project applies them;
-    /// its owners and admins save them, as they change everything else the
-    /// project's members share.
+    /// A project's saved dashboards: the Spend page's charts under a name.
+    /// Every role on the project opens them; its owners and admins save them,
+    /// as they change all else its members share.
     View,
     /// A project's alerts — a metric over its spans against thresholds — and
     /// its monitors, each an agent's schedule. Any
@@ -82,11 +81,10 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
     use Resource as R;
     use Verb as V;
 
-    // Combinations no customer endpoint exposes — deny outright. The chain is
-    // written by `emit_audit` and hash-linked. A role that could edit it would
-    // make it a record of what somebody was willing to leave behind. A trace
-    // is written by ingest and never edited but for its tags; deleting one,
-    // or an end user's, is its other mutation.
+    // Combinations no customer endpoint exposes — deny outright. A role that
+    // could edit the hash-linked chain would make it a record of what somebody
+    // was willing to leave behind; a trace is ingest's to write, and a person
+    // only scores one or deletes it, or an end user's.
     if matches!(
         (verb, resource),
         (V::Create | V::Update | V::Delete, R::Audit) | (V::Create, R::Trace)
@@ -101,10 +99,8 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
         // the project (and structurally impossible audit mutations).
         Role::Admin => !(resource == R::Project && verb == V::Delete),
 
-        // Reads the work, mutates nothing but the project's alerts and its
-        // runs' tags. The chain is the exception: what everyone did is the
-        // owner's record of the collaboration, not the work a member was
-        // invited to see.
+        // Reads the work but the chain, the owner's record of what everyone
+        // did, and changes only the project's alerts and its runs' scores.
         Role::Member => {
             resource == R::Alert
                 || (resource == R::Trace && verb == V::Update)
