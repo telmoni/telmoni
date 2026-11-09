@@ -1007,6 +1007,108 @@ async fn another_exporters_spans_are_held_then_placed_in_their_runs(pool: PgPool
     assert_eq!(again.len(), 4);
 }
 
+/// Another exporter's texts holding a NUL, which Postgres cannot store, are
+/// held and land with the NUL removed.
+#[sqlx::test]
+async fn another_exporters_texts_with_a_nul_are_held_and_land_without_it(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let lane = lane(&pool, true);
+    let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
+    let trace = "cc".repeat(16);
+    let span = |id: &str, parent: &str, name: &str, attributes: Value| {
+        json!({
+            "traceId": trace, "spanId": id, "parentSpanId": parent, "name": name,
+            "startTimeUnixNano": "1760000000000000000",
+            "endTimeUnixNano": "1760000000100000000",
+            "attributes": attributes,
+        })
+    };
+    let body = json!({ "resourceSpans": [{
+        "resource": { "attributes": [
+            text("service.name", "checkout"), text("service.version", "v\u{0}2"),
+        ] },
+        "scopeSpans": [{ "scope": { "name": "openinference" }, "spans": [
+            span(&"11".repeat(8), "", "plan\u{0}ner", json!([
+                text(contract::OPERATION, "invoke_agent"), text(contract::AGENT_NAME, "plan\u{0}ner"),
+            ])),
+            span(&"22".repeat(8), &"11".repeat(8), "chat\u{0} gpt-5", json!([
+                text(contract::OPERATION, "chat"), text(contract::REQUEST_MODEL, "gpt\u{0}-5"),
+                text("gen_ai.prompt.name", "tri\u{0}age"), text("telmoni.tag.team", "sup\u{0}port"),
+            ])),
+        ]}],
+    }]});
+    let (status, _, answer) = lane
+        .send(
+            Some(INGEST_KEY),
+            "application/json",
+            None,
+            body.to_string().into_bytes(),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&answer)
+    );
+    assert_eq!(
+        json_body(&answer)["partialSuccess"],
+        Value::Null,
+        "nothing refused"
+    );
+
+    sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .expect("quiet");
+    telmoni_telemetry::foreign::land_quiet(&lane.state)
+        .await
+        .expect("a pass");
+    type Landed = (String, String, String, String, String, String, String);
+    let read = || {
+        ch.store
+            .read(
+                &Projects::one(lane.project.clone()),
+                "SELECT span_id, name, agent, model, release, \
+                        attributes['gen_ai.prompt.name'], tags['team'] \
+                   FROM telemetry.spans \
+                  WHERE project_id IN {projects:Array(String)} ORDER BY span_id",
+            )
+            .fetch_all::<Landed>()
+    };
+    common::eventually("the placed spans are read", || async {
+        read().await.is_ok_and(|rows| rows.len() == 2)
+    })
+    .await;
+    let landed = read().await.expect("the rows");
+    let s = String::from;
+    assert_eq!(
+        landed,
+        vec![
+            (
+                "11".repeat(8),
+                s("planner"),
+                s("planner"),
+                s(""),
+                s("v2"),
+                s(""),
+                s("")
+            ),
+            (
+                "22".repeat(8),
+                s("chat gpt-5"),
+                s("planner"),
+                s("gpt-5"),
+                s("v2"),
+                s("triage"),
+                s("support")
+            ),
+        ]
+    );
+}
+
 /// Another exporter's retrievals and memory searches land as retrievals,
 /// named by what they searched: under an agent, in its run, and with none,
 /// in their trace's; an agent's data source stays an attribute of its run.

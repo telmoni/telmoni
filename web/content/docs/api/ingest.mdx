@@ -106,7 +106,9 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean, except a name under `telmoni.`, which is dropped as `unlisted` | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |
 
 A field whose value breaks its rule refuses the span whole; an attribute past
-its cap is dropped and the span kept.
+its cap is dropped and the span kept. A NUL character is taken out of every
+name and value a span carries, its content among them, since Postgres, where
+another exporter's spans wait, cannot keep one.
 
 A span's start and end are kept as sent, to the microsecond, unless the clock
 that timed them is a time zone or a date out. The SDKs send their clock with

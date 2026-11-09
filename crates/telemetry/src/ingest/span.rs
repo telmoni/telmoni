@@ -279,6 +279,7 @@ pub fn map(
         None if context.scope == contract::SCOPE => SpanKind::Step,
         None => SpanKind::Span,
     };
+    let span_name = || without_nul(&span.name).into_owned();
     let name = match kind {
         SpanKind::Run => fields
             .agent_name
@@ -286,16 +287,14 @@ pub fn map(
             .or_else(|| fields.workflow_name.take())
             .unwrap_or_else(|| {
                 if agent.is_empty() {
-                    span.name.clone()
+                    span_name()
                 } else {
                     agent.clone()
                 }
             }),
-        SpanKind::ToolCall => fields.tool_name.take().unwrap_or_else(|| span.name.clone()),
-        SpanKind::Retrieval => fields.source().unwrap_or_else(|| span.name.clone()),
-        SpanKind::RunStart | SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => {
-            span.name.clone()
-        }
+        SpanKind::ToolCall => fields.tool_name.take().unwrap_or_else(span_name),
+        SpanKind::Retrieval => fields.source().unwrap_or_else(span_name),
+        SpanKind::RunStart | SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => span_name(),
     };
     if name.is_empty() {
         return Err(refuse(Refusal::Invalid("name")));
@@ -435,13 +434,14 @@ impl Fields {
     /// Read one attribute: into a column, into `tags` or `attributes`, or
     /// onto `dropped`. A field whose value breaks its rule refuses the span.
     fn read(&mut self, kv: &KeyValue, span_id: &str, dropped: &mut Drops) -> Result<(), Refusal> {
-        let key = contract::current_name(&kv.key);
+        let sent_key = without_nul(&kv.key);
+        let key = contract::current_name(&sent_key);
         let Some(value) = kv.value.as_ref().and_then(|v| v.value.as_ref()) else {
             return Ok(());
         };
         note(
             &mut self.sent,
-            contract::sent_as(&kv.key, is_scalar(value), false),
+            contract::sent_as(&sent_key, is_scalar(value), false),
         );
         let mut drop_attribute =
             |attribute: &str, reason: DropReason| dropped.push(span_id, attribute, reason);
@@ -710,13 +710,13 @@ impl Fields {
                         .map(|kv| {
                             let value = kv.value.as_ref().and_then(|v| v.value.as_ref());
                             (
-                                kv.key.clone(),
+                                without_nul(&kv.key).into_owned(),
                                 value.map_or(serde_json::Value::Null, json_of),
                             )
                         })
                         .collect();
                     serde_json::json!({
-                        "name": event.name,
+                        "name": without_nul(&event.name),
                         "time_unix_nano": event.time_unix_nano,
                         "attributes": attributes,
                     })
@@ -752,7 +752,7 @@ fn json_of(value: &Value) -> serde_json::Value {
         any.value.as_ref().map_or(serde_json::Value::Null, json_of)
     };
     match value {
-        Value::StringValue(s) => serde_json::Value::from(s.as_str()),
+        Value::StringValue(s) => serde_json::Value::from(without_nul(s)),
         Value::BoolValue(b) => serde_json::Value::from(*b),
         Value::IntValue(n) => serde_json::Value::from(*n),
         Value::DoubleValue(d) => {
@@ -764,13 +764,23 @@ fn json_of(value: &Value) -> serde_json::Value {
             .iter()
             .map(|kv| {
                 (
-                    kv.key.clone(),
+                    without_nul(&kv.key).into_owned(),
                     kv.value.as_ref().map_or(serde_json::Value::Null, of),
                 )
             })
             .collect::<serde_json::Map<_, _>>()
             .into(),
         Value::StringValueStrindex(_) | Value::BytesValue(_) => serde_json::Value::Null,
+    }
+}
+
+/// `text` without a NUL: Postgres's `text` and `jsonb` refuse one, and a
+/// held span's row is `jsonb`.
+fn without_nul(text: &str) -> Cow<'_, str> {
+    if text.contains('\0') {
+        Cow::Owned(text.replace('\0', ""))
+    } else {
+        Cow::Borrowed(text)
     }
 }
 
@@ -819,7 +829,7 @@ fn number(value: &Value) -> Option<f64> {
 /// absent, as OTLP asks of every other signal's receiver.
 fn scalar(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::StringValue(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::StringValue(s) => Some(without_nul(s)),
         Value::BoolValue(b) => Some(Cow::Owned(b.to_string())),
         Value::IntValue(n) => Some(Cow::Owned(n.to_string())),
         Value::DoubleValue(d) => Some(Cow::Owned(d.to_string())),
@@ -839,7 +849,7 @@ fn as_text(value: &Value) -> Option<Cow<'_, str>> {
                 .values
                 .iter()
                 .map(|item| match item.value.as_ref()? {
-                    Value::StringValue(s) => Some(serde_json::Value::from(s.as_str())),
+                    Value::StringValue(s) => Some(serde_json::Value::from(without_nul(s))),
                     Value::BoolValue(b) => Some(serde_json::Value::from(*b)),
                     Value::IntValue(n) => Some(serde_json::Value::from(*n)),
                     Value::DoubleValue(d) => Some(serde_json::Value::from(*d)),
@@ -1585,6 +1595,53 @@ mod tests {
                 .named()
                 .iter()
                 .any(|d| d.attribute == "telmoni.unknown" && d.reason == DropReason::Unlisted)
+        );
+    }
+
+    /// A NUL is removed from every name and value a span and its resource carry.
+    #[test]
+    fn a_nul_is_removed_from_every_text_a_span_carries() {
+        let resource = Resource {
+            attributes: vec![
+                kv(contract::RELEASE, s("v\u{0}2")),
+                kv("service.name", s("rep\0orter")),
+            ],
+            ..Resource::default()
+        };
+        let read = read_resource(Some(&resource));
+        assert_eq!(read.release, "v2");
+        assert_eq!(
+            read.attributes,
+            [("service.name".to_owned(), "reporter".to_owned())]
+        );
+
+        let project = ProjectId::new();
+        let keep = |id: &str| id.to_owned();
+        let span = Span {
+            name: "chat\0 claude".into(),
+            attributes: vec![
+                kv(contract::RUN_ID, s(RUN)),
+                kv(contract::AGENT, s("nightly\0-report")),
+                kv(contract::OPERATION, s("chat")),
+                kv(contract::RESPONSE_MODEL, s("claude\0-sonnet")),
+                kv("telmoni.tag.te\0am", s("sea\0rch")),
+                kv("gen_ai.prompt.name", s("tri\0age")),
+                kv("x.cou\0nt", Value::IntValue(1)),
+            ],
+            ..call()
+        };
+        let (row, _) =
+            map(&span, &context(&project, &[], &keep), &mut Drops::default()).expect("kept");
+        assert_eq!(row.name, "chat claude");
+        assert_eq!(row.agent, "nightly-report");
+        assert_eq!(row.model, "claude-sonnet");
+        assert_eq!(row.tags, [("team".to_owned(), "search".to_owned())]);
+        assert_eq!(
+            row.attributes,
+            [
+                ("gen_ai.prompt.name".to_owned(), "triage".to_owned()),
+                ("x.count".to_owned(), "1".to_owned()),
+            ]
         );
     }
 
