@@ -5,6 +5,7 @@
 
 pub mod agents;
 pub(crate) mod chain;
+pub mod changes;
 pub mod content_mode;
 pub mod field_inventory;
 pub mod history;

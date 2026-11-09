@@ -76,6 +76,9 @@ pub struct TraceFilter {
     /// Prompt names (`gen_ai.prompt.name`) a run carries where any of its
     /// spans does.
     pub prompts: Vec<String>,
+    /// Prompts by name and version, each `name:version`, which a run carries
+    /// where any of its spans carries both.
+    pub prompt_versions: Vec<String>,
     /// How many days back, by the day each span arrived.
     pub days: u16,
     /// The window's prices for the spend the rows show and sort by; none prices
@@ -106,6 +109,7 @@ impl Default for TraceFilter {
             releases: Vec::new(),
             tags: Vec::new(),
             prompts: Vec::new(),
+            prompt_versions: Vec::new(),
             days: DEFAULT_DAYS,
             prices: crate::prices::PriceBook::default(),
             score: None,
@@ -203,6 +207,7 @@ pub enum Facet {
     Release,
     Tag,
     Prompt,
+    PromptVersion,
 }
 
 // In the sidebar's order.
@@ -217,6 +222,7 @@ telmoni_shared::wire_enum!(Facet {
     Release => "release",
     Tag => "tag",
     Prompt => "prompt",
+    PromptVersion => "prompt_version",
 });
 
 impl TryFrom<String> for Facet {
@@ -228,7 +234,7 @@ impl TryFrom<String> for Facet {
 }
 
 /// One value of one facet: how many of a list's rows, among those the other
-/// filters admit, carry it. A facet the read spells as none of the ten fails
+/// filters admit, carry it. A facet the read spells as none of the eleven fails
 /// the read, never vanishes from the answer.
 #[derive(Debug, Clone, PartialEq, Eq, Row, Deserialize)]
 pub struct FacetRow {
@@ -336,12 +342,17 @@ macro_rules! admits {
     (prompt) => {
         "(empty({prompts:Array(String)}) OR hasAny(prompts, {prompts:Array(String)}))"
     };
+    (prompt_version) => {
+        "(empty({prompt_versions:Array(String)}) \
+         OR hasAny(prompt_versions, {prompt_versions:Array(String)}))"
+    };
 }
 
 /// What a run carries where any of its spans does, each value once and
 /// sorted: the deployments and releases its spans were sent from, its tags
-/// as `key:value`, and the prompt names among its attributes. Named apart
-/// from the columns, as the sums below are.
+/// as `key:value`, the prompt names among its attributes, and each prompt by
+/// name and version, `name:version`, where one span carries both. Named
+/// apart from the columns, as the sums below are.
 macro_rules! run_carries {
     () => {
         concat!(
@@ -350,7 +361,10 @@ macro_rules! run_carries {
             "arraySort(groupUniqArrayArray(arrayMap((k, v) -> concat(k, ':', v), ",
             "mapKeys(tags), mapValues(tags)))) AS tag_pairs, ",
             "arraySort(groupUniqArrayIf(attributes['gen_ai.prompt.name'], ",
-            "mapContains(attributes, 'gen_ai.prompt.name'))) AS prompts "
+            "mapContains(attributes, 'gen_ai.prompt.name'))) AS prompts, ",
+            "arraySort(groupUniqArrayIf(concat(attributes['gen_ai.prompt.name'], ':', ",
+            "attributes['gen_ai.prompt.version']), attributes['gen_ai.prompt.name'] != '' ",
+            "AND attributes['gen_ai.prompt.version'] != '')) AS prompt_versions "
         )
     };
 }
@@ -436,7 +450,9 @@ macro_rules! runs {
             " AND ",
             admits!(tag),
             " AND ",
-            admits!(prompt)
+            admits!(prompt),
+            " AND ",
+            admits!(prompt_version)
         )
     };
 }
@@ -586,12 +602,13 @@ macro_rules! facets_sql {
             "toUInt8(", $crate::traces::admits!(release), ") AS m_release, ",
             "toUInt8(", $crate::traces::admits!(tag), ") AS m_tag, ",
             "toUInt8(", $crate::traces::admits!(prompt), ") AS m_prompt, ",
+            "toUInt8(", $crate::traces::admits!(prompt_version), ") AS m_prompt_version, ",
             // How many filters the run fails, so a value counts where no
             // filter but its own refuses the run: with its own flag up it
             // needs no miss, with it down that one miss alone.
             "(1 - m_agent) + (1 - m_user) + (1 - m_session) + (1 - m_status) + (1 - m_model) ",
             "+ (1 - m_tool) + (1 - m_environment) + (1 - m_release) + (1 - m_tag) ",
-            "+ (1 - m_prompt) AS misses ",
+            "+ (1 - m_prompt) + (1 - m_prompt_version) AS misses ",
             $crate::traces::window!(),
             "GROUP BY run_id) ",
             "ARRAY JOIN arrayConcat(",
@@ -607,7 +624,9 @@ macro_rules! facets_sql {
             "releases), ",
             "arrayMap(x -> tuple('tag', CAST(x AS String), toUInt8(misses + m_tag = 1)), tag_pairs), ",
             "arrayMap(x -> tuple('prompt', CAST(x AS String), toUInt8(misses + m_prompt = 1)), ",
-            "prompts)",
+            "prompts), ",
+            "arrayMap(x -> tuple('prompt_version', CAST(x AS String), ",
+            "toUInt8(misses + m_prompt_version = 1)), prompt_versions)",
             ") AS facet_value ",
             "WHERE tupleElement(facet_value, 3) = 1 AND tupleElement(facet_value, 2) != '' ",
             $holds,
@@ -618,7 +637,8 @@ macro_rules! facets_sql {
             "facet = 'tool', {tools:Array(String)}, ",
             "facet = 'environment', {environments:Array(String)}, ",
             "facet = 'release', {releases:Array(String)}, facet = 'tag', {tags:Array(String)}, ",
-            "facet = 'prompt', {prompts:Array(String)}, emptyArrayString()), value) DESC, ",
+            "facet = 'prompt', {prompts:Array(String)}, ",
+            "facet = 'prompt_version', {prompt_versions:Array(String)}, emptyArrayString()), value) DESC, ",
             "listed DESC, value ",
             "LIMIT 51 BY facet"
         )
@@ -664,6 +684,7 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         .param("releases", &filter.releases)
         .param("tags", &filter.tags)
         .param("prompts", &filter.prompts)
+        .param("prompt_versions", &filter.prompt_versions)
         .param(
             "score",
             filter.score.as_ref().map_or("", |s| s.name.as_str()),
@@ -1047,7 +1068,7 @@ mod tests {
     use crate::store::PROJECTS_PARAM;
 
     /// Every filter's parameter, which every read but a trace's spans binds.
-    const FILTER_PARAMS: [&str; 11] = [
+    const FILTER_PARAMS: [&str; 12] = [
         "{days:UInt16}",
         "{agents:Array(String)}",
         "{users:Array(String)}",
@@ -1059,6 +1080,7 @@ mod tests {
         "{releases:Array(String)}",
         "{tags:Array(String)}",
         "{prompts:Array(String)}",
+        "{prompt_versions:Array(String)}",
     ];
 
     /// Every sort is one literal that names its projects, carries no
@@ -1119,9 +1141,9 @@ mod tests {
     }
 
     /// What a run carries where any of its spans does — its deployments,
-    /// releases, tags and prompts — is summed once, apart from the columns,
-    /// and filtered by `hasAny`, so a run crossing two deployments answers
-    /// to either.
+    /// releases, tags, prompts and their versions — is summed once, apart
+    /// from the columns, and filtered by `hasAny`, so a run crossing two
+    /// deployments answers to either.
     #[test]
     fn what_a_run_carries_is_summed_once_and_filtered_by_any_of_it() {
         let sql = list_sql(TraceSort::Started, SortDirection::Desc);
@@ -1133,6 +1155,10 @@ mod tests {
             ("AS releases", "hasAny(releases, {releases:Array(String)})"),
             ("AS tag_pairs", "hasAny(tag_pairs, {tags:Array(String)})"),
             ("AS prompts", "hasAny(prompts, {prompts:Array(String)})"),
+            (
+                "AS prompt_versions",
+                "hasAny(prompt_versions, {prompt_versions:Array(String)})",
+            ),
         ] {
             assert_eq!(sql.matches(alias).count(), 1, "{alias}");
             assert!(sql.contains(filter), "{filter}");
@@ -1142,7 +1168,13 @@ mod tests {
             sql.contains("concat(k, ':', v)"),
             "a tag filters as key:value"
         );
-        for facet in ["'environment'", "'release'", "'tag'", "'prompt'"] {
+        for facet in [
+            "'environment'",
+            "'release'",
+            "'tag'",
+            "'prompt'",
+            "'prompt_version'",
+        ] {
             assert!(FACETS_SQL.contains(facet), "no facet {facet}");
         }
     }

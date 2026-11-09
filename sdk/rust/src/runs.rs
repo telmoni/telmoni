@@ -120,6 +120,11 @@ pub struct ModelCallOptions {
     /// `text_completion`, `embeddings`); a blank one is `chat` too, and any
     /// other, with one warning.
     pub operation: Option<String>,
+    /// The prompt it used, by name: sent in every content mode, so a prompt,
+    /// never a person, who goes in [`RunOptions::user_id`]. Blank reads as none.
+    pub prompt: Option<String>,
+    /// The prompt's version, sent only beside its name. Blank reads as none.
+    pub prompt_version: Option<String>,
     /// The messages sent to the model: content, which leaves the process only
     /// when [`Config::capture_content`](crate::Config::capture_content) is on
     /// and the project's mode allows.
@@ -309,7 +314,8 @@ impl Handle {
             counted: 0.0,
         };
         let operation = model_operation(options.operation.as_deref(), warner);
-        let (name, mut attributes) = model_call_opening(&model, operation, provider);
+        let prompt = prompt_of(options.prompt, options.prompt_version, warner);
+        let (name, mut attributes) = model_call_opening(&model, operation, provider, prompt);
         if let Some(messages) = options.input_messages {
             attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
         }
@@ -999,10 +1005,17 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
     }
 
     let run_id = Uuid::new_v4().to_string();
-    let user_id =
-        (options.user_id).filter(|id| fits(id, contract::USER_ID_MAX, "user id", &inner.warner));
-    let session_id = (options.session_id)
-        .filter(|id| fits(id, contract::SESSION_ID_MAX, "session id", &inner.warner));
+    let user_id = (options.user_id)
+        .filter(|id| fits(id, contract::USER_ID_MAX, "user id", "run", &inner.warner));
+    let session_id = (options.session_id).filter(|id| {
+        fits(
+            id,
+            contract::SESSION_ID_MAX,
+            "session id",
+            "run",
+            &inner.warner,
+        )
+    });
     let inherited = inherited(&run_id, &agent, user_id, session_id);
     let mut attributes = run_attributes(&agent, &inherited, options.tags, &inner.warner);
     if let Some(messages) = options.input_messages {
@@ -1178,6 +1191,7 @@ pub(crate) fn model_call_opening(
     model: &str,
     operation: String,
     provider: Option<String>,
+    prompt: Option<(String, Option<String>)>,
 ) -> (String, Vec<KeyValue>) {
     // Ingest refuses a call over an empty model, but keeps one with none.
     let name = if model.is_empty() {
@@ -1192,7 +1206,40 @@ pub(crate) fn model_call_opening(
     if let Some(provider) = provider.filter(|provider| !provider.is_empty()) {
         attributes.push(KeyValue::new(contract::PROVIDER, provider));
     }
+    if let Some((prompt, version)) = prompt {
+        attributes.push(KeyValue::new(contract::PROMPT_NAME, prompt));
+        if let Some(version) = version {
+            attributes.push(KeyValue::new(contract::PROMPT_VERSION, version));
+        }
+    }
     (name, attributes)
+}
+
+/// A live call's prompt and its version: a blank one is none, and one past its
+/// cap or a version without its name is left off with one warning.
+fn prompt_of(
+    prompt: Option<String>,
+    version: Option<String>,
+    warner: &Warner,
+) -> Option<(String, Option<String>)> {
+    let kept = |text: Option<String>, what: &str| {
+        text.filter(|text| {
+            !text.trim().is_empty()
+                && fits(text, contract::ATTRIBUTE_VALUE_MAX, what, "call", warner)
+        })
+    };
+    let (prompt, version) = (
+        kept(prompt, "prompt's name"),
+        kept(version, "prompt's version"),
+    );
+    if prompt.is_none() && version.is_some() {
+        warner.once(
+            "call:prompt_version".to_owned(),
+            "telmoni: a prompt's version needs its prompt's name; the call is sent without it",
+            WarningKind::Input.into(),
+        );
+    }
+    prompt.map(|prompt| (prompt, version))
 }
 
 /// A tool call's span name, `execute_tool <name>`, and what it opens with
@@ -1288,15 +1335,17 @@ fn cut(text: &str, most: usize, what: &str, warner: &Warner) -> String {
     text.chars().take(most).collect()
 }
 
-/// Whether an id is within ingest's cap; one past it is left off with one
-/// warning, since cut it would name another.
-fn fits(id: &str, most: usize, what: &str, warner: &Warner) -> bool {
+/// Whether an id is within ingest's cap; one past it is left off its run or
+/// call with one warning, since cut it would name another.
+fn fits(id: &str, most: usize, what: &str, span: &str, warner: &Warner) -> bool {
     if id.chars().nth(most).is_none() {
         return true;
     }
     warner.once(
         format!("long:{what}"),
-        &format!("telmoni: a {what} must be up to {most} characters; the run is sent without it"),
+        &format!(
+            "telmoni: a {what} must be up to {most} characters; the {span} is sent without it"
+        ),
         WarningKind::Input.into(),
     );
     false

@@ -67,6 +67,8 @@ type runFixture struct {
 type modelCallSpec struct {
 	Provider         string  `json:"provider"`
 	Model            string  `json:"model"`
+	Prompt           string  `json:"prompt"`
+	PromptVersion    string  `json:"prompt_version"`
 	ResponseModel    string  `json:"response_model"`
 	TimeToFirstToken float64 `json:"time_to_first_token"`
 	Usage            struct {
@@ -241,6 +243,8 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 	callSpec := stepSpec.Inside[0].ModelCall
 	_, call := run.ModelCall(stepCtx, callSpec.Model, telmoni.ModelCallOptions{
 		Provider:      callSpec.Provider,
+		Prompt:        callSpec.Prompt,
+		PromptVersion: callSpec.PromptVersion,
 		InputMessages: callSpec.InputMessages,
 	})
 	call.Answered(telmoni.Answer{

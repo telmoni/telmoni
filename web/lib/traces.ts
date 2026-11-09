@@ -1,3 +1,4 @@
+import type { Change } from "@/lib/server/entities/changes";
 import type {
   DownloadFormat,
   ListFilters,
@@ -7,7 +8,7 @@ import type {
 } from "@/lib/server/entities/traces";
 import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
-import { SortDirection, SpanKind, SpanStatus, TraceSort } from "@/lib/types/enums";
+import { ChangeKind, SortDirection, SpanKind, SpanStatus, TraceSort } from "@/lib/types/enums";
 import {
   FILTER_KEYS,
   TAG_KEY_MAX,
@@ -65,6 +66,7 @@ export const FILTER_LABEL: Record<FilterKey, string> = {
   release: "Release",
   tag: "Tag",
   prompt: "Prompt",
+  prompt_version: "Prompt version",
 };
 
 /** The filters whose values are ids, or pairs, too many to tick from a list
@@ -72,7 +74,8 @@ export const FILTER_LABEL: Record<FilterKey, string> = {
 export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
 
 /** The longest value each filter takes, in characters, as the server caps it
- *  (`crates/telemetry/src/contract.rs`); a tag's is its key, colon and value. */
+ *  (`crates/telemetry/src/contract.rs`); a tag's is its key, colon and value,
+ *  a prompt version's its name, colon and version. */
 export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
   agent: 128,
   model: 128,
@@ -83,6 +86,7 @@ export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
   release: 128,
   tag: TAG_KEY_MAX + 1 + TAG_VALUE_MAX,
   prompt: 1_024,
+  prompt_version: 1_024 + 1 + 1_024,
 };
 
 /** The trace list's own state beside its query, in its URL: never sent to
@@ -116,7 +120,8 @@ export function parseFilters(searchParams: SearchParams): ListFilters {
   const values = (filter: FilterKey): string[] => {
     if (filter === "status") return many(searchParams.status).filter((s) => isOneOf(statuses, s));
     const kept = capped(filter, searchParams);
-    return filter === "tag" ? kept.filter(isTagPair) : kept;
+    if (filter === "tag") return kept.filter(isTagPair);
+    return filter === "prompt_version" ? kept.filter(isPromptVersion) : kept;
   };
   return compact(
     Object.fromEntries(FILTERS.map((filter) => [filter, some(values(filter))])) as ListFilters,
@@ -167,6 +172,13 @@ export function isTagPair(value: string): boolean {
     [...value.slice(0, colon)].length <= TAG_KEY_MAX &&
     [...value.slice(colon + 1)].length <= TAG_VALUE_MAX
   );
+}
+
+/** Whether `value` is a prompt's version as the filter takes one,
+ *  `name:version`, split at its first colon and neither part empty. */
+function isPromptVersion(value: string): boolean {
+  const colon = value.indexOf(":");
+  return colon > 0 && colon < value.length - 1;
 }
 
 /** The keys among `pairs`, each `key:value` as a tag's facet names it, split
@@ -839,6 +851,51 @@ export const KIND_LABEL: Record<SpanKind, string> = {
   [SpanKind.Retrieval]: "Retrieval",
   [SpanKind.Span]: "Span",
 };
+
+/** The word the console gives each kind of change. */
+const CHANGE_LABEL: Record<ChangeKind, string> = {
+  [ChangeKind.Release]: "release",
+  [ChangeKind.Model]: "model",
+  [ChangeKind.Prompt]: "prompt",
+};
+
+/** What a change changed to, and where, its agent left out:
+ *  `release 1.4.2 in production`, `prompt triage version 3`; a capped one
+ *  saying its day marked no more of its kind, so it may not be the latest. */
+export function changeWords(change: Change): string {
+  const what =
+    change.kind === ChangeKind.Prompt
+      ? `${CHANGE_LABEL[change.kind]} ${change.prompt} version ${change.value}`
+      : `${CHANGE_LABEL[change.kind]} ${change.value}`;
+  const where = change.environment ? `${what} in ${change.environment}` : what;
+  return change.capped
+    ? `${where}; its later ${CHANGE_LABEL[change.kind]} changes that UTC day are not marked`
+    : where;
+}
+
+/** The changes the list's charts mark on one bar, by its start as the server
+ *  sent it: a line naming each. */
+export type ChangeMark = { at: string; changes: string[] };
+
+/** Each change on the bar it fell in, read off the bars' own starts: the last
+ *  to start at or before it, so one before the first is on the first and one
+ *  after the last on the last, as the histogram clamps runs. A bar's changes
+ *  are one mark, in the order given. */
+export function marksOn(bars: readonly { at: string }[], changes: readonly Change[]): ChangeMark[] {
+  const starts = bars.map((bar) => Date.parse(bar.at));
+  const held = new Map<number, string[]>();
+  for (const change of changes) {
+    const at = Date.parse(change.changed_at);
+    const bar = Math.max(0, starts.findLastIndex((start) => start <= at));
+    const lines = held.get(bar) ?? [];
+    lines.push(`${change.agent}: ${changeWords(change)}`);
+    held.set(bar, lines);
+  }
+  return bars.flatMap((bar, i) => {
+    const lines = held.get(i);
+    return lines ? [{ at: bar.at, changes: lines }] : [];
+  });
+}
 
 /** A count's figures alone: no sign, point, exponent or space. */
 const WHOLE = /^\d+$/;

@@ -14,7 +14,8 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use telmoni_shared::{ContentMode, MonitorCause, MonitorState, ProjectId, SpanKind};
+use telmoni_shared::{ChangeKind, ContentMode, MonitorCause, MonitorState, ProjectId, SpanKind};
+use telmoni_telemetry::changes::{self, Mark};
 use telmoni_telemetry::schema::{MIGRATION, statements};
 use telmoni_telemetry::store::{PROJECTS_SETTING, SpanRow};
 
@@ -100,6 +101,31 @@ fn the_monitor_checks_admit_exactly_the_words_rust_holds() {
     assert_eq!(words("monitors_state_check"), states);
     assert_eq!(words("monitors_cause_check"), causes);
     assert_eq!(words("incidents_cause_check"), causes);
+}
+
+/// A change's kind and mark are `TEXT` written from their enums, so each
+/// CHECK admits exactly the words Rust holds, and the loop's name is one its
+/// heartbeat and the place it read to may take.
+#[test]
+fn the_changes_checks_admit_exactly_the_words_rust_holds() {
+    let sql = postgres_migration();
+    let words = |constraint: &str| -> BTreeSet<String> {
+        check_body(&sql, constraint)
+            .split('\'')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    };
+    let kinds: BTreeSet<String> = ChangeKind::all().iter().map(ToString::to_string).collect();
+    let marks: BTreeSet<String> = Mark::all().iter().map(ToString::to_string).collect();
+    assert_eq!(words("changes_kind_check"), kinds);
+    assert_eq!(words("changes_mark_check"), marks);
+    assert!(words("heartbeats_name_check").contains(changes::HEARTBEAT));
+    assert_eq!(
+        words("reads_name_check"),
+        BTreeSet::from([changes::HEARTBEAT.to_owned()])
+    );
 }
 
 /// An alert's kind is `TEXT` read back through the enum, so the CHECK admits

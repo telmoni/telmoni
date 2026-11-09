@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { SpanStatus } from "@/lib/types/enums";
 
+import { ChangeSchema } from "./changes";
 import type { Read } from "./read";
 import { readLane } from "./traces";
 
@@ -23,6 +24,8 @@ const AgentSchema = z.object({
 export const AgentListSchema = z.object({
   days: z.number().int(),
   agents: z.array(AgentSchema),
+  /** Each listed agent's newest change of each kind over the days read. */
+  changes: z.array(ChangeSchema),
 });
 export type AgentList = z.infer<typeof AgentListSchema>;
 

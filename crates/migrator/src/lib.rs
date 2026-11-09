@@ -56,8 +56,8 @@ pub async fn migrate_from_env() -> anyhow::Result<()> {
 /// Rotate every partitioned Postgres table once — create the months ahead,
 /// and drop the expired ones where the registry allows it (nowhere today) —
 /// then drop ClickHouse's days and months past retention, the spans past a
-/// project's own, and the content that follows them, whether the one before
-/// failed or not. The first failure is the answer.
+/// project's own, and the content and agents' changes that follow them,
+/// whether the one before failed or not. The first failure is the answer.
 pub async fn rotate_from_env() -> anyhow::Result<()> {
     let options = migrator_options()?;
     let clickhouse = telmoni_telemetry::store::client(&require(CLICKHOUSE_URL_VAR)?)
@@ -95,11 +95,22 @@ pub async fn rotate_from_env() -> anyhow::Result<()> {
     if let Ok(rows) = &content {
         tracing::info!(rows, "rotate: content past its span's retention purged");
     }
+    let changes = match &pool {
+        Ok(pool) => telmoni_telemetry::retention::purge_changes(pool, now, cut).await,
+        Err(_) => Ok(0),
+    };
+    if let Ok(rows) = &changes {
+        tracing::info!(
+            rows,
+            "rotate: agents' changes past their spans' retention purged"
+        );
+    }
     rotated?;
     pool?;
     shortened?;
     purged?;
     content?;
+    changes?;
     Ok(())
 }
 

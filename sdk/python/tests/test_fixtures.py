@@ -89,6 +89,8 @@ def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
             with telmoni.model_call(
                 call_spec["model"],
                 provider=call_spec["provider"],
+                prompt=call_spec["prompt"],
+                prompt_version=call_spec["prompt_version"],
                 input_messages=call_spec["input_messages"],
             ) as call:
                 call.answered(

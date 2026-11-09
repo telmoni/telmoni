@@ -19,6 +19,10 @@ function calls(transport: FakeTransport): JsonSpan[] {
   return transport.spans().filter((span) => span.name.startsWith('chat '));
 }
 
+function promptsOf(span: JsonSpan): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(attributesOf(span)).filter(([key]) => key.startsWith('gen_ai.prompt.')));
+}
+
 describe('a model call', () => {
   it("carries the conventions' names", async () => {
     const run = h.telmoni.run('bot', { sessionId: 'conv' }, (run) => {
@@ -238,6 +242,103 @@ describe('a model call', () => {
       'telmoni: a provider must be up to 128 characters; it is sent cut to its first 128',
       'telmoni: a response model must be up to 128 characters; it is sent cut to its first 128',
     ]);
+  });
+
+  it('names its prompt on its own span alone, and a recorded call names none', async () => {
+    h.telmoni.run('bot', (run) =>
+      run.step('plan', (step) => step.modelCall('m', { prompt: 'support-reply', promptVersion: '3' }, () => {})),
+    );
+    const at = Date.parse('2026-10-18T09:00:00.000Z');
+    // A record's call reads no prompt, whatever keys a caller's object carries.
+    const recorded = { type: 'model_call', model: 'r', start: at, end: at, prompt: 'support-reply', promptVersion: '3' } as const;
+    h.telmoni.recordRun({ runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d', agent: 'recorder', start: at, end: at, inside: [recorded] });
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(Object.fromEntries(h.transport.spans().map((span) => [span.name, promptsOf(span)]))).toEqual({
+      'invoke_agent bot': {},
+      plan: {},
+      'chat m': { 'gen_ai.prompt.name': 'support-reply', 'gen_ai.prompt.version': '3' },
+      'invoke_agent recorder': {},
+      'chat r': {},
+    });
+  });
+
+  it('takes a blank prompt as none, and leaves off a version without its name, warned once', async () => {
+    h.telmoni.run('bot', (run) => {
+      for (const [prompt, promptVersion] of [
+        ['', ''],
+        [' ', '\u{3000}'],
+        ['p', '\t'],
+        ['', '3'],
+        [undefined, '3'],
+        ['\u{2003}', '3'],
+      ] as const) {
+        run.modelCall('m', { prompt, promptVersion }, () => {});
+      }
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(calls(h.transport).map(promptsOf)).toEqual([{}, {}, { 'gen_ai.prompt.name': 'p' }, {}, {}, {}]);
+    expect(h.warnings).toEqual(["telmoni: a prompt's version needs its prompt's name; the call is sent without it"]);
+    expect(h.fields).toStrictEqual([{ kind: 'input' }]);
+  });
+
+  it("leaves off a prompt or version past ingest's cap, counted in characters, never cut", async () => {
+    // Cut, either would name another, as a cut user would.
+    const widest = '😀'.repeat(1024);
+    h.telmoni.run('bot', (run) => {
+      for (let i = 0; i < 2; i++) {
+        run.modelCall('m', { prompt: widest, promptVersion: 'v'.repeat(1024) }, () => {});
+        run.modelCall('m', { prompt: 'p'.repeat(1025), promptVersion: '3' }, () => {});
+        run.modelCall('m', { prompt: 'p', promptVersion: '😀'.repeat(1025) }, () => {});
+      }
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    const once = [{ 'gen_ai.prompt.name': widest, 'gen_ai.prompt.version': 'v'.repeat(1024) }, {}, { 'gen_ai.prompt.name': 'p' }];
+    expect(calls(h.transport).map(promptsOf)).toEqual([...once, ...once]);
+    expect([...h.warnings].sort()).toEqual([
+      "telmoni: a prompt's name must be up to 1024 characters; the call is sent without it",
+      "telmoni: a prompt's version must be up to 1024 characters; the call is sent without it",
+      "telmoni: a prompt's version needs its prompt's name; the call is sent without it",
+    ]);
+    expect(h.fields).toStrictEqual([{ kind: 'input' }, { kind: 'input' }, { kind: 'input' }]);
+  });
+
+  it('sends a prompt or version that is no string as its text, warned once', async () => {
+    h.telmoni.run('bot', (run) => {
+      const options = { prompt: new String('support-reply') as unknown as string, promptVersion: 3 as unknown as string };
+      run.modelCall('m', options, () => {});
+    });
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(promptsOf(one(calls(h.transport)))).toEqual({ 'gen_ai.prompt.name': 'support-reply', 'gen_ai.prompt.version': '3' });
+    expect(h.warnings).toEqual([
+      "telmoni: a prompt's name that is no string is sent as its text",
+      "telmoni: a prompt's version that is no string is sent as its text",
+    ]);
+  });
+
+  it('sends its prompt as given where content leaves, never handed to the mask or the scrubbers', async () => {
+    // Metadata, as a name is: the mask and the scrubbers read content alone.
+    const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
+    const handed: string[] = [];
+    const mask = (key: string, value: string): string => {
+      handed.push(key);
+      return value;
+    };
+    const kept = harness({ captureContent: true, mask, scrubPii: true }, {}, Array.from({ length: 6 }, () => on));
+    try {
+      kept.telmoni.run('warm', () => {});
+      expect(await kept.telmoni.flush()).toBe(true);
+      kept.telmoni.run('bot', (run) => {
+        const options = { prompt: 'reply-to-ada@example.com', promptVersion: '3', inputMessages: 'write to ada@example.com' };
+        run.modelCall('m', options, () => {});
+      });
+      expect(await kept.telmoni.flush()).toBe(true);
+    } finally {
+      await kept.telmoni.shutdown();
+    }
+    const call = one(calls(kept.transport));
+    expect(attributesOf(call)['gen_ai.input.messages']).toBe('write to [pii: email]');
+    expect(promptsOf(call)).toEqual({ 'gen_ai.prompt.name': 'reply-to-ada@example.com', 'gen_ai.prompt.version': '3' });
+    expect([...new Set(handed)]).toEqual(['gen_ai.input.messages']);
   });
 
   it('has content taken off before it leaves', async () => {

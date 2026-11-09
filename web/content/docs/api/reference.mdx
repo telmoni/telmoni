@@ -6,8 +6,8 @@ description: "The Telmoni API: authentication, rate limits, and the public /v1 r
 The Telmoni API is an HTTP interface under `/v1`. Authenticated by a
 [project API key](/docs/api/api-keys), it reads a project as the console does:
 its organization, its traces with their spans and, if asked, their
-content, its totals by the hour or the day and its incidents, so a script, a
-notebook or a BI tool can work with them. The routes here need the `read`
+content, its totals by the hour or the day, its incidents and its agents'
+changes, so a script, a notebook or a BI tool can work with them. The routes here need the `read`
 scope, and write nothing. Spans go to a lane of their own,
 [`/otlp/v1/traces`](/docs/api/ingest), with a key holding the `ingest` scope, as
 do the two writes under `/v1`: `PUT /v1/media/{sha256}`, where our SDKs keep a
@@ -112,8 +112,9 @@ query, each parameter repeatable where the page lets you pick several values:
   no further than your plan keeps spans, and the answer's `days` says how far
   it read.
 - `agent`, `user`, `session`, `status` (`ok`, `error` or `cancelled`),
-  `model`, `tool`, `environment`, `release`, `prompt`, and `tag` as
-  `key:value`: each narrows the list to runs that match one of its values.
+  `model`, `tool`, `environment`, `release`, `prompt`, `tag` as `key:value`,
+  and `prompt_version` as `name:version`, a prompt's version under its name:
+  each narrows the list to runs that match one of its values.
 - `sort` and `dir` (`asc` or `desc`): The column and the direction, as the page
   sorts.
 - `limit` and `page`: The page's size and which page, from 1.
@@ -307,6 +308,54 @@ incidents whose notices showed that run.
 
 `GET /v1/incidents/{id}` answers one incident in the same shape, or `404`
 for an ID the project does not hold.
+
+## `GET /v1/changes`
+
+The project's agents' changes, the ones the **Runs** page marks on its bars:
+each the first run of an agent, in one environment, to carry a release, a
+model or a prompt's version its runs there had not carried in the 30 days
+before ([Changes](/docs/monitoring/traces#changes)). The newest first, 500 at
+most. It takes:
+
+- `days`: How many days back, 1 to 360; 7 when left out, and no further than
+  your plan keeps spans.
+- `agent` and `environment`: each narrows the list to changes that match one of
+  its values.
+
+An unknown parameter, or a value that does not parse, is a `400`.
+
+### Response
+
+`200 OK` `application/json`
+
+```json
+{
+  "days": 7,
+  "more": false,
+  "changes": [
+    {
+      "agent": "support",
+      "environment": "production",
+      "kind": "prompt",
+      "prompt": "support-reply",
+      "value": "3",
+      "changed_at": "2026-11-01T09:05:00Z",
+      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "capped": false
+    }
+  ]
+}
+```
+
+- `kind`: `release`, `model` or `prompt`; `value` is the release, the model,
+  or the prompt's version, and `prompt` its name, on a prompt's change alone.
+- `environment`: The environment its spans were sent from, empty where they
+  named none.
+- `changed_at`: When the run that first carried it started; `run_id` that run,
+  which [`GET /v1/traces/{run_id}`](#get-v1tracesrun_id) reads while it is kept.
+- `capped`: `true` where an agent made more than 24 changes of one kind in a
+  UTC day: on the last one listed, since the rest are not.
+- `more`: Whether the window held more than the 500 listed.
 
 ## `POST /v1/scores`
 

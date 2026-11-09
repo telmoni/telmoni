@@ -71,6 +71,10 @@ pub(crate) const MEMORY_RECORD_COUNT: &str = "gen_ai.memory.record.count";
 pub(crate) const TIME_TO_FIRST_CHUNK: &str = "gen_ai.response.time_to_first_chunk";
 
 pub(crate) const REQUEST_REASONING_LEVEL: &str = "gen_ai.request.reasoning.level";
+/// The prompt a live model call used, by name and version: metadata, sent
+/// whatever the content mode.
+pub(crate) const PROMPT_NAME: &str = "gen_ai.prompt.name";
+pub(crate) const PROMPT_VERSION: &str = "gen_ai.prompt.version";
 
 pub(crate) const INPUT_MESSAGES: &str = "gen_ai.input.messages";
 pub(crate) const OUTPUT_MESSAGES: &str = "gen_ai.output.messages";

@@ -31,6 +31,15 @@
     "more": true,
     "values": []
   },
+  "prompt_version": {
+    "more": false,
+    "values": [
+      {
+        "count": 4,
+        "value": "support-reply:3"
+      }
+    ]
+  },
   "release": {
     "more": false,
     "values": [
@@ -63,7 +72,7 @@
     "values": [
       {
         "count": 5,
-        "value": "tier:pro"
+        "value": "team:search"
       }
     ]
   },

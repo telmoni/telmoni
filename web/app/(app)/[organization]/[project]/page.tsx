@@ -13,7 +13,8 @@ import { fetchAgents } from "@/lib/server/entities/agents";
 import { fetchAlerts } from "@/lib/server/entities/alerts";
 import { DOCS_URL } from "@/lib/site";
 import { projectPath } from "@/lib/slug";
-import { formatCost, formatCount, tracesHref } from "@/lib/traces";
+import { changeWords, formatCost, formatCount, tracesHref } from "@/lib/traces";
+import { ChangeKind } from "@/lib/types/enums";
 
 // The tab is titled by the project's name, so a tab among several says which.
 export async function generateMetadata({
@@ -26,10 +27,12 @@ export async function generateMetadata({
 
 const plural = (n: number, one: string, many: string) => `${formatCount(n)} ${n === 1 ? one : many}`;
 
-// A project opens on its agents: each that ran over the days read, its last
-// run and how that ended, what it cost against what its runs usually cost,
-// and the alerts that watch it with their open incidents. Anybody on the
-// project reads it.
+/** The order an agent's changes stand in under its name: the contract's, the release first. */
+const KINDS = Object.values(ChangeKind);
+
+// A project opens on its agents over the days read: each one's newest
+// changes, its last run and how that ended, its cost against its usual, and
+// the alerts that watch it. Anybody on the project reads it.
 export default async function AgentsPage({ params }: PageProps<"/[organization]/[project]">) {
   const { organization, project: slug } = await params;
   const project = await fetchProjectBySlug(slug);
@@ -37,7 +40,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
   const base = projectPath(organization, project.slug);
   const [read, alerts] = await Promise.all([fetchAgents(project.id), fetchAlerts(project.id)]);
   if (read.kind !== "ok") return <ServiceUnavailable />;
-  const { days, agents } = read.value;
+  const { days, agents, changes } = read.value;
   const watched = alerts.kind === "ok" ? alerts : null;
   const everyAgents = watched ? openIncidentsOf(watched.alerts, watched.incidents, null) : 0;
   const alertsHref = `${base}/alerts`;
@@ -46,7 +49,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
     <>
       <PageHeader
         title="Agents"
-        info={`Every agent that ran in the last ${days} days: its last run, what that cost against what its runs usually cost, the alerts that watch it, and their open incidents.`}
+        info={`Every agent that ran in the last ${days} days: its last run, what that cost against what its runs usually cost, the alerts that watch it, and their open incidents. Under its name, the newest release, model and prompt version it changed to in those days, each opening the run that first carried it.`}
       />
       <div className="grid gap-page">
         <section className="grid gap-gutter">
@@ -94,15 +97,28 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
               {agents.map((agent) => {
                 const watchers = watched ? watchersOf(watched.alerts, agent.agent) : null;
                 const open = watched ? openIncidentsOf(watched.alerts, watched.incidents, agent.agent) : 0;
+                const changed = changes
+                  .filter((change) => change.agent === agent.agent)
+                  .toSorted((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind));
                 return (
                   <tr key={agent.agent}>
-                    <Td className="font-medium whitespace-nowrap">
+                    <Td className="whitespace-nowrap">
                       <Link
                         href={tracesHref(organization, project.slug, { agent: [agent.agent] })}
-                        className="underline-offset-4 hover:underline"
+                        className="font-medium underline-offset-4 hover:underline"
                       >
                         {agent.agent}
                       </Link>
+                      {changed.map((change) => (
+                        <Link
+                          key={change.kind}
+                          href={`${base}/traces/${change.run_id}`}
+                          title={changeWords(change)}
+                          className="block max-w-64 truncate text-xs text-muted-foreground underline-offset-4 hover:underline"
+                        >
+                          {changeWords(change)}
+                        </Link>
+                      ))}
                     </Td>
                     <Td className="whitespace-nowrap">
                       <span className="flex items-center gap-gutter">

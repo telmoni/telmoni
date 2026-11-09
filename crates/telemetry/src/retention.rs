@@ -7,7 +7,8 @@
 //! its purge and gone from every read within moments as the store applies
 //! the mark ([`crate::store::Store::delete_project`]), leave the disk by
 //! the next night's run ([`rewrite_deleted`]). The content an `on` project
-//! keeps in Postgres follows its span's day ([`purge_content`]). A project
+//! keeps in Postgres follows its span's day ([`purge_content`]), and the
+//! agents' changes the spans that carry them ([`purge_changes`]). A project
 //! that chose fewer days than the longest sold has its older spans deleted
 //! the same night, and their content with them ([`shortened`]). Scores go by
 //! the same days, deleted rather than dropped.
@@ -251,6 +252,33 @@ pub async fn purge_content(
         .context("listing the projects with files nothing names")?;
     for project in &unnamed {
         gone += delete_content_before(pool, project, cutoff).await?;
+    }
+    Ok(gone)
+}
+
+/// The agents' changes [`purge`] leaves behind, as the migrator: past the
+/// longest retention sold for every project, and past its own for each
+/// shortened one ([`crate::changes::purge_before`]). Answers how many went.
+pub async fn purge_changes(
+    pool: &sqlx::PgPool,
+    now: DateTime<Utc>,
+    shortened: &[Shortened],
+) -> anyhow::Result<u64> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("a changes purge's connection")?;
+    let mut gone = crate::changes::purge_before(&mut conn, None, span_cutoff(now))
+        .await
+        .context("purging the changes past the longest retention")?;
+    for (project, days) in shortened {
+        gone += crate::changes::purge_before(
+            &mut conn,
+            Some(std::slice::from_ref(project)),
+            cutoff_after(now, *days),
+        )
+        .await
+        .context("purging a project's changes past its own retention")?;
     }
     Ok(gone)
 }

@@ -22,7 +22,8 @@ after typing the project's name
   applies the mark — an export still being written as the project went
   marked once it lands — and the nightly rotation removes them from disk; its
   telemetry settings, its saved dashboards, its alerts with their
-  incidents and its maintenance windows, the content it kept, and the keys
+  incidents and its maintenance windows, its agents'
+  [changes](/docs/monitoring/traces#changes), the content it kept, and the keys
   its end-user and session ids were hashed and its content sealed under go with them. Its connectors, their delivery history and
   its activity feed are purged in the same request, just before its
   telemetry — the Slack app uninstalled right after from every workspace no
@@ -86,7 +87,9 @@ A project's **Admin** or the organization's **Owner** can.
   done.
 - **What stays:** the hourly totals, counts and costs that name no trace or
   user, keep counting them; an alert's incident keeps the run's id, which
-  then opens nothing.
+  then opens nothing, and so does an agent's
+  [change](/docs/monitoring/traces#changes) the run first carried, kept while
+  other runs within retention carry what changed.
 - **If a step fails:** the answer is an error, and trying again finishes the
   deletion; the audit log then records each request.
 

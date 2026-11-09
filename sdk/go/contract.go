@@ -57,6 +57,10 @@ const (
 	attrTimeToFirstChunk = "gen_ai.response.time_to_first_chunk"
 
 	attrRequestReasoningLevel = "gen_ai.request.reasoning.level"
+	// attrPromptName and attrPromptVersion are the prompt a live model call
+	// used: metadata, sent whatever the content mode.
+	attrPromptName    = "gen_ai.prompt.name"
+	attrPromptVersion = "gen_ai.prompt.version"
 
 	attrInputMessages      = "gen_ai.input.messages"
 	attrOutputMessages     = "gen_ai.output.messages"

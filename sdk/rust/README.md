@@ -104,7 +104,12 @@ a model call with no model and a retrieval with a blank source are named by
 their operation alone, and a model call of an operation ingest reads as no model
 call, any but `chat`, `generate_content`, `text_completion` and `embeddings`, goes as `chat`;
 each with one warning, where ingest would refuse the span, or the whole run for
-its agent, user or session, or file the call elsewhere.
+its agent, user or session, or file the call elsewhere. `ModelCallOptions`'
+`prompt` and `prompt_version` name the prompt the call used, sent on its span in
+every content mode, so a prompt's name names a prompt and never a person, who
+goes in `user_id`; a blank one is none, and one past ingest's 1,024 characters
+is left off, never cut, as is a version whose name is none or was left off, each
+with one warning. A recorded call names no prompt.
 `fail("ErrorType")` marks a span failed with the error's type, none if empty,
 and no message; `cancel()` marks it cancelled by the agent. The `_with`
 methods take a closure and return its value, or the `Error` that kept their

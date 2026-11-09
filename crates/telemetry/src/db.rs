@@ -1117,5 +1117,11 @@ async fn purge_project_content(
         .execute(tx.conn())
         .await?
         .rows_affected();
-    Ok(held + delete_content(tx.conn(), project_ids, None, i64::MAX).await?)
+    // And its agents' changes, which follow its spans.
+    let changes = sqlx::query("DELETE FROM telemetry.changes WHERE project_id = ANY($1)")
+        .bind(project_ids)
+        .execute(tx.conn())
+        .await?
+        .rows_affected();
+    Ok(held + changes + delete_content(tx.conn(), project_ids, None, i64::MAX).await?)
 }

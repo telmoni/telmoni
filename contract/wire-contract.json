@@ -35,6 +35,11 @@
       "scheduled",
       "manual"
     ],
+    "ChangeKind": [
+      "release",
+      "model",
+      "prompt"
+    ],
     "ChartMeasure": [
       "spend",
       "tokens",
@@ -314,6 +319,7 @@
       "environment": 128,
       "model": 128,
       "prompt": 1024,
+      "prompt_version": 2049,
       "release": 128,
       "session": 200,
       "tag": 321,

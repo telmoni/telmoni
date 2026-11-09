@@ -293,6 +293,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 attributes: vec![
                     ("gen_ai.response.id".into(), "resp_01".into()),
                     ("gen_ai.prompt.name".into(), "triage-v2".into()),
+                    ("gen_ai.prompt.version".into(), "3".into()),
                 ],
                 ..span_at(
                     &p.ours,
@@ -352,7 +353,10 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 user_id: "user-b".into(),
                 session_id: "conv-2".into(),
                 tags: vec![("team".into(), "support".into())],
-                attributes: vec![("gen_ai.prompt.name".into(), "triage-v2".into())],
+                attributes: vec![
+                    ("gen_ai.prompt.name".into(), "triage-v2".into()),
+                    ("gen_ai.prompt.version".into(), "4".into()),
+                ],
                 ..span_at(
                     &p.ours,
                     b,
@@ -613,6 +617,22 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
         [a]
     );
     assert!(ids(&p.list("?prompt=nobody").await).is_empty());
+    // A prompt's version is matched under its name, never alone.
+    assert_eq!(ids(&p.list("?prompt_version=triage-v2%3A3").await), [a]);
+    assert_eq!(
+        ids(&p
+            .list("?prompt_version=triage-v2%3A3&prompt_version=triage-v2%3A4")
+            .await),
+        [b, a]
+    );
+    assert!(ids(&p.list("?prompt_version=other%3A3").await).is_empty());
+    assert!(
+        ids(&p
+            .list("?prompt=triage-v2&prompt_version=triage-v2%3A9")
+            .await)
+        .is_empty(),
+        "a name's runs, and none on that version"
+    );
     // A filter given again admits a run matching any of its values; an empty
     // value, a form's untouched field, admits every run.
     assert_eq!(ids(&p.list("?agent=support-bot&agent=zeta").await), [c, b]);
@@ -725,6 +745,11 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
         "a tag as key:value, wherever on the run it was"
     );
     assert_eq!(values(&all, "prompt"), owned(&[("triage-v2", 2)]));
+    assert_eq!(
+        values(&all, "prompt_version"),
+        owned(&[("triage-v2:3", 1), ("triage-v2:4", 1)]),
+        "a prompt as name:version"
+    );
     assert_eq!(all["agent"]["more"], false);
 
     let by_model = p.get(&format!("{lane}?model=gpt-x")).await;
@@ -978,7 +1003,11 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(call["input_tokens"], 1_200);
     assert_eq!(
         call["attributes"],
-        serde_json::json!({ "gen_ai.response.id": "resp_01", "gen_ai.prompt.name": "triage-v2" })
+        serde_json::json!({
+            "gen_ai.response.id": "resp_01",
+            "gen_ai.prompt.name": "triage-v2",
+            "gen_ai.prompt.version": "3",
+        })
     );
     let tool = &spans[3];
     assert_eq!(tool["status"], "error");
@@ -1193,6 +1222,8 @@ async fn a_query_a_parameter_does_not_take_is_a_400_that_echoes_nothing(pool: Pg
         "?status=maybe%3Cscript%3E",
         "?tag=untagged%3Cscript%3E",
         "?tag=%3Anameless",
+        "?prompt_version=nameless",
+        "?prompt_version=%3Anameless",
         "?sort=price",
         "?sort=agent&sort=user",
         "?dir=sideways",

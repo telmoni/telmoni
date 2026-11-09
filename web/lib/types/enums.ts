@@ -74,6 +74,14 @@ export const SpanStatus = {
 } as const;
 export type SpanStatus = typeof SpanStatus[keyof typeof SpanStatus];
 
+/** Wire vocabulary of the Rust `ChangeKind`: what an agent's change changed. */
+export const ChangeKind = {
+  Release: "release",
+  Model:   "model",
+  Prompt:  "prompt",
+} as const;
+export type ChangeKind = typeof ChangeKind[keyof typeof ChangeKind];
+
 /** Wire vocabulary of the Rust `TraceSort`: a column of the trace list, named in the URL. */
 export const TraceSort = {
   Started:      "started",

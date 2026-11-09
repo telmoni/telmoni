@@ -614,7 +614,8 @@ CREATE TABLE telemetry.heartbeats (
     period_seconds INTEGER     NOT NULL,
     beat_at        TIMESTAMPTZ NOT NULL,
     CONSTRAINT heartbeats_name_check
-        CHECK (name IN ('purges', 'refusals', 'alerts', 'monitors', 'capacity', 'usage', 'foreign')),
+        CHECK (name IN ('purges', 'refusals', 'alerts', 'monitors', 'capacity', 'usage', 'foreign',
+                        'changes')),
     CONSTRAINT heartbeats_period_check CHECK (period_seconds > 0)
 );
 
@@ -877,3 +878,76 @@ CREATE POLICY maintenance_access ON telemetry.content_held
 -- The purges take a project's bytes off and delete an organization's row; a
 -- transfer moves a project's bytes to the organization that now holds it.
 GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.content_held TO telemetry_maintenance;
+
+-- An agent's changes (`changes.rs`): a row the first run of an agent, in one
+-- environment, to carry a release, a model or a prompt's version its runs
+-- there had not carried in the 30 days before, written by the loop alone. A
+-- row is also what the loop remembers: `hidden` past the day's cap, so a value
+-- held back is not taken for new the next day, and once its run's day is past
+-- retention; it goes once no span within retention carries what changed.
+CREATE TABLE telemetry.changes (
+    id          UUID        PRIMARY KEY,
+    project_id  TEXT        NOT NULL,
+    agent       TEXT        NOT NULL,
+    environment TEXT        NOT NULL,
+    kind        TEXT        NOT NULL,
+    -- A prompt's name, on a prompt's change alone; `value` is its version.
+    prompt      TEXT,
+    value       TEXT        NOT NULL,
+    -- The five above as one SHA-256: a key on the texts could pass an index
+    -- entry's size.
+    identity    TEXT        NOT NULL,
+    changed_at  TIMESTAMPTZ NOT NULL,
+    run_id      UUID        NOT NULL,
+    -- The last arrival of a span carrying it, to the hour.
+    seen_at     TIMESTAMPTZ NOT NULL,
+    mark        TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT changes_kind_check CHECK (kind IN ('release', 'model', 'prompt')),
+    CONSTRAINT changes_mark_check CHECK (mark IN ('shown', 'capped', 'hidden')),
+    CONSTRAINT changes_prompt_check CHECK ((kind = 'prompt') = (prompt IS NOT NULL)),
+    CONSTRAINT changes_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),
+    CONSTRAINT changes_environment_check CHECK (char_length(environment) <= 128),
+    CONSTRAINT changes_value_check CHECK (char_length(value) BETWEEN 1 AND 1024),
+    CONSTRAINT changes_prompt_name_check CHECK (char_length(prompt) BETWEEN 1 AND 1024),
+    CONSTRAINT changes_identity_check CHECK (identity ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT changes_first_run_key UNIQUE (project_id, identity, run_id)
+);
+
+-- The readers, and a day's counts, read by the change's time.
+CREATE INDEX changes_project_idx ON telemetry.changes (project_id, changed_at DESC);
+-- The nightly purges read by it.
+CREATE INDEX changes_seen_idx ON telemetry.changes (seen_at);
+
+ALTER TABLE telemetry.changes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.changes FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON telemetry.changes
+    USING      (project_id = current_setting('app.project_id', true))
+    WITH CHECK (project_id = current_setting('app.project_id', true));
+CREATE POLICY maintenance_access ON telemetry.changes
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+-- The loop writes them and moves what it saw; the purges hide and delete them.
+GRANT SELECT, INSERT, DELETE ON telemetry.changes TO telemetry_maintenance;
+GRANT UPDATE (seen_at, mark) ON telemetry.changes TO telemetry_maintenance;
+
+-- How far a loop that reads the spans by the minute has read them, so a new
+-- leader, or one back from an outage, goes on from there. Names no tenant.
+CREATE TABLE telemetry.reads (
+    name    TEXT        PRIMARY KEY,
+    read_to TIMESTAMPTZ NOT NULL,
+    CONSTRAINT reads_name_check CHECK (name IN ('changes'))
+);
+
+ALTER TABLE telemetry.reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE telemetry.reads FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY maintenance_access ON telemetry.reads
+    TO telemetry_maintenance
+    USING      (current_user = 'telemetry_maintenance')
+    WITH CHECK (current_user = 'telemetry_maintenance');
+
+GRANT SELECT, INSERT, UPDATE ON telemetry.reads TO telemetry_maintenance;

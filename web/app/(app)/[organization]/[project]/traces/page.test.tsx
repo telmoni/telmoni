@@ -26,8 +26,10 @@ vi.mock("@/components/service-unavailable", () => ({
 
 // The charts measure the box they draw in, which jsdom has none of.
 vi.mock("@/components/traces/charts", () => ({
-  TraceHistogramStrip: () => <div data-testid="histogram" />,
-  TraceCharts: () => <div data-testid="charts" />,
+  TraceHistogramStrip: ({ marks }: { marks: unknown }) => (
+    <div data-testid="histogram" data-marks={JSON.stringify(marks)} />
+  ),
+  TraceCharts: ({ marks }: { marks: unknown }) => <div data-testid="charts" data-marks={JSON.stringify(marks)} />,
 }));
 
 vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({
@@ -82,6 +84,19 @@ vi.mock("@/lib/server/data", () => ({
   fetchTraceFacets: (projectId: string, query: unknown) => fetchTraceFacets(projectId, query),
   fetchTraceHistogram: (projectId: string, query: unknown, utcOffset: number) =>
     fetchTraceHistogram(projectId, query, utcOffset),
+}));
+
+let mockChanges: unknown;
+const fetchChanges = vi.fn<
+  (projectId: string, days: number | undefined, agents: readonly string[], environments: readonly string[]) => Promise<unknown>
+>(async () => mockChanges);
+vi.mock("@/lib/server/entities/changes", () => ({
+  fetchChanges: (
+    projectId: string,
+    days: number | undefined,
+    agents: readonly string[],
+    environments: readonly string[],
+  ) => fetchChanges(projectId, days, agents, environments),
 }));
 
 import TracesPage from "./page";
@@ -204,12 +219,14 @@ beforeEach(() => {
       release: NONE,
       tag: NONE,
       prompt: NONE,
+      prompt_version: NONE,
     },
   };
   mockHistogram = {
     kind: "ok",
     histogram: { days: 7, bucket_seconds: 10800, utc_offset: 0, bars: [] },
   };
+  mockChanges = { kind: "ok", value: { days: 7, more: false, changes: [] } };
 });
 
 describe("TracesPage", () => {
@@ -451,6 +468,72 @@ describe("TracesPage", () => {
     expect(screen.getByTestId("charts")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getByRole("tab", { name: /Chart/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  // A change explains the bars whatever else narrows them.
+  it("marks the changes of the list's agents and environments alone, each on the bar it fell in", async () => {
+    mockHistogram = {
+      kind: "ok",
+      histogram: {
+        days: 30,
+        bucket_seconds: 86_400,
+        utc_offset: 0,
+        bars: [{ at: "2026-10-10T00:00:00Z" }, { at: "2026-10-11T00:00:00Z" }],
+      },
+    };
+    const release = {
+      agent: "support-bot",
+      environment: "production",
+      kind: "release",
+      value: "2026.10.18",
+      changed_at: "2026-10-11T03:00:00Z",
+      run_id: RUN_B,
+      capped: false,
+    };
+    mockChanges = { kind: "ok", value: { days: 30, more: false, changes: [release] } };
+    render(
+      await TracesPage({
+        params: PARAMS,
+        searchParams: Promise.resolve({
+          agent: "support-bot",
+          environment: "production",
+          status: "error",
+          model: "claude-sonnet-5-5",
+          tag: "team:core",
+          days: "30",
+        }),
+      }),
+    );
+    expect(fetchChanges).toHaveBeenCalledWith(PROJECT, 30, ["support-bot"], ["production"]);
+    expect(JSON.parse(screen.getByTestId("histogram").dataset.marks ?? "null")).toEqual([
+      { at: "2026-10-11T00:00:00Z", changes: ["support-bot: release 2026.10.18 in production"] },
+    ]);
+    expect(screen.queryByText(/older ones are not/)).toBeNull();
+  });
+
+  it("draws the charts without marks where the changes could not be read, as the list stands without its facets", async () => {
+    mockHistogram = {
+      kind: "ok",
+      histogram: { days: 7, bucket_seconds: 10800, utc_offset: 0, bars: [{ at: "2026-10-11T00:00:00Z" }] },
+    };
+    mockChanges = { kind: "unavailable" };
+    const { unmount } = render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(fetchChanges).toHaveBeenCalledWith(PROJECT, undefined, [], []);
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(JSON.parse(screen.getByTestId("histogram").dataset.marks ?? "null")).toEqual([]);
+    unmount();
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
+    expect(JSON.parse(screen.getByTestId("charts").dataset.marks ?? "null")).toEqual([]);
+  });
+
+  it("says the window's older changes are not marked where it held more than were read", async () => {
+    mockChanges = { kind: "ok", value: { days: 7, more: true, changes: [] } };
+    const note = /^Only the window.s newest changes are marked; its older ones are not\.$/;
+    const { unmount } = render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByText(note)).toBeInTheDocument();
+    unmount();
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
+    expect(screen.getByText(note)).toBeInTheDocument();
   });
 
   it("shows each run's tags as chips in the Tags column, each narrowing the list to it", async () => {

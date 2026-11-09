@@ -65,6 +65,9 @@ export const RESPONSE_MODEL = 'gen_ai.response.model';
 export const REQUEST_MODEL = 'gen_ai.request.model';
 export const PROVIDER = 'gen_ai.provider.name';
 export const REQUEST_REASONING_LEVEL = 'gen_ai.request.reasoning.level';
+/** The prompt a live model call used, by name and version: metadata, sent whatever the content mode. */
+export const PROMPT_NAME = 'gen_ai.prompt.name';
+export const PROMPT_VERSION = 'gen_ai.prompt.version';
 /** In seconds, from the request to the answer's first chunk. */
 export const TIME_TO_FIRST_CHUNK = 'gen_ai.response.time_to_first_chunk';
 export const INPUT_TOKENS = 'gen_ai.usage.input_tokens';

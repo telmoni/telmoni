@@ -1,7 +1,8 @@
 //! Telemetry's `/v1` lanes: behind a project API key holding the `ingest`
 //! scope, the files an SDK lifts out of a span's messages before it exports
 //! the span, each kept once by the hash of its bytes ([`router`]); behind one
-//! holding `read`, the project's traces, its rollups and its incidents, as
+//! holding `read`, the project's traces, its rollups, its incidents and its
+//! agents' changes, as
 //! the console reads them ([`reads`]), which auth's `/v1` router puts behind
 //! its own gate, the organization's switch and the day's data out.
 
@@ -29,6 +30,7 @@ use telmoni_shared::types::ApiKeyScope;
 
 use crate::AppState;
 use crate::content::{self, MEDIA_MAX};
+use crate::handler::changes::{self, ChangeList};
 use crate::handler::incidents::{self, IncidentList, IncidentQuery};
 use crate::handler::scores;
 use crate::handler::traces::{self, Reader, TraceDetail, TraceList};
@@ -62,6 +64,8 @@ pub enum V1Op {
     Incidents,
     /// [`get_incident`]
     Incident,
+    /// [`list_changes`]
+    Changes,
 }
 
 /// Every lane this module serves under `/v1`.
@@ -358,6 +362,53 @@ pub const V1_LANES: &[V1Lane] = &[
             ],
         },
     },
+    V1Lane {
+        op: V1Op::Changes,
+        scope: ApiKeyScope::Read,
+        route: Route {
+            method: Method::Get,
+            bearer: true,
+            path: "/v1/changes",
+            summary: "The project's agents' changes",
+            description: "Each first run of an agent, in one environment, to carry \
+                          a release, a model or a prompt's version its runs there had \
+                          not carried in the 30 days before, the newest first, 500 at \
+                          most, `more` saying the window held more. An agent past 24 \
+                          changes of one kind in a UTC day is marked no further that \
+                          day, its last shown one `capped`.",
+            params: &[
+                Param {
+                    name: "days",
+                    in_query: true,
+                    required: false,
+                    description: "How many days back, 1 to 360; 7 where not given, and never more than the plan keeps.",
+                },
+                Param {
+                    name: "agent",
+                    in_query: true,
+                    required: false,
+                    description: "One agent's changes; given again, each one more.",
+                },
+                Param {
+                    name: "environment",
+                    in_query: true,
+                    required: false,
+                    description: "One environment's changes; given again, each one more.",
+                },
+            ],
+            answers: &[
+                Answer {
+                    status: 200,
+                    description: "The changes.",
+                },
+                Answer {
+                    status: 400,
+                    description: "A parameter the lane does not take, or a value past its cap.",
+                },
+                NO_READ_SCOPE,
+            ],
+        },
+    },
 ];
 
 /// This module's `/v1` lanes, the `/v1` taken off, behind the ingest key's
@@ -405,6 +456,7 @@ fn lanes(scope: ApiKeyScope) -> Router<Arc<AppState>> {
                     V1Op::Metrics => get(get_metrics),
                     V1Op::Incidents => get(list_incidents),
                     V1Op::Incident => get(get_incident),
+                    V1Op::Changes => get(list_changes),
                 },
             )
         })
@@ -466,6 +518,17 @@ pub async fn get_incident(
 ) -> Result<Json<IncidentRow>, TelmoniError> {
     Ok(Json(
         incidents::incident(&state, &key.project_id, &id).await?,
+    ))
+}
+
+/// `GET /v1/changes` — the key's project's agents' changes.
+pub async fn list_changes(
+    State(state): State<Arc<AppState>>,
+    key: ActingKey,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> Result<Json<ChangeList>, TelmoniError> {
+    Ok(Json(
+        changes::change_list(&state, &key.project_id, pairs).await?,
     ))
 }
 

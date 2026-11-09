@@ -60,6 +60,7 @@ pub struct FilterValueMax {
     pub release: usize,
     pub tag: usize,
     pub prompt: usize,
+    pub prompt_version: usize,
 }
 
 pub const FILTER_VALUE_MAX: FilterValueMax = FilterValueMax {
@@ -72,6 +73,7 @@ pub const FILTER_VALUE_MAX: FilterValueMax = FilterValueMax {
     release: RELEASE_MAX,
     tag: TAG_KEY_MAX + 1 + TAG_VALUE_MAX,
     prompt: ATTRIBUTE_VALUE_MAX,
+    prompt_version: ATTRIBUTE_VALUE_MAX + 1 + ATTRIBUTE_VALUE_MAX,
 };
 
 /// Which lane a query string is read for. Each takes the filters and the
@@ -114,6 +116,9 @@ pub struct TraceQuery {
     pub tag: Vec<String>,
     /// Prompt names any of their spans carry.
     pub prompt: Vec<String>,
+    /// Prompts by name and version any of their spans carry, each
+    /// `name:version`.
+    pub prompt_version: Vec<String>,
     /// A score the runs carry, by its name, and the least and most of its value.
     pub score: Option<String>,
     pub score_min: Option<String>,
@@ -189,6 +194,7 @@ impl TraceQuery {
             Facet::Release => &mut self.release,
             Facet::Tag => &mut self.tag,
             Facet::Prompt => &mut self.prompt,
+            Facet::PromptVersion => &mut self.prompt_version,
         }
     }
 
@@ -267,6 +273,7 @@ impl TraceQuery {
             releases: values("release", &self.release, FILTER_VALUE_MAX.release)?,
             tags: tag_values(&self.tag)?,
             prompts: values("prompt", &self.prompt, FILTER_VALUE_MAX.prompt)?,
+            prompt_versions: prompt_version_values(&self.prompt_version)?,
             days: parse_days(self.days.as_deref())?,
             prices: crate::prices::PriceBook::default(),
             score: self.score_filter()?,
@@ -399,6 +406,24 @@ pub(crate) fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> 
                 "tag is key:value, the key 1 to {TAG_KEY_MAX} characters and the value up to \
                  {TAG_VALUE_MAX}"
             )));
+        }
+    }
+    Ok(pairs)
+}
+
+/// A prompt version filter's values, each `name:version` as a run carries a
+/// prompt where one span names both: compared whole, so a version is never
+/// matched under another prompt's name.
+pub(crate) fn prompt_version_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
+    let pairs = values("prompt_version", given, FILTER_VALUE_MAX.prompt_version)?;
+    for pair in &pairs {
+        let well_formed = pair
+            .split_once(':')
+            .is_some_and(|(name, version)| !name.is_empty() && !version.is_empty());
+        if !well_formed {
+            return Err(TelmoniError::BadRequest(
+                "prompt_version is name:version, each part at least one character".into(),
+            ));
         }
     }
     Ok(pairs)
@@ -651,6 +676,8 @@ pub struct Facets {
     /// Each tag as `key:value`.
     pub tag: FacetValues,
     pub prompt: FacetValues,
+    /// Each prompt as `name:version`.
+    pub prompt_version: FacetValues,
 }
 
 /// One filter's values: the ticked ones first, then the most rows, up to
@@ -683,6 +710,7 @@ impl Facets {
             Facet::Release => &mut self.release,
             Facet::Tag => &mut self.tag,
             Facet::Prompt => &mut self.prompt,
+            Facet::PromptVersion => &mut self.prompt_version,
         }
     }
 
@@ -1458,6 +1486,8 @@ mod tests {
                 ("tag", "team:search"),
                 ("tag", "team:a:b"),
                 ("prompt", "triage-v2"),
+                ("prompt_version", "triage:3"),
+                ("prompt_version", "triage:v:2"),
                 ("sort", "user"),
                 ("days", "30"),
                 ("limit", "50"),
@@ -1480,6 +1510,11 @@ mod tests {
             "a tag's value may hold a colon of its own"
         );
         assert_eq!(filter.prompts, ["triage-v2"]);
+        assert_eq!(
+            filter.prompt_versions,
+            ["triage:3", "triage:v:2"],
+            "a version may hold a colon of its own"
+        );
         assert_eq!(filter.days, 30);
         assert_eq!(
             query.sort().expect("a sort"),

@@ -19,11 +19,12 @@ import {
   fetchTraceHistogram,
   fetchTraces,
 } from "@/lib/server/data";
+import { fetchChanges } from "@/lib/server/entities/changes";
 import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { AGENT_PROMPT } from "@/lib/first-run";
 import { MAX_DAYS } from "@/lib/list-query";
-import { DEFAULT_ROWS, activeFilters, parseTraceQuery, parseTraceUi } from "@/lib/traces";
+import { DEFAULT_ROWS, activeFilters, marksOn, parseTraceQuery, parseTraceUi } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
 export const metadata = { title: "Runs" };
@@ -47,11 +48,22 @@ export default async function TracesPage({
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
   const { gate, project } = resolved;
 
-  const [access, facets, histogram] = await Promise.all([
+  const [access, facets, histogram, changes] = await Promise.all([
     fetchTraces(project.id, { ...query, limit: query.limit ?? DEFAULT_ROWS }),
     fetchTraceFacets(project.id, query),
     fetchTraceHistogram(project.id, query, utcOffset),
+    // By agent and environment alone: a change explains the bars whatever else narrows them.
+    fetchChanges(project.id, query.days, query.agent ?? [], query.environment ?? []),
   ]);
+  const marks =
+    histogram.kind === "ok" && changes.kind === "ok"
+      ? marksOn(histogram.histogram.bars, changes.value.changes)
+      : [];
+  const unmarked = changes.kind === "ok" && changes.value.more && (
+    <p className="text-xs text-muted-foreground">
+      Only the window&rsquo;s newest changes are marked; its older ones are not.
+    </p>
+  );
   // The rows this render drew, as one token: the table is keyed by it, and
   // the new-traces bar reads a change in it as the list drawn again.
   const drawn = access.kind === "ok" ? access.list.traces.map((t) => t.run_id).join() : "";
@@ -182,7 +194,10 @@ export default async function TracesPage({
         instead={
           ui.display === "chart" ? (
             histogram.kind === "ok" ? (
-              <TraceCharts histogram={histogram.histogram} />
+              <>
+                <TraceCharts histogram={histogram.histogram} marks={marks} />
+                {unmarked}
+              </>
             ) : (
               <NoticeCard title="The charts could not be read." body="Try again in a moment." />
             )
@@ -190,7 +205,12 @@ export default async function TracesPage({
         }
         table={(list) => (
           <>
-            {histogram.kind === "ok" && <TraceHistogramStrip histogram={histogram.histogram} />}
+            {histogram.kind === "ok" && (
+              <>
+                <TraceHistogramStrip histogram={histogram.histogram} marks={marks} />
+                {unmarked}
+              </>
+            )}
             <TraceTable
               organization={organization}
               slug={slug}

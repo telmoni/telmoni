@@ -100,6 +100,13 @@ reads as no model call, any but `chat`, `generate_content`, `text_completion` an
 as `chat`; each with one warning, where ingest would refuse the span, or the
 whole run for its agent, user or session, or file the call elsewhere.
 
+`modelCall(model, { prompt: 'support-reply', promptVersion: '3' }, fn)` names
+the prompt the call used, sent on its span in every content mode, so a prompt's
+name names a prompt and never a person, who goes in `userId`. A blank one is
+none; one past ingest's 1,024 characters is left off, never cut, and so is a
+version whose name is none or was left off, each with one warning; one that is
+no string goes as its text, with one warning. A recorded call names no prompt.
+
 `telmoni.wrap(agent, options, fn)` returns `fn` opening a run per call, with
 the run's handle as `fn`'s last argument:
 

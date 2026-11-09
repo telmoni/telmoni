@@ -114,6 +114,7 @@ impl App {
         ));
         let foreign = tokio::spawn(telmoni_telemetry::foreign::run(self.telemetry.clone()));
         let monitors = tokio::spawn(telmoni_telemetry::monitors::run(self.telemetry.clone()));
+        let changes = tokio::spawn(telmoni_telemetry::changes::run(self.telemetry.clone()));
         // Told as the shutdown comes, so a pass stops between alerts, and a
         // tick between monitors, while the server drains.
         tokio::spawn({
@@ -166,6 +167,7 @@ impl App {
             ended = alerts => return died("the alerts' evaluation", ended),
             ended = foreign => return died("another exporter's spans landing", ended),
             ended = monitors => return died("the monitors' watch", ended),
+            ended = changes => return died("the agents' changes", ended),
         }
         // The alert and monitor in hand are settled and told before the process ends.
         tokio::join!(

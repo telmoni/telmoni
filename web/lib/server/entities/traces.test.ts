@@ -14,6 +14,7 @@ vi.mock("./identity-context", () => ({
     "x-project-id": projectId,
   }),
 }));
+import { fetchChanges } from "./changes";
 import {
   fetchTrace,
   fetchTraceFacets,
@@ -80,6 +81,7 @@ const FACETS = {
   release: { values: [], more: false },
   tag: { values: [{ value: "team:search", count: 1 }], more: false },
   prompt: { values: [], more: false },
+  prompt_version: { values: [], more: false },
 };
 
 const HISTOGRAM = {
@@ -244,6 +246,31 @@ describe("the reads beside the list", () => {
     expect(await fetchTraceFacets(PROJECT, {})).toEqual({ kind: "forbidden" });
     answer(200, { ...HISTOGRAM, bars: [{ at: "x" }] });
     expect(await fetchTraceHistogram(PROJECT, {}, 0)).toEqual({ kind: "unavailable" });
+  });
+
+  it("reads the changes over the window, of the agents and in the environments named, a prompt's naming its prompt", async () => {
+    const prompt = {
+      agent: "zeta",
+      environment: "production",
+      kind: "prompt",
+      prompt: "triage",
+      value: "3",
+      changed_at: "2026-10-11T03:00:00Z",
+      run_id: RUN,
+      capped: false,
+    };
+    const changes = { days: 30, more: false, changes: [prompt] };
+    answer(200, changes);
+    expect(await fetchChanges(PROJECT, 30, ["zeta", "nightly-report"], ["production"])).toEqual({
+      kind: "ok",
+      value: changes,
+    });
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe(
+      "http://server/internal/v1/telemetry/changes?days=30&agent=zeta&agent=nightly-report&environment=production",
+    );
+    answer(200, { ...changes, changes: [{ ...prompt, prompt: undefined }] });
+    expect(await fetchChanges(PROJECT, undefined, [], [])).toEqual({ kind: "unavailable" });
+    expect(fetchWithTimeout.mock.calls[1]![0]).toBe("http://server/internal/v1/telemetry/changes");
   });
 });
 

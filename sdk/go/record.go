@@ -338,7 +338,7 @@ func (r *recorder) call(parent context.Context, call CallRecord) {
 	switch call := itemValue(call).(type) {
 	case ModelCallRecord:
 		operation, _ := modelOperation(call.Operation)
-		name, own := modelCallOpening(call.Model, operation, call.Provider)
+		name, own := modelCallOpening(call.Model, operation, call.Provider, "", "")
 		if call.ReasoningEffort != "" {
 			own = append(own, attribute.String(attrRequestReasoningLevel, call.ReasoningEffort))
 		}

@@ -28,6 +28,7 @@ import { ConversationListSchema, ConversationSchema, StatusSchema } from "./agen
 import { AgentListSchema } from "./agents";
 import { AlertListSchema, IncidentListSchema, MuteListSchema } from "./alerts";
 import { AuditPageSchema } from "./audit";
+import { ChangeListSchema } from "./changes";
 import { InviteListSchema, InviteLookSchema, MemberListSchema } from "./member";
 import {
   AccountDeletedSchema,
@@ -128,6 +129,7 @@ const READERS: Record<string, z.ZodType> = {
   "notifications/slack-identities.json": SlackIdentitiesSchema,
   "telemetry/agents.json": AgentListSchema,
   "telemetry/alerts.json": AlertListSchema,
+  "telemetry/changes.json": ChangeListSchema,
   "telemetry/content-mode.json": ContentModeSettingSchema,
   "telemetry/dashboards.json": DashboardViewListSchema,
   "telemetry/facets.json": FacetsSchema,

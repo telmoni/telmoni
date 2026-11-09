@@ -49,8 +49,23 @@ const alert = (id: string, agents: string[] = [], paused: string | null = null) 
 
 const incident = (id: string, rule: string, status = "open") => ({ id, rule_id: rule, status });
 
-const agentsOk = (agents: unknown[]) => ({ kind: "ok", value: { days: 14, agents } });
-const alertsOk = (alerts: unknown[], incidents: unknown[] = []) => ({
+const agentsOk = (agents: unknown[], changes: unknown[] = []) => ({
+  kind: "ok",
+  value: { days: 14, agents, changes },
+});
+
+const change = (kind: string, value: string, run: string, patch: Record<string, unknown> = {}) => ({
+  agent: "support-bot",
+  environment: "production",
+  kind,
+  value,
+  changed_at: "2026-11-05T08:00:00Z",
+  run_id: run,
+  capped: false,
+  ...patch,
+});
+
+const alertsOk =(alerts: unknown[], incidents: unknown[] = []) => ({
   kind: "ok",
   alerts,
   incidents,
@@ -108,6 +123,43 @@ describe("a project's Agents page", () => {
     expect(support.querySelector('time[datetime="2026-11-05T09:00:00Z"]')?.closest("a")).toHaveAttribute(
       "href",
       "/acme/web/traces/0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+    );
+  });
+
+  it("puts an agent's newest release, model and prompt version under its name, each opening the run that first carried it", async () => {
+    const release = "0192f3a1-7c2e-7b4d-9a61-000000000001";
+    const model = "0192f3a1-7c2e-7b4d-9a61-000000000002";
+    const prompt = "0192f3a1-7c2e-7b4d-9a61-000000000003";
+    // In the server's order, by the kinds' names: the page stands the release first.
+    mockAgents = agentsOk(
+      [agent("support-bot"), agent("nightly-report")],
+      [
+        change("model", "gpt-4o-mini", model, { environment: "" }),
+        change("prompt", "3", prompt, { prompt: "triage" }),
+        change("release", "1.4.2", release),
+      ],
+    );
+    render(await AgentsPage({ params: PARAMS } as never));
+
+    const support = within(screen.getByRole("link", { name: "support-bot" }).closest("td")!);
+    expect(support.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+      ["support-bot", "/acme/web/traces?agent=support-bot"],
+      ["release 1.4.2 in production", `/acme/web/traces/${release}`],
+      ["model gpt-4o-mini", `/acme/web/traces/${model}`],
+      ["prompt triage version 3 in production", `/acme/web/traces/${prompt}`],
+    ]);
+    const nightly = within(screen.getByRole("link", { name: "nightly-report" }).closest("td")!);
+    expect(nightly.getAllByRole("link")).toHaveLength(1);
+  });
+
+  // A capped day's last shown change may not be the agent's latest: its line says so.
+  it("says an agent's capped change was its day's last of its kind marked", async () => {
+    const run = "0192f3a1-7c2e-7b4d-9a61-000000000004";
+    mockAgents = agentsOk([agent("support-bot")], [change("release", "9.0.24", run, { capped: true })]);
+    render(await AgentsPage({ params: PARAMS } as never));
+
+    expect(screen.getByRole("link", { name: /^release 9\.0\.24 in production/ })).toHaveTextContent(
+      "release 9.0.24 in production; its later release changes that UTC day are not marked",
     );
   });
 

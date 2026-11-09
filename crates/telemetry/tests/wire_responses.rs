@@ -9,12 +9,14 @@ use uuid::Uuid;
 
 use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
-    ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, MonitorCause,
+    ChangeKind, ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, MonitorCause,
     OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
     Severity, SortDirection, SpanKind, SpanStatus, TraceSort,
 };
+use telmoni_telemetry::changes::Change;
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
 use telmoni_telemetry::handler::agents::{AGENTS_DAYS, AgentRow, Agents};
+use telmoni_telemetry::handler::changes::ChangeList;
 use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::{FieldInventory, Row};
 use telmoni_telemetry::handler::incidents::IncidentList;
@@ -164,8 +166,42 @@ fn the_trace_list_answers_as_the_console_reads() {
     );
 }
 
+/// A change of each kind: a release, a model on a day past its cap, and a
+/// prompt's version under its name.
+fn changes() -> Vec<Change> {
+    let change = |kind, prompt: Option<&str>, value: &str, secs, capped| Change {
+        agent: "support".into(),
+        environment: "production".into(),
+        kind,
+        prompt: prompt.map(Into::into),
+        value: value.into(),
+        changed_at: at(secs),
+        run_id: RUN,
+        capped,
+    };
+    vec![
+        change(ChangeKind::Prompt, Some("support-reply"), "3", 120, false),
+        change(ChangeKind::Model, None, "gpt-4o-mini-2024-07-18", 60, true),
+        change(ChangeKind::Release, None, "1.4.2", 0, false),
+    ]
+}
+
+/// The changes the trace list's charts mark, the newest first.
+#[test]
+fn the_changes_answer_as_the_console_reads() {
+    pin(
+        "changes",
+        &ChangeList {
+            days: 7,
+            more: false,
+            changes: changes(),
+        },
+    );
+}
+
 /// The Agents page's rows: one agent whose last run ended and was priced,
-/// and one still on its first run, with no usual cost yet.
+/// with its newest change of each kind, and one still on its first run,
+/// with no usual cost yet.
 #[test]
 fn the_agents_answer_as_the_console_reads() {
     pin(
@@ -196,6 +232,7 @@ fn the_agents_answer_as_the_console_reads() {
                     usual_spend: None,
                 },
             ],
+            changes: changes(),
         },
     );
 }
@@ -222,11 +259,12 @@ fn the_facets_answer_as_the_console_reads() {
             tool: values("search", 4),
             environment: values("production", 12),
             release: values("1.4.2", 12),
-            tag: values("tier:pro", 5),
+            tag: values("team:search", 5),
             prompt: FacetValues {
                 values: Vec::new(),
                 more: true,
             },
+            prompt_version: values("support-reply:3", 4),
         },
     );
 }

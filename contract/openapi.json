@@ -44,6 +44,96 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/changes": {
+      "get": {
+        "description": "Each first run of an agent, in one environment, to carry a release, a model or a prompt's version its runs there had not carried in the 30 days before, the newest first, 500 at most, `more` saying the window held more. An agent past 24 changes of one kind in a UTC day is marked no further that day, its last shown one `capped`.",
+        "parameters": [
+          {
+            "description": "How many days back, 1 to 360; 7 where not given, and never more than the plan keeps.",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One agent's changes; given again, each one more.",
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One environment's changes; given again, each one more.",
+            "in": "query",
+            "name": "environment",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The changes."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A parameter the lane does not take, or a value past its cap."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No live `tm_` API key was presented. A revoked, expired or unknown key answers the same way."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A live key without the `read` scope."
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too many requests. The server meters by source address and by key before the request reaches a lane, and says when to come back in `Retry-After`."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
+          }
+        },
+        "summary": "The project's agents' changes"
+      }
+    },
     "/v1/incidents": {
       "get": {
         "description": "The project's incidents, those not resolved first, then the newest, 200 at most; with `run`, those whose notices showed that run.",

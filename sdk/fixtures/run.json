@@ -13,6 +13,8 @@
               "model_call": {
                 "provider": "openai",
                 "model": "gpt-4o-mini",
+                "prompt": "support-reply",
+                "prompt_version": "3",
                 "response_model": "gpt-4o-mini-2024-07-18",
                 "time_to_first_token": 0.35,
                 "usage": { "input_tokens": 12, "output_tokens": 7, "cache_read_input_tokens": 3, "cache_write_input_tokens": 0, "cost": 0.000123 },
@@ -58,6 +60,8 @@
                 "attributes": [
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "conv_7" } },
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "chat" } },
+                  { "key": "gen_ai.prompt.name", "value": { "stringValue": "support-reply" } },
+                  { "key": "gen_ai.prompt.version", "value": { "stringValue": "3" } },
                   { "key": "gen_ai.provider.name", "value": { "stringValue": "openai" } },
                   { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-4o-mini" } },
                   { "key": "gen_ai.response.model", "value": { "stringValue": "gpt-4o-mini-2024-07-18" } },

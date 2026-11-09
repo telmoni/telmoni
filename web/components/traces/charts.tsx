@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import {
   ChartContainer,
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
 import { formatScoreValue } from "@/lib/scores";
-import { formatCost, formatCount, formatDuration } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration, type ChangeMark } from "@/lib/traces";
 import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
@@ -102,11 +102,13 @@ function rows(histogram: TraceHistogram, metric: Metric) {
 /** One metric over the window, in the histogram's bars. */
 function MetricChart({
   histogram,
+  marks,
   metric,
   className,
   legend = false,
 }: {
   histogram: TraceHistogram;
+  marks: readonly ChangeMark[];
   metric: Metric;
   className?: string;
   legend?: boolean;
@@ -116,6 +118,7 @@ function MetricChart({
 
   const data = rows(histogram, metric);
   const seconds = histogram.bucket_seconds;
+  const changed = new Map(marks.map((mark) => [mark.at, mark.changes]));
   const lines = metric === "duration" || metric === "first_token" || metric === "score";
   const config =
     metric === "runs"
@@ -159,7 +162,20 @@ function MetricChart({
         <ChartTooltipContent
           labelFormatter={(_, payload) => {
             const iso = payload?.[0]?.payload?.at;
-            return typeof iso === "string" ? barLabel(iso, seconds) : null;
+            if (typeof iso !== "string") return null;
+            const changes = changed.get(iso);
+            if (!changes) return barLabel(iso, seconds);
+            return (
+              <div className="grid max-w-80 gap-1">
+                {barLabel(iso, seconds)}
+                {changes.map((line, i) => (
+                  <div key={i} className="flex gap-2 font-normal">
+                    <span className="shrink-0 border-l border-dashed border-foreground" aria-hidden="true" />
+                    <span className="min-w-0 wrap-break-word">{line}</span>
+                  </div>
+                ))}
+              </div>
+            );
           }}
           formatter={(raw, name, item) => (
             <div className="flex w-full items-center gap-2">
@@ -189,6 +205,10 @@ function MetricChart({
       tickFormatter={(v: number) => value(v)}
     />
   );
+  // Dashed apart from the solid series, and thin, so a bar it crosses stays whole.
+  const changeLines = marks.map((mark) => (
+    <ReferenceLine key={mark.at} x={mark.at} stroke="var(--foreground)" strokeDasharray="3 3" />
+  ));
 
   return (
     <ChartContainer config={config} className={cn("aspect-auto w-full", className)}>
@@ -208,6 +228,7 @@ function MetricChart({
               <Line dataKey="p95" type="monotone" stroke="var(--color-p95)" strokeWidth={1.5} dot={false} connectNulls={false} />
             </>
           )}
+          {changeLines}
         </LineChart>
       ) : (
         <BarChart data={data} margin={{ left: 0, right: 8, top: 4 }}>
@@ -225,6 +246,7 @@ function MetricChart({
               <Bar dataKey="error" stackId="runs" fill="var(--color-error)" radius={[2, 2, 0, 0]} />
             </>
           )}
+          {changeLines}
         </BarChart>
       )}
     </ChartContainer>
@@ -235,7 +257,13 @@ function MetricChart({
 // the window's runs by when they started, or their tokens or durations,
 // picked beside it. A region rather than a `<section>`, which the console
 // keeps for a page's own blocks.
-export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }) {
+export function TraceHistogramStrip({
+  histogram,
+  marks,
+}: {
+  histogram: TraceHistogram;
+  marks: readonly ChangeMark[];
+}) {
   const [picked, setMetric] = useState<Metric>("runs");
   // A score picked, then its filter cleared, falls back to the runs.
   const metric = drawn(histogram).includes(picked) ? picked : "runs";
@@ -261,7 +289,7 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
           </SelectContent>
         </Select>
       </div>
-      <MetricChart histogram={histogram} metric={metric} className="h-28" />
+      <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-28" />
     </div>
   );
 }
@@ -270,7 +298,13 @@ export function TraceHistogramStrip({ histogram }: { histogram: TraceHistogram }
 // ended, their tokens, how long they ran and how soon their first model call
 // began to answer — the median and the slowest twentieth — and, where the
 // list is narrowed to a score, that score's mean, each a bar of the same width.
-export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
+export function TraceCharts({
+  histogram,
+  marks,
+}: {
+  histogram: TraceHistogram;
+  marks: readonly ChangeMark[];
+}) {
   return (
     <div className="grid gap-page lg:grid-cols-2">
       {drawn(histogram).map((metric) => (
@@ -283,7 +317,7 @@ export function TraceCharts({ histogram }: { histogram: TraceHistogram }) {
           <h2 className="text-base font-medium">
             {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
           </h2>
-          <MetricChart histogram={histogram} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />
+          <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />
         </div>
       ))}
     </div>

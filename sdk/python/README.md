@@ -97,6 +97,13 @@ an operation ingest reads as no model call, any but `chat`, `generate_content`, 
 goes as `chat`; each with one warning, where ingest would refuse the span,
 or the whole run for its agent, user or session, or file the call elsewhere.
 
+`model_call(..., prompt="support-reply", prompt_version="3")` names the prompt
+the call used, sent on its span in every content mode, so a prompt's name names
+a prompt and never a person, who goes in `user_id`. A blank one is none; one
+past ingest's 1,024 characters is left off, never cut, and so is a version whose
+name is none or was left off, each with one warning; one that is no string goes
+as its text, with one warning. A recorded call names no prompt.
+
 ## A run recorded after it ended
 
 A job that keeps its own log, or a hook that runs once the turn it reports is

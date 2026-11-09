@@ -57,6 +57,8 @@ export const ListFiltersSchema = z.object({
   /** Each `key:value`. */
   tag: Values,
   prompt: Values,
+  /** Each `name:version`. */
+  prompt_version: Values,
 });
 export type ListFilters = z.infer<typeof ListFiltersSchema>;
 export type FilterKey = keyof ListFilters;

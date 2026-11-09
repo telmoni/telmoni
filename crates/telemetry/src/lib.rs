@@ -45,6 +45,7 @@ use telmoni_shared::middleware::service_auth::{ServiceSecrets, require_service_s
 pub mod boot;
 pub mod capacity;
 pub mod ceilings;
+pub mod changes;
 pub mod config;
 pub mod content;
 pub mod contract;
@@ -243,6 +244,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/telemetry/history", get(handler::history::get_history))
         .route("/telemetry/agents", get(handler::agents::get_agents))
+        .route("/telemetry/changes", get(handler::changes::list_changes))
         .route(
             "/telemetry/objectives",
             get(handler::objectives::list_objectives),

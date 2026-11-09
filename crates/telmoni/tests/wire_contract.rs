@@ -21,11 +21,11 @@ use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::types::WireEnum;
 use telmoni_shared::types::email::MAX_EMAIL_LEN;
 use telmoni_shared::{
-    ApiKeyScope, ChartMeasure, ContentMode, Flag, IncidentStatus, MetricsGroup, MissingData,
-    MonitorCause, MonitorState, NotificationKind, OrganizationRole, OrganizationStatus, Role,
-    RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource,
-    ScoreTarget, ScoreType, Severity, SortDirection, SpanKind, SpanStatus, TelmoniResourceKind,
-    TraceSort, slug,
+    ApiKeyScope, ChangeKind, ChartMeasure, ContentMode, Flag, IncidentStatus, MetricsGroup,
+    MissingData, MonitorCause, MonitorState, NotificationKind, OrganizationRole,
+    OrganizationStatus, Role, RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator,
+    RuleWindow, ScoreSource, ScoreTarget, ScoreType, Severity, SortDirection, SpanKind, SpanStatus,
+    TelmoniResourceKind, TraceSort, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, NAME_MAX as SPAN_NAME_MAX, UTC_OFFSET_RANGE};
@@ -112,6 +112,7 @@ fn generated_contract() -> Value {
             "RuleLevel": wire::<RuleLevel>(),
             "MonitorState": wire::<MonitorState>(),
             "MonitorCause": wire::<MonitorCause>(),
+            "ChangeKind": wire::<ChangeKind>(),
             "Flag": wire::<Flag>(),
             "ResourceKind": wire::<TelmoniResourceKind>(),
             "PausedBy": wire::<PausedBy>(),

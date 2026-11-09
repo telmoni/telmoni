@@ -136,6 +136,11 @@ BEGIN
     IF to_regclass('telemetry.held_spans') IS NOT NULL THEN
         EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.held_spans FROM telemetry';
     END IF;
+    -- An agent's changes are the changes loop's and the purges': a request
+    -- reads them.
+    IF to_regclass('telemetry.changes') IS NOT NULL THEN
+        EXECUTE 'REVOKE INSERT, UPDATE, DELETE ON telemetry.changes FROM telemetry';
+    END IF;
     IF to_regclass('telemetry.media') IS NOT NULL THEN
         EXECUTE 'REVOKE UPDATE, DELETE ON telemetry.media FROM telemetry';
     END IF;

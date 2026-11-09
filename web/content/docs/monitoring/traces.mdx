@@ -59,18 +59,20 @@ your browser rather than in the page's link.
 ### Filters
 
 The **Filters** panel beside the list names each agent, status, model, tool,
-user, session, environment, release, tag and prompt among the window's runs,
-with how many runs carry it — counted under every other filter, so a value
-beside a ticked one says what ticking it would add. Tick values to narrow the
-list: the values of one filter add to each other, and filters narrow
-together. The panel names fifty values of each at most, the most runs first;
-a session's or a user's id can be typed in as well (**Text**), as it is
+user, session, environment, release, tag, prompt and prompt version among the
+window's runs, with how many runs carry it — counted under every other filter,
+so a value beside a ticked one says what ticking it would add. Tick values to
+narrow the list: the values of one filter add to each other, and filters
+narrow together. The panel names fifty values of each at most, the most runs
+first; a session's or a user's id can be typed in as well (**Text**), as it is
 stored: the hashed id the Session or User column shows; and so can a tag, as
-`key:value`. A run carries an environment, a release, a tag or a prompt
-where any of its spans does: the deployment is the resource's
+`key:value`. A run carries an environment, a release, a tag, a prompt or a
+prompt version where any of its spans does: the deployment is the resource's
 `deployment.environment.name` and `service.version`, a tag each
-`telmoni.tag.<key>` with its value, and a prompt a span's
-`gen_ai.prompt.name`. Click an agent, a user, a session, a model, a tool, an
+`telmoni.tag.<key>` with its value, a prompt a span's `gen_ai.prompt.name`,
+and a prompt version, as `name:version`, its `gen_ai.prompt.version` beside
+that name, so a version is matched under its prompt and never alone. Click an
+agent, a user, a session, a model, a tool, an
 environment or a release in a row to narrow the list to it alone. The filters
 in force stand above the rows: clear one with its ×, or all of them at once.
 The button beside the panel's heading hides it, and opens it again. Drag the
@@ -138,6 +140,41 @@ is in view: at once for the first, and once more for whatever arrives in the
 next 30 seconds.
 
 **Refresh**, beside the window, reads the list now.
+
+### Changes
+
+A change is the first run of an agent to carry a release, a model or a
+prompt's version its runs had not carried in the 30 days before: a deploy, a
+prompt edited, or a model a provider moved to under the name you call. Each
+is drawn as a line on the bar it fell in, above the list and on **Chart**, one
+line a bar naming every change in it: the agent, what changed and to what, and
+the environment. The lines stand for the agents and environments the list is
+narrowed to, or for every one where it is narrowed to none; the other filters
+leave them, since a change explains the bars whatever else is ticked.
+
+Telmoni finds a change within two minutes of its run's spans landing, and
+another exporter's once its trace lands. A line shows when the list is next
+read — **Show**, **Refresh** or a new filter — not as the change is found.
+Past 500 changes in the window, the newest 500 are drawn, and the page says so.
+
+- **Each environment is its own:** a release staging took first is a change
+  again when production takes it.
+- **An agent's first run** marks what it ran on.
+- **A model** is the one a model call answered with; **a prompt's version**
+  is a span's `gen_ai.prompt.version` beside its `gen_ai.prompt.name`, so a
+  version sent alone, or a name with no version, marks nothing.
+- **A value carried again** within its 30 days is no change, however long it
+  was away in between; past them, it is one again. A project that keeps fewer
+  than 30 days remembers only the days it keeps.
+- **An agent past 24 changes of one kind in a UTC day** is marked no further
+  that day, its 24th saying so, so a release named after each request floods
+  nothing; what it carried past them is still remembered, and is no change the
+  next day. A project keeps up to 1,000 changes a UTC day.
+
+Each change is also a line of its agent's row on the
+[Agents page](/docs/workspace/organizations-and-projects#a-projects-agents),
+opening the run that first carried it, and a row of
+[`GET /v1/changes`](/docs/api/reference#get-v1changes).
 
 Every filter, the sort, the window and the page are in the page's URL, so a
 link holds the view you were looking at.

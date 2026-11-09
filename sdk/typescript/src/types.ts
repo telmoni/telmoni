@@ -156,6 +156,10 @@ export interface ModelCallOptions {
   provider?: string | undefined;
   /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
+  /** The prompt it used, by name: sent in every content mode, so a prompt, never a person, who goes in the run's `userId`. */
+  prompt?: string | undefined;
+  /** The prompt's version, sent only beside its name. */
+  promptVersion?: string | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;
   /** Content, as above. */

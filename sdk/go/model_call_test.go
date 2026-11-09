@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -406,6 +407,159 @@ func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
 	}
 	if !reflect.DeepEqual(warnings, wantWarnings) {
 		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
+	}
+}
+
+// promptsOf is the prompt a span names, by its attributes.
+func promptsOf(t *testing.T, span map[string]any) map[string]any {
+	t.Helper()
+	return attributesUnder(attributesOf(t, span), "gen_ai.prompt.")
+}
+
+// callPrompts is what each model call sent names of its prompt, in order.
+func callPrompts(t *testing.T, h *harness) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, span := range calls(t, h) {
+		out = append(out, promptsOf(t, span))
+	}
+	return out
+}
+
+func TestAPromptGoesOnItsCallAloneAndARecordedCallNamesNone(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	stepCtx, step := run.Step(ctx, "plan")
+	_, call := run.ModelCall(stepCtx, "m", telmoni.ModelCallOptions{Prompt: "support-reply", PromptVersion: "3"})
+	call.End()
+	step.End()
+	run.End()
+	at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	if err := h.client.RecordRun(context.Background(), telmoni.RunRecord{
+		RunID: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", Agent: "recorder", Start: at, End: at,
+		Inside: []telmoni.RecordItem{telmoni.ModelCallRecord{Model: "r", Start: at, End: at}},
+	}); err != nil {
+		t.Fatalf("recording the run: %v", err)
+	}
+	h.flush()
+	got := map[string]map[string]any{}
+	for _, span := range h.transport.spans(t) {
+		got[span["name"].(string)] = promptsOf(t, span)
+	}
+	want := map[string]map[string]any{
+		"invoke_agent bot":      {},
+		"plan":                  {},
+		"chat m":                {"gen_ai.prompt.name": "support-reply", "gen_ai.prompt.version": "3"},
+		"invoke_agent recorder": {},
+		"chat r":                {},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("prompts\n got: %v\nwant: %v", got, want)
+	}
+}
+
+// A blank prompt or version is none, as an empty provider is; a version alone
+// names no prompt.
+func TestABlankPromptIsNoneAndAVersionWithoutItsNameIsLeftOff(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	for _, given := range []telmoni.ModelCallOptions{
+		{},
+		{Prompt: " ", PromptVersion: "\U00003000"},
+		{Prompt: "p", PromptVersion: "\t"},
+		{PromptVersion: "3"},
+		{Prompt: "\U00002003", PromptVersion: "3"},
+	} {
+		_, call := run.ModelCall(ctx, "m", given)
+		call.End()
+	}
+	run.End()
+	h.flush()
+	want := []map[string]any{{}, {}, {"gen_ai.prompt.name": "p"}, {}, {}}
+	if got := callPrompts(t, h); !reflect.DeepEqual(got, want) {
+		t.Errorf("prompts\n got: %v\nwant: %v", got, want)
+	}
+	expectWarnings(t, h, "telmoni: a prompt's version needs its prompt's name; the call is sent without it")
+	expectFields(t, h, map[string]any{"kind": "input"})
+}
+
+// Cut, a prompt or its version would name another, as a cut user would.
+func TestAPromptPastIngestsCapIsLeftOffNeverCut(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	widest := strings.Repeat("😀", 1024)
+	for range 2 {
+		for _, given := range []telmoni.ModelCallOptions{
+			{Prompt: widest, PromptVersion: strings.Repeat("v", 1024)},
+			{Prompt: strings.Repeat("p", 1025), PromptVersion: "3"},
+			{Prompt: "p", PromptVersion: strings.Repeat("😀", 1025)},
+		} {
+			_, call := run.ModelCall(ctx, "m", given)
+			call.End()
+		}
+	}
+	run.End()
+	h.flush()
+	once := []map[string]any{{"gen_ai.prompt.name": widest, "gen_ai.prompt.version": strings.Repeat("v", 1024)}, {}, {"gen_ai.prompt.name": "p"}}
+	if got, want := callPrompts(t, h), slices.Concat(once, once); !reflect.DeepEqual(got, want) {
+		t.Errorf("prompts\n got: %v\nwant: %v", got, want)
+	}
+	warnings := h.logs.warnings()
+	slices.Sort(warnings)
+	wantWarnings := []string{
+		"telmoni: a prompt's name must be up to 1024 characters; the call is sent without it",
+		"telmoni: a prompt's version must be up to 1024 characters; the call is sent without it",
+		"telmoni: a prompt's version needs its prompt's name; the call is sent without it",
+	}
+	if !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
+	}
+}
+
+// A prompt is metadata, as a name is: where content leaves, the mask and the
+// scrubbers read the content alone.
+func TestAPromptLeavesAsGivenWhereContentDoesNeverMaskedOrScrubbed(t *testing.T) {
+	var mu sync.Mutex
+	handed := map[string]bool{}
+	pii := true
+	transport := newFakeTransport(t)
+	transport.fallback = contentOn()
+	h := newHarness(t, telmoni.Config{
+		APIKey:         telmoni.NewSecret("k"),
+		CaptureContent: true,
+		ScrubPII:       &pii,
+		Mask: func(key, value string) (string, bool) {
+			mu.Lock()
+			handed[key] = true
+			mu.Unlock()
+			return value, true
+		},
+	}, transport)
+	aRun(t, h)
+	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{
+		Prompt:        "reply-to-ada@example.com",
+		PromptVersion: "3",
+		InputMessages: "write to ada@example.com",
+	})
+	call.End()
+	run.End()
+	h.flush()
+	spans := calls(t, h)
+	if len(spans) != 1 {
+		t.Fatalf("want one model call, got %v", names(spans))
+	}
+	if got := attributesOf(t, spans[0])["gen_ai.input.messages"]; got != "write to [pii: email]" {
+		t.Errorf("gen_ai.input.messages = %v, want it scrubbed", got)
+	}
+	want := map[string]any{"gen_ai.prompt.name": "reply-to-ada@example.com", "gen_ai.prompt.version": "3"}
+	if got := promptsOf(t, spans[0]); !reflect.DeepEqual(got, want) {
+		t.Errorf("prompts\n got: %v\nwant: %v", got, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := map[string]bool{"gen_ai.input.messages": true}; !reflect.DeepEqual(handed, want) {
+		t.Errorf("the mask was handed %v, want the content alone", handed)
 	}
 }
 

@@ -1,7 +1,7 @@
 //! `GET /internal/v1/telemetry/agents` — each of the project's agents as its
 //! Agents page reads it: its runs over the last [`AGENTS_DAYS`] days, those
-//! that failed, its last run, and what that run cost against what its ended
-//! runs usually cost.
+//! that failed, its last run, what that run cost against what its ended
+//! runs usually cost, and its newest change of each kind ([`crate::changes`]).
 
 use std::sync::Arc;
 
@@ -12,10 +12,12 @@ use clickhouse::Row;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::extract::Json;
 use telmoni_shared::{SpanStatus, TelmoniError};
 
 use crate::AppState;
+use crate::changes::Change;
 use crate::handler::traces::{read_failed, reader, window_prices};
 use crate::store::{Projects, text};
 // The run's sums by their own names, which `runs!` expands to.
@@ -72,6 +74,8 @@ pub struct AgentRow {
 pub struct Agents {
     pub days: u16,
     pub agents: Vec<AgentRow>,
+    /// Each listed agent's newest change of each kind in the window.
+    pub changes: Vec<Change>,
 }
 
 /// `GET /internal/v1/telemetry/agents` — anyone on the project reads it.
@@ -95,8 +99,17 @@ pub async fn get_agents(
     .fetch_all()
     .await
     .map_err(read_failed)?;
+    let mut tx = project_scope(&state.db, &reader.project_id).await?;
+    let mut changes = crate::changes::newest(&mut tx, &reader.project_id, AGENTS_DAYS).await?;
+    tx.commit().await?;
+    changes.retain(|change| {
+        agents
+            .iter()
+            .any(|row: &AgentRow| row.agent == change.agent)
+    });
     Ok(Json(Agents {
         days: AGENTS_DAYS,
         agents,
+        changes,
     }))
 }

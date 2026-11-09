@@ -918,6 +918,9 @@ async fn hold(
             purged.projects += 1;
         }
         purged.content += delete_content_before(state, projects, cutoff).await?;
+        let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
+        crate::changes::purge_before(lane.conn(), Some(projects), cutoff).await?;
+        lane.commit().await?;
     }
     let mut held = content_held(state, organization_id).await?;
     if held <= capacity.content_bytes {

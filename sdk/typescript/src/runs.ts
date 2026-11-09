@@ -455,8 +455,8 @@ export class Opener {
     const inherited = inheritedOf(
       runId,
       agent,
-      user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', this.#warnOnce) ? user : undefined,
-      session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', this.#warnOnce) ? session : undefined,
+      user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', 'run', this.#warnOnce) ? user : undefined,
+      session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', 'run', this.#warnOnce) ? session : undefined,
     );
     const attributes = runAttributes(agent, inherited, tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce));
     if (isSet(options.inputMessages)) {
@@ -513,7 +513,8 @@ export class Opener {
     const named = filled(options.provider, 'provider', this.#warnOnce);
     const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
     const operation = operationOf(options.operation, this.#warnOnce);
-    const [name, attributes] = modelCallOpening(run.inherited, model, operation, provider);
+    const [prompt, promptVersion] = promptOf(options, this.#warnOnce);
+    const [name, attributes] = modelCallOpening(run.inherited, model, operation, provider, prompt, promptVersion);
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
@@ -998,13 +999,39 @@ function runAttributes(agent: string, inherited: Attributes, tags: Attributes): 
 
 /**
  * A model call's span name and attributes, live or recorded, before its
- * messages: its operation one ingest reads, an empty model or provider left off.
+ * messages: its operation one ingest reads, an empty model, provider or prompt left off.
  */
-function modelCallOpening(inherited: Attributes, model: string, operation: string, provider: string): [string, Attributes] {
+function modelCallOpening(
+  inherited: Attributes,
+  model: string,
+  operation: string,
+  provider: string,
+  prompt = '',
+  promptVersion = '',
+): [string, Attributes] {
   const attributes: Attributes = { ...inherited, [contract.OPERATION]: operation };
   if (model !== '') attributes[contract.REQUEST_MODEL] = model;
   if (provider !== '') attributes[contract.PROVIDER] = provider;
+  if (prompt !== '') {
+    attributes[contract.PROMPT_NAME] = prompt;
+    if (promptVersion !== '') attributes[contract.PROMPT_VERSION] = promptVersion;
+  }
   return [model === '' ? operation : `${operation} ${model}`, attributes];
+}
+
+/** A live call's prompt and its version: a blank one is none, and one past its cap or a version without its name is left off with one warning. */
+function promptOf(options: ModelCallOptions, warnOnce: WarnOnce): [string, string] {
+  const kept = (value: unknown, what: string): string => {
+    const text = isSet(value) ? asText(value, what, warnOnce) : '';
+    return isBlank(text) || !fits(text, contract.ATTRIBUTE_VALUE_MAX, what, 'call', warnOnce) ? '' : text;
+  };
+  const name = kept(options.prompt, "prompt's name");
+  const version = kept(options.promptVersion, "prompt's version");
+  if (version === '' || name !== '') return [name, version];
+  warnOnce('call:prompt_version', "telmoni: a prompt's version needs its prompt's name; the call is sent without it", {
+    kind: 'input',
+  });
+  return ['', ''];
 }
 
 /** A tool call's attributes, live or recorded, before its arguments. */
@@ -1120,10 +1147,10 @@ function cut(value: string, most: number, what: string, warnOnce: WarnOnce): str
   return characters.slice(0, most).join('');
 }
 
-/** Whether an id is within ingest's cap; one past it is left off with one warning, since cut it would name another. */
-function fits(value: string, most: number, what: string, warnOnce: WarnOnce): boolean {
+/** Whether an id is within ingest's cap; one past it is left off its run or call with one warning, since cut it would name another. */
+function fits(value: string, most: number, what: string, span: 'run' | 'call', warnOnce: WarnOnce): boolean {
   if (value.length <= most || [...value].length <= most) return true;
-  warnOnce(`long:${what}`, `telmoni: a ${what} must be up to ${most} characters; the run is sent without it`, {
+  warnOnce(`long:${what}`, `telmoni: a ${what} must be up to ${most} characters; the ${span} is sent without it`, {
     kind: 'input',
   });
   return false;

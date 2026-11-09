@@ -57,6 +57,10 @@ type ModelCallOptions struct {
 	// Operation is chat, generate_content, text_completion or embeddings;
 	// blank means chat, and any other goes as chat with one warning.
 	Operation string
+	// Prompt and PromptVersion name the prompt it used, sent in every content
+	// mode: a prompt, never a person, who goes in RunOptions.UserID.
+	Prompt        string
+	PromptVersion string
 	// InputMessages and SystemInstructions are content: recorded as JSON,
 	// sent only when CaptureContent is on and the project's mode allows.
 	InputMessages      any
@@ -302,10 +306,10 @@ func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (contex
 	}
 	runID := newUUID()
 	userID, sessionID := opts.UserID, opts.SessionID
-	if userID != "" && !c.fits(userID, userIDMax, "user id") {
+	if userID != "" && !c.fits(userID, userIDMax, "user id", "run") {
 		userID = ""
 	}
-	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id") {
+	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id", "run") {
 		sessionID = ""
 	}
 	inherited := inheritedAttributes(runID, agent, userID, sessionID)
@@ -617,7 +621,8 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 	if setAside {
 		c.warnOperation()
 	}
-	name, attrs := modelCallOpening(model, operation, provider)
+	prompt, promptVersion := c.prompt(opts.Prompt, opts.PromptVersion)
+	name, attrs := modelCallOpening(model, operation, provider, prompt, promptVersion)
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
@@ -711,9 +716,9 @@ func (c *Client) runOpening(agent string, inherited []attribute.KeyValue, tags m
 }
 
 // modelCallOpening is a model call's span name and own attributes, live or
-// recorded, its operation one ingest reads and an empty model or provider
-// left off.
-func modelCallOpening(model, operation, provider string) (string, []attribute.KeyValue) {
+// recorded, its operation one ingest reads and an empty model, provider or
+// prompt left off.
+func modelCallOpening(model, operation, provider, prompt, promptVersion string) (string, []attribute.KeyValue) {
 	attrs := []attribute.KeyValue{attribute.String(attrOperation, operation)}
 	name := operation
 	if model != "" {
@@ -723,7 +728,30 @@ func modelCallOpening(model, operation, provider string) (string, []attribute.Ke
 	if provider != "" {
 		attrs = append(attrs, attribute.String(attrProvider, provider))
 	}
+	if prompt != "" {
+		attrs = append(attrs, attribute.String(attrPromptName, prompt))
+		if promptVersion != "" {
+			attrs = append(attrs, attribute.String(attrPromptVersion, promptVersion))
+		}
+	}
 	return name, attrs
+}
+
+// prompt is a live call's prompt and its version: a blank one is none, and one
+// past its cap or a version without its name is left off with one warning.
+func (c *Client) prompt(name, version string) (string, string) {
+	kept := func(text, what string) string {
+		if strings.TrimSpace(text) == "" || !c.fits(text, attributeValueMax, what, "call") {
+			return ""
+		}
+		return text
+	}
+	name, version = kept(name, "prompt's name"), kept(version, "prompt's version")
+	if version != "" && name == "" {
+		c.exporter.warnOnce("call:prompt_version", WarningInput, "telmoni: a prompt's version needs its prompt's name; the call is sent without it")
+		return "", ""
+	}
+	return name, version
 }
 
 // toolCallOpening is a tool call's span name and own attributes, live or
@@ -969,13 +997,13 @@ func (c *Client) cut(text string, most int, what string) string {
 }
 
 // fits reports whether an id is within ingest's cap; one past it is left off
-// with one warning, since cut it would name another.
-func (c *Client) fits(id string, most int, what string) bool {
+// its run or call with one warning, since cut it would name another.
+func (c *Client) fits(id string, most int, what, span string) bool {
 	if len(id) <= most || utf8.RuneCountInString(id) <= most {
 		return true
 	}
 	if c.built() {
-		c.exporter.warnOnce("long:"+what, WarningInput, fmt.Sprintf("telmoni: a %s must be up to %d characters; the run is sent without it", what, most))
+		c.exporter.warnOnce("long:"+what, WarningInput, fmt.Sprintf("telmoni: a %s must be up to %d characters; the %s is sent without it", what, most, span))
 	}
 	return false
 }

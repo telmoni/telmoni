@@ -4,14 +4,18 @@
 mod common;
 
 use std::collections::BTreeSet;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use common::{
     Failure, Harness, Outcome, attributes_of, keyed, mode_on, name_of, only, starting_with,
 };
 use serde_json::{Map, Value, json};
 use telmoni::transport::{Answer, TransportError};
-use telmoni::{Config, Content, ContentMode, ModelCallOptions, Reply, RunOptions, Usage};
+use telmoni::{
+    Config, Content, ContentMode, ModelCallOptions, ModelCallRecord, Reply, RunOptions, RunRecord,
+    Usage,
+};
 
 #[test]
 fn a_model_call_carries_the_conventions_names() -> Outcome {
@@ -278,6 +282,187 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
             "telmoni: a response model must be up to 128 characters; it is sent cut to its first 128",
         ]
     );
+    Ok(())
+}
+
+/// The prompt a span names, by its attributes.
+fn prompts_of(span: &Value) -> Result<Value, Failure> {
+    let prompts: Map<String, Value> = attributes_of(span)?
+        .as_object()
+        .ok_or("attributes")?
+        .iter()
+        .filter(|(key, _)| key.starts_with("gen_ai.prompt."))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    Ok(Value::Object(prompts))
+}
+
+/// What each model call sent names of its prompt, in order.
+fn call_prompts(harness: &Harness) -> Result<Vec<Value>, Failure> {
+    let spans = harness.spans()?;
+    starting_with(&spans, "chat ")
+        .into_iter()
+        .map(prompts_of)
+        .collect()
+}
+
+fn prompted(prompt: Option<&str>, version: Option<&str>) -> ModelCallOptions {
+    ModelCallOptions {
+        prompt: prompt.map(str::to_owned),
+        prompt_version: version.map(str::to_owned),
+        ..ModelCallOptions::default()
+    }
+}
+
+#[test]
+fn a_prompt_goes_on_its_call_alone_and_a_recorded_call_names_none() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let step = run.step("plan")?;
+    step.model_call("m", prompted(Some("support-reply"), Some("3")))?
+        .end();
+    step.end();
+    run.end();
+    let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
+    harness.telmoni.record_run(RunRecord {
+        inside: vec![ModelCallRecord::new("r", at, at).into()],
+        ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "recorder", at, at)
+    })?;
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let sent: Map<String, Value> = spans
+        .iter()
+        .map(|span| Ok((name_of(span).to_owned(), prompts_of(span)?)))
+        .collect::<Result<_, Failure>>()?;
+    assert_eq!(
+        Value::Object(sent),
+        json!({
+            "invoke_agent bot": {},
+            "plan": {},
+            "chat m": { "gen_ai.prompt.name": "support-reply", "gen_ai.prompt.version": "3" },
+            "invoke_agent recorder": {},
+            "chat r": {},
+        })
+    );
+    Ok(())
+}
+
+/// A blank prompt or version is none, as an empty provider is; a version alone
+/// names no prompt.
+#[test]
+fn a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    for (prompt, version) in [
+        (Some(""), Some("")),
+        (Some(" "), Some("\u{3000}")),
+        (Some("p"), Some("\t")),
+        (Some(""), Some("3")),
+        (None, Some("3")),
+        (Some("\u{2003}"), Some("3")),
+    ] {
+        run.model_call("m", prompted(prompt, version))?.end();
+    }
+    run.end();
+    harness.flush()?;
+
+    let none = json!({});
+    assert_eq!(
+        call_prompts(&harness)?,
+        [
+            none.clone(),
+            none.clone(),
+            json!({ "gen_ai.prompt.name": "p" }),
+            none.clone(),
+            none.clone(),
+            none,
+        ]
+    );
+    assert_eq!(
+        harness.warnings.all(),
+        ["telmoni: a prompt's version needs its prompt's name; the call is sent without it"]
+    );
+    assert_eq!(harness.warnings.kinds(), ["input"]);
+    Ok(())
+}
+
+/// Cut, a prompt or its version would name another, as a cut user would.
+#[test]
+fn a_prompt_past_ingests_cap_is_left_off_never_cut() -> Outcome {
+    let harness = Harness::new()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let widest = "😀".repeat(1024);
+    let version = "v".repeat(1024);
+    for _ in 0..2 {
+        run.model_call("m", prompted(Some(&widest), Some(&version)))?
+            .end();
+        run.model_call("m", prompted(Some(&"p".repeat(1025)), Some("3")))?
+            .end();
+        run.model_call("m", prompted(Some("p"), Some(&"😀".repeat(1025))))?
+            .end();
+    }
+    run.end();
+    harness.flush()?;
+
+    let once = [
+        json!({ "gen_ai.prompt.name": widest, "gen_ai.prompt.version": version }),
+        json!({}),
+        json!({ "gen_ai.prompt.name": "p" }),
+    ];
+    assert_eq!(call_prompts(&harness)?, [once.clone(), once].concat());
+    let mut warnings = harness.warnings.all();
+    warnings.sort();
+    assert_eq!(
+        warnings,
+        [
+            "telmoni: a prompt's name must be up to 1024 characters; the call is sent without it",
+            "telmoni: a prompt's version must be up to 1024 characters; the call is sent without it",
+            "telmoni: a prompt's version needs its prompt's name; the call is sent without it",
+        ]
+    );
+    Ok(())
+}
+
+/// A prompt is metadata, as a name is: where content leaves, the mask and the
+/// scrubbers read the content alone.
+#[test]
+fn a_prompt_leaves_as_given_where_content_does_never_masked_or_scrubbed() -> Outcome {
+    let handed = Arc::new(Mutex::new(BTreeSet::<String>::new()));
+    let seen = Arc::clone(&handed);
+    let config = Config {
+        capture_content: true,
+        scrub_pii: Some(true),
+        mask: Some(Arc::new(move |key: &str, value: &str| {
+            seen.lock().map(|mut keys| keys.insert(key.to_owned())).ok();
+            Some(value.to_owned())
+        })),
+        ..keyed()
+    };
+    let harness = Harness::answering(config, std::iter::repeat_n(Ok(mode_on()), 6))?;
+    harness.telmoni.run("warm", RunOptions::default())?.end();
+    harness.flush()?;
+    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let options = ModelCallOptions {
+        input_messages: Some("write to ada@example.com".into()),
+        ..prompted(Some("reply-to-ada@example.com"), Some("3"))
+    };
+    run.model_call("m", options)?.end();
+    run.end();
+    harness.flush()?;
+
+    let spans = harness.spans()?;
+    let call = only(&spans, "chat ")?;
+    assert_eq!(
+        attributes_of(call)?.get("gen_ai.input.messages"),
+        Some(&json!("write to [pii: email]"))
+    );
+    assert_eq!(
+        prompts_of(call)?,
+        json!({ "gen_ai.prompt.name": "reply-to-ada@example.com", "gen_ai.prompt.version": "3" })
+    );
+    let handed = handed.lock().map_err(|_| "the mask's keys")?.clone();
+    assert_eq!(handed, BTreeSet::from(["gen_ai.input.messages".to_owned()]));
     Ok(())
 }
 

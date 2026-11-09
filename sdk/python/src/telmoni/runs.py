@@ -224,6 +224,8 @@ class Run(Handle):
         *,
         provider: str | None = None,
         operation: str = contract.DEFAULT_MODEL_OPERATION,
+        prompt: str | None = None,
+        prompt_version: str | None = None,
         input_messages: object | None = None,
         system_instructions: object | None = None,
     ) -> Scope[ModelCall]:
@@ -231,6 +233,8 @@ class Run(Handle):
             model,
             provider=provider,
             operation=operation,
+            prompt=prompt,
+            prompt_version=prompt_version,
             input_messages=input_messages,
             system_instructions=system_instructions,
             run=self,
@@ -565,13 +569,15 @@ class Opener:
         caps = guard.Guard(*guard.caps(max_steps, max_spend))
         run_id = str(uuid.uuid4())
         user = _text(user_id, "user id", warn_once) if user_id is not None else ""
-        if user and not _within(user, contract.USER_ID_MAX, "user id", warn_once):
+        if user and not _within(
+            user, contract.USER_ID_MAX, "user id", "run", warn_once
+        ):
             user = ""
         session = (
             _text(session_id, "session id", warn_once) if session_id is not None else ""
         )
         if session and not _within(
-            session, contract.SESSION_ID_MAX, "session id", warn_once
+            session, contract.SESSION_ID_MAX, "session id", "run", warn_once
         ):
             session = ""
         inherited = _inherited(run_id, agent, user, session)
@@ -641,6 +647,8 @@ class Opener:
         *,
         provider: str | None,
         operation: str,
+        prompt: str | None,
+        prompt_version: str | None,
         input_messages: object | None,
         system_instructions: object | None,
     ) -> ModelCall | None:
@@ -663,7 +671,10 @@ class Opener:
         named = _text(provider, "provider", warn_once) if provider is not None else ""
         provider = _cut(named, contract.PROVIDER_MAX, "provider", warn_once)
         operation = _operation(operation, warn_once)
-        name, own = _model_call_opening(model, operation, provider)
+        prompt, prompt_version = _prompt(prompt, prompt_version, warn_once)
+        name, own = _model_call_opening(
+            model, operation, provider, prompt, prompt_version
+        )
         attributes: dict[str, Any] = {**run.inherited, **own}
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
@@ -1040,16 +1051,53 @@ def _operation(
 
 
 def _model_call_opening(
-    model: str, operation: str, provider: str | None
+    model: str,
+    operation: str,
+    provider: str | None,
+    prompt: str = "",
+    prompt_version: str = "",
 ) -> tuple[str, dict[str, Any]]:
     """A model call's span name and own attributes, live or recorded, its
-    operation one ingest reads and an empty model or provider left off."""
+    operation one ingest reads and an empty model, provider or prompt left off."""
     attributes: dict[str, Any] = {contract.OPERATION: operation}
     if model:
         attributes[contract.REQUEST_MODEL] = model
     if provider:
         attributes[contract.PROVIDER] = provider
+    if prompt:
+        attributes[contract.PROMPT_NAME] = prompt
+        if prompt_version:
+            attributes[contract.PROMPT_VERSION] = prompt_version
     return (f"{operation} {model}" if model else operation), attributes
+
+
+def _prompt(
+    prompt: object | None,
+    version: object | None,
+    warn_once: Callable[[str, str, WarningInfo], None],
+) -> tuple[str, str]:
+    """A live call's prompt and its version: a blank one is none, and one past
+    its cap or a version without its name is left off with one warning."""
+
+    def kept(value: object | None, what: str) -> str:
+        text = "" if value is None else _text(value, what, warn_once)
+        if _blank(text) or not _within(
+            text, contract.ATTRIBUTE_VALUE_MAX, what, "call", warn_once
+        ):
+            return ""
+        return text
+
+    name = kept(prompt, "prompt's name")
+    sent = kept(version, "prompt's version")
+    if sent and not name:
+        warn_once(
+            "call:prompt_version",
+            "telmoni: a prompt's version needs its prompt's name; "
+            "the call is sent without it",
+            _INPUT,
+        )
+        return "", ""
+    return name, sent
 
 
 def _tool_call_opening(name: str) -> tuple[str, dict[str, Any]]:
@@ -1164,16 +1212,20 @@ def _cut(
 
 
 def _within(
-    value: str, most: int, what: str, warn_once: Callable[[str, str, WarningInfo], None]
+    value: str,
+    most: int,
+    what: str,
+    span: str,
+    warn_once: Callable[[str, str, WarningInfo], None],
 ) -> bool:
-    """Whether an id is within ingest's cap; one past it is left off with one
-    warning, since cut it would name another."""
+    """Whether an id is within ingest's cap; one past it is left off its run or
+    call with one warning, since cut it would name another."""
     if len(value) <= most:
         return True
     warn_once(
         f"long:{what}",
         f"telmoni: a {what} must be up to {most} characters; "
-        "the run is sent without it",
+        f"the {span} is sent without it",
         _INPUT,
     )
     return False

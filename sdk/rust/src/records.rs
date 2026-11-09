@@ -715,7 +715,8 @@ impl Spans<'_> {
         match call {
             CallRecord::Model(call) => {
                 let operation = call.operation.unwrap_or_default();
-                let (name, own) = runs::model_call_opening(&call.model, operation, call.provider);
+                let (name, own) =
+                    runs::model_call_opening(&call.model, operation, call.provider, None);
                 attributes.extend(own);
                 if let Some(effort) = call.reasoning_effort.filter(|effort| !effort.is_empty()) {
                     attributes.push(KeyValue::new(contract::REQUEST_REASONING_LEVEL, effort));

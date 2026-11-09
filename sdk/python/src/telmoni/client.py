@@ -140,17 +140,25 @@ class Telmoni:
         *,
         provider: str | None = None,
         operation: str = contract.DEFAULT_MODEL_OPERATION,
+        prompt: str | None = None,
+        prompt_version: str | None = None,
         input_messages: object | None = None,
         system_instructions: object | None = None,
         run: Run | None = None,
     ) -> Scope[ModelCall]:
-        """A model call inside the current run; ``answered()`` records the reply."""
+        """A model call inside the current run; ``answered()`` records the reply.
+
+        ``prompt`` and ``prompt_version`` name the prompt it used, sent in every
+        content mode: a prompt, never a person, who goes in the run's ``user_id``.
+        """
         return Scope(
             lambda: self._opener.model_call(
                 model,
                 run,
                 provider=provider,
                 operation=operation,
+                prompt=prompt,
+                prompt_version=prompt_version,
                 input_messages=input_messages,
                 system_instructions=system_instructions,
             )

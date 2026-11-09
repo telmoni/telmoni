@@ -33,6 +33,8 @@ const VERSIONED = new Set(['telemetry.sdk.version', 'telemetry.distro.version'])
 interface ModelCallSpec {
   provider: string;
   model: string;
+  prompt: string;
+  prompt_version: string;
   response_model: string;
   time_to_first_token: number;
   usage: {
@@ -143,6 +145,8 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
           call.model,
           {
             provider: call.provider,
+            prompt: call.prompt,
+            promptVersion: call.prompt_version,
             inputMessages: call.input_messages,
           },
           async (modelCall) => {

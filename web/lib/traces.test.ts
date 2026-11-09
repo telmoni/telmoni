@@ -2,8 +2,10 @@ import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { cellOf, titleOf } from "@/components/traces/cells";
+import type { Change } from "@/lib/server/entities/changes";
 import type { Trace, TraceSpan } from "@/lib/server/entities/traces";
 import { testSpan } from "@/lib/span-fixture";
+import { ChangeKind } from "@/lib/types/enums";
 import { TraceColumn } from "@/lib/types/traces";
 
 import {
@@ -22,6 +24,7 @@ import {
   isTagPair,
   listDownloadHref,
   listPageHref,
+  marksOn,
   nextSort,
   pageCount,
   parseFilters,
@@ -131,6 +134,18 @@ describe("the URL as the list's state", () => {
       user: ["😀".repeat(128)],
       tag: [`${at(64)}:${at(256)}`],
     });
+  });
+
+  it("takes a prompt's version as name:version, split at its first colon, neither part empty and the whole within its length", () => {
+    const at = (n: number) => "p".repeat(n);
+    expect(
+      parseTraceQuery({
+        prompt_version: ["triage:3", "triage:v:2", "triage", ":3", "triage:", `${at(1_024)}:${at(1_024)}`, `${at(1_024)}:${at(1_025)}`],
+      }),
+    ).toEqual({ prompt_version: ["triage:3", "triage:v:2", `${at(1_024)}:${at(1_024)}`] });
+    expect(activeFilters({ prompt_version: ["triage:3"] })).toEqual([
+      { filter: "prompt_version", label: "Prompt version", value: "triage:3", text: "triage:3" },
+    ]);
   });
 
   it("measures a typed value in characters, so an id of 128 emoji fits as the server takes it", () => {
@@ -564,5 +579,91 @@ describe("a trace's spans on one line of time", () => {
     });
     expect(timelineBars([run, instant])[1]!.width).toBe(0.5);
     expect(timelineBars([])).toEqual([]);
+  });
+});
+
+describe("an agent's changes marked on the list's charts", () => {
+  // A reader five and a half hours east of UTC: each bar starts on the half hour.
+  const BARS = [
+    { at: "2027-01-15T06:30:00Z" },
+    { at: "2027-01-15T07:30:00Z" },
+    { at: "2027-01-15T08:30:00Z" },
+  ];
+  const BASE = {
+    agent: "support",
+    environment: "production",
+    run_id: "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+    capped: false,
+  };
+  const release = (changed_at: string, value = "1.4.2"): Change => ({
+    ...BASE,
+    kind: ChangeKind.Release,
+    value,
+    changed_at,
+  });
+
+  it("marks a change on the bar holding it, read off the bars' own starts", () => {
+    expect(marksOn(BARS, [release("2027-01-15T08:00:00Z")])).toEqual([
+      { at: "2027-01-15T07:30:00Z", changes: ["support: release 1.4.2 in production"] },
+    ]);
+    // A bar holds from its start, compared as a time, not as text: ".5Z" sorts before "Z".
+    for (const changed_at of ["2027-01-15T08:30:00Z", "2027-01-15T08:30:00.5Z"]) {
+      expect(marksOn(BARS, [release(changed_at)]), changed_at).toEqual([
+        { at: "2027-01-15T08:30:00Z", changes: ["support: release 1.4.2 in production"] },
+      ]);
+    }
+  });
+
+  it("marks one before the first bar on the first, and one after the last on the last, as the histogram clamps runs", () => {
+    expect(
+      marksOn(BARS, [release("2027-01-15T11:00:00Z", "1.5.0"), release("2027-01-14T23:00:00Z", "1.3.9")]),
+    ).toEqual([
+      { at: "2027-01-15T06:30:00Z", changes: ["support: release 1.3.9 in production"] },
+      { at: "2027-01-15T08:30:00Z", changes: ["support: release 1.5.0 in production"] },
+    ]);
+    expect(marksOn([], [release("2027-01-15T08:00:00Z")])).toEqual([]);
+  });
+
+  it("makes the changes one bar holds one mark naming each, the environment where one was named", () => {
+    const model: Change = {
+      ...BASE,
+      agent: "triage",
+      environment: "",
+      kind: ChangeKind.Model,
+      value: "gpt-4o-mini",
+      changed_at: "2027-01-15T07:50:00Z",
+    };
+    const prompt: Change = {
+      ...BASE,
+      kind: ChangeKind.Prompt,
+      prompt: "support-reply",
+      value: "3",
+      changed_at: "2027-01-15T07:40:00Z",
+    };
+    expect(marksOn(BARS, [model, prompt])).toEqual([
+      {
+        at: "2027-01-15T07:30:00Z",
+        changes: ["triage: model gpt-4o-mini", "support: prompt support-reply version 3 in production"],
+      },
+    ]);
+  });
+
+  it("says of a capped change that its agent's later changes of its kind that UTC day were not marked", () => {
+    const capped: Change = {
+      ...BASE,
+      kind: ChangeKind.Model,
+      value: "gpt-4o-mini",
+      changed_at: "2027-01-15T08:00:00Z",
+      capped: true,
+    };
+    expect(marksOn(BARS, [capped, release("2027-01-15T07:59:00Z")])).toEqual([
+      {
+        at: "2027-01-15T07:30:00Z",
+        changes: [
+          "support: model gpt-4o-mini in production; its later model changes that UTC day are not marked",
+          "support: release 1.4.2 in production",
+        ],
+      },
+    ]);
   });
 });

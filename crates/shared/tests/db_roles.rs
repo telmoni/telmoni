@@ -112,11 +112,13 @@ const OPERATOR_ONLY: &[&str] = &[
 /// row. The delivery log is the record of what a project told the outside
 /// world; its rows go with their delivery by cascade, which needs no grant.
 /// An erasure's fence is read by every answer's save, and lifted or forged
-/// by nothing a request does; a month's questions are counted by it alone.
+/// by nothing a request does; a month's questions are counted by it alone;
+/// an agent's changes are what the spans showed, found by its loop alone.
 const LANE_WRITTEN: &[&str] = &[
     "notifications.delivery_attempts",
     "agent.erasures",
     "agent.questions_asked",
+    "telemetry.changes",
 ];
 
 /// The tables the runtime role writes but never deletes from: its
@@ -640,6 +642,20 @@ async fn the_maintenance_lanes_narrowed_grants_hold_in_every_tier() {
             "telemetry_maintenance",
             "telemetry.rule_connectors",
             &["SELECT"],
+        ),
+        // The changes loop writes them and moves what each saw and how it is
+        // marked, a column grant; the purges hide and delete them.
+        (
+            "telemetry_maintenance",
+            "telemetry.changes",
+            &["SELECT", "INSERT", "DELETE"],
+        ),
+        // How far the changes loop has read, written by the replica that ran
+        // a tick of it; its row is never removed.
+        (
+            "telemetry_maintenance",
+            "telemetry.reads",
+            &["SELECT", "INSERT", "UPDATE"],
         ),
         // The prices are `migrate`'s to write and the module's to read.
         ("telemetry_maintenance", "telemetry.model_prices", &[]),

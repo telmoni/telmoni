@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 
 import pytest
 
@@ -295,6 +296,185 @@ def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
             "it is sent cut to its first 128"
         ),
     ]
+
+
+def prompts_of(span: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in attributes_of(span).items()
+        if key.startswith("gen_ai.prompt.")
+    }
+
+
+def test_a_prompt_goes_on_its_call_alone_and_a_recorded_call_names_none(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    with (
+        telmoni.run("bot") as run,
+        telmoni.step("plan"),
+        run.model_call("m", prompt="support-reply", prompt_version="3"),
+    ):
+        pass
+    at = datetime(2026, 10, 18, 9, tzinfo=timezone.utc)
+    telmoni.record_run(
+        RunRecord(
+            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+            agent="recorder",
+            start=at,
+            end=at,
+            inside=[ModelCallRecord(model="r", start=at, end=at)],
+        )
+    )
+    assert telmoni.flush()
+    assert {span["name"]: prompts_of(span) for span in transport.spans()} == {
+        "invoke_agent bot": {},
+        "plan": {},
+        "chat m": {"gen_ai.prompt.name": "support-reply", "gen_ai.prompt.version": "3"},
+        "invoke_agent recorder": {},
+        "chat r": {},
+    }
+
+
+def test_a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A blank one is none, as an empty provider is; a version alone names no
+    prompt."""
+    with telmoni.run("bot") as run:
+        for prompt, version in (
+            ("", ""),
+            (" ", "\N{IDEOGRAPHIC SPACE}"),
+            ("p", "\t"),
+            ("", "3"),
+            (None, "3"),
+            ("\N{EM SPACE}", "3"),
+        ):
+            with run.model_call("m", prompt=prompt, prompt_version=version):
+                pass
+    assert telmoni.flush()
+    sent = [prompts_of(span) for span in calls(transport)]
+    assert sent == [{}, {}, {"gen_ai.prompt.name": "p"}, {}, {}, {}]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        (
+            "telmoni: a prompt's version needs its prompt's name; "
+            "the call is sent without it"
+        )
+    ]
+    assert infos_in(caplog) == [WarningInfo("input")]
+
+
+def test_a_prompt_past_ingests_cap_is_left_off_never_cut(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Cut, a prompt or its version would name another, as a cut user would."""
+    widest = "😀" * 1024
+    with telmoni.run("bot") as run:
+        for _ in range(2):
+            with run.model_call("m", prompt=widest, prompt_version="v" * 1024):
+                pass
+            with run.model_call("m", prompt="p" * 1025, prompt_version="3"):
+                pass
+            with run.model_call("m", prompt="p", prompt_version="😀" * 1025):
+                pass
+    assert telmoni.flush()
+    sent = [prompts_of(span) for span in calls(transport)]
+    assert (
+        sent
+        == [
+            {"gen_ai.prompt.name": widest, "gen_ai.prompt.version": "v" * 1024},
+            {},
+            {"gen_ai.prompt.name": "p"},
+        ]
+        * 2
+    )
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert sorted(warnings) == [
+        (
+            "telmoni: a prompt's name must be up to 1024 characters; "
+            "the call is sent without it"
+        ),
+        (
+            "telmoni: a prompt's version must be up to 1024 characters; "
+            "the call is sent without it"
+        ),
+        (
+            "telmoni: a prompt's version needs its prompt's name; "
+            "the call is sent without it"
+        ),
+    ]
+    assert infos_in(caplog) == [WarningInfo("input")] * 3
+
+
+class Prompt(Enum):
+    REPLY = "support-reply"
+
+
+def test_a_prompt_that_is_no_string_goes_as_its_text(
+    telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
+) -> None:
+    with (
+        telmoni.run("bot") as run,
+        run.model_call(
+            "m",
+            prompt=Prompt.REPLY,  # type: ignore[arg-type]
+            prompt_version=3,  # type: ignore[arg-type]
+        ),
+    ):
+        pass
+    assert telmoni.flush()
+    (call,) = calls(transport)
+    assert prompts_of(call) == {
+        "gen_ai.prompt.name": "Prompt.REPLY",
+        "gen_ai.prompt.version": "3",
+    }
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings == [
+        "telmoni: a prompt's name that is no string is sent as its text",
+        "telmoni: a prompt's version that is no string is sent as its text",
+    ]
+
+
+def test_a_prompt_leaves_as_given_where_content_does_never_masked_or_scrubbed(
+    transport: FakeTransport,
+) -> None:
+    """Metadata, as a name is: the mask and the scrubbers read content alone."""
+    handed: list[str] = []
+
+    def mask(key: str, value: str) -> str:
+        handed.append(key)
+        return value
+
+    on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
+    transport.answers = [on, on]
+    client = Telmoni(
+        Config(api_key="k", capture_content=True, mask=mask, scrub_pii=True),
+        transport=transport,
+    )
+    try:
+        with client.run("bot"):
+            pass
+        assert client.flush()
+        with (
+            client.run("bot"),
+            client.model_call(
+                "m",
+                prompt="reply-to-ada@example.com",
+                prompt_version="3",
+                input_messages="write to ada@example.com",
+            ),
+        ):
+            pass
+        assert client.flush()
+    finally:
+        client.shutdown()
+    (call,) = calls(transport)
+    assert attributes_of(call)["gen_ai.input.messages"] == "write to [pii: email]"
+    assert prompts_of(call) == {
+        "gen_ai.prompt.name": "reply-to-ada@example.com",
+        "gen_ai.prompt.version": "3",
+    }
+    assert set(handed) == {"gen_ai.input.messages"}
 
 
 def test_content_is_taken_off_before_it_leaves(

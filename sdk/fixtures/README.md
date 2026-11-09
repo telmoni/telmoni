@@ -16,7 +16,9 @@ Before comparing, a suite normalizes what it captured:
 6. `telemetry.sdk.language` is replaced by `<language>`; `telemetry.sdk.version`, `telemetry.distro.version` and the scope's `version` by `<version>`.
 7. Everything else is compared as JSON: names, kinds, every attribute's key and typed value (`stringValue`; `intValue` as a decimal string; `doubleValue` as a number; `boolValue`), each span's `status`, the resource and the scope's name. A span with no error carries no `status`; one that failed carries `{"code": 2}`.
 
-The content the scenario hands the model call (`gen_ai.input.messages`, `gen_ai.output.messages`) is absent from the export: the exporter takes content off every span unless the code asked for it and the project's mode allows.
+The content the scenario hands the model call (`gen_ai.input.messages`, `gen_ai.output.messages`) is absent from the export: the exporter takes content off every span unless the code asked for it and the project's mode allows. The prompt it names, `prompt` and `prompt_version`, is metadata, so it is there with content off: `gen_ai.prompt.name` and `gen_ai.prompt.version`, on the call's span alone.
+
+The rest each suite proves on its own: a blank prompt or version is none, without a word; one past ingest's 1,024 characters, counted in characters, is left off, never cut, and so is a version whose name is none or was left off, each with one warning; in Python and TypeScript one that is no string goes as its text, with one warning; with content on, both leave as given, never handed to the mask or the scrubbers; and a recorded call names no prompt.
 
 Every request carries `Telmoni-Sent-At`, the SDK's clock as the attempt leaves, in decimal nanoseconds since the Unix epoch, stamped anew on each attempt, by which ingest moves an export from a clock a zone or a date out.
 

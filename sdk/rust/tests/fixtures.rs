@@ -168,6 +168,8 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
         text(call_spec, "model")?,
         ModelCallOptions {
             provider: Some(text(call_spec, "provider")?.to_owned()),
+            prompt: Some(text(call_spec, "prompt")?.to_owned()),
+            prompt_version: Some(text(call_spec, "prompt_version")?.to_owned()),
             input_messages: Some(field(call_spec, "input_messages")?.clone().into()),
             ..ModelCallOptions::default()
         },

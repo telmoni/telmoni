@@ -2,6 +2,7 @@
 
 pub mod api_key_scope;
 pub mod audit_action;
+pub mod change_kind;
 pub mod chart_measure;
 pub mod content_mode;
 pub mod email;
@@ -37,6 +38,7 @@ pub mod wire_enum;
 
 pub use api_key_scope::ApiKeyScope;
 pub use audit_action::AuditAction;
+pub use change_kind::ChangeKind;
 pub use chart_measure::ChartMeasure;
 pub use content_mode::ContentMode;
 pub use email::{Email, EmailError};

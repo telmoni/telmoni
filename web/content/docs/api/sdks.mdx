@@ -74,7 +74,9 @@ holding the **ingest** scope.
     @telmoni.run("support-bot")
     def answer(question: str) -> str:
         with telmoni.step("plan"):
-            with telmoni.model_call("gpt-4o-mini", provider="openai") as call:
+            with telmoni.model_call(
+                "gpt-4o-mini", provider="openai", prompt="support-reply", prompt_version="3"
+            ) as call:
                 reply = ask_the_model(question)  # your provider's call
                 call.answered(
                     response_model=reply.model,
@@ -112,7 +114,7 @@ holding the **ingest** scope.
     the tags past the first 32 kept; an empty user, session, provider or
     response model is left off as unset. A usage handed to `answered` that is
     no `Usage`, your provider's own usage object say, is taken as none, with
-    one warning: copy its counts into a `Usage`. A name, model, provider, user, session, response model or error
+    one warning: copy its counts into a `Usage`. A name, model, provider, prompt, prompt version, user, session, response model or error
     type that is no string goes as its text with one warning, as does a tag
     that is no string, finite number or bool; an exception or an
     exception's class handed to `fail()` goes as the class's name, an
@@ -123,6 +125,10 @@ holding the **ingest** scope.
     nothing goes as `step`, a model call with no model is named by its operation
     alone, and one of an operation ingest reads as no model call, any but
     `chat`, `generate_content`, `text_completion` and `embeddings`, goes as `chat`; each with one warning.
+    A blank `prompt` or `prompt_version` is none, as an empty provider is; one
+    past 1,024 characters is left off, never cut, since cut it would name
+    another, and so is a version whose prompt is none or was left off, each
+    with one warning.
   </Tab>
   <Tab value="TypeScript">
     ```ts
@@ -135,7 +141,7 @@ holding the **ingest** scope.
       { userId: 'user_42', sessionId: 'conv_7', tags: { env: 'prod' } },
       async (run) => {
         const reply = await run.step('plan', (step) =>
-          step.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
+          step.modelCall('gpt-4o-mini', { provider: 'openai', prompt: 'support-reply', promptVersion: '3' }, async (call) => {
             const reply = await askTheModel(question); // your provider's call
             call.answered({
               responseModel: reply.model,
@@ -169,7 +175,7 @@ holding the **ingest** scope.
     provider or response model is left off as unset. A usage handed to
     `answered` carrying none of `Usage`'s keys, your provider's own usage
     object say, is taken as none, with one warning: copy its counts into
-    `inputTokens` and the rest. A name, model, provider, user, session, response model
+    `inputTokens` and the rest. A name, model, provider, prompt, prompt version, user, session, response model
     or error type that is no string goes as its text with one warning, as does
     a tag that is no string, finite number or boolean; an error, or a class,
     handed to `fail()` goes as its class's name, an `Error`'s message and
@@ -181,7 +187,10 @@ holding the **ingest** scope.
     goes as `step`, a model call with no model is named by its operation alone,
     and one of an operation ingest reads as no model call, any but `chat`,
     `generate_content`, `text_completion` and `embeddings`, goes as `chat`;
-    each with one warning.
+    each with one warning. A blank `prompt` or `promptVersion` is none, as an
+    empty provider is; one past 1,024 characters is left off, never cut, since
+    cut it would name another, and so is a version whose prompt is none or was
+    left off, each with one warning.
   </Tab>
   <Tab value="Go">
     ```go
@@ -199,7 +208,7 @@ holding the **ingest** scope.
     defer run.End()
 
     stepCtx, step := run.Step(ctx, "plan")
-    _, call := run.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+    _, call := run.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai", Prompt: "support-reply", PromptVersion: "3"})
     reply, err := askTheModel(stepCtx, question) // your provider's call
     if err != nil {
     	call.Fail(err)
@@ -240,7 +249,10 @@ holding the **ingest** scope.
     goes as `step`, a model call with no model is named by its operation alone,
     and one of an operation ingest reads as no model call, any but `chat`,
     `generate_content`, `text_completion` and `embeddings`, goes as `chat`;
-    each with one warning.
+    each with one warning. A blank `Prompt` or `PromptVersion` is none, as an
+    empty provider is; one past 1,024 characters is left off, never cut, since
+    cut it would name another, and so is a version whose prompt is none or was
+    left off, each with one warning.
   </Tab>
   <Tab value="Rust">
     ```rust
@@ -259,7 +271,15 @@ holding the **ingest** scope.
     )?;
     let reply = {
         let step = run.step("plan")?;
-        let call = step.model_call("gpt-4o-mini", ModelCallOptions { provider: Some("openai".into()), ..ModelCallOptions::default() })?;
+        let call = step.model_call(
+            "gpt-4o-mini",
+            ModelCallOptions {
+                provider: Some("openai".into()),
+                prompt: Some("support-reply".into()),
+                prompt_version: Some("3".into()),
+                ..ModelCallOptions::default()
+            },
+        )?;
         let reply = ask_the_model(question)?; // your provider's call
         call.answered(Reply {
             response_model: Some(reply.model.clone()),
@@ -293,7 +313,11 @@ holding the **ingest** scope.
     cut it would name another; a step named nothing goes as `step`, a model
     call with no model is named by its operation alone, and one of an operation
     ingest reads as no model call, any but `chat`, `generate_content`,
-    `text_completion` and `embeddings`, goes as `chat`; each with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
+    `text_completion` and `embeddings`, goes as `chat`; each with one warning.
+    A blank `prompt` or `prompt_version` is none, as an empty provider is; one
+    past 1,024 characters is left off, never cut, since cut it would name
+    another, and so is a version whose prompt is none or was left off, each
+    with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
     `tool_call_with` end the span when the closure returns and return its
     value, `step_with` and the calls' wrapped in a `Result` for the cap; their
     `try_` forms mark an `Err` on the span with the error's type name,
@@ -998,7 +1022,14 @@ from 0, taken by its answer (`answered(time_to_first_token=0.35)`,
 `{ timeToFirstToken: 0.35 }`, `Answer{TimeToFirstToken: d}`,
 `Reply { time_to_first_token: Some(d), .. }`). In Python and TypeScript, a
 time below 0 or not finite is left off the call with one warning, as is a
-time below 0 in Go. A tool call is
+time below 0 in Go. Where you name it, a model call also carries the prompt it
+used, by name and version, as `gen_ai.prompt.name` and `gen_ai.prompt.version`,
+from `prompt` and `prompt_version` (`promptVersion` in TypeScript, `Prompt` and
+`PromptVersion` in Go). Both are metadata, sent in every content mode and never
+handed to your [mask](#masking-content) or the
+[scrubbers](#scrubbing-secrets-and-personal-data), so a prompt's name names a
+prompt and never a person: a person goes in the run's `user_id`. A recorded
+call carries none. A tool call is
 `execute_tool <name>`, and a retrieval `retrieval <source>`, or a memory's
 search `search_memory`, with what it asked for and how many came back
 ([a retrieval](#a-retrieval)). A failure is marked by the error's class, as
@@ -1074,7 +1105,7 @@ fails — Python's raise, TypeScript's throw, Go's and Rust's panic, or in Pytho
 and TypeScript an answer that is no string — sends the span without that field,
 warned once (`mask_failed`) by the key alone, never its words, which may hold
 what it was handed. It sees the content the SDK records, never a span's name, a
-tag or a user id, which are metadata kept on every project, nor an attribute
+tag, a user id or a call's prompt, which are metadata kept on every project, nor an attribute
 your code sets on a span itself through OpenTelemetry, which leaves the process
 whatever `capture_content` says and which a project keeping content keeps as
 [metadata content](/docs/monitoring/content#what-is-kept): keep a person out of
