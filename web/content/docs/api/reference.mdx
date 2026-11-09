@@ -220,7 +220,10 @@ totals Telmoni keeps an hour at a time.
   `status`, `environment` or `release`, from the totals; or by `tag`, `user`
   or `session`, from the spans, no further back than your plan keeps them,
   which `days` in the answer then says. Only tool calls carry a `tool`; every
-  other span falls under the empty value.
+  other span falls under the empty value. Only a span that names a model
+  carries a `model`, which the SDKs' model calls do and their runs' own spans
+  do not: a model's points then count its calls, and the runs fall under the
+  empty value.
 - `tag`: With `group=tag`, the tag key whose values split each step, 1 to 64
   characters.
 
@@ -239,15 +242,15 @@ totals Telmoni keeps an hour at a time.
       "value": "claude-sonnet-5-5",
       "spans": 412,
       "failed": 3,
-      "runs": 40,
-      "failed_runs": 1,
+      "runs": 0,
+      "failed_runs": 0,
       "input_tokens": 512000,
       "output_tokens": 98000,
       "cache_read_input_tokens": 120000,
       "cache_write_input_tokens": 4000,
       "spend": 2.34,
       "duration_ms": { "avg": 1840.5, "p50": 1500, "p90": 3100, "p99": 7400 },
-      "run_duration_ms": { "p50": 9200, "p95": 21000, "p99": 30500 }
+      "run_duration_ms": { "p50": null, "p95": null, "p99": null }
     }
   ],
   "truncated": false
