@@ -56,9 +56,10 @@ export function DataTable({
       className={cn("relative min-w-0", flush && "first:-mt-gutter last:-mb-gutter")}
       data-overflow={overflow || undefined}
     >
+      {/* Absolute labels must be clipped by the scroller, not its wrapper. */}
       <Surface
         data-slot={flush ? "table-scroll" : "card"}
-        className={flush ? "min-w-0 overflow-x-auto" : "overflow-hidden py-0 gap-0"}
+        className={cn("relative", flush ? "min-w-0 overflow-x-auto" : "overflow-hidden py-0 gap-0")}
         tabIndex={0}
       >
         <table className={cn("w-full text-sm", className)} {...props} />

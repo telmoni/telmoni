@@ -41,7 +41,7 @@ export function EditCaps({
         size="sm"
         className={ROW_BUTTON}
         onClick={(e) => open(e.currentTarget, null)}
-        aria-label={`Set ${name}'s caps`}
+        aria-label={`Set caps for ${name}`}
       >
         Set caps
       </Button>

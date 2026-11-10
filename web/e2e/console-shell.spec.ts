@@ -79,6 +79,15 @@ test.describe("Console chrome row", () => {
     await expect(brand).toBeVisible();
     const rail = page.locator("#console-sidebar");
     const row = rail.getByRole("link", { name: "Projects" });
+    const sizes = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      const rem = Number.parseFloat(style.fontSize);
+      return {
+        control: Number.parseFloat(style.getPropertyValue("--control-size")) * rem,
+        gutter: Number.parseFloat(style.getPropertyValue("--spacing-gutter")) * rem,
+        sidebar: Number.parseFloat(style.getPropertyValue("--spacing-sidebar")) * rem,
+      };
+    });
 
     // The brand and collapse fill the rail's cell; search stays on the right.
     const railOpen = (await rail.boundingBox())!;
@@ -90,17 +99,19 @@ test.describe("Console chrome row", () => {
     const word = (await brand.locator("svg").last().boundingBox())!;
     const search = (await page.getByRole("button", { name: "Search", exact: true }).boundingBox())!;
     const profile = (await page.getByRole("button", { name: /^Account:/ }).boundingBox())!;
-    expect(railOpen.width).toBe(252);
-    expect(close.width).toBe(36);
-    expect(Math.abs(mark.x + mark.width / 2 - (rowOpen.x + 18))).toBeLessThanOrEqual(1);
-    expect(Math.abs(rowOpen.x - railOpen.x - 18)).toBeLessThanOrEqual(1);
-    expect(Math.abs(word.x - (rowOpen.x + 44))).toBeLessThanOrEqual(1);
+    const brandGap = await brand.evaluate((el) => Number.parseFloat(getComputedStyle(el).columnGap));
+    expect(railOpen.width).toBe(sizes.sidebar);
+    expect(close.width).toBe(sizes.control);
+    expect(close.height).toBe(sizes.control);
+    expect(Math.abs(mark.x + mark.width / 2 - (rowOpen.x + sizes.control / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(rowOpen.x - railOpen.x - sizes.gutter)).toBeLessThanOrEqual(1);
+    expect(Math.abs(word.x - (brandOpen.x + sizes.control + brandGap))).toBeLessThanOrEqual(1);
     expect(close.x).toBeGreaterThan(brandOpen.x + brandOpen.width);
     expect(search.x).toBeGreaterThan(railOpen.x + railOpen.width);
-    expect(profile.width).toBe(36);
-    expect(profile.height).toBe(36);
+    expect(profile.width).toBe(sizes.control);
+    expect(profile.height).toBe(sizes.control);
     expect(profile.y).toBe(search.y);
-    expect(Math.abs(railOpen.x + railOpen.width - close.x - close.width - 18)).toBeLessThanOrEqual(1);
+    expect(Math.abs(railOpen.x + railOpen.width - close.x - close.width - sizes.gutter)).toBeLessThanOrEqual(1);
 
     await page.getByRole("button", { name: "Collapse navigation" }).click();
     const open = page.getByRole("button", { name: "Expand navigation" });

@@ -107,19 +107,19 @@ describe("the Limits page", () => {
 
   it("offers caps to an owner or admin, and to no member", async () => {
     const { unmount } = render(await LimitsPage());
-    expect(screen.queryByRole("button", { name: /Set .*'s caps/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Set caps for / })).toBeNull();
     unmount();
     asRole("admin");
     render(await LimitsPage());
-    expect(screen.getByRole("button", { name: "Set Support bot's caps" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set Research's caps" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set caps for Support bot" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set caps for Research" })).toBeInTheDocument();
   });
 
   // New project's panel, a field a row, rather than a dialog over the page.
   it("sets a project's caps in a panel, its held caps filled in", async () => {
     asRole("admin");
     render(await LimitsPage());
-    fireEvent.click(screen.getByRole("button", { name: "Set Support bot's caps" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set caps for Support bot" }));
     const panel = screen.getByRole("dialog", { name: 'Caps on "Support bot"' });
     expect(panel).toHaveAttribute("aria-modal", "false");
     expect(within(panel).getByRole("button", { name: "Save caps" })).toBeInTheDocument();

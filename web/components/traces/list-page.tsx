@@ -125,7 +125,7 @@ export function ListPage<L extends ListWindow>({
     return (
       <>
         <PageHeader title={title} info={info} />
-        {firstRun}
+        <div className="grid gap-page">{firstRun}</div>
       </>
     );
   }

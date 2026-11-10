@@ -5,7 +5,7 @@ import { expectProjectAgents, landOnProject } from "./helpers";
 
 const SERVICE_SECRET = "e2e-service-secret-do-not-use-in-production";
 const SERVER = "http://localhost:8082";
-const LIST_CARD = ["overflow-hidden", "p-0", "gap-0"];
+const LIST_CARD = ["overflow-hidden", "gap-0"];
 
 type TestUser = { userId: string; email: string; firstName: string; lastName: string };
 
@@ -110,6 +110,7 @@ type Snapshot = {
   sections: string[][];
   tables: {
     card: string[] | null;
+    flush: boolean;
     rows: number;
     cells: string[][];
     reachable: boolean;
@@ -152,12 +153,13 @@ function snapshot(page: Page): Promise<Snapshot> {
       lead: kids[0] && kids[0] !== content ? cls(kids[0]) : null,
       sections: Array.from(main.querySelectorAll("section")).map((s) => Array.from(s.classList)),
       tables: Array.from(main.querySelectorAll("table")).map((t) => {
-        const card = t.closest('[data-slot="card"]');
+        const card = t.closest('[data-slot="card"], [data-slot="table-scroll"]');
         const box = t.getBoundingClientRect();
         const cardBox = card?.getBoundingClientRect();
         const cells = Array.from(t.querySelectorAll("th, td"));
         return {
           card: cls(card),
+          flush: card?.getAttribute("data-slot") === "table-scroll",
           rows: t.tBodies[0]?.rows.length ?? 0,
           cells: cells.map((c) => Array.from(c.classList)),
           reachable:
@@ -182,7 +184,7 @@ function snapshot(page: Page): Promise<Snapshot> {
       // A card of its own with the same classes, as Privacy's notes are, is
       // no empty state.
       emptyStates: Array.from(
-        main.querySelectorAll('div.grid.gap-1.p-4:not([data-slot="card"])'),
+        main.querySelectorAll('div.grid.gap-1.p-gutter:not([data-slot="card"])'),
       ).map((d) => cls(d.closest('[data-slot="card"]'))),
       main: { width: main.getBoundingClientRect().width },
       pane: { clientWidth: pane.clientWidth, scrollWidth: pane.scrollWidth },
@@ -234,11 +236,7 @@ test.describe("Console content containers", () => {
       const at = (what: string) => `${route}: ${what}`;
 
       if (s.children > 0) {
-        // <main> is `flex flex-col gap-2` (console-shell.tsx), and every page
-        // draws an optional `PageHeader` title row followed by one content
-        // wrapper. The row is a sibling rather than a child of the wrapper so
-        // the gap above the content stays main's gap-2, and so the header's
-        // action lines up with the cards — which console-shell.spec.ts pins.
+        // A sibling title row keeps its action aligned with the cards.
         expect(s.wrappers, at("one content wrapper under <main>")).toBe(1);
         expect(s.wrapper?.tag, at("the wrapper is a div")).toBe("DIV");
         expect(s.wrapper?.classes, at("the wrapper is grid gap-page")).toEqual(
@@ -258,8 +256,8 @@ test.describe("Console content containers", () => {
             expect.arrayContaining(["flex"]),
           );
           expect(
-            s.lead.some((cls) => cls === "min-h-7" || cls === "min-h-9"),
-            at("the title row has min-h-7"),
+            s.lead.includes("min-h-control"),
+            at("the title row shares the control height"),
           ).toBe(true);
         }
       }
@@ -273,7 +271,11 @@ test.describe("Console content containers", () => {
         ).toBe(true);
       }
       for (const t of s.tables) {
-        expect(t.card, at("a table sits on the list card")).toEqual(expect.arrayContaining(LIST_CARD));
+        expect(t.card, at("a table has its standard scroll surface")).toEqual(
+          expect.arrayContaining(
+            t.flush ? ["min-w-0", "overflow-x-auto"] : [...LIST_CARD, "p-gutter", "py-0"],
+          ),
+        );
         for (const cell of t.cells) {
           expect(
             cell.some((cls) => cls === "px-gutter" || cls === "px-4") &&
@@ -289,7 +291,9 @@ test.describe("Console content containers", () => {
         ).toBeLessThanOrEqual(t.cardScrollWidth + 1);
       }
       for (const card of s.emptyStates) {
-        expect(card, at("an empty state sits on the list card")).toEqual(expect.arrayContaining(LIST_CARD));
+        expect(card, at("an empty state sits on the list card")).toEqual(
+          expect.arrayContaining([...LIST_CARD, "p-0"]),
+        );
       }
       expect(s.main.width, at("<main> is not the pane's width")).toBeGreaterThanOrEqual(
         s.pane.clientWidth - 1,
