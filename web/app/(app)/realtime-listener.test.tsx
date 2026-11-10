@@ -356,14 +356,14 @@ describe("RealtimeListener - membership:changed", () => {
 });
 
 // Ingest's nudge: a page reading the project's spans is drawn again — the
-// trace page for its own run alone, the Traces list counting instead unless
+// trace page for its own trace alone, the Traces list counting instead unless
 // it is empty — and nothing else moves.
 describe("RealtimeListener - spans:ingested", () => {
-  const nudge = (projectId: string, runs: string[] = ["run_1"], more = false) =>
+  const nudge = (projectId: string, traces: string[] = ["trace_1"], more = false) =>
     MockEventSource.instances[0]!.emit("spans:ingested", {
       organizationId: "org_1",
       projectId,
-      runs,
+      traces,
       more,
     });
 
@@ -387,8 +387,8 @@ describe("RealtimeListener - spans:ingested", () => {
     listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
     mockPathname = "/acme/web/traces";
     render(<RealtimeListener />);
-    nudge("project_1", ["run_1", "run_2"]);
-    nudge("project_1", ["run_2", "r1"], true);
+    nudge("project_1", ["trace_1", "trace_2"]);
+    nudge("project_1", ["trace_2", "r1"], true);
     expect(mockRefresh).not.toHaveBeenCalled();
     expect(newTraces("project_1"), "r1 is on the list already").toEqual({ count: 2, more: true });
   });
@@ -399,7 +399,7 @@ describe("RealtimeListener - spans:ingested", () => {
     listDrawn("project_1", { rows: [], empty: true, first: true });
     mockPathname = "/acme/web/traces";
     render(<RealtimeListener />);
-    nudge("project_1", ["run_1"]);
+    nudge("project_1", ["trace_1"]);
     expect(mockRefresh).toHaveBeenCalledTimes(1);
     expect(newTraces("project_1")).toEqual({ count: 0, more: false });
   });
@@ -418,32 +418,32 @@ describe("RealtimeListener - spans:ingested", () => {
     MockEventSource.instances[1]!.emit("spans:ingested", {
       organizationId: "org_1",
       projectId: "project_1",
-      runs: ["run_1"],
+      traces: ["trace_1"],
       more: false,
     });
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("draws a trace's page for its own run, or when the batch held more than the nudge names", () => {
-    mockPathname = "/acme/web/traces/run_7";
+  it("draws a trace's page for its own trace, or when the batch held more than the nudge names", () => {
+    mockPathname = "/acme/web/traces/trace_7";
     render(<RealtimeListener />);
-    nudge("project_1", ["run_1", "run_2"]);
+    nudge("project_1", ["trace_1", "trace_2"]);
     expect(mockRefresh).not.toHaveBeenCalled();
-    nudge("project_1", ["run_1", "run_7"]);
+    nudge("project_1", ["trace_1", "trace_7"]);
     expect(mockRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it("draws a trace's page when its run may be among the ones the nudge left out", () => {
-    mockPathname = "/acme/web/traces/run_7";
+  it("draws a trace's page when its trace may be among the ones the nudge left out", () => {
+    mockPathname = "/acme/web/traces/trace_7";
     render(<RealtimeListener />);
-    nudge("project_1", ["run_1"], true);
+    nudge("project_1", ["trace_1"], true);
     expect(mockRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("holds between redraws for as long as the layout says", () => {
     vi.useFakeTimers();
     try {
-      mockPathname = "/acme/web/traces/run_1";
+      mockPathname = "/acme/web/traces/trace_1";
       render(<RealtimeListener liveHoldMs={100} />);
       nudge("project_1");
       nudge("project_1");
@@ -456,22 +456,22 @@ describe("RealtimeListener - spans:ingested", () => {
     }
   });
 
-  // The list's peek is read again when its own run lands, held as a page is,
-  // while the list itself still counts rather than draws.
-  it("tells the list's peek when its own run lands, and the list counts it", () => {
+  // The list's peek is read again when its own trace lands, held as a page
+  // is, while the list itself still counts rather than draws.
+  it("tells the list's peek when its own trace lands, and the list counts it", () => {
     vi.useFakeTimers();
     const landed = vi.fn();
     window.addEventListener(PEEK_NUDGED, landed);
     try {
       listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
-      window.history.replaceState(null, "", "/acme/web/traces?peek=run_7");
+      window.history.replaceState(null, "", "/acme/web/traces?peek=trace_7");
       mockPathname = "/acme/web/traces";
       render(<RealtimeListener liveHoldMs={100} />);
-      nudge("project_1", ["run_1"]);
+      nudge("project_1", ["trace_1"]);
       expect(landed).not.toHaveBeenCalled();
-      nudge("project_1", ["run_7"]);
+      nudge("project_1", ["trace_7"]);
       expect(landed).toHaveBeenCalledTimes(1);
-      nudge("project_1", ["run_1"], true);
+      nudge("project_1", ["trace_1"], true);
       expect(landed, "held, as a page is").toHaveBeenCalledTimes(1);
       vi.advanceTimersByTime(100);
       expect(landed).toHaveBeenCalledTimes(2);
@@ -487,7 +487,7 @@ describe("RealtimeListener - spans:ingested", () => {
   it("leaves a download's route alone", () => {
     mockPathname = "/acme/web/traces/export";
     render(<RealtimeListener />);
-    nudge("project_1", ["run_1"], true);
+    nudge("project_1", ["trace_1"], true);
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
@@ -496,7 +496,7 @@ describe("RealtimeListener - spans:ingested", () => {
     const visibility = vi.spyOn(document, "visibilityState", "get");
     try {
       visibility.mockReturnValue("hidden");
-      mockPathname = "/acme/web/traces/run_1";
+      mockPathname = "/acme/web/traces/trace_1";
       render(<RealtimeListener liveHoldMs={100} />);
       nudge("project_1");
       nudge("project_1");

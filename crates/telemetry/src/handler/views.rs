@@ -476,7 +476,7 @@ mod tests {
             { "measure": "cost" },
             { "measure": "tokens", "group": "model" },
             { "measure": "spend", "group": "status" },
-            { "measure": "runs" },
+            { "measure": "traces" },
         ] }));
         assert_eq!(
             read.charts,
@@ -487,7 +487,7 @@ mod tests {
                     tag: None
                 },
                 DashboardChart {
-                    measure: ChartMeasure::Runs,
+                    measure: ChartMeasure::Traces,
                     group: None,
                     tag: None
                 },

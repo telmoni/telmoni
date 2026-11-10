@@ -114,6 +114,8 @@ export interface OtlpSpan {
   endTimeUnixNano: string;
   attributes: KeyValue[];
   events?: { timeUnixNano: string; name: string; attributes: KeyValue[] }[];
+  /** The application's span a trace was opened beside: its ids alone. */
+  links?: { traceId: string; spanId: string }[];
   status?: { code: number; message?: string };
 }
 
@@ -722,6 +724,9 @@ export class Exporter {
       endTimeUnixNano: nanos(end),
       attributes,
     };
+    if (span.links.length > 0) {
+      encoded.links = span.links.map((link) => ({ traceId: link.context.traceId, spanId: link.context.spanId }));
+    }
     // Events and the status message carry an exception's message and stack
     // trace: content, and the first to go from a span trimmed to fit. A
     // score's event goes whatever, with its score alone where content stays home.

@@ -18,11 +18,11 @@ import { cn } from "@/lib/utils";
 // there, its bar on the trace's line of time, and what it says beside its
 // name. Metadata alone: what a span kept is `span-content.tsx`'s.
 
-/** A span's kind as a glyph: the run as the Traces row draws it, a model
+/** A span's kind as a glyph: the agent as the Traces row draws it, a model
  *  call as the sparkle every AI surface uses, a tool as its wrench. */
 const KIND_ICON: Record<SpanKind, LucideIcon> = {
-  [SpanKind.Run]: ListTree,
-  [SpanKind.RunStart]: Play,
+  [SpanKind.Agent]: ListTree,
+  [SpanKind.TraceStart]: Play,
   [SpanKind.Step]: Footprints,
   [SpanKind.ModelCall]: Sparkles,
   [SpanKind.ToolCall]: Wrench,
@@ -78,7 +78,7 @@ export function SpanGuides({ depth }: { depth: number }) {
   ));
 }
 
-/** The row's bar on the trace's one line of time: from where the run's own
+/** The row's bar on the trace's one line of time: from where the agent's own
  *  name starts to the pane's edge, whatever the row's depth, so bars read
  *  against each other as a timeline's must. */
 export function SpanBar({
@@ -143,7 +143,7 @@ export function TruncatedNote({
   if (!trace.truncated) return null;
   return (
     <p className={cn("text-xs text-muted-foreground", className)}>
-      This run holds more spans than the server sends at once; the first{" "}
+      This trace holds more spans than the server sends at once; the first{" "}
       {formatCount(trace.spans.length)} are here.
     </p>
   );

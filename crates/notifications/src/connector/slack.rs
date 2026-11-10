@@ -152,13 +152,13 @@ pub enum SlackAction {
     Acknowledge,
     MuteForAnHour,
     /// A link, which Slack tells the app of all the same.
-    OpenRun,
+    OpenTrace,
 }
 
 telmoni_shared::wire_enum!(SlackAction {
     Acknowledge => "acknowledge",
     MuteForAnHour => "mute_for_an_hour",
-    OpenRun => "open_run",
+    OpenTrace => "open_trace",
 });
 
 /// An incident notice's buttons. Each value names the project and the
@@ -180,11 +180,11 @@ fn buttons(incident: &EventIncident<'_>) -> Value {
             "value": value,
         }),
     ];
-    if let Some(url) = incident.run_url {
+    if let Some(url) = incident.trace_url {
         elements.push(json!({
             "type": "button",
-            "action_id": SlackAction::OpenRun.as_str(),
-            "text": { "type": "plain_text", "text": "Open the run" },
+            "action_id": SlackAction::OpenTrace.as_str(),
+            "text": { "type": "plain_text", "text": "Open the trace" },
             "url": url,
         }));
     }
@@ -822,15 +822,15 @@ mod tests {
     }
 
     /// An incident's notice carries Acknowledge, Mute for an hour and Open
-    /// the run, each value naming the project and incident a press is
-    /// scoped to; one showing no run has no link to one, and any other
+    /// the trace, each value naming the project and incident a press is
+    /// scoped to; one showing no trace has no link to one, and any other
     /// notice no buttons.
     #[test]
     fn an_incidents_notice_carries_its_buttons() {
         let project = ProjectId::try_new("project_1").unwrap();
         let id = Uuid::now_v7();
-        let run = "https://app.example/org_1/project_1/traces/0190";
-        let event = |run_url| Event {
+        let trace = "https://app.example/org_1/project_1/traces/0190";
+        let event = |trace_url| Event {
             id: Uuid::nil(),
             kind: telmoni_shared::types::NotificationKind::IncidentOpened,
             title: "Model calls: alert",
@@ -838,19 +838,19 @@ mod tests {
             incident: Some(EventIncident {
                 project_id: &project,
                 id,
-                run_url,
+                trace_url,
             }),
         };
-        let v = render(&event(Some(run)));
+        let v = render(&event(Some(trace)));
         assert_eq!(v["blocks"][3]["type"], "actions");
         let buttons = v["blocks"][3]["elements"].as_array().unwrap();
         let actions: Vec<&str> = buttons
             .iter()
             .map(|button| button["action_id"].as_str().unwrap())
             .collect();
-        assert_eq!(actions, ["acknowledge", "mute_for_an_hour", "open_run"]);
+        assert_eq!(actions, ["acknowledge", "mute_for_an_hour", "open_trace"]);
         assert_eq!(buttons[0]["style"], "primary");
-        assert_eq!(buttons[2]["url"], run);
+        assert_eq!(buttons[2]["url"], trace);
         for button in &buttons[..2] {
             let value = button["value"].as_str().unwrap();
             assert_eq!(parse_button_value(value), Some((project.clone(), id)));

@@ -1,7 +1,7 @@
 //! Trace and span ids: random, as OpenTelemetry's own generator makes them,
-//! except for the spans of a recorded run, whose ids are derived from the
-//! run's id, so that a record sent twice is the same bytes and ingest's claim
-//! on the body answers it once.
+//! except for the spans of a recorded trace, whose ids are derived from the
+//! trace's id, so that a record sent twice is the same bytes and ingest's
+//! claim on the body answers it once.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -63,16 +63,23 @@ impl Drop for Given {
     }
 }
 
-/// A recorded run's trace id: the run's id, its sixteen bytes.
-pub(crate) fn trace_id(run_id: &Uuid) -> TraceId {
-    TraceId::from_bytes(*run_id.as_bytes())
+/// A trace id as given: 32 hex digits in either case that are not all zeros,
+/// which no trace has; `None` for anything else.
+pub(crate) fn trace_id(given: &str) -> Option<TraceId> {
+    if given.len() != 32 || !given.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    TraceId::from_hex(given)
+        .ok()
+        .filter(|trace_id| *trace_id != TraceId::INVALID)
 }
 
-/// The id of a recorded run's span at `place`: the first eight bytes of the
-/// version 5 UUID (RFC 9562) named by the place, in decimal, under the run's
+/// The id of a recorded trace's span at `place`: the first eight bytes of the
+/// version 5 UUID (RFC 9562) named by the place, in decimal, under the trace's
 /// id. Its version's bits are among those eight, so it is never zero.
-pub(crate) fn span_id(run_id: &Uuid, place: u64) -> SpanId {
+pub(crate) fn span_id(trace_id: &TraceId, place: u64) -> SpanId {
+    let namespace = Uuid::from_bytes(trace_id.to_bytes());
     let [a, b, c, d, e, f, g, h, ..] =
-        *Uuid::new_v5(run_id, place.to_string().as_bytes()).as_bytes();
+        *Uuid::new_v5(&namespace, place.to_string().as_bytes()).as_bytes();
     SpanId::from_bytes([a, b, c, d, e, f, g, h])
 }

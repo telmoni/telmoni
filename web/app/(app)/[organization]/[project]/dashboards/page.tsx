@@ -22,7 +22,7 @@ function daysOf(given: string | string[] | undefined): number {
   return Number.isInteger(days) && days >= 1 && days <= MAX_DAYS ? days : OPENING_DAYS;
 }
 
-// The month's budgets, then the window's charts: spend, tokens, runs and
+// The month's budgets, then the window's charts: spend, tokens, traces and
 // latency from the hourly totals, time to first token from the spans.
 export default async function DashboardsPage({
   params,
@@ -46,7 +46,7 @@ export default async function DashboardsPage({
     alerts.kind === "ok"
       ? alerts.alerts.filter(
           (alert) =>
-            alert.kind === SpanKind.Run &&
+            alert.kind === SpanKind.Agent &&
             alert.measure === RuleMeasure.Cost &&
             alert.aggregation === RuleAggregation.Sum &&
             alert.window === RuleWindow.Month &&
@@ -58,7 +58,7 @@ export default async function DashboardsPage({
     <>
       <PageHeader
         title="Spend"
-        info="What the project's agents spend, against this month's budgets, and charts over the window, by the UTC day or, for a day, the hour: spend, tokens, runs and latency from the hourly totals, and time to first token from the spans. Spend is priced as it is read, the project's own prices first."
+        info="What the project's agents spend, against this month's budgets, and charts over the window, by the UTC day or, for a day, the hour: spend, tokens, traces and latency from the hourly totals, and time to first token from the spans. Spend is priced as it is read, the project's own prices first."
         action={<WindowPicker days={days} windows={TOTALS_WINDOWS} />}
       />
       <div className="grid gap-page">
@@ -83,12 +83,12 @@ export default async function DashboardsPage({
         {totals.kind !== "ok" ? (
           <NoticeCard
             title="The totals could not be read."
-            body="Reload to try again. The Traces page charts a window's runs, tokens and durations."
+            body="Reload to try again. The Traces page charts a window's traces, tokens and durations."
           />
         ) : totals.rollups.points.length === 0 ? (
           <NoticeCard
             title="Nothing to show yet."
-            body={`No run has landed in the last ${
+            body={`No trace has landed in the last ${
               totals.rollups.days === 1 ? "day" : `${totals.rollups.days} days`
             }.`}
           />

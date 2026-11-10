@@ -371,7 +371,7 @@ async fn a_routed_notice_spends_its_room_on_the_connections_that_hear_it(pool: P
     );
 }
 
-/// ⚠ The incident a routed notice opens, and the run it shows, ride on each of
+/// ⚠ The incident a routed notice opens, and the trace it shows, ride on each of
 /// its deliveries, a reminder's as an opening's: what Slack draws its buttons from.
 #[sqlx::test]
 async fn a_routed_notices_incident_rides_on_its_deliveries(pool: PgPool) {
@@ -379,7 +379,7 @@ async fn a_routed_notices_incident_rides_on_its_deliveries(pool: PgPool) {
     let heard = connection(&pool, &project, &organization, "active").await;
     let notifier = Notifier(module(&pool));
     let incident = Uuid::now_v7();
-    let run = "https://app.example/org/project/traces/run";
+    let trace = "https://app.example/org/project/traces/0190";
     let notice = |dedup_key| Notice {
         kind: NotificationKind::IncidentOpened,
         subject_user_id: None,
@@ -389,7 +389,7 @@ async fn a_routed_notices_incident_rides_on_its_deliveries(pool: PgPool) {
         dedup_key,
         incident: Some(IncidentNotice {
             id: incident,
-            run_url: Some(run),
+            trace_url: Some(trace),
         }),
     };
     let route = Route {
@@ -411,11 +411,11 @@ async fn a_routed_notices_incident_rides_on_its_deliveries(pool: PgPool) {
         .await
         .expect("reminded");
     let carried: Vec<(Option<Uuid>, Option<String>)> =
-        sqlx::query_as("SELECT incident_id, run_url FROM notifications.deliveries ORDER BY id")
+        sqlx::query_as("SELECT incident_id, trace_url FROM notifications.deliveries ORDER BY id")
             .fetch_all(&pool)
             .await
             .expect("the deliveries");
-    let rides = (Some(incident), Some(run.to_owned()));
+    let rides = (Some(incident), Some(trace.to_owned()));
     assert_eq!(carried, [rides.clone(), rides]);
 }
 
@@ -429,7 +429,7 @@ async fn a_routed_notice_past_its_metadata_bound_is_refused(pool: PgPool) {
         subject_user_id: None,
         title: "Slow calls: alert",
         body: "The p95 duration of model calls over the last hour is 6200 ms.",
-        metadata: json!({ "run": "r".repeat(4_096) }),
+        metadata: json!({ "trace": "t".repeat(4_096) }),
         dedup_key: Some("telemetry:incident:a:opened"),
         incident: None,
     };

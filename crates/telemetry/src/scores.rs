@@ -1,4 +1,4 @@
-//! Scores: of a run, one of its spans or a session, each a name and a value,
+//! Scores: of a trace, one of its spans or a session, each a name and a value,
 //! kept in `telemetry.scores` beside the spans. They come from the
 //! application's own code, as OpenTelemetry's `gen_ai.evaluation.result`
 //! event on the span it scores, or `POST /v1/scores`; or from a member on a
@@ -37,8 +37,9 @@ pub const CATEGORY_MAX: usize = 64;
 /// The longest scorer's version the application names.
 pub const VERSION_MAX: usize = 64;
 /// A score's comment, content, as the content its project keeps holds it:
-/// under the score's run, as a field of a span named by the score's id, which
-/// no span's 16 hex digits can be, so it goes as the run's content goes.
+/// under the score's trace, as a field of a span named by the score's id,
+/// which no span's 16 hex digits can be, so it goes as the trace's content
+/// goes.
 pub const COMMENT_FIELD: &str = "telmoni.score.comment";
 /// The longest comment, in characters.
 pub const COMMENT_MAX: usize = 4_000;
@@ -65,9 +66,7 @@ pub struct ScoreRow {
     pub score_id: Uuid,
     #[serde(with = "text")]
     pub target: ScoreTarget,
-    /// Nil for a session's, and for another exporter's span until its trace is placed.
-    #[serde(with = "clickhouse::serde::uuid")]
-    pub run_id: Uuid,
+    /// Empty for a session's.
     pub trace_id: String,
     pub span_id: String,
     pub session_id: String,
@@ -263,8 +262,8 @@ pub fn version_of(given: Option<&str>) -> Option<String> {
 /// What a score is of, by its ids.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetKey {
-    Run(Uuid),
-    Span(Uuid, String),
+    Trace(String),
+    Span(String, String),
     Session(String),
 }
 
@@ -273,26 +272,26 @@ impl TargetKey {
     #[must_use]
     pub const fn kind(&self) -> ScoreTarget {
         match self {
-            Self::Run(_) => ScoreTarget::Run,
+            Self::Trace(_) => ScoreTarget::Trace,
             Self::Span(..) => ScoreTarget::Span,
             Self::Session(_) => ScoreTarget::Session,
         }
     }
 
-    /// Its run, span and session, as a row keeps them: nil and empty where none.
+    /// Its trace, span and session, as a row keeps them: empty where none.
     #[must_use]
-    pub fn ids(&self) -> (Uuid, String, String) {
+    pub fn ids(&self) -> (String, String, String) {
         match self {
-            Self::Run(run) => (*run, String::new(), String::new()),
-            Self::Span(run, span) => (*run, span.clone(), String::new()),
-            Self::Session(session) => (Uuid::nil(), String::new(), session.clone()),
+            Self::Trace(trace) => (trace.clone(), String::new(), String::new()),
+            Self::Span(trace, span) => (trace.clone(), span.clone(), String::new()),
+            Self::Session(session) => (String::new(), String::new(), session.clone()),
         }
     }
 
     fn key(&self) -> String {
         match self {
-            Self::Run(run) => format!("run/{run}"),
-            Self::Span(run, span) => format!("span/{run}/{span}"),
+            Self::Trace(trace) => format!("trace/{trace}"),
+            Self::Span(trace, span) => format!("span/{trace}/{span}"),
             Self::Session(session) => format!("session/{session}"),
         }
     }
@@ -368,84 +367,69 @@ pub fn of_span(span: &Span) -> Vec<EventScore> {
         .collect()
 }
 
-/// Another exporter's trace's scores still waiting, under the nil run.
-const WAITING_SQL: &str = "SELECT * FROM telemetry.scores FINAL
+/// A trace's scores given as the trace's own, by the spans they score.
+const OWN_SQL: &str = "SELECT * FROM telemetry.scores FINAL
      WHERE project_id IN {projects:Array(String)} AND trace_id = {trace:String}
-       AND run_id = toUUID('00000000-0000-0000-0000-000000000000')";
+       AND target = 'trace' AND has({spans:Array(String)}, span_id)";
 
-/// Another exporter's trace landed: each waiting score of a span placed
-/// written again under its run, of the run where the span is the run's own,
-/// and one of a span dropped taken back. A write that fails leaves them
-/// waiting, logged, for retention to take.
-pub async fn place_waiting(
+/// Another exporter's trace landed with agents nested under its own: each
+/// score given as the trace's on a nested agent's span, read as its span's,
+/// written again as a span's. A write that fails leaves them, logged.
+pub async fn demote(
     store: &crate::store::Store,
     project_id: &ProjectId,
     trace_id: &str,
-    placed: &[crate::store::SpanRow],
-    dropped: &[String],
+    nested: &[String],
     token: &str,
 ) {
+    if nested.is_empty() {
+        return;
+    }
     let projects = crate::store::Projects::one(project_id.clone());
-    let waiting: Vec<ScoreRow> = match store
-        .read(&projects, WAITING_SQL)
+    let own: Vec<ScoreRow> = match store
+        .read(&projects, OWN_SQL)
         .param("trace", trace_id)
+        .param("spans", nested)
         .fetch_all()
         .await
     {
         Ok(rows) => rows,
         Err(error) => {
             tracing::warn!(project_id = %project_id, kind = crate::store::Fault::of(&error).as_str(),
-                "scores: another exporter's waiting scores could not be read; they wait on");
+                "scores: a nested agent's scores could not be read; they stay the trace's");
             return;
         }
     };
     let now = Utc::now();
-    let moved: Vec<ScoreRow> = waiting
+    let moved: Vec<ScoreRow> = own
         .into_iter()
-        .filter_map(|score| {
-            if let Some(row) = placed.iter().find(|row| row.span_id == score.span_id) {
-                Some(ScoreRow {
-                    received_at: now,
-                    run_id: row.run_id,
-                    session_id: row.session_id.clone(),
-                    target: if row.kind == telmoni_shared::SpanKind::Run {
-                        ScoreTarget::Run
-                    } else {
-                        ScoreTarget::Span
-                    },
-                    ..score
-                })
-            } else {
-                dropped.contains(&score.span_id).then_some(ScoreRow {
-                    received_at: now,
-                    is_deleted: 1,
-                    ..score
-                })
-            }
+        .map(|score| ScoreRow {
+            received_at: now,
+            target: ScoreTarget::Span,
+            ..score
         })
         .collect();
     if let Err(error) = store
-        .insert_scores_once(&moved, &format!("{token}/placed-scores"))
+        .insert_scores_once(&moved, &format!("{token}/demoted-scores"))
         .await
     {
         tracing::warn!(project_id = %project_id, kind = crate::store::Fault::of(&error).as_str(),
-            "scores: another exporter's placed scores could not be written; they wait on");
+            "scores: a nested agent's scores could not be written again; they stay the trace's");
     }
 }
 
-/// Some runs' own scores, a row a run a name: their mean, how many, and a
+/// Some traces' own scores, a row a trace a name: their mean, how many, and a
 /// category's every value.
-const RUN_SUMMARIES_SQL: &str = "SELECT run_id, name, any(data_type) AS data_type,
+const TRACE_SUMMARIES_SQL: &str = "SELECT trace_id, name, any(data_type) AS data_type,
             avg(value) AS mean, count() AS n, arraySort(groupUniqArrayArray(categories)) AS categories
        FROM telemetry.scores FINAL
-      WHERE project_id IN {projects:Array(String)} AND has({runs:Array(UUID)}, run_id)
-        AND target = 'run'
-      GROUP BY run_id, name ORDER BY name";
+      WHERE project_id IN {projects:Array(String)} AND has({traces:Array(String)}, trace_id)
+        AND target = 'trace'
+      GROUP BY trace_id, name ORDER BY name";
 
 #[derive(Row, Deserialize)]
 struct SummaryRow {
-    #[serde(with = "clickhouse::serde::uuid")]
-    run_id: Uuid,
+    trace_id: String,
     name: String,
     #[serde(with = "text")]
     data_type: ScoreType,
@@ -478,36 +462,39 @@ impl From<SummaryRow> for Summary {
     }
 }
 
-/// Each of `runs`' own scores, summed by name.
+/// Each of `traces`' own scores, summed by name.
 ///
 /// # Errors
 ///
 /// ClickHouse did not answer, or refused the read.
-pub async fn of_runs(
+pub async fn of_traces(
     store: &crate::store::Store,
     projects: &crate::store::Projects,
-    runs: &[Uuid],
-) -> clickhouse::error::Result<std::collections::BTreeMap<Uuid, Vec<Summary>>> {
-    let mut by_run = std::collections::BTreeMap::<Uuid, Vec<Summary>>::new();
-    if runs.is_empty() {
-        return Ok(by_run);
+    traces: &[String],
+) -> clickhouse::error::Result<std::collections::BTreeMap<String, Vec<Summary>>> {
+    let mut by_trace = std::collections::BTreeMap::<String, Vec<Summary>>::new();
+    if traces.is_empty() {
+        return Ok(by_trace);
     }
     let rows: Vec<SummaryRow> = store
-        .read(projects, RUN_SUMMARIES_SQL)
-        .param("runs", runs)
+        .read(projects, TRACE_SUMMARIES_SQL)
+        .param("traces", traces)
         .fetch_all()
         .await?;
     for row in rows {
-        by_run.entry(row.run_id).or_default().push(row.into());
+        by_trace
+            .entry(row.trace_id.clone())
+            .or_default()
+            .push(row.into());
     }
-    Ok(by_run)
+    Ok(by_trace)
 }
 
-/// A run's scores, and its spans' and its session's, newest first, each
+/// A trace's scores, and its spans' and its session's, newest first, each
 /// once as given last; those taken back left out.
-pub const RUN_SQL: &str = "SELECT * FROM telemetry.scores FINAL
+pub const TRACE_SQL: &str = "SELECT * FROM telemetry.scores FINAL
      WHERE project_id IN {projects:Array(String)} AND is_deleted = 0
-       AND (run_id = {run:UUID} OR (target = 'session' AND session_id != ''
+       AND (trace_id = {trace:String} OR (target = 'session' AND session_id != ''
             AND session_id = {session:String}))
      ORDER BY received_at DESC
      LIMIT 1000";
@@ -569,14 +556,14 @@ mod tests {
     #[test]
     fn a_scores_id_is_one_a_scorer_a_name_a_target() {
         let project = ProjectId::new();
-        let run = TargetKey::Run(Uuid::nil());
+        let trace = TargetKey::Trace("ab".repeat(16));
         assert_eq!(
-            member_score_id(&project, &run, "helpful", "u1"),
-            member_score_id(&project, &run, "helpful", "u1")
+            member_score_id(&project, &trace, "helpful", "u1"),
+            member_score_id(&project, &trace, "helpful", "u1")
         );
         assert_ne!(
-            member_score_id(&project, &run, "helpful", "u1"),
-            member_score_id(&project, &run, "helpful", "u2")
+            member_score_id(&project, &trace, "helpful", "u1"),
+            member_score_id(&project, &trace, "helpful", "u2")
         );
         let event = |at, place| EventScore {
             judgement: Checked(judgement(ScoreType::Boolean)),

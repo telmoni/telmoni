@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::{RuleAggregation, SpanKind};
 
 /// What an alert measures: of each span of the kind it watches, of each
-/// run, or of the project's scores of one name; or how fast an agent's runs
-/// spend their objective's error budget. `[PUBLIC-API]`.
+/// trace, or of the project's scores of one name; or how fast an agent's
+/// traces spend their objective's error budget. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
@@ -19,20 +19,20 @@ pub enum RuleMeasure {
     Duration,
     /// Each span's input and output tokens, summed.
     Tokens,
-    /// Each run's model calls' cost, in US dollars, as they land.
+    /// Each trace's model calls' cost, in US dollars, as they land.
     Cost,
     /// Each score of the alert's name: a number's value, a yes or no's 1 or 0.
     Score,
-    /// How fast one agent's runs spend their objective's error budget: the
+    /// How fast one agent's traces spend their objective's error budget: the
     /// share that failed it, over the share it allows.
     Burn,
-    /// Each run's steps, counted as they land.
+    /// Each trace's steps, counted as they land.
     Steps,
-    /// The most times in a row each run called one tool, its tool calls in
+    /// The most times in a row each trace called one tool, its tool calls in
     /// the order they started: a loop.
     Repeats,
-    /// One for each run whose spans have landed and whose own has not, quiet
-    /// past the window: a stall.
+    /// One for each trace whose spans have landed and whose agent's own has
+    /// not, quiet past the window: a stall.
     Stalled,
 }
 
@@ -70,13 +70,14 @@ impl RuleMeasure {
     }
 
     /// Whether the measure is counted on spans of `kind`: tokens on model
-    /// calls alone, and what is read run by run, or from scores, on runs.
+    /// calls alone, and what is read trace by trace, or from scores, on the
+    /// agent's span.
     #[must_use]
     pub const fn measured_on(self, kind: SpanKind) -> bool {
         match self {
             Self::Tokens => matches!(kind, SpanKind::ModelCall),
             Self::Cost | Self::Score | Self::Burn | Self::Steps | Self::Repeats | Self::Stalled => {
-                matches!(kind, SpanKind::Run)
+                matches!(kind, SpanKind::Agent)
             }
             Self::Count | Self::Failures | Self::Duration => true,
         }

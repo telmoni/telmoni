@@ -30,7 +30,7 @@ vi.mock("@/lib/server/project-page", () => ({
 const BURN = {
   id: "7a1c0e52-0000-4000-8000-000000000009",
   name: "Support answers",
-  kind: "run",
+  kind: "agent",
   measure: "burn",
   aggregation: "avg",
   filters: { agent: ["support-bot"] },
@@ -81,7 +81,7 @@ beforeEach(() => {
       hour_burn: 15,
       six_hour_burn: 4.25,
       days: 30,
-      runs: 10_000,
+      traces: 10_000,
       missed: 25,
       budget_left: 0.75,
     },
@@ -94,9 +94,9 @@ describe("ObjectivesPage", () => {
     expect(screen.getByRole("button", { name: "New objective" })).toBeInTheDocument();
     expect(screen.queryByText("Slow calls")).toBeNull();
     const row = screen.getByRole("row", { name: /Support answers/ });
-    expect(row).toHaveTextContent("99% of support-bot's runs succeed over 30 days");
+    expect(row).toHaveTextContent("99% of support-bot's traces succeed over 30 days");
     expect(row).toHaveTextContent("75%");
-    expect(row).toHaveTextContent("25 of 10,000 runs missed, 30 days");
+    expect(row).toHaveTextContent("25 of 10,000 traces missed, 30 days");
     expect(row).toHaveTextContent("15×");
     expect(row).toHaveTextContent("4.25×");
     expect(row).toHaveTextContent("Gone in 2.0 days at this rate");

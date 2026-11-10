@@ -7,7 +7,7 @@ use common::{
     Failure, Harness, Outcome, attributes_of, field, in_child, is_child, keyed, load_fixture,
     mode_on, only, text,
 };
-use telmoni::{Config, DEFAULT_ENDPOINT, ModelCallOptions, RunOptions, Telmoni, VERSION};
+use telmoni::{Config, DEFAULT_ENDPOINT, ModelCallOptions, Telmoni, TraceOptions, VERSION};
 
 #[test]
 fn the_default_endpoint_is_the_machine_host() {
@@ -235,8 +235,8 @@ fn the_scrubbers_set_in_code_win_over_the_environment() -> Outcome {
                 },
                 std::iter::repeat_n(Ok(mode_on()), 2),
             )?;
-            let run = harness.telmoni.run("bot", RunOptions::default())?;
-            let call = run.model_call(
+            let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+            let call = trace.model_call(
                 "m",
                 ModelCallOptions {
                     input_messages: Some(message.as_str().into()),
@@ -244,7 +244,7 @@ fn the_scrubbers_set_in_code_win_over_the_environment() -> Outcome {
                 },
             )?;
             call.end();
-            run.end();
+            trace.end();
             harness.flush()?;
             let spans = harness.spans()?;
             Ok(text(
@@ -332,7 +332,7 @@ fn an_endpoint_variable_that_is_no_unicode_is_refused() -> Outcome {
         let harness = common::Harness::with(Config::from_env())?;
         harness
             .telmoni
-            .run("bot", telmoni::RunOptions::default())?
+            .trace("bot", telmoni::TraceOptions::default())?
             .end();
         harness.flush()?;
         harness.telmoni.shutdown();
@@ -373,7 +373,7 @@ fn every_endpoint_is_read_as_the_fixture_reads_it() -> Outcome {
             endpoint,
             "{given}, read twice"
         );
-        let (sent, warnings, _) = one_run(given)?;
+        let (sent, warnings, _) = one_trace(given)?;
         assert!(
             sent >= 1 && warnings.is_empty(),
             "{given}: {sent} sent, {warnings:?}"
@@ -388,7 +388,7 @@ fn every_endpoint_is_read_as_the_fixture_reads_it() -> Outcome {
             "cleartext" => "unencrypted HTTP",
             _ => "http:// or https://",
         };
-        let (sent, warnings, kinds) = one_run(given)?;
+        let (sent, warnings, kinds) = one_trace(given)?;
         assert_eq!(sent, 0, "{given} was sent to");
         assert!(
             warnings.len() == 1 && warnings.first().is_some_and(|text| text.contains(why)),
@@ -399,13 +399,13 @@ fn every_endpoint_is_read_as_the_fixture_reads_it() -> Outcome {
     Ok(())
 }
 
-/// One run on a client whose endpoint is `given`: the exports it sent, and its
-/// warnings and their kinds.
-fn one_run(given: &str) -> Result<(usize, Vec<String>, Vec<&'static str>), common::Failure> {
+/// One trace on a client whose endpoint is `given`: the exports it sent, and
+/// its warnings and their kinds.
+fn one_trace(given: &str) -> Result<(usize, Vec<String>, Vec<&'static str>), common::Failure> {
     let harness = common::Harness::with(Config::new(given, None, Some("telmoni_k".to_owned())))?;
     harness
         .telmoni
-        .run("bot", telmoni::RunOptions::default())?
+        .trace("bot", telmoni::TraceOptions::default())?
         .end();
     harness.flush()?;
     harness.telmoni.shutdown();
@@ -425,7 +425,7 @@ fn a_deployment_named_past_ingests_cap_is_left_off_with_one_warning() -> Outcome
         release: Some("r".repeat(128)),
         ..keyed()
     })?;
-    harness.telmoni.run("bot", RunOptions::default())?.end();
+    harness.telmoni.trace("bot", TraceOptions::default())?.end();
     harness.flush()?;
     let bodies = harness.transport.bodies()?;
     let body = bodies.first().ok_or("a body")?;

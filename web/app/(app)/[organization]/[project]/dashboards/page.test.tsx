@@ -52,14 +52,14 @@ const point = (spend: number) => ({
   at: "2026-11-02T00:00:00Z",
   spans: 3,
   failed: 0,
-  runs: 1,
-  failed_runs: 0,
+  traces: 1,
+  failed_traces: 0,
   input_tokens: 10,
   output_tokens: 5,
   cache_read_input_tokens: 0,
   cache_write_input_tokens: 0,
   spend,
-  run_duration_ms: { p50: 1, p95: 2, p99: 3 },
+  trace_duration_ms: { p50: 1, p95: 2, p99: 3 },
 });
 
 const rollups = (points: unknown[], truncated = false, days = 7) => ({
@@ -77,7 +77,7 @@ beforeEach(() => {
       {
         id: "a1",
         name: "Monthly budget",
-        kind: "run",
+        kind: "agent",
         measure: "cost",
         aggregation: "sum",
         window: "month",
@@ -88,7 +88,7 @@ beforeEach(() => {
       {
         id: "a3",
         name: "Unread budget",
-        kind: "run",
+        kind: "agent",
         measure: "cost",
         aggregation: "sum",
         window: "month",
@@ -99,7 +99,7 @@ beforeEach(() => {
       {
         id: "a4",
         name: "Paused budget",
-        kind: "run",
+        kind: "agent",
         measure: "cost",
         aggregation: "sum",
         window: "month",
@@ -141,7 +141,7 @@ describe("DashboardsPage", () => {
     fetchRollups.mockResolvedValue(rollups([], false, 30));
     render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "90" }) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
-    expect(screen.getByText("No run has landed in the last 30 days.")).toBeInTheDocument();
+    expect(screen.getByText("No trace has landed in the last 30 days.")).toBeInTheDocument();
     expect(screen.queryByTestId("charts")).toBeNull();
   });
 

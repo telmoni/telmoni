@@ -1,6 +1,6 @@
 //! The Rust SDK for Telmoni, privacy-first, open-source monitoring for AI
-//! agents: an agent's runs, steps, model calls, tool calls and retrievals as
-//! OpenTelemetry spans, sent to Telmoni and nowhere else. The client takes
+//! agents: an agent's traces, steps, model calls, tool calls and retrievals
+//! as OpenTelemetry spans, sent to Telmoni and nowhere else. The client takes
 //! prompts, completions and tool payloads off every span before it leaves the
 //! process unless you ask and the project allows.
 //!
@@ -11,16 +11,17 @@
 //!
 //! The client owns a tracer provider of its own, built part by part so no
 //! `OTEL_*` variable reaches it, and runs beside whatever OpenTelemetry the
-//! application has: a run opened while an application span is current joins
-//! that span's trace, an application span opened under [`Run::attach`] or
-//! [`Run::context`] nests under the run, and each side exports its own spans
-//! only. Both take the application on this crate's `opentelemetry` minor,
-//! re-exported as [`opentelemetry`]: cargo builds each 0.x minor as a crate of
-//! its own, with a current context of its own.
+//! application has: a trace opened while an application span is current is a
+//! trace of its own, linked to that span, an application span opened under
+//! [`Trace::attach`] or [`Trace::context`] nests under the agent's span, and
+//! each side exports its own spans only. Both take the application on this
+//! crate's `opentelemetry` minor, re-exported as [`opentelemetry`]: cargo
+//! builds each 0.x minor as a crate of its own, with a current context of its
+//! own.
 //!
 //! ```no_run
 //! use telmoni::{
-//!     Config, ModelCallOptions, Reply, RetrievalOptions, RunOptions, Telmoni, ToolCallOptions, Usage,
+//!     Config, ModelCallOptions, Reply, RetrievalOptions, Telmoni, ToolCallOptions, TraceOptions, Usage,
 //! };
 //!
 //! # fn main() -> Result<(), telmoni::Error> {
@@ -28,16 +29,16 @@
 //! // TELMONI_CAPTURE_CONTENT, TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII.
 //! let telmoni = Telmoni::new(Config::from_env());
 //!
-//! let run = telmoni.run(
+//! let trace = telmoni.trace(
 //!     "support-bot",
-//!     RunOptions {
+//!     TraceOptions {
 //!         user_id: Some("user_42".into()),
 //!         max_spend: Some(0.50),
-//!         ..RunOptions::default()
+//!         ..TraceOptions::default()
 //!     },
 //! )?;
 //! {
-//!     let step = run.step("plan")?;
+//!     let step = trace.step("plan")?;
 //!     let call = step.model_call(
 //!         "gpt-4o-mini",
 //!         ModelCallOptions {
@@ -55,10 +56,10 @@
 //!         ..Reply::default()
 //!     });
 //! }
-//! let tool = run.tool_call("search", ToolCallOptions::default())?;
+//! let tool = trace.tool_call("search", ToolCallOptions::default())?;
 //! tool.returned(serde_json::json!({ "results": 3 }));
 //! drop(tool);
-//! let found = run.retrieval(
+//! let found = trace.retrieval(
 //!     "kb-articles",
 //!     RetrievalOptions {
 //!         query: Some("refunds".into()),
@@ -68,7 +69,7 @@
 //! )?;
 //! found.returned(&[serde_json::json!({ "id": "kb-112", "score": 0.91 })]);
 //! drop(found);
-//! run.end();
+//! trace.end();
 //!
 //! telmoni.shutdown();
 //! # Ok(())
@@ -79,13 +80,14 @@
 //! methods take a closure instead and return its value, or the [`Error`] that
 //! kept their handle from opening; their `try_` forms, for a closure whose
 //! error converts from [`Error`], mark an `Err` on the span with the error
-//! type's name and return it unchanged. A step, a model call, a tool call or a retrieval opened once its run reached
-//! a cap it was opened with — `max_steps`, or `max_spend` in US dollars,
-//! counted in this process — is [`Error::CapExceeded`], and opens nothing.
+//! type's name and return it unchanged. A step, a model call, a tool call or
+//! a retrieval opened once its trace reached a cap it was opened with —
+//! `max_steps`, or `max_spend` in US dollars, counted in this process — is
+//! [`Error::CapExceeded`], and opens nothing.
 //!
-//! A run that has already ended — a job's own log, a hook that runs after the
-//! turn it reports — is sent whole from its [`RunRecord`] by
-//! [`Telmoni::record_run`].
+//! A trace that has already ended — a job's own log, a hook that runs after
+//! the turn it reports — is sent whole from its [`TraceRecord`] by
+//! [`Telmoni::record_trace`].
 
 #![warn(missing_docs)]
 
@@ -99,10 +101,10 @@ mod ids;
 mod processor;
 mod propagation;
 mod records;
-mod runs;
 mod sampler;
 mod scores;
 mod scrub;
+mod traces;
 pub mod transport;
 mod warnings;
 
@@ -112,16 +114,19 @@ pub use error::{Cap, Error, Text};
 pub use exporter::ContentMode;
 pub use processor::Batching;
 pub use propagation::Carrier;
-pub use records::{CallRecord, ModelCallRecord, RecordItem, RunRecord, StepRecord, ToolCallRecord};
-pub use runs::{
-    Content, ModelCall, ModelCallOptions, Reply, Retrieval, RetrievalOptions, Run, RunOptions,
-    RunReply, Step, ToolCall, ToolCallOptions, Usage,
+pub use records::{
+    CallRecord, ModelCallRecord, RecordItem, StepRecord, ToolCallRecord, TraceRecord,
 };
 pub use scores::{Score, ScoreTarget};
+pub use traces::{
+    Content, ModelCall, ModelCallOptions, Reply, Retrieval, RetrievalOptions, Step, ToolCall,
+    ToolCallOptions, Trace, TraceOptions, TraceReply, Usage,
+};
 pub use warnings::{Warning, WarningKind};
 
-/// The OpenTelemetry a run joins and hands its context to: nest your own spans
-/// under a run through it, or through the same `opentelemetry` minor.
+/// The OpenTelemetry a trace is linked to and hands its context to: nest your
+/// own spans under a trace through it, or through the same `opentelemetry`
+/// minor.
 pub use opentelemetry;
 /// Its SDK, whose `ShouldSample` [`Config::sampler`] takes.
 pub use opentelemetry_sdk;

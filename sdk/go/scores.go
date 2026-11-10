@@ -50,10 +50,10 @@ type ScoreOptions struct {
 	Version string
 }
 
-// ScoreTarget is what a late score scores: a run by its id, one of its spans
-// by the run's id and the span's, or a session by its id.
+// ScoreTarget is what a late score scores: a trace by its id, one of its spans
+// by the trace's id and the span's, or a session by its id.
 type ScoreTarget struct {
-	RunID     string
+	TraceID   string
 	SpanID    string
 	SessionID string
 }
@@ -73,7 +73,7 @@ const (
 	whyVersion  = "its version is up to 64 characters"
 	whyRange    = "a range is a number score's alone"
 	whyValue    = "its value is a number, a yes or no, or a category"
-	whyTarget   = "it names a run, a run and one of its spans by 16 hex digits, or a session of up to 200 characters"
+	whyTarget   = "it names a trace by 32 hex digits, a trace and one of its spans by 16, or a session of up to 200 characters"
 	whyEnded    = "its span had ended; send it with the client's score, naming the span"
 	whyFull     = "its span holds 16 scores already"
 )
@@ -147,7 +147,7 @@ func (s score) attributes() []attribute.KeyValue {
 // scoreItem is one score of a POST to scoresPath; an absent key is left out.
 type scoreItem struct {
 	ID         string   `json:"id"`
-	RunID      string   `json:"run_id,omitempty"`
+	TraceID    string   `json:"trace_id,omitempty"`
 	SpanID     string   `json:"span_id,omitempty"`
 	SessionID  string   `json:"session_id,omitempty"`
 	Name       string   `json:"name"`
@@ -161,7 +161,7 @@ type scoreItem struct {
 
 func (s score) item(target ScoreTarget) scoreItem {
 	// A fresh id each call, so a retry replaces itself.
-	item := scoreItem{ID: newUUID(), RunID: target.RunID, SpanID: target.SpanID, SessionID: target.SessionID, Name: s.name, Version: s.version}
+	item := scoreItem{ID: newUUID(), TraceID: target.TraceID, SpanID: target.SpanID, SessionID: target.SessionID, Name: s.name, Version: s.version}
 	switch s.kind {
 	case scoreCategory:
 		item.DataType, item.Categories = "category", []string{s.label}
@@ -177,20 +177,20 @@ func (s score) item(target ScoreTarget) scoreItem {
 }
 
 // checkTarget is the target as sent, its ids lowercase and its session
-// trimmed; false for anything but a run, a run's span or a session.
+// trimmed; false for anything but a trace, a trace's span or a session.
 func checkTarget(t ScoreTarget) (ScoreTarget, bool) {
 	if t.SessionID != "" {
 		session := strings.TrimSpace(t.SessionID)
-		if t.RunID != "" || t.SpanID != "" || session == "" || utf8.RuneCountInString(session) > sessionIDMax {
+		if t.TraceID != "" || t.SpanID != "" || session == "" || utf8.RuneCountInString(session) > sessionIDMax {
 			return t, false
 		}
 		return ScoreTarget{SessionID: session}, true
 	}
-	run, ok := parseUUID(t.RunID)
-	if !ok || run == [16]byte{} {
+	traceID, ok := parseTraceID(t.TraceID)
+	if !ok {
 		return t, false
 	}
-	out := ScoreTarget{RunID: formatUUID(run)}
+	out := ScoreTarget{TraceID: traceID.String()}
 	if t.SpanID != "" {
 		if _, err := hex.DecodeString(t.SpanID); err != nil || len(t.SpanID) != 16 {
 			return t, false
@@ -205,8 +205,8 @@ func (c *Client) refuseScore(why string) {
 	c.exporter.warnOnce("score:"+why, WarningInput, "telmoni: a score was not sent: "+why)
 }
 
-// Score sends a score of a run, one of its spans or a session that may have
-// ended, no run needed. It travels the export queue as a span of its own,
+// Score sends a score of a trace, one of its spans or a session that may have
+// ended, no trace needed. It travels the export queue as a span of its own,
 // which the exporter posts to /v1/scores instead; a score or target the rules
 // refuse is not sent, with one warning.
 func (c *Client) Score(target ScoreTarget, name string, value ScoreValue, opts ScoreOptions) {
@@ -224,7 +224,7 @@ func (c *Client) Score(target ScoreTarget, name string, value ScoreValue, opts S
 		c.refuseScore(why)
 		return
 	}
-	// From the root, so no run's trace or attributes reach it.
+	// From the root, so no trace or its attributes reach it.
 	_, carrier := c.tracer.Start(context.Background(), scoreSpanName,
 		trace.WithAttributes(attribute.String(attrScoreSent, asJSON(s.item(target)))))
 	carrier.End()
@@ -263,16 +263,16 @@ func (h *handle) spanID() string {
 	return h.span.SpanContext().SpanID().String()
 }
 
-// Score scores the run on its span, as the client's Score would, timed now;
-// once the run ended, send it with the client's Score instead.
-func (r *Run) Score(name string, value ScoreValue, opts ScoreOptions) {
+// Score scores the trace on the agent's span, as the client's Score would,
+// timed now; once the trace ended, send it with the client's Score instead.
+func (r *Trace) Score(name string, value ScoreValue, opts ScoreOptions) {
 	if r == nil {
 		return
 	}
 	r.handle.score(name, value, opts)
 }
 
-// Score scores the step as its run's Score would.
+// Score scores the step as its trace's Score would.
 func (s *Step) Score(name string, value ScoreValue, opts ScoreOptions) {
 	if s == nil {
 		return
@@ -280,7 +280,7 @@ func (s *Step) Score(name string, value ScoreValue, opts ScoreOptions) {
 	s.handle.score(name, value, opts)
 }
 
-// Score scores the call as its run's Score would.
+// Score scores the call as its trace's Score would.
 func (m *ModelCall) Score(name string, value ScoreValue, opts ScoreOptions) {
 	if m == nil {
 		return
@@ -288,7 +288,7 @@ func (m *ModelCall) Score(name string, value ScoreValue, opts ScoreOptions) {
 	m.handle.score(name, value, opts)
 }
 
-// Score scores the call as its run's Score would.
+// Score scores the call as its trace's Score would.
 func (t *ToolCall) Score(name string, value ScoreValue, opts ScoreOptions) {
 	if t == nil {
 		return
@@ -296,7 +296,7 @@ func (t *ToolCall) Score(name string, value ScoreValue, opts ScoreOptions) {
 	t.handle.score(name, value, opts)
 }
 
-// Score scores the retrieval as its run's Score would.
+// Score scores the retrieval as its trace's Score would.
 func (r *Retrieval) Score(name string, value ScoreValue, opts ScoreOptions) {
 	if r == nil {
 		return
@@ -304,16 +304,16 @@ func (r *Retrieval) Score(name string, value ScoreValue, opts ScoreOptions) {
 	r.handle.score(name, value, opts)
 }
 
-// SpanID is the run's span's id, 16 lowercase hex digits, which a late score
-// names; "" for a handle that does nothing.
-func (r *Run) SpanID() string {
+// SpanID is the agent's span's id, 16 lowercase hex digits, which a late
+// score names; "" for a handle that does nothing.
+func (r *Trace) SpanID() string {
 	if r == nil {
 		return ""
 	}
 	return r.handle.spanID()
 }
 
-// SpanID is the step's span's id, as its run's SpanID is.
+// SpanID is the step's span's id, as its trace's SpanID is.
 func (s *Step) SpanID() string {
 	if s == nil {
 		return ""
@@ -321,7 +321,7 @@ func (s *Step) SpanID() string {
 	return s.handle.spanID()
 }
 
-// SpanID is the call's span's id, as its run's SpanID is.
+// SpanID is the call's span's id, as its trace's SpanID is.
 func (m *ModelCall) SpanID() string {
 	if m == nil {
 		return ""
@@ -329,7 +329,7 @@ func (m *ModelCall) SpanID() string {
 	return m.handle.spanID()
 }
 
-// SpanID is the call's span's id, as its run's SpanID is.
+// SpanID is the call's span's id, as its trace's SpanID is.
 func (t *ToolCall) SpanID() string {
 	if t == nil {
 		return ""
@@ -337,7 +337,7 @@ func (t *ToolCall) SpanID() string {
 	return t.handle.spanID()
 }
 
-// SpanID is the retrieval's span's id, as its run's SpanID is.
+// SpanID is the retrieval's span's id, as its trace's SpanID is.
 func (r *Retrieval) SpanID() string {
 	if r == nil {
 		return ""

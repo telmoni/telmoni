@@ -9,7 +9,7 @@ import { useToastAction } from "@/lib/use-action";
 
 /** A project admin's Delete on a trace's page: confirmed, then the list,
  *  where the trace no longer shows. */
-export function DeleteTrace({ projectId, runId }: { projectId: string; runId: string }) {
+export function DeleteTrace({ projectId, traceId }: { projectId: string; traceId: string }) {
   const { pending, run } = useToastAction();
   const [open, setOpen] = useState(false);
 
@@ -28,7 +28,7 @@ export function DeleteTrace({ projectId, runId }: { projectId: string; runId: st
       description="Its spans and any content they kept are gone from every page at once. The deletion is recorded in the audit log, and a receipt is mailed to you. There is no undo."
       confirmLabel="Delete trace"
       destructive
-      onConfirm={() => run(() => deleteTraceAction(projectId, runId))}
+      onConfirm={() => run(() => deleteTraceAction(projectId, traceId))}
     />
   );
 }

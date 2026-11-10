@@ -539,7 +539,7 @@ pub enum Receipt<'a> {
     /// One trace of a project, and how many of its spans went.
     Trace {
         project_id: &'a ProjectId,
-        run_id: Uuid,
+        trace_id: &'a str,
         spans: u64,
     },
     /// One end user of a project, and how many of their traces went.
@@ -596,8 +596,8 @@ pub struct Notice<'a> {
 pub struct IncidentNotice<'a> {
     /// The incident.
     pub id: Uuid,
-    /// The run the notice shows, on the console; none where it shows none.
-    pub run_url: Option<&'a str>,
+    /// The trace the notice shows, on the console; none where it shows none.
+    pub trace_url: Option<&'a str>,
 }
 
 /// A word to an organization's owner and admins on its own feed, never a

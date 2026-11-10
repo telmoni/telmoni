@@ -8,7 +8,6 @@ use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::common::v1::{KeyValue, any_value::Value};
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{Span, status::StatusCode};
-use uuid::Uuid;
 
 use telmoni_shared::digest::hex_lower as hex;
 use telmoni_shared::{ProjectId, SpanKind, SpanStatus};
@@ -261,27 +260,24 @@ pub fn map(
     }
     fields.read_failure(span, &span_id, dropped);
 
-    // Without both, a span from another exporter: held under the nil run until
-    // its trace's tree says which run it is of ([`crate::foreign`]).
-    let (run_id, agent) = match (fields.run_id, fields.agent.take()) {
-        (Some(run_id), Some(agent)) => (run_id, agent),
-        _ => (Uuid::nil(), String::new()),
-    };
+    // Without it, a span from another exporter: held, its agent empty, until
+    // its trace's tree names the agent it sits under ([`crate::foreign`]).
+    let agent = fields.agent.take().unwrap_or_default();
     let kind = match fields
         .operation
         .as_deref()
         .and_then(contract::kind_of_operation)
     {
         Some(kind) => kind,
-        None if context.scope == contract::SCOPE && span.name == contract::RUN_START => {
-            SpanKind::RunStart
+        None if context.scope == contract::SCOPE && span.name == contract::TRACE_START => {
+            SpanKind::TraceStart
         }
         None if context.scope == contract::SCOPE => SpanKind::Step,
         None => SpanKind::Span,
     };
     let span_name = || without_nul(&span.name).into_owned();
     let name = match kind {
-        SpanKind::Run => fields
+        SpanKind::Agent => fields
             .agent_name
             .take()
             .or_else(|| fields.workflow_name.take())
@@ -294,7 +290,7 @@ pub fn map(
             }),
         SpanKind::ToolCall => fields.tool_name.take().unwrap_or_else(span_name),
         SpanKind::Retrieval => fields.source().unwrap_or_else(span_name),
-        SpanKind::RunStart | SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => span_name(),
+        SpanKind::TraceStart | SpanKind::Step | SpanKind::ModelCall | SpanKind::Span => span_name(),
     };
     if name.is_empty() {
         return Err(refuse(Refusal::Invalid("name")));
@@ -333,7 +329,6 @@ pub fn map(
         project_id: context.project_id.clone(),
         received_at: context.received_at,
         units: 0,
-        run_id,
         agent,
         trace_id: hex(&span.trace_id),
         span_id,
@@ -370,11 +365,11 @@ pub fn map(
 
 /// What a row counts against its plan: one unit per started KiB of its text
 /// as kept, and [`SPAN_FIXED_BYTES`] for its ids, times and counts — the ids
-/// counted there alone, never again as text. A run's opening costs none: its
-/// run's own span is what the run costs.
+/// counted there alone, never again as text. A trace's opening costs none:
+/// the agent's own span is what the trace costs.
 #[must_use]
 pub fn units_of(row: &SpanRow) -> u32 {
-    if row.kind == SpanKind::RunStart {
+    if row.kind == SpanKind::TraceStart {
         return 0;
     }
     let text = [
@@ -402,7 +397,6 @@ pub fn units_of(row: &SpanRow) -> u32 {
 /// The fields read off a span's attributes, before they are a row.
 #[derive(Default)]
 struct Fields {
-    run_id: Option<Uuid>,
     agent: Option<String>,
     operation: Option<String>,
     agent_name: Option<String>,
@@ -451,13 +445,6 @@ impl Fields {
             return Ok(());
         }
         match key {
-            contract::RUN_ID => {
-                self.run_id = Some(
-                    text(value)
-                        .and_then(|t| Uuid::parse_str(&t).ok())
-                        .ok_or(Refusal::Invalid(contract::RUN_ID))?,
-                );
-            }
             contract::AGENT => {
                 self.agent = Some(bounded_text(value, contract::AGENT_MAX, contract::AGENT)?);
             }
@@ -924,9 +911,7 @@ mod tests {
         Value::StringValue(text.into())
     }
 
-    const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
-
-    /// A model call inside a run, as our SDK sends one.
+    /// A model call inside a trace, as our SDK sends one.
     fn call() -> Span {
         Span {
             trace_id: vec![0x4b; 16],
@@ -936,7 +921,6 @@ mod tests {
             start_time_unix_nano: 1_760_000_000_000_000_000,
             end_time_unix_nano: 1_760_000_001_500_000_000,
             attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s("chat")),
                 kv(contract::RESPONSE_MODEL, s("claude-sonnet-5-5")),
@@ -1027,7 +1011,7 @@ mod tests {
         };
         let (row, _) = map(&call(), &on, &mut Drops::default()).expect("kept");
         for sent in [
-            contract::RUN_ID,
+            contract::AGENT,
             "gen_ai.usage.cache_creation.input_tokens",
             contract::TAG_FAMILY,
             "gen_ai.input.messages",
@@ -1061,7 +1045,6 @@ mod tests {
 
         assert_eq!(row.kind, SpanKind::ModelCall);
         assert_eq!(row.name, "chat claude-sonnet-5-5");
-        assert_eq!(row.run_id.to_string(), RUN);
         assert_eq!(row.agent, "nightly-report");
         assert_eq!(row.trace_id, "4b".repeat(16));
         assert_eq!(row.span_id, "0f".repeat(8));
@@ -1206,15 +1189,14 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_named_by_its_agent() {
+    fn an_agents_span_is_named_by_its_agent() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let mut dropped = Drops::default();
-        let run = Span {
+        let agent = Span {
             name: "invoke_agent".into(),
             parent_span_id: Vec::new(),
             attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s("invoke_agent")),
                 kv(contract::CANCELLED, Value::BoolValue(true)),
@@ -1223,8 +1205,8 @@ mod tests {
             events: Vec::new(),
             ..call()
         };
-        let (row, _) = map(&run, &context(&project, &[], &keep), &mut dropped).expect("kept");
-        assert_eq!(row.kind, SpanKind::Run);
+        let (row, _) = map(&agent, &context(&project, &[], &keep), &mut dropped).expect("kept");
+        assert_eq!(row.kind, SpanKind::Agent);
         assert_eq!(
             row.name, "nightly-report",
             "no gen_ai.agent.name: the agent's"
@@ -1239,10 +1221,7 @@ mod tests {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let plain = Span {
-            attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
-                kv(contract::AGENT, s("nightly-report")),
-            ],
+            attributes: vec![kv(contract::AGENT, s("nightly-report"))],
             ..call()
         };
         let ours = context(&project, &[], &keep);
@@ -1265,7 +1244,6 @@ mod tests {
         let on = context(&project, &[], &keep);
         let span = |operation: &str, name: &str, ids: &[(&str, &str)]| {
             let mut attributes = vec![
-                kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s(operation)),
             ];
@@ -1331,17 +1309,17 @@ mod tests {
         let refused = map(&conventional, &on, &mut Drops::default()).unwrap_err();
         assert_eq!(refused.reason, Refusal::OverCap("name"));
         // On an agent's span, a data source is an attribute alone.
-        let run = row(&span(
+        let agent = row(&span(
             "invoke_agent",
             "invoke_agent",
             &[(contract::DATA_SOURCE_ID, "docs-index")],
         ));
         assert_eq!(
-            (run.kind, run.name.as_str()),
-            (SpanKind::Run, "nightly-report")
+            (agent.kind, agent.name.as_str()),
+            (SpanKind::Agent, "nightly-report")
         );
         let attribute = (contract::DATA_SOURCE_ID.to_owned(), "docs-index".to_owned());
-        assert!(run.attributes.contains(&attribute));
+        assert!(agent.attributes.contains(&attribute));
         let theirs = Context {
             scope: "opentelemetry.instrumentation.langchain",
             ..context(&project, &[], &keep)
@@ -1351,10 +1329,10 @@ mod tests {
         assert_eq!(planned.kind, SpanKind::Step, "from any exporter");
     }
 
-    /// A span with no run is another exporter's: kept under the nil run, its
-    /// operation naming its kind, for its trace's tree to place.
+    /// A span naming no agent is another exporter's: kept with its agent
+    /// empty, its operation naming its kind, for its trace's tree to place.
     #[test]
-    fn a_span_outside_a_run_is_held_under_the_nil_run() {
+    fn a_span_naming_no_agent_is_held_with_it_empty() {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let foreign = Span {
@@ -1367,7 +1345,6 @@ mod tests {
             &mut Drops::default(),
         )
         .expect("held");
-        assert!(row.run_id.is_nil());
         assert_eq!(row.agent, "");
         assert_eq!(row.kind, SpanKind::ModelCall);
         assert_eq!(row.span_id, "0f".repeat(8));
@@ -1378,11 +1355,7 @@ mod tests {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let with = |key: &str, value: Value| Span {
-            attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
-                kv(contract::AGENT, s("nightly-report")),
-                kv(key, value),
-            ],
+            attributes: vec![kv(contract::AGENT, s("nightly-report")), kv(key, value)],
             ..call()
         };
         for (key, value, expected) in [
@@ -1451,14 +1424,6 @@ mod tests {
             .unwrap_err();
             assert_eq!(refused.reason, expected, "{key}");
         }
-        let bad_run = with(contract::RUN_ID, s("not-a-uuid"));
-        let refused = map(
-            &bad_run,
-            &context(&project, &[], &keep),
-            &mut Drops::default(),
-        )
-        .unwrap_err();
-        assert_eq!(refused.reason, Refusal::Invalid(contract::RUN_ID));
         let long_name = Span {
             name: "n".repeat(contract::NAME_MAX + 1),
             ..with(contract::OPERATION, s("chat"))
@@ -1474,7 +1439,6 @@ mod tests {
         let named_by_both = Span {
             name: format!("generate_content {widest_model}"),
             attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s("generate_content")),
                 kv(contract::REQUEST_MODEL, s(&widest_model)),
@@ -1519,7 +1483,6 @@ mod tests {
         let keep = |id: &str| id.to_owned();
         let costing = |value: Value| Span {
             attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly-report")),
                 kv(contract::OPERATION, s("chat")),
                 kv(contract::COST, value),
@@ -1546,7 +1509,6 @@ mod tests {
         let (unreported, _) = map(
             &Span {
                 attributes: vec![
-                    kv(contract::RUN_ID, s(RUN)),
                     kv(contract::AGENT, s("nightly-report")),
                     kv(contract::OPERATION, s("chat")),
                 ],
@@ -1564,7 +1526,6 @@ mod tests {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let mut attributes = vec![
-            kv(contract::RUN_ID, s(RUN)),
             kv(contract::AGENT, s("nightly-report")),
             kv("telmoni.tag.long", s(&"v".repeat(257))),
             kv("telmoni.tag.", s("nameless")),
@@ -1620,7 +1581,6 @@ mod tests {
         let span = Span {
             name: "chat\0 claude".into(),
             attributes: vec![
-                kv(contract::RUN_ID, s(RUN)),
                 kv(contract::AGENT, s("nightly\0-report")),
                 kv(contract::OPERATION, s("chat")),
                 kv(contract::RESPONSE_MODEL, s("claude\0-sonnet")),

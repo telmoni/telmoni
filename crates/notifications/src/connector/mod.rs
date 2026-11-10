@@ -103,8 +103,8 @@ pub struct EventIncident<'a> {
     /// The project it is of, which a press is scoped to.
     pub project_id: &'a ProjectId,
     pub id: Uuid,
-    /// The run the notice shows, on the console.
-    pub run_url: Option<&'a str>,
+    /// The trace the notice shows, on the console.
+    pub trace_url: Option<&'a str>,
 }
 
 /// Cut `s` to at most `max` bytes here, rather than have a vendor refuse it

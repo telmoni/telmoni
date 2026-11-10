@@ -110,7 +110,7 @@ fn alert(name: &str) -> Value {
 fn objective(name: &str) -> Value {
     json!({
         "name": name,
-        "kind": "run",
+        "kind": "agent",
         "measure": "burn",
         "aggregation": "avg",
         "filters": { "agent": ["nightly-report"] },

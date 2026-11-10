@@ -1,9 +1,9 @@
 ---
 title: "Scores"
-description: "Scores on a run, a span or a session: from your code, through an SDK, OpenTelemetry's evaluation event or the API, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace and in the trace list's Scores column."
+description: "Scores on a trace, a span or a session: from your code, through an SDK, OpenTelemetry's evaluation event or the API, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace and in the trace list's Scores column."
 ---
 
-A **score** judges a run, one of its spans or a session: a name, 1 to 64
+A **score** judges a trace, one of its spans or a session: a name, 1 to 64
 characters, and a value of one of three types.
 
 | Type | Value |
@@ -23,9 +23,9 @@ an end user erased, a project deleted, or its days past retention.
   span is open and on the client once it has ended
   ([Scores](/docs/api/sdks#scores) on the SDK page). Underneath, a score of a
   span still open is OpenTelemetry's `gen_ai.evaluation.result` event on the
-  span it judges, the run's where the event is on the run's own span
+  span it judges, the trace's where the event is on the agent's own span
   ([Scores](/docs/api/ingest#scores) on the ingest page), which any exporter
-  sends, another exporter's spans' scores landing with their run; and one of
+  sends, another exporter's spans' scores landing with their trace; and one of
   something already ended, a session's among them, goes to
   [`POST /v1/scores`](/docs/api/reference#post-v1scores), under its own id so
   a retry keeps it once.
@@ -42,28 +42,28 @@ A member may say why, in a **Comment** of up to 4,000 characters. A comment
 is content, unlike its score: it is kept only on a project
 whose [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
 is on — a member's is refused on one that keeps none — sealed under the
-project's key with the run's own content, and opened only with it, so a
-trace's page shows it, from the score's badge, where it shows the run's
+project's key with the trace's own content, and opened only with it, so a
+trace's page shows it, from the score's badge, where it shows the trace's
 content, and the read is filed as that content's is; a trace's download
-carries it with the run's content.
+carries it with the trace's content.
 Scoring again replaces it, a score given again without one takes it back, and
-it goes with its score and its run, and past the project's retention from
-when it was given. A session's score takes none: no run of the session holds
+it goes with its score and its trace, and past the project's retention from
+when it was given. A session's score takes none: no trace of the session holds
 it; nor does one given once the organization holds the content its plan does.
 
 ## Where they show
 
-- **A trace's page and its view beside the list**: every score of the run and of its spans under the
+- **A trace's page and its view beside the list**: every score of the trace and of its spans under the
   trace's line, a span's named by its span, each saying who gave it, its
   comment opened from it; and a span's beside the span when it is chosen.
 - **The trace list**: the **Scores** column, on in the default columns, gives
-  each run's own scores by name, a number's mean where there are several, a
+  each trace's own scores by name, a number's mean where there are several, a
   yes or no's share of yeses, and a category's values. **Score** in the
-  filters, or `?score=` and a name, narrows the list to runs carrying that
+  filters, or `?score=` and a name, narrows the list to traces carrying that
   score, an optional least and most (`score_min`, `score_max`) bounding its
-  value; a run passes where any score of the name falls within them. Narrowed
+  value; a trace passes where any score of the name falls within them. Narrowed
   to a score, the list's charts add its mean over the window, each bar the
-  scores given in it on the runs the list admits.
+  scores given in it on the traces the list admits.
 - **An alert**: a [score alert](/docs/monitoring/alerts#making-an-alert)
   watches a score's average, a percentile, its highest or how many over a
   window, or its change from the window before, so a drop opens an incident.

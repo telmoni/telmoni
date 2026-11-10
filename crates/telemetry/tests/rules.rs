@@ -206,7 +206,7 @@ async fn an_alert_that_reads_two_ways_is_refused(pool: PgPool) {
         assert!(status.is_client_error(), "{field}: {status} {refused}");
     }
     let cap = json!({
-        "name": "Cost cap", "kind": "run", "measure": "cost", "aggregation": "max",
+        "name": "Cost cap", "kind": "agent", "measure": "cost", "aggregation": "max",
         "window": "day", "operator": "gt", "alert_threshold": 5
     });
     for (field, value) in [
@@ -884,9 +884,8 @@ async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: 
             project_id: project.clone(),
             received_at: at,
             score_id: id,
-            target: telmoni_shared::ScoreTarget::Run,
-            run_id: Uuid::new_v4(),
-            trace_id: String::new(),
+            target: telmoni_shared::ScoreTarget::Trace,
+            trace_id: Uuid::new_v4().simple().to_string(),
             span_id: String::new(),
             session_id: String::new(),
             name: name.into(),
@@ -927,14 +926,14 @@ async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: 
         .await
         .expect("the scores are kept");
     for body in [
-        json!({ "name": "Relevance", "kind": "run", "measure": "score", "score_name": "relevance",
+        json!({ "name": "Relevance", "kind": "agent", "measure": "score", "score_name": "relevance",
             "aggregation": "avg", "window": "day", "operator": "lt", "alert_threshold": 0.3,
             "missing_data": "no_data" }),
-        json!({ "name": "Relevance dropped", "kind": "run", "measure": "score",
+        json!({ "name": "Relevance dropped", "kind": "agent", "measure": "score",
             "score_name": "relevance", "aggregation": "avg", "window": "day",
             "baseline": "previous", "operator": "lt", "alert_threshold": -20,
             "warning_threshold": -10, "missing_data": "no_data" }),
-        json!({ "name": "Gone quiet", "kind": "run", "measure": "score", "score_name": "gone",
+        json!({ "name": "Gone quiet", "kind": "agent", "measure": "score", "score_name": "gone",
             "aggregation": "count", "window": "day", "baseline": "previous", "operator": "lt",
             "alert_threshold": -50 }),
     ] {
@@ -982,15 +981,15 @@ async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: 
         "a count that stopped fell by all of it: {quiet}"
     );
     assert_eq!(quiet["severity"], "alert");
-    // Its notice showed the run scored lowest in the window.
-    let shown: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT unnest(i.runs) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
+    // Its notice showed the trace scored lowest in the window.
+    let shown: Vec<String> = sqlx::query_scalar(
+        "SELECT unnest(i.traces) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
           WHERE r.name = 'Relevance dropped'",
     )
         .fetch_all(&pool)
         .await
-        .expect("the incident's runs");
-    assert_eq!(shown, [lowest.run_id]);
+        .expect("the incident's traces");
+    assert_eq!(shown, std::slice::from_ref(&lowest.trace_id));
 }
 
 /// A span of `run`'s, of `agent`, received at `at`.
@@ -1003,7 +1002,7 @@ fn of_run(
     at: DateTime<Utc>,
 ) -> telmoni_telemetry::store::SpanRow {
     telmoni_telemetry::store::SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         agent: agent.into(),
         span_id: format!("{:016x}", at.timestamp_micros()),
         ..common::received(project, kind, name, 100, at)
@@ -1013,7 +1012,7 @@ fn of_run(
 /// The runs `name`'s incidents showed.
 async fn shown_by(pool: &PgPool, name: &str) -> Vec<Uuid> {
     sqlx::query_scalar(
-        "SELECT unnest(i.runs) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
+        "SELECT unnest(i.traces) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
           WHERE r.name = $1",
     )
     .bind(name)
@@ -1089,10 +1088,10 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
         .await
         .expect("the spans are kept");
     for body in [
-        json!({ "name": "Loops", "kind": "run", "measure": "repeats", "aggregation": "max",
+        json!({ "name": "Loops", "kind": "agent", "measure": "repeats", "aggregation": "max",
             "filters": { "agent": ["support-agent"] }, "window": "hour", "operator": "gte",
             "alert_threshold": 12, "warning_threshold": 6 }),
-        json!({ "name": "Long runs", "kind": "run", "measure": "steps", "aggregation": "max",
+        json!({ "name": "Long runs", "kind": "agent", "measure": "steps", "aggregation": "max",
             "window": "hour", "operator": "gt", "alert_threshold": 100 }),
     ] {
         let made = request(
@@ -1172,20 +1171,20 @@ async fn a_run_with_only_its_opening_counts_as_left_open(pool: PgPool) {
     };
     ch.store
         .insert_spans(&[
-            at(opened, SpanKind::RunStart, "telmoni.run.start", quiet),
-            at(ended, SpanKind::RunStart, "telmoni.run.start", quiet),
+            at(opened, SpanKind::TraceStart, "telmoni.trace.start", quiet),
+            at(ended, SpanKind::TraceStart, "telmoni.trace.start", quiet),
             of_run(
                 &project,
                 ended,
                 agent,
-                SpanKind::Run,
+                SpanKind::Agent,
                 agent,
                 quiet + TimeDelta::minutes(5),
             ),
         ])
         .await
         .expect("the spans are kept");
-    let body = json!({ "name": "Stalls", "kind": "run", "measure": "stalled",
+    let body = json!({ "name": "Stalls", "kind": "agent", "measure": "stalled",
         "aggregation": "count", "window": "hour", "operator": "gte", "alert_threshold": 1 });
     let (status, made) = answer(
         &app,
@@ -1244,7 +1243,7 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
             &project,
             ended,
             agent,
-            SpanKind::Run,
+            SpanKind::Agent,
             "answer",
             quiet + TimeDelta::minutes(5),
         ),
@@ -1262,7 +1261,7 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
         .insert_spans(&rows)
         .await
         .expect("the spans are kept");
-    let body = json!({ "name": "Stalls", "kind": "run", "measure": "stalled",
+    let body = json!({ "name": "Stalls", "kind": "agent", "measure": "stalled",
         "aggregation": "count", "window": "hour", "operator": "gte", "alert_threshold": 1 });
     let made = request(
         "POST",
@@ -1307,7 +1306,7 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
             &project,
             stalled,
             agent,
-            SpanKind::Run,
+            SpanKind::Agent,
             "answer",
             now,
         )])

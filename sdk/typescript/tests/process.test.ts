@@ -34,7 +34,7 @@ describe('a short-lived process', () => {
   it('sends what it flushes before it exits', () => {
     expect(existsSync(BUILT), 'build the SDK first: npm run build').toBe(true);
     const { status, stdout } = runScript(`
-      telmoni.run('bot', () => undefined);
+      telmoni.trace('bot', () => undefined);
       if (!(await telmoni.flush())) process.exit(2);
     `);
     expect(status).toBe(0);
@@ -43,7 +43,7 @@ describe('a short-lived process', () => {
 
   it('sends a record it flushes before it exits', () => {
     const { status, stdout } = runScript(`
-      telmoni.recordRun({ runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d', agent: 'bot', start: 1000, end: 2000 });
+      telmoni.recordTrace({ traceId: '3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d', agent: 'bot', start: 1000, end: 2000 });
       if (!(await telmoni.flush())) process.exit(2);
     `);
     expect(status).toBe(0);
@@ -52,7 +52,7 @@ describe('a short-lived process', () => {
 
   it('sends what it queued when it ends of itself, neither flushed nor shut down', () => {
     const { status, stdout } = runScript(`
-      telmoni.run('bot', () => undefined);
+      telmoni.trace('bot', () => undefined);
     `);
     expect(status).toBe(0);
     expect(JSON.parse(stdout)).toEqual({ exports: 1 });

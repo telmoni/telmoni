@@ -13,7 +13,7 @@ describe("objectiveInputOf", () => {
       ok: true,
       input: {
         name: "Support answers",
-        kind: SpanKind.Run,
+        kind: SpanKind.Agent,
         measure: RuleMeasure.Burn,
         filters: { agent: ["support-bot"] },
         alert_threshold: 14.4,
@@ -43,7 +43,7 @@ describe("objectiveInputOf", () => {
     const alert = {
       id: "7a1c0e52-0000-4000-8000-000000000009",
       name: "Fast answers",
-      kind: SpanKind.Run,
+      kind: SpanKind.Agent,
       measure: RuleMeasure.Burn,
       filters: { agent: ["support-bot"] },
       objective: { target: 0.95, latency_ms: 2000, days: 28 },

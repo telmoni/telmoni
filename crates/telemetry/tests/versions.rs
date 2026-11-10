@@ -152,18 +152,18 @@ impl Lane {
     }
 }
 
-/// One run being written: every span of it shares its id and its agent, and
-/// is received a second after the run started.
-struct Run<'a> {
+/// One trace being written: every span of it shares its id and its agent,
+/// and is received a second after the trace started.
+struct Trace<'a> {
     project: &'a ProjectId,
     id: Uuid,
     agent: &'a str,
     started: DateTime<Utc>,
 }
 
-/// A run of `agent` that started `minutes` ago.
-fn run<'a>(project: &'a ProjectId, agent: &'a str, minutes: i64) -> Run<'a> {
-    Run {
+/// A trace of `agent` that started `minutes` ago.
+fn trace<'a>(project: &'a ProjectId, agent: &'a str, minutes: i64) -> Trace<'a> {
+    Trace {
         project,
         id: Uuid::new_v4(),
         agent,
@@ -171,13 +171,13 @@ fn run<'a>(project: &'a ProjectId, agent: &'a str, minutes: i64) -> Run<'a> {
     }
 }
 
-impl Run<'_> {
-    /// A span of the run sent from `from`, an environment and a release,
+impl Trace<'_> {
+    /// A span of the trace sent from `from`, an environment and a release,
     /// starting `after` milliseconds into it and lasting `millis`.
     fn span(&self, kind: SpanKind, from: (&str, &str), after: i64, millis: i64) -> SpanRow {
         let started = self.started + Duration::milliseconds(after);
         SpanRow {
-            run_id: self.id,
+            trace_id: self.id.simple().to_string(),
             agent: self.agent.into(),
             span_id: format!("{:016x}", Uuid::new_v4().as_u64_pair().0),
             environment: from.0.into(),
@@ -202,7 +202,7 @@ impl Run<'_> {
             } else {
                 SpanStatus::Ok
             },
-            ..self.span(SpanKind::Run, from, 0, millis)
+            ..self.span(SpanKind::Agent, from, 0, millis)
         }
     }
 
@@ -240,9 +240,8 @@ impl Run<'_> {
             project_id: self.project.clone(),
             received_at: Utc::now().trunc_subsecs(6),
             score_id: Uuid::new_v4(),
-            target: ScoreTarget::Run,
-            run_id: self.id,
-            trace_id: String::new(),
+            target: ScoreTarget::Trace,
+            trace_id: self.id.simple().to_string(),
             span_id: String::new(),
             session_id: String::new(),
             name: name.into(),
@@ -305,7 +304,7 @@ async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPoo
     let (mut spans, mut scores) = (Vec::new(), Vec::new());
     let mut oldest = None;
     for n in 0..10 {
-        let old = run(&l.ours, AGENT, 120 - n);
+        let old = trace(&l.ours, AGENT, 120 - n);
         spans.extend(old.ended(before, 1_000, 0.02, n < 2));
         if n == 0 {
             oldest = Some(old.started);
@@ -313,7 +312,7 @@ async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPoo
         if n < 5 {
             scores.push(old.scored("helpful", 0.75));
         }
-        let new = run(&l.ours, AGENT, 60 - n);
+        let new = trace(&l.ours, AGENT, 60 - n);
         spans.extend(new.ended(after, 2_000, 0.04, n < 4));
         if let Some(value) = [0.5, 0.25, 0.75].get(usize::try_from(n).expect("a count")) {
             scores.push(new.scored("helpful", *value));
@@ -322,10 +321,10 @@ async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPoo
     // The same release on another agent, and on another project's agent of
     // the same name: neither is this agent's.
     for n in 0..3 {
-        let other = run(&l.ours, "nightly-report", 30 - n);
+        let other = trace(&l.ours, "nightly-report", 30 - n);
         spans.extend(other.ended(after, 9_000, 9.0, true));
         scores.push(other.scored("helpful", 0.0));
-        let theirs = run(&l.theirs, AGENT, 30 - n);
+        let theirs = trace(&l.theirs, AGENT, 30 - n);
         spans.extend(theirs.ended(after, 9_000, 9.0, true));
         scores.push(theirs.scored("helpful", 0.0));
     }
@@ -338,7 +337,7 @@ async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPoo
     assert_eq!(answer["environment"], "production");
     assert_eq!(
         answer["environments"],
-        json!([{ "value": "production", "runs": 20 }])
+        json!([{ "value": "production", "traces": 20 }])
     );
     assert_eq!(answer["prompt"], Value::Null);
     assert_eq!(answer["prompts"], json!([]));
@@ -350,9 +349,12 @@ async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPoo
         "the newest first"
     );
     let (new, old) = (row(&answer, "2026.11.3"), row(&answer, "2026.11.2"));
-    assert_eq!((&old["runs"], &old["failed_runs"]), (&json!(10), &json!(2)));
     assert_eq!(
-        (&new["runs"], &new["failed_runs"]),
+        (&old["traces"], &old["failed_traces"]),
+        (&json!(10), &json!(2))
+    );
+    assert_eq!(
+        (&new["traces"], &new["failed_traces"]),
         (&json!(10), &json!(4)),
         "twice as often"
     );
@@ -394,17 +396,17 @@ async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_l
     let a = ("production", "a");
     let mut spans = Vec::new();
     for (minutes, millis, cost) in [(60, 100, 0.10), (59, 200, 0.30), (58, 900, 0.20)] {
-        spans.extend(run(&l.ours, AGENT, minutes).ended(a, millis, cost, false));
+        spans.extend(trace(&l.ours, AGENT, minutes).ended(a, millis, cost, false));
     }
     // Still running: a call of it has landed, its own span has not.
-    spans.push(run(&l.ours, AGENT, 57).call(a, "gpt-4o-mini", 5.0));
+    spans.push(trace(&l.ours, AGENT, 57).call(a, "gpt-4o-mini", 5.0));
     l.keep(&spans).await;
 
     let alone = l.read(&[("agent", AGENT), ("by", "release")]).await;
     assert_eq!(values(&alone), ["a"], "one version, with none before it");
     let only = row(&alone, "a");
     assert_eq!(
-        (&only["runs"], &only["failed_runs"]),
+        (&only["traces"], &only["failed_traces"]),
         (&json!(4), &json!(0))
     );
     assert_eq!(
@@ -419,11 +421,11 @@ async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_l
     assert_eq!(only["scores"], json!([]));
 
     let (b, c) = (("production", "b"), ("production", "c"));
-    let failing = run(&l.ours, AGENT, 29);
-    let free = run(&l.ours, AGENT, 20);
-    let unnamed = run(&l.ours, AGENT, 5);
+    let failing = trace(&l.ours, AGENT, 29);
+    let free = trace(&l.ours, AGENT, 20);
+    let unnamed = trace(&l.ours, AGENT, 5);
     l.keep(&[
-        run(&l.ours, AGENT, 30).call(b, "gpt-4o-mini", 1.0),
+        trace(&l.ours, AGENT, 30).call(b, "gpt-4o-mini", 1.0),
         SpanRow {
             status: SpanStatus::Error,
             ..failing.call(b, "gpt-4o-mini", 1.0)
@@ -441,7 +443,7 @@ async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_l
     );
     let running = row(&answer, "b");
     assert_eq!(
-        (&running["runs"], &running["failed_runs"]),
+        (&running["traces"], &running["failed_traces"]),
         (&json!(2), &json!(1)),
         "a failed span fails a run still running"
     );
@@ -460,7 +462,7 @@ async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_l
     );
     let unnamed = row(&answer, "");
     assert_eq!(
-        (&unnamed["runs"], &unnamed["p50_ms"]),
+        (&unnamed["traces"], &unnamed["p50_ms"]),
         (&json!(1), &json!(700))
     );
     assert_eq!(answer["more"], false);
@@ -475,9 +477,9 @@ async fn a_run_counts_under_each_model_it_called(pool: PgPool) {
         return;
     };
     let (both, one, none) = (
-        run(&l.ours, AGENT, 30),
-        run(&l.ours, AGENT, 20),
-        run(&l.ours, AGENT, 10),
+        trace(&l.ours, AGENT, 30),
+        trace(&l.ours, AGENT, 20),
+        trace(&l.ours, AGENT, 10),
     );
     l.keep(&[
         both.own(PRODUCTION, 1_000, false),
@@ -501,11 +503,11 @@ async fn a_run_counts_under_each_model_it_called(pool: PgPool) {
     );
     let mini = row(&answer, "gpt-4o-mini");
     assert_eq!(
-        (&mini["runs"], &mini["failed_runs"]),
+        (&mini["traces"], &mini["failed_traces"]),
         (&json!(2), &json!(1))
     );
-    assert_eq!(row(&answer, "claude-sonnet-5-5")["runs"], 1);
-    assert_eq!(row(&answer, "")["runs"], 1, "the run that called none");
+    assert_eq!(row(&answer, "claude-sonnet-5-5")["traces"], 1);
+    assert_eq!(row(&answer, "")["traces"], 1, "the run that called none");
 }
 
 /// ⚠ A run whose spans were sent from two environments counts, in each, by
@@ -518,7 +520,7 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
         return;
     };
     let (staging, production, unnamed) = (("staging", "A"), ("production", "B"), ("", "C"));
-    let crossing = run(&l.ours, AGENT, 30);
+    let crossing = trace(&l.ours, AGENT, 30);
     let mut spans = vec![
         crossing.own(production, 5_000, false),
         crossing.call(staging, "model-staging", 0.25),
@@ -528,11 +530,11 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
         crossing.span(SpanKind::ToolCall, unnamed, 20, 10),
     ];
     for minutes in [20, 10] {
-        let within = run(&l.ours, AGENT, minutes);
+        let within = trace(&l.ours, AGENT, minutes);
         spans.push(within.own(production, 1_000, false));
         spans.push(within.call(production, "model-production", 0.5));
     }
-    let staged = run(&l.ours, AGENT, 40);
+    let staged = trace(&l.ours, AGENT, 40);
     spans.push(staged.own(("staging", "S"), 1_000, false));
     l.keep(&spans).await;
 
@@ -541,14 +543,14 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
     assert_eq!(
         answer["environments"],
         json!([
-            { "value": "production", "runs": 3 },
-            { "value": "staging", "runs": 2 },
-            { "value": "", "runs": 1 },
+            { "value": "production", "traces": 3 },
+            { "value": "staging", "traces": 2 },
+            { "value": "", "traces": 1 },
         ])
     );
     assert_eq!(values(&answer), ["B"], "no other environment's release");
     let b = row(&answer, "B");
-    assert_eq!(b["runs"], 3);
+    assert_eq!(b["traces"], 3);
     assert_eq!(b["p95_ms"], 5_000, "the crossing run, whole");
     assert_eq!(b["median_spend"], 0.5);
 
@@ -589,7 +591,7 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
     assert_eq!(prompts["prompt"], "triage");
     assert_eq!(
         prompts["prompts"],
-        json!([{ "value": "triage", "runs": 1 }])
+        json!([{ "value": "triage", "traces": 1 }])
     );
     assert_eq!(values(&prompts), ["v2"]);
     assert_eq!(values(&read("staging", "prompt").await), ["v1"]);
@@ -613,7 +615,7 @@ async fn a_prompts_versions_are_read_by_name_and_version_apart(pool: PgPool) {
         return;
     };
     let named = |minutes: i64, prompts: &[(&str, &str)]| {
-        let run = run(&l.ours, AGENT, minutes);
+        let run = trace(&l.ours, AGENT, minutes);
         let mut spans = vec![run.own(PRODUCTION, 1_000, false)];
         for (name, version) in prompts {
             spans.push(if version.is_empty() {
@@ -651,11 +653,11 @@ async fn a_prompts_versions_are_read_by_name_and_version_apart(pool: PgPool) {
     assert_eq!(
         default["prompts"],
         json!([
-            { "value": "triage", "runs": 4 },
-            { "value": "triage:blue", "runs": 2 },
-            { "value": "other", "runs": 1 },
-            { "value": long, "runs": 1 },
-            { "value": "分類-é", "runs": 1 },
+            { "value": "triage", "traces": 4 },
+            { "value": "triage:blue", "traces": 2 },
+            { "value": "other", "traces": 1 },
+            { "value": long, "traces": 1 },
+            { "value": "分類-é", "traces": 1 },
         ])
     );
     assert_eq!(
@@ -663,15 +665,15 @@ async fn a_prompts_versions_are_read_by_name_and_version_apart(pool: PgPool) {
         ["3", "blue:v2", ""],
         "never `v2`, another prompt's, nor `9`, another span's"
     );
-    assert_eq!(row(&default, "blue:v2")["runs"], 2);
-    assert_eq!(row(&default, "3")["runs"], 1);
-    assert_eq!(row(&default, "")["runs"], 1, "named with no version");
+    assert_eq!(row(&default, "blue:v2")["traces"], 2);
+    assert_eq!(row(&default, "3")["traces"], 1);
+    assert_eq!(row(&default, "")["traces"], 1, "named with no version");
     assert_eq!(default, of("triage").await, "asked for by name, the same");
 
     let blue = of("triage:blue").await;
     assert_eq!(blue["prompt"], "triage:blue");
     assert_eq!(values(&blue), ["v2"]);
-    assert_eq!(row(&blue, "v2")["runs"], 2);
+    assert_eq!(row(&blue, "v2")["traces"], 2);
     assert_eq!(values(&of("分類-é").await), ["β"]);
     let longest = l
         .read(&[("agent", AGENT), ("by", "prompt"), ("prompt", &long)])
@@ -717,10 +719,10 @@ async fn a_score_is_read_once_a_run_and_version(pool: PgPool) {
         ("production", "r3"),
     );
     let (a, b, c, d) = (
-        run(&l.ours, AGENT, 60),
-        run(&l.ours, AGENT, 50),
-        run(&l.ours, AGENT, 40),
-        run(&l.ours, AGENT, 30),
+        trace(&l.ours, AGENT, 60),
+        trace(&l.ours, AGENT, 50),
+        trace(&l.ours, AGENT, 40),
+        trace(&l.ours, AGENT, 30),
     );
     l.keep(&[
         a.own(r1, 1_000, false),
@@ -771,7 +773,7 @@ async fn a_score_is_read_once_a_run_and_version(pool: PgPool) {
         },
         ScoreRow {
             target: ScoreTarget::Session,
-            run_id: Uuid::nil(),
+            trace_id: String::new(),
             session_id: "s_1".into(),
             ..a.scored("helpful", 1.0)
         },
@@ -867,7 +869,7 @@ async fn settings(pool: &PgPool, l: &Lane, retention_days: Option<i16>) {
 /// A run of release `release` received `days` ago, scored three days ago
 /// and now.
 fn kept_for(l: &Lane, release: &'static str, days: i64) -> (Vec<SpanRow>, Vec<ScoreRow>) {
-    let run = run(&l.ours, AGENT, days * 24 * 60);
+    let run = trace(&l.ours, AGENT, days * 24 * 60);
     let then = ScoreRow {
         received_at: Utc::now().trunc_subsecs(6) - Duration::days(3),
         ..run.scored("helpful", 0.0)
@@ -944,16 +946,16 @@ async fn more_than_fifty_versions_are_cut_to_the_newest_and_say_so(pool: PgPool)
     let mut spans = Vec::new();
     for (n, release) in releases.iter().enumerate().skip(1) {
         let minutes = 100 - i64::try_from(n).expect("a count");
-        spans.push(run(&l.ours, AGENT, minutes).own(("production", release), 1_000, false));
+        spans.push(trace(&l.ours, AGENT, minutes).own(("production", release), 1_000, false));
     }
-    spans.push(run(&l.ours, AGENT, 1).own(PRODUCTION, 1_000, false));
+    spans.push(trace(&l.ours, AGENT, 1).own(PRODUCTION, 1_000, false));
     l.keep(&spans).await;
 
     let fifty = l.read(&[("agent", AGENT)]).await;
     assert_eq!(fifty["more"], false, "fifty are all named");
     assert_eq!(rows(&fifty).len(), 51, "and the runs naming none");
 
-    l.keep(&[run(&l.ours, AGENT, 100).own(("production", "r00"), 1_000, false)])
+    l.keep(&[trace(&l.ours, AGENT, 100).own(("production", "r00"), 1_000, false)])
         .await;
     let answer = l.read(&[("agent", AGENT)]).await;
     assert_eq!(answer["more"], true);
@@ -986,13 +988,15 @@ async fn an_agent_is_read_by_any_name_it_has(pool: PgPool) {
     let spans: Vec<SpanRow> = names
         .iter()
         .zip(1..)
-        .map(|(name, minutes)| run(&l.ours, name, minutes).own(("production", *name), 1_000, false))
+        .map(|(name, minutes)| {
+            trace(&l.ours, name, minutes).own(("production", *name), 1_000, false)
+        })
         .collect();
     l.keep(&spans).await;
     for name in names {
         let answer = l.read(&[("agent", name)]).await;
         assert_eq!(values(&answer), [name], "the agent named {name:?}");
-        assert_eq!(row(&answer, name)["runs"], 1);
+        assert_eq!(row(&answer, name)["traces"], 1);
     }
     let absent = l.read(&[("agent", "never-ran")]).await;
     assert_eq!(absent["environment"], "");

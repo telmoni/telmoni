@@ -86,6 +86,7 @@ export interface JsonSpan {
   endTimeUnixNano: string;
   attributes: JsonAttribute[];
   events?: Array<{ timeUnixNano: string; name: string; attributes: JsonAttribute[] }>;
+  links?: Array<{ traceId: string; spanId: string }>;
   status?: { code: number; message?: string };
 }
 
@@ -176,11 +177,11 @@ export class FakeTransport {
     return this.requests.map((request) => JSON.parse(request.body) as ExportBody);
   }
 
-  /** Every span sent but each run's opening, which `run-start.json`'s test reads from the bodies. */
+  /** Every span sent but each trace's opening, which `trace-start.json`'s test reads from the bodies. */
   spans(): JsonSpan[] {
     return this.bodies().flatMap((body) =>
       body.resourceSpans.flatMap((resourceSpans) =>
-        resourceSpans.scopeSpans.flatMap((scopeSpans) => scopeSpans.spans.filter((span) => span.name !== 'telmoni.run.start')),
+        resourceSpans.scopeSpans.flatMap((scopeSpans) => scopeSpans.spans.filter((span) => span.name !== 'telmoni.trace.start')),
       ),
     );
   }
@@ -201,7 +202,8 @@ export function attributesOf(span: Pick<JsonSpan, 'attributes'>): Record<string,
   return out;
 }
 
-export function runsIn(transport: FakeTransport): JsonSpan[] {
+/** Each trace's agent span, the one at its root. */
+export function tracesIn(transport: FakeTransport): JsonSpan[] {
   return transport.spans().filter((span) => span.name.startsWith('invoke_agent '));
 }
 

@@ -1,6 +1,6 @@
 ---
 title: "Connect an agent"
-description: "The four ways an agent's runs reach Telmoni, an SDK, a coding-agent plugin, a framework's own instrumentation or any OpenTelemetry exporter, each from the key to the first run."
+description: "The four ways an agent's traces reach Telmoni, an SDK, a coding-agent plugin, a framework's own instrumentation or any OpenTelemetry exporter, each from the key to the first trace."
 ---
 
 Every way in starts with the same key. On your project's **API keys** page,
@@ -12,12 +12,12 @@ Then pick the way that fits what you run:
 
 | You run | Use | Code to write |
 |---|---|---|
-| Your own agent in Python, TypeScript, Go or Rust | [An SDK](#an-sdk) | A few lines around each run |
+| Your own agent in Python, TypeScript, Go or Rust | [An SDK](#an-sdk) | A few lines around each execution |
 | Claude Code, Codex or Antigravity | [Its plugin](#a-coding-agent-plugin) | None |
 | The OpenAI or Anthropic SDK, LangChain or LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM or the Vercel AI SDK | [Its own instrumentation](#a-framework) | An exporter's three settings |
 | Anything else that speaks OpenTelemetry | [Any OTLP exporter](#any-opentelemetry-exporter) | An exporter's settings |
 
-Each run lists on the project's **Runs** page within a minute of ending, and
+Each trace lists on the project's **Traces** page within a minute of ending, and
 its agent on **Agents**. Prompts, replies and tool payloads stay in your
 process unless you turn content on.
 
@@ -56,16 +56,16 @@ Set the key where your agent runs:
 $ export TELMONI_API_KEY=tm_...
 ```
 
-Then open a run around your agent's work, with a step, a model call and a tool
-call inside it for each piece: [A run](/docs/api/sdks#a-run) shows it in each
-language. The dialog that shows a new key also gives each SDK a first run to
-paste into a terminal, which sends one run named `my-agent`.
+Then open a trace around your agent's work, with a step, a model call and a tool
+call inside it for each piece: [A trace](/docs/api/sdks#a-trace) shows it in each
+language. The dialog that shows a new key also gives each SDK a first trace to
+paste into a terminal, which sends one trace named `my-agent`.
 
 ---
 
 ## A coding-agent plugin
 
-Each plugin records every turn of the coding agent as a run, with no code. Each
+Each plugin records every turn of the coding agent as a trace, with no code. Each
 needs [Node.js](https://nodejs.org) 22 or later on your `PATH`.
 
 **[Claude Code](/docs/api/coding-agents#claude-code):** add the marketplace and
@@ -100,7 +100,7 @@ agy plugin install https://github.com/telmoni/antigravity-observability-plugin
 ## A framework
 
 A framework that already speaks OpenTelemetry's GenAI conventions sends its
-runs through OpenTelemetry's own OTLP exporter, with no SDK of ours. Set the
+traces through OpenTelemetry's own OTLP exporter, with no SDK of ours. Set the
 exporter from the environment:
 
 ```console
@@ -124,7 +124,7 @@ POST https://api.telmoni.com/otlp/v1/traces
 Authorization: Bearer tm_...
 ```
 
-Each span must carry what places it in a run:
+Each span must carry what places it under its agent:
 [What a span must carry](/docs/api/ingest#what-a-span-must-carry).
 
 ---

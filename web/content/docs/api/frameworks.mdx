@@ -1,22 +1,23 @@
 ---
 title: "Frameworks"
-description: "The OpenAI and Anthropic SDKs, LangChain and LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM and the Vercel AI SDK, reporting their runs to Telmoni through each one's own OpenTelemetry instrumentation, with no SDK of ours: what to install, the exporter's two settings, and the one setting that sends content."
+description: "The OpenAI and Anthropic SDKs, LangChain and LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM and the Vercel AI SDK, reporting their traces to Telmoni through each one's own OpenTelemetry instrumentation, with no SDK of ours: what to install, the exporter's two settings, and the one setting that sends content."
 ---
 
 A framework that already speaks OpenTelemetry's GenAI conventions reports its
-runs to Telmoni through an exporter you configure, with no SDK of ours and no
+traces to Telmoni through an exporter you configure, with no SDK of ours and no
 package of ours per framework: an instrumentation somebody else maintains is
 one we do not. Its spans go to [ingest](/docs/api/ingest) like any exporter's,
-and each trace is placed in its runs as
-[What a span must carry](/docs/api/ingest#what-a-span-must-carry) says: under
-its topmost agent or workflow, or, where only the model client is
-instrumented, as one run of its calls named by your `service.name`. They show
-on the **Runs** page a minute or so after the trace goes quiet.
+and each trace is placed as
+[What a span must carry](/docs/api/ingest#what-a-span-must-carry) says: named
+by its topmost agent or workflow, or, where only the model client is
+instrumented, by your `service.name`, under an agent's span Telmoni writes.
+They show on the **Traces** page a minute or so after the trace goes quiet.
 
 Each instrumentation below sets `gen_ai.operation.name` on its spans, which is
 what Telmoni reads them by. One that writes a convention of its own instead —
-OpenInference's `openinference.span.kind`, say — reaches Telmoni as spans in
-no run, which are dropped.
+OpenInference's `openinference.span.kind`, say — reaches Telmoni as plain
+spans, a trace named by your `service.name` with no model call or tool call in
+it.
 
 ## The exporter
 
@@ -31,7 +32,7 @@ $ export OTEL_SERVICE_NAME=support-bot
 
 The header's value is URL-encoded, so its space is `%20`. On your own
 deployment, the endpoint is its machine host's. `OTEL_SERVICE_NAME` names the
-runs of an application whose model client alone is instrumented.
+traces of an application whose model client alone is instrumented.
 
 In Python, install `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http`,
 and set the provider up once, before the framework is imported:
@@ -91,8 +92,8 @@ OpenAIInstrumentor().instrument()
 ```
 
 Each call is a `chat` or `embeddings` span with its model, provider and
-tokens. With no agent above them, an application's calls are one run per
-trace, named by `OTEL_SERVICE_NAME`. Content: the setting above.
+tokens. With no agent above them, an application's calls are one trace,
+named by `OTEL_SERVICE_NAME`. Content: the setting above.
 
 **TypeScript.** `npm install @opentelemetry/instrumentation-openai`, and
 `new OpenAIInstrumentation()` in the SDK's `instrumentations`. Its calls are
@@ -125,12 +126,12 @@ LangChainInstrumentor().instrument()
 ```
 
 An agent is an `invoke_agent` span named by the agent's `name`, its model calls
-`chat` and its tools `execute_tool` spans under it: one run, named by the
+`chat` and its tools `execute_tool` spans under it: one trace, named by the
 agent. Content: the setting above.
 
 **TypeScript.** OpenTelemetry publishes none for LangChain.js yet. Traceloop's
 `@traceloop/instrumentation-langchain` marks an agent `invoke_agent`, its
-model calls `chat` and its tools `execute_tool`, so each agent is a run; a
+model calls `chat` and its tools `execute_tool`, so each agent is a trace; a
 plain chain it marks `workflow`, which is a plain span to Telmoni. It sends
 content **by default**: give it `traceContent: false` unless the project keeps
 content.
@@ -152,7 +153,7 @@ OpenAIAgentsInstrumentor().instrument(disable_openai_trace_export=True)
 Runner.run_sync(agent, question, run_config=RunConfig(workflow_name="support-bot"))
 ```
 
-The workflow is the run, its agents and calls under it, named by
+The workflow is the trace's agent, its agents and calls under it, named by
 `workflow_name`, which is `Agent workflow` when you give none.
 `disable_openai_trace_export=True` stops the SDK sending its traces to OpenAI
 as well. Content: the setting above.
@@ -166,7 +167,7 @@ as above, in traces of their own.
 **Python.** OpenTelemetry's instrumentation is not released yet. Traceloop's
 `opentelemetry-instrumentation-crewai` marks the crew's kickoff, its agents and
 its tasks as `invoke_agent` and its model calls as `chat`: the kickoff, the
-topmost, is the run, its agents and tasks spans of it.
+topmost, is the trace's agent, its agents and tasks spans of it.
 
 ```python
 from opentelemetry.instrumentation.crewai import CrewAIInstrumentor
@@ -217,7 +218,7 @@ import { registerTelemetry } from 'ai';
 registerTelemetry(new OpenTelemetry());
 ```
 
-`generateText`, `streamText` and the rest are then each an `invoke_agent` run,
+`generateText`, `streamText` and the rest are then each an `invoke_agent` trace,
 its model calls `chat` and its tools `execute_tool` spans. It records inputs
 and outputs **by default**: pass `telemetry: { recordInputs: false,
 recordOutputs: false }` on a call unless the project keeps content.

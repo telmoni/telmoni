@@ -124,14 +124,14 @@ impl FakeTransport {
             .collect()
     }
 
-    /// Every span received, in the order it was sent, but each run's opening,
-    /// which `run-start.json`'s test reads from the bodies.
+    /// Every span received, in the order it was sent, but each trace's
+    /// opening, which `trace-start.json`'s test reads from the bodies.
     pub(crate) fn spans(&self) -> Result<Vec<Value>, Failure> {
         Ok(self
             .bodies()?
             .iter()
             .flat_map(spans_of)
-            .filter(|span| name_of(span) != "telmoni.run.start")
+            .filter(|span| name_of(span) != "telmoni.trace.start")
             .collect())
     }
 
@@ -512,17 +512,12 @@ pub(crate) fn only<'a>(spans: &'a [Value], prefix: &str) -> Result<&'a Value, Fa
     }
 }
 
-/// The run span (`invoke_agent …`) carrying `run_id`.
-pub(crate) fn run_span<'a>(spans: &'a [Value], run_id: &str) -> Result<&'a Value, Failure> {
+/// The agent's span (`invoke_agent …`) of the trace `trace_id`.
+pub(crate) fn trace_span<'a>(spans: &'a [Value], trace_id: &str) -> Result<&'a Value, Failure> {
     starting_with(spans, "invoke_agent ")
         .into_iter()
-        .find(|span| {
-            attributes_of(span)
-                .ok()
-                .and_then(|attributes| attributes.get("telmoni.run_id").cloned())
-                == Some(json!(run_id))
-        })
-        .ok_or_else(|| format!("no run span for {run_id}").into())
+        .find(|span| span.get("traceId") == Some(&json!(trace_id)))
+        .ok_or_else(|| format!("no agent span for {trace_id}").into())
 }
 
 /// Lowercase 8-4-4-4-12 hex, version 4.
@@ -631,10 +626,10 @@ fn the_fakes_work() -> Outcome {
     assert_eq!(transport.uploads().len(), 2);
     assert_eq!(transport.count(), 3, "an upload is no export");
 
-    let fixture = load_fixture("run.json")?;
+    let fixture = load_fixture("trace.json")?;
     assert!(text(field(&fixture, "scenario")?, "capture_content").is_err());
     let call = fixture
-        .pointer("/scenario/run/inside/0/inside/0/model_call")
+        .pointer("/scenario/trace/inside/0/inside/0/model_call")
         .ok_or("the scenario's model call")?;
     assert!((float(call, "time_to_first_token")? - 0.35).abs() < f64::EPSILON);
     assert_eq!(
@@ -652,28 +647,23 @@ fn the_fakes_work() -> Outcome {
 
     let span = json!({
         "name": "s",
+        "traceId": "t",
         "attributes": [
             { "key": "n", "value": { "intValue": "5" } },
             { "key": "t", "value": { "stringValue": "x" } },
-            { "key": "telmoni.run_id", "value": { "stringValue": "r" } },
         ],
     });
-    assert_eq!(
-        attributes_of(&span)?,
-        json!({ "n": 5, "t": "x", "telmoni.run_id": "r" })
-    );
+    assert_eq!(attributes_of(&span)?, json!({ "n": 5, "t": "x" }));
     assert_eq!(name_of(&span), "s");
     let spans = vec![
         span,
-        json!({ "name": "invoke_agent bot", "attributes": [
-            { "key": "telmoni.run_id", "value": { "stringValue": "r" } },
-        ] }),
+        json!({ "name": "invoke_agent bot", "traceId": "t", "attributes": [] }),
     ];
     assert_eq!(name_of(named(&spans, "s")?), "s");
     assert_eq!(starting_with(&spans, "invoke_agent ").len(), 1);
     assert_eq!(name_of(only(&spans, "s")?), "s");
     assert!(only(&spans, "").is_err());
-    assert_eq!(name_of(run_span(&spans, "r")?), "invoke_agent bot");
+    assert_eq!(name_of(trace_span(&spans, "t")?), "invoke_agent bot");
     assert!(is_uuid_v4("0f8fad5b-d9cb-469f-a165-70867728950e"));
     assert!(!is_uuid_v4("0f8fad5b-d9cb-169f-a165-70867728950e"));
     assert_eq!(tags(&[("a", "b")]).get("a").map(String::as_str), Some("b"));

@@ -10,14 +10,14 @@ const PointSchema = z.object({
   at: z.string(),
   spans: z.number(),
   failed: z.number(),
-  runs: z.number(),
-  failed_runs: z.number(),
+  traces: z.number(),
+  failed_traces: z.number(),
   input_tokens: z.number(),
   output_tokens: z.number(),
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
   spend: z.number(),
-  run_duration_ms: z.object({
+  trace_duration_ms: z.object({
     p50: z.number().nullable(),
     p95: z.number().nullable(),
     p99: z.number().nullable(),

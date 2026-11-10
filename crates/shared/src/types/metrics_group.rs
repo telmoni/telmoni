@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What the totals are split by: a column the hourly totals keep, or a run's
+/// What the totals are split by: a column the hourly totals keep, or a trace's
 /// tag, its end user or its session, which the spans alone keep. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

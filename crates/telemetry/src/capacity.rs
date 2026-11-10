@@ -2,7 +2,7 @@
 //! spent: the span units its agents send over its month, counted at ingest's
 //! door in Redis, shared by every replica. Past them, a plan with a grace
 //! keeps every span for its days while the owner is asked to lift it; then,
-//! and from the first span over where there is none, one run in
+//! and from the first span over where there is none, one trace in
 //! [`SAMPLE_ONE_IN`] is kept whole, each of its spans flagged with the rate,
 //! and the rest are counted in the answer's partial success, nothing
 //! dropped unsaid. The numbers are the deployment's, read through the
@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, DurationRound as _, Utc};
 use redis::AsyncCommands;
 use serde_json::json;
-use uuid::Uuid;
 
 use telmoni_shared::seam::{self, Entitlements, OrganizationAlert};
 use telmoni_shared::{Capacity, OrganizationId};
@@ -45,7 +44,7 @@ const KEEP_FOR: Duration = Duration::from_secs(60);
 /// How many organizations' answers are kept at once.
 const KNOWN_MAX: usize = 10_000;
 
-/// Past a plan's spans, one run in this many is kept.
+/// Past a plan's spans, one trace in this many is kept.
 pub const SAMPLE_ONE_IN: u64 = 10;
 
 /// How long a month's counts outlive the longest month, so a late export
@@ -94,12 +93,12 @@ pub struct Held {
     pub content_full: bool,
 }
 
-/// Whether a run is among those kept past a plan's spans: chosen by its id
-/// under the project's own key, so every span of a run, in any export, is
+/// Whether a trace is among those kept past a plan's spans: chosen by its id
+/// under the project's own key, so every span of a trace, in any export, is
 /// kept or sampled out together, and no sender can choose ids that are kept.
 #[must_use]
-pub fn kept_past_the_grant(storage: &UserIdStorage, run_id: Uuid) -> bool {
-    let digest = storage.store(&format!("sample:{run_id}"));
+pub fn kept_past_the_grant(storage: &UserIdStorage, trace_id: &str) -> bool {
+    let digest = storage.store(&format!("sample:{trace_id}"));
     digest
         .get(..16)
         .and_then(|head| u64::from_str_radix(head, 16).ok())
@@ -429,17 +428,17 @@ pub fn drop_content(batch: &mut Batch) {
     }
 }
 
-/// One run in [`SAMPLE_ONE_IN`] kept, each of its spans flagged with the rate
-/// it was kept at; the rest, their content and what they dropped, counted in
-/// the answer with the sentence that names what lifts it.
+/// One trace in [`SAMPLE_ONE_IN`] kept, each of its spans flagged with the
+/// rate it was kept at; the rest, their content and what they dropped,
+/// counted in the answer with the sentence that names what lifts it.
 pub fn sample(batch: &mut Batch, detail: &str, storage: &UserIdStorage) {
     let before = batch.rows.len();
     batch
         .rows
-        .retain(|row| kept_past_the_grant(storage, row.run_id));
+        .retain(|row| kept_past_the_grant(storage, &row.trace_id));
     batch
         .content
-        .retain(|content| kept_past_the_grant(storage, content.run_id));
+        .retain(|content| kept_past_the_grant(storage, &content.trace_id));
     #[expect(clippy::cast_precision_loss, reason = "a sampling rate, ten at most")]
     let rate = 1.0 / SAMPLE_ONE_IN as f64;
     for row in &mut batch.rows {
@@ -475,12 +474,12 @@ fn tell_over(
         }
         let body = if grace > 0 {
             format!(
-                "{detail} Every span is kept for {grace} more days; after that, one run in \
+                "{detail} Every span is kept for {grace} more days; after that, one trace in \
                  {SAMPLE_ONE_IN} is kept, until the month renews."
             )
         } else {
             format!(
-                "{detail} Until the month renews, one run in {SAMPLE_ONE_IN} is kept and the \
+                "{detail} Until the month renews, one trace in {SAMPLE_ONE_IN} is kept and the \
                  rest are sampled out."
             )
         };

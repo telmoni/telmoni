@@ -44,8 +44,8 @@ pub enum Resource {
     /// The organization's append-only audit chain. Owners and admins read it,
     /// members do not; the resource exists to deny the write verbs structurally.
     Audit,
-    /// A project's traces: the runs its agents recorded, which every role on
-    /// the project reads. Ingest alone writes a span; any member scores a run,
+    /// A project's traces, which every role on the project reads. Ingest
+    /// alone writes a span; any member scores a trace,
     /// and its owners and admins delete a trace or an end user's.
     Trace,
     /// A project's saved dashboards: the Spend page's charts under a name.
@@ -100,7 +100,7 @@ pub fn can(role: Role, verb: Verb, resource: Resource) -> bool {
         Role::Admin => !(resource == R::Project && verb == V::Delete),
 
         // Reads the work but the chain, the owner's record of what everyone
-        // did, and changes only the project's alerts and its runs' scores.
+        // did, and changes only the project's alerts and its traces' scores.
         Role::Member => {
             resource == R::Alert
                 || (resource == R::Trace && verb == V::Update)

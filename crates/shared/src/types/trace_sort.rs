@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceSort {
-    /// When the run started: newest first by default.
+    /// When the trace started: newest first by default.
     Started,
     /// The run's agent.
     Agent,
     /// The end user, as stored.
     User,
-    /// The session the run belongs to.
+    /// The session the trace belongs to.
     Session,
-    /// How the run ended.
+    /// How the trace ended.
     Status,
-    /// How many steps the run took.
+    /// How many steps the trace took.
     Steps,
     /// How many model calls it made.
     ModelCalls,

@@ -1,14 +1,14 @@
 ---
 title: "Client SDKs"
-description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust: an agent's runs, steps, model calls, tool calls and retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else."
+description: "The Telmoni SDKs for Python, TypeScript / JavaScript, Go and Rust: an agent's traces, steps, model calls, tool calls and retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else."
 ---
 
-The SDKs record an agent's **runs**, and the **steps**, **model calls**,
+The SDKs record an agent's **traces**, and the **steps**, **model calls**,
 **tool calls** and **retrievals** inside each, as OpenTelemetry spans, and send them to
 [ingest](/docs/api/ingest), and, where content is sent, the images and files
 their messages carry to the platform beside them ([content](#content)). Each one runs a tracer provider of its own beside
 whatever OpenTelemetry your application already has, sends nothing outside a
-run, and takes prompts, completions and tool payloads off every span before it
+trace, and takes prompts, completions and tool payloads off every span before it
 leaves the process unless you ask and the project's content mode allows.
 
 | Language | Package | Requires | Source |
@@ -54,9 +54,10 @@ carry nothing else; Rust also carries serde, serde_json, tracing, uuid, ring and
 
 ---
 
-## A run
+## A trace
 
-A run is one execution of an agent. Open one around the agent's work, and
+A trace is one execution of an agent: a trace of its own, whose id is its
+OpenTelemetry trace id, 32 hex digits. Open one around the agent's work, and
 inside it open a step for each unit of work, a model call around each call to
 a model, a tool call around each tool, and a [retrieval](#a-retrieval)
 around each search of a vector store or a memory. The SDK sends each span when
@@ -71,7 +72,7 @@ holding the **ingest** scope.
     telmoni = Telmoni.from_env()
 
 
-    @telmoni.run("support-bot")
+    @telmoni.trace("support-bot")
     def answer(question: str) -> str:
         with telmoni.step("plan"):
             with telmoni.model_call(
@@ -87,16 +88,16 @@ holding the **ingest** scope.
         return reply.text
 
 
-    with telmoni.run(
+    with telmoni.trace(
         "support-bot",
         user_id="user_42",
         session_id="conv_7",
         tags={"env": "prod"},
-    ) as run:
+    ) as trace:
         ...
     ```
 
-    Each of `run`, `step`, `model_call` and `tool_call` is a context manager,
+    Each of `trace`, `step`, `model_call` and `tool_call` is a context manager,
     an `async with`, and a decorator; on a generator, sync or async, the
     decorator's span covers its iteration. An exception that escapes one
     marks the span failed with the exception's class, records its message
@@ -104,7 +105,7 @@ holding the **ingest** scope.
     `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed
     before its end, marks it cancelled.
     `fail("TimeoutError")` and `cancel()` do the same by hand.
-    `run` raises `ValueError` for a blank agent name or a cap that is no cap
+    `trace` raises `ValueError` for a blank agent name or a cap that is no cap
     ([the guard](#the-guard)). A token
     count is read from a number or its text, its fraction cut, and `Usage`'s
     `cost` is what the call cost in US dollars, where your provider reports
@@ -132,15 +133,15 @@ holding the **ingest** scope.
   </Tab>
   <Tab value="TypeScript">
     ```ts
-    import { Telmoni, type Run } from 'telmoni';
+    import { Telmoni, type Trace } from 'telmoni';
 
     const telmoni = Telmoni.fromEnv();
 
-    const text = await telmoni.run(
+    const text = await telmoni.trace(
       'support-bot',
       { userId: 'user_42', sessionId: 'conv_7', tags: { env: 'prod' } },
-      async (run) => {
-        const reply = await run.step('plan', (step) =>
+      async (trace) => {
+        const reply = await trace.step('plan', (step) =>
           step.modelCall('gpt-4o-mini', { provider: 'openai', prompt: 'support-reply', promptVersion: '3' }, async (call) => {
             const reply = await askTheModel(question); // your provider's call
             call.answered({
@@ -150,12 +151,12 @@ holding the **ingest** scope.
             return reply;
           }),
         );
-        await run.toolCall('search', {}, () => search(reply.query)); // a rejection marks it failed
+        await trace.toolCall('search', {}, () => search(reply.query)); // a rejection marks it failed
         return reply.text;
       },
     );
 
-    const answer = telmoni.wrap('support-bot', {}, async (question: string, run: Run) => '...');
+    const answer = telmoni.wrap('support-bot', {}, async (question: string, trace: Trace) => '...');
     ```
 
     Each callback receives its handle and may be sync or async; the span ends
@@ -163,8 +164,8 @@ holding the **ingest** scope.
     with the error's class name, records an `Error`'s message and stack as
     [content](#content), and is thrown again; one named `AbortError`
     marks it cancelled. `fail('TimeoutError')` and `cancel()` do the same by
-    hand, and `wrap` turns a function into one that opens a run per call.
-    `run` throws a `TypeError` for a blank agent name and a `RangeError` for
+    hand, and `wrap` turns a function into one that opens a trace per call.
+    `trace` throws a `TypeError` for a blank agent name and a `RangeError` for
     a cap that is no cap ([the guard](#the-guard)). A token count is read from a number, a
     bigint or a decimal numeral's text, its fraction cut, and the usage's
     `cost` is what the call cost in US dollars, where your provider reports
@@ -200,15 +201,15 @@ holding the **ingest** scope.
     }
     defer client.Shutdown(context.Background())
 
-    ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{
+    ctx, trace := client.Trace(ctx, "support-bot", telmoni.TraceOptions{
     	UserID:    "user_42",
     	SessionID: "conv_7",
     	Tags:      map[string]string{"env": "prod"},
     })
-    defer run.End()
+    defer trace.End()
 
-    stepCtx, step := run.Step(ctx, "plan")
-    _, call := run.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai", Prompt: "support-reply", PromptVersion: "3"})
+    stepCtx, step := trace.Step(ctx, "plan")
+    _, call := trace.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai", Prompt: "support-reply", PromptVersion: "3"})
     reply, err := askTheModel(stepCtx, question) // your provider's call
     if err != nil {
     	call.Fail(err)
@@ -221,7 +222,7 @@ holding the **ingest** scope.
     call.End()
     step.End()
 
-    _, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{})
+    _, tool := trace.ToolCall(ctx, "search", telmoni.ToolCallOptions{})
     if _, err := search(reply.Query); err != nil {
     	tool.Fail(err)
     }
@@ -229,14 +230,14 @@ holding the **ingest** scope.
     ```
 
     Each opener returns a context carrying its span, so your own OpenTelemetry
-    spans started with it nest under the run, and the handle to end with
-    `defer`; `telmoni.RunFromContext(ctx)` finds the run deep in a call stack.
+    spans started with it nest under the agent's span, and the handle to end with
+    `defer`; `telmoni.TraceFromContext(ctx)` finds the trace deep in a call stack.
     `Fail(err)` marks the span failed with the error's Go type, records its
-    message as [content](#content), and marks it cancelled for `context.Canceled`, unless its run
+    message as [content](#content), and marks it cancelled for `context.Canceled`, unless its trace
     was [refused an opening](#the-guard);
     `FailWith("TimeoutError")` and `Cancel()` do the same by hand. The SDK
     never panics: a `Client` not from `New`, the nil a failed `New` returns
-    among them, sends nothing; a blank agent name opens a run that does
+    among them, sends nothing; a blank agent name opens a trace that does
     nothing, and of what Telmoni would refuse, these are left off with one
     warning — a token count below 0, a `Usage`'s `Cost` below 0 or not finite
     (a `*float64`, nil where your provider reports none), a tag whose key is
@@ -256,21 +257,21 @@ holding the **ingest** scope.
   </Tab>
   <Tab value="Rust">
     ```rust
-    use telmoni::{Config, ModelCallOptions, Reply, RunOptions, Telmoni, ToolCallOptions, Usage};
+    use telmoni::{Config, ModelCallOptions, Reply, Telmoni, ToolCallOptions, TraceOptions, Usage};
 
     let telmoni = Telmoni::new(Config::from_env());
 
-    let run = telmoni.run(
+    let trace = telmoni.trace(
         "support-bot",
-        RunOptions {
+        TraceOptions {
             user_id: Some("user_42".into()),
             session_id: Some("conv_7".into()),
             tags: [("env".to_owned(), "prod".to_owned())].into(),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
     let reply = {
-        let step = run.step("plan")?;
+        let step = trace.step("plan")?;
         let call = step.model_call(
             "gpt-4o-mini",
             ModelCallOptions {
@@ -288,20 +289,20 @@ holding the **ingest** scope.
         });
         reply
     };
-    let tool = run.tool_call("search", ToolCallOptions::default())?;
+    let tool = trace.tool_call("search", ToolCallOptions::default())?;
     if search(&reply.query).is_err() {
         tool.fail("TimeoutError");
     }
     drop(tool);
-    run.end();
+    trace.end();
     telmoni.shutdown();
     ```
 
     Each handle is a guard that ends its span when dropped or on `end()`.
-    `run` returns an error for a blank agent name or a cap that is no cap;
+    `trace` returns an error for a blank agent name or a cap that is no cap;
     `step`, `model_call` and `tool_call` once
-    the run reached a cap it was opened with ([the guard](#the-guard)); and
-    `record_run` for the cases [below](#a-run-recorded-after-it-ended).
+    the trace reached a cap it was opened with ([the guard](#the-guard)); and
+    `record_trace` for the cases [below](#a-trace-recorded-after-it-ended).
     Nothing else in the SDK fails: of what Telmoni would refuse, these are
     left off with one warning — a token count below 0, a cost below 0 or not
     finite, a tag whose key is not 1 to 64 characters or whose value is past
@@ -317,15 +318,15 @@ holding the **ingest** scope.
     A blank `prompt` or `prompt_version` is none, as an empty provider is; one
     past 1,024 characters is left off, never cut, since cut it would name
     another, and so is a version whose prompt is none or was left off, each
-    with one warning. The closure forms `run_with`, `step_with`, `model_call_with` and
+    with one warning. The closure forms `trace_with`, `step_with`, `model_call_with` and
     `tool_call_with` end the span when the closure returns and return its
     value, `step_with` and the calls' wrapped in a `Result` for the cap; their
     `try_` forms mark an `Err` on the span with the error's type name,
     recording its message (`Display`) as [content](#content), before
     returning it unchanged, and return a cap's refusal as that error type,
-    which takes one (`From<telmoni::Error>`); `run.on_result(result)` does
-    the same for a run held as a guard. `fail("TimeoutError")` and
-    `cancel()` do the same by hand, and `context()` or `attach()` make the run
+    which takes one (`From<telmoni::Error>`); `trace.on_result(result)` does
+    the same for a trace held as a guard. `fail("TimeoutError")` and
+    `cancel()` do the same by hand, and `context()` or `attach()` make the trace
     current for your own spans.
   </Tab>
 </Tabs>
@@ -364,25 +365,25 @@ counts, times and fails as it does tool calls, by source.
     ```
 
     `retrieval` is a context manager, an `async with` and a decorator, as
-    `tool_call` is, on the client or on a run; `returned` takes a list or a
+    `tool_call` is, on the client or on a trace; `returned` takes a list or a
     tuple.
   </Tab>
   <Tab value="TypeScript">
     ```typescript
-    await run.retrieval('kb-articles', { query: question, topK: 5 }, async (found) => {
+    await trace.retrieval('kb-articles', { query: question, topK: 5 }, async (found) => {
       found.returned(await index.search(question, 5)); // your vector store's search
     });
-    await run.retrieval('customer-preferences', { topK: 3, memory: true }, async (remembered) => {
+    await trace.retrieval('customer-preferences', { topK: 3, memory: true }, async (remembered) => {
       remembered.returned(await memories.search(question, 3));
     });
     ```
 
-    `retrieval` opens on a run or a step, as `toolCall` does; `returned` takes
+    `retrieval` opens on a trace or a step, as `toolCall` does; `returned` takes
     an array.
   </Tab>
   <Tab value="Go">
     ```go
-    _, found := run.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: question, TopK: 5})
+    _, found := trace.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: question, TopK: 5})
     found.Returned(index.Search(question, 5)) // your vector store's search
     found.End()
     ```
@@ -395,7 +396,7 @@ counts, times and fails as it does tool calls, by source.
     ```rust
     use telmoni::RetrievalOptions;
 
-    let found = run.retrieval(
+    let found = trace.retrieval(
         "kb-articles",
         RetrievalOptions { query: Some(question.into()), top_k: Some(5), ..RetrievalOptions::default() },
     )?;
@@ -414,7 +415,7 @@ its source `gen_ai.memory.store.id` and how many records came back
 `gen_ai.data_source.id` and the count `telmoni.retrieval.returned`. A source
 names a store, never a person: it is kept as metadata in every mode and in the
 hourly totals for thirteen months, so a memory kept for each of your users
-names the user in the run's `user_id`. A source past 145 characters is cut to
+names the user in the trace's `user_id`. A source past 145 characters is cut to
 145, a blank one sends the span named by its operation alone, and a `top_k`,
 read as a token count is, is left off below 0, each with one warning. Anything
 handed to `returned` but a list is refused whole, with one warning, and the
@@ -422,11 +423,11 @@ last list handed over wins: its documents and its count are set together.
 
 ---
 
-## A run recorded after it ended
+## A trace recorded after it ended
 
 A job that keeps its own log, or a hook that runs once the work it reports is
-over, hands the finished run over whole, as data: its id, a UUID you give and
-keep with the log; its agent, user, session and tags; the messages it was
+over, hands the finished trace over whole, as data: its id, 32 hex digits you
+give and keep with the log; its agent, user, session and tags; the messages it was
 asked and answered with, which are [content](#content); its start and end and
 how it ended; and its steps and calls, each with its own times. A step holds
 the calls made inside it, and steps of its own, a subagent's own subagents say,
@@ -450,13 +451,13 @@ by as much, so time a record by the clock that sends it.
     ```python
     from datetime import datetime, timezone
 
-    from telmoni import ModelCallRecord, RunRecord, ToolCallRecord, Usage
+    from telmoni import ModelCallRecord, ToolCallRecord, TraceRecord, Usage
 
     at = lambda s: datetime(2026, 10, 12, 9, 0, s, tzinfo=timezone.utc)
 
-    telmoni.record_run(
-        RunRecord(
-            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+    telmoni.record_trace(
+        TraceRecord(
+            trace_id="3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
             agent="nightly-triage",
             session_id="conv_7",
             start=at(0),
@@ -475,8 +476,8 @@ by as much, so time a record by the clock that sends it.
 
     Times carry their timezone. A `StepRecord`'s `calls` hold steps as well as
     calls, and a `ModelCallRecord` takes `input_messages` and
-    `reasoning_effort`. A blank agent, a run id that is neither a
-    hyphenated UUID nor 32 hex digits, or is the nil UUID, a time without its
+    `reasoning_effort`. A blank agent, a trace id that is not 32 hex digits
+    or is all zeros, a time without its
     timezone or outside what Telmoni reads (after the Unix epoch, and less than
     2^64 nanoseconds after it, in July 2554), an empty step's name or model,
     text longer than Telmoni keeps (a step's or a tool's name past 145
@@ -490,8 +491,8 @@ by as much, so time a record by the clock that sends it.
   </Tab>
   <Tab value="TypeScript">
     ```ts
-    telmoni.recordRun({
-      runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d',
+    telmoni.recordTrace({
+      traceId: '3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d',
       agent: 'nightly-triage',
       sessionId: 'conv_7',
       start: new Date('2026-10-12T09:00:00Z'),
@@ -520,8 +521,8 @@ by as much, so time a record by the clock that sends it.
     A time is a `Date` or milliseconds since the Unix epoch; a step is
     `{ type: 'step', name, start, end, calls }`, its `calls` holding steps as
     well as calls, and a model call takes `inputMessages` and
-    `reasoningEffort`. A blank agent, a run id that
-    is neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an
+    `reasoningEffort`. A blank agent, a trace id that is not 32 hex digits,
+    either case, or is all zeros, or an
     empty step's name or model throws a `TypeError`, as does a field of the
     wrong type — a time that is not one, an item of no known `type`, `inside`
     or `calls` that is no array, tags or a usage that is no object — save a
@@ -536,8 +537,8 @@ by as much, so time a record by the clock that sends it.
   <Tab value="Go">
     ```go
     start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
-    err := client.RecordRun(ctx, telmoni.RunRecord{
-        RunID:     "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+    err := client.RecordTrace(ctx, telmoni.TraceRecord{
+        TraceID:   "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
         Agent:     "nightly-triage",
         SessionID: "conv_7",
         Start:     start,
@@ -559,8 +560,8 @@ by as much, so time a record by the clock that sends it.
 
     A step is a `telmoni.StepRecord` with its `Calls`, steps among them, and a
     `telmoni.ModelCallRecord` takes `InputMessages` and `ReasoningEffort`. A
-    blank agent, a run
-    id that is not a UUID or is the nil UUID, a time that is zero or outside
+    blank agent, a trace id that is not 32 hex digits or is all zeros, a time
+    that is zero or outside
     what Telmoni reads (after the Unix epoch, and less than 2^64 nanoseconds
     after it, in July 2554), an empty step's name or model, text longer than
     Telmoni keeps (a step's or a tool's name past 145 characters, the agent, a
@@ -572,13 +573,13 @@ by as much, so time a record by the clock that sends it.
     ```rust
     use std::time::{Duration, SystemTime};
 
-    use telmoni::{ModelCallRecord, RunRecord, ToolCallRecord, Usage};
+    use telmoni::{ModelCallRecord, ToolCallRecord, TraceRecord, Usage};
 
     // 2026-10-12T09:00:00Z, and what came after it.
     let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
     let at = |millis| start + Duration::from_millis(millis);
 
-    telmoni.record_run(RunRecord {
+    telmoni.record_trace(TraceRecord {
         session_id: Some("conv_7".into()),
         inside: vec![
             ModelCallRecord {
@@ -593,7 +594,7 @@ by as much, so time a record by the clock that sends it.
             }
             .into(),
         ],
-        ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
+        ..TraceRecord::new("3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
     })?;
     telmoni.flush();
     ```
@@ -601,8 +602,8 @@ by as much, so time a record by the clock that sends it.
     A step is a `StepRecord` with its `calls`, steps among them, and a
     `ModelCallRecord` takes `input_messages` and `reasoning_effort`. A blank
     agent
-    (`Error::EmptyAgent`), a run id that is not a UUID or is the nil UUID
-    (`Error::RunId`), an empty step's name or model (`Error::EmptyName`), a
+    (`Error::EmptyAgent`), a trace id that is not 32 hex digits or is all zeros
+    (`Error::TraceId`), an empty step's name or model (`Error::EmptyName`), a
     time outside what Telmoni reads, after the Unix epoch and less than 2^64
     nanoseconds after it, in July 2554 (`Error::RecordedTime`), text longer
     than Telmoni keeps — a step's or a tool's name past 145 characters, the
@@ -611,145 +612,145 @@ by as much, so time a record by the clock that sends it.
     nested past 16 deep (`Error::TooDeep`) or a span that
     ends before it starts (`Error::EndBeforeStart`) is returned as an error, and
     nothing is sent; a record the queue has no room for is `Error::QueueFull`.
-    `record_run` takes the record, so send `record.clone()` where you would
+    `record_trace` takes the record, so send `record.clone()` where you would
     record it again.
   </Tab>
 </Tabs>
 
-The run is sent as the live calls would have sent it, through the same
-exporter and content rules, in a trace of its own named by the
-run's id, whatever trace is current. Each span's id is derived from the run's
-id and the span's place in the record, and a record travels in bodies of its
-own, so the same record sent again is the same bytes, whatever else the client
-is sending, which Telmoni, where it reaches its Redis, answers within the hour
-as it answered the first, storing nothing twice: give a run the same id each
-time you send it. A record's content, its run's and each step's and call's,
-leaves under the same two locks as a live run's.
+The trace is sent as the live calls would have sent it, through the same
+exporter and content rules, under the trace id the record gives, whatever
+trace is current. Each span's id is derived from that id and the span's place
+in the record, and a record travels in bodies of its own, so the same record
+sent again is the same bytes, whatever else the client is sending, which
+Telmoni, where it reaches its Redis, answers within the hour as it answered
+the first, storing nothing twice: give a trace the same id each time you send
+it. A record's content, the agent's and each step's and call's, leaves under
+the same two locks as a live trace's.
 The [Claude Code, Codex and Antigravity plugins](/docs/api/coding-agents) are built on it.
 
 ---
 
 ## Scores
 
-A [score](/docs/monitoring/scores) judges a run, one of its spans or a
+A [score](/docs/monitoring/scores) judges a trace, one of its spans or a
 session: a name, 1 to 64 characters, and a number, a yes or no, or a category
 of up to 64 characters. A number may name its range, which it must fall
 within, and any score the version of what scored, up to 64 characters. A
 score is metadata, sent in every content mode and never handed to your
 [mask](#masking-content).
 
-On a handle still open — a run, a step, a model call, a tool call or a retrieval — `score`
+On a handle still open — a trace, a step, a model call, a tool call or a retrieval — `score`
 puts it on that span, as OpenTelemetry's evaluation event, and it leaves with
 the span. Once the span has ended, a person's feedback on an answer say, or
-for a session, the client's `score` names what it scores — a run by its id, a
-span by its run's id and the handle's span id, or a session — and sends it to
+for a session, the client's `score` names what it scores — a trace by its id, a
+span by its trace's id and the handle's span id, or a session — and sends it to
 [`POST /v1/scores`](/docs/api/reference#post-v1scores) with the next export,
 under the same key; a flush or a shutdown sends it as it sends the spans
-queued, and a retry keeps it once. A record's run, steps and calls take their
+queued, and a retry keeps it once. A record's trace, steps and calls take their
 scores too, each sent at its span's end.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
     ```python
-    with telmoni.run("support-bot", session_id="conv_7") as run:
+    with telmoni.trace("support-bot", session_id="conv_7") as trace:
         with telmoni.model_call("gpt-4o-mini", provider="openai") as call:
             ...
             call.score("grounded", True)
-        run.score("relevance", 0.8, range=(0, 1), version="judge-2")
-        run_id, span_id = run.run_id, call.span_id
+        trace.score("relevance", 0.8, range=(0, 1), version="judge-2")
+        trace_id, span_id = trace.trace_id, call.span_id
 
     # Later, once the person answered:
-    telmoni.score("thumbs", True, run_id=run_id)
+    telmoni.score("thumbs", True, trace_id=trace_id)
     telmoni.score("outcome", "resolved", session_id="conv_7")
     ```
 
     `value` is a `bool`, a yes or no; an `int` or a `float`, a number; or a
-    `str`, a category. A record's run, steps and calls take
+    `str`, a category. A record's trace, steps and calls take
     `scores=[{"name": "thumbs", "value": True}]`.
   </Tab>
   <Tab value="TypeScript">
     ```ts
-    await telmoni.run('support-bot', { sessionId: 'conv_7' }, async (run) => {
-      await run.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
+    await telmoni.trace('support-bot', { sessionId: 'conv_7' }, async (trace) => {
+      await trace.modelCall('gpt-4o-mini', { provider: 'openai' }, async (call) => {
         // ...
         call.score('grounded', true);
       });
-      run.score('relevance', 0.8, { range: [0, 1], version: 'judge-2' });
-      runId = run.runId;
+      trace.score('relevance', 0.8, { range: [0, 1], version: 'judge-2' });
+      traceId = trace.traceId;
     });
 
     // Later, once the person answered:
-    telmoni.score('thumbs', true, { runId });
+    telmoni.score('thumbs', true, { traceId });
     telmoni.score('outcome', 'resolved', { sessionId: 'conv_7' });
     ```
 
     `value` is a `boolean`, a yes or no; a `number`; or a `string`, a
     category. A handle's `spanId` names its span for a later score. A record's
-    run, steps and calls take `scores: [{ name: 'thumbs', value: true }]`.
+    trace, steps and calls take `scores: [{ name: 'thumbs', value: true }]`.
   </Tab>
   <Tab value="Go">
     ```go
-    run.Score("relevance", telmoni.Number(0.8),
+    trace.Score("relevance", telmoni.Number(0.8),
         telmoni.ScoreOptions{Range: &[2]float64{0, 1}, Version: "judge-2"})
     call.Score("grounded", telmoni.Bool(true), telmoni.ScoreOptions{})
-    runID, spanID := run.ID(), call.SpanID()
+    traceID, spanID := trace.TraceID(), call.SpanID()
 
     // Later, once the person answered:
-    client.Score(telmoni.ScoreTarget{RunID: runID}, "thumbs",
+    client.Score(telmoni.ScoreTarget{TraceID: traceID}, "thumbs",
         telmoni.Bool(true), telmoni.ScoreOptions{})
     client.Score(telmoni.ScoreTarget{SessionID: "conv_7"}, "outcome",
         telmoni.Category("resolved"), telmoni.ScoreOptions{})
     ```
 
-    A nil handle scores nothing. A record's run, steps and calls take
+    A nil handle scores nothing. A record's trace, steps and calls take
     `Scores: []telmoni.RecordedScore{{Name: "thumbs", Value: telmoni.Bool(true)}}`.
   </Tab>
   <Tab value="Rust">
     ```rust
     use telmoni::{Score, ScoreTarget};
 
-    run.score(Score::number("relevance", 0.8).range(0.0, 1.0).version("judge-2"));
+    trace.score(Score::number("relevance", 0.8).range(0.0, 1.0).version("judge-2"));
     call.score(Score::boolean("grounded", true));
-    let (run_id, span_id) = (run.run_id().to_owned(), call.span_id());
+    let (trace_id, span_id) = (trace.trace_id().to_owned(), call.span_id());
 
     // Later, once the person answered:
-    telmoni.score(&ScoreTarget::run(&run_id), Score::boolean("thumbs", true));
+    telmoni.score(&ScoreTarget::trace(&trace_id), Score::boolean("thumbs", true));
     telmoni.score(&ScoreTarget::session("conv_7"), Score::category("outcome", "resolved"));
     ```
 
-    A record's run, steps and calls take `scores: vec![Score::boolean("thumbs", true)]`.
+    A record's trace, steps and calls take `scores: vec![Score::boolean("thumbs", true)]`.
   </Tab>
 </Tabs>
 
 A score that breaks these rules — a name blank or too long, a number that is
 not finite or falls outside its range, a range on a yes or no or a category, a
 blank category, a version too long, a value of another type, or a target that
-names no run, span or session — is not sent, with one warning, `input`
+names no trace, span or session — is not sent, with one warning, `input`
 ([Answers and warnings](#answers-and-warnings)), and never raised into your
 code; so is one on a handle whose span has ended, which the client's `score`
 sends instead, and a span's seventeenth, since a span holds 32 events and its
 failure needs one. A body `/v1/scores` refuses is dropped with one warning,
 `refused`, one it cannot take just then is sent again as an export is, and
 one still failing after an export's attempts is dropped with one warning,
-`failed`. A score on a run continued from another service sends nothing, as
-nothing of that run is sent from this side.
+`failed`. A score on a trace continued from another service sends nothing, as
+nothing of that trace is sent from this side.
 
-## A run across services
+## A trace across services
 
 An agent whose work spans more than one service — an orchestrator handing a
-task to a worker, a tool served over HTTP — is still one run. Before the
+task to a worker, a tool served over HTTP — is still one trace. Before the
 request leaves, `inject` writes into its headers the W3C `traceparent` of the
-span current inside the run and the run's id and agent as the W3C `baggage`
-members `telmoni.run_id` and `telmoni.agent`, beside whatever members the
-headers hold already. In the service that answers, `extract` reads them back
-as the run continued there: the steps and calls it opens carry the caller's
-run and take the caller's span as their parent, so the trace shows the work
-where it was asked for, and the trace list shows one run, not one a service.
+span current inside the trace and the agent as the W3C `baggage` member
+`telmoni.agent`, beside whatever members the headers hold already. In the
+service that answers, `extract` reads them back as the trace continued there:
+the steps and calls it opens carry the caller's trace id and agent and take
+the caller's span as their parent, so the trace shows the work where it was
+asked for, and the trace list shows one trace, not one a service.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
     ```python
-    # The orchestrator, inside a run.
+    # The orchestrator, inside a trace.
     with telmoni.step("delegate"):
         headers = {"Content-Type": "application/json"}
         telmoni.inject(headers)
@@ -758,15 +759,15 @@ where it was asked for, and the trace list shows one run, not one a service.
     # The worker.
     @app.post("/work")
     def work(request):
-        run = telmoni.extract(request.headers)
-        with telmoni.step("work", run=run):
+        trace = telmoni.extract(request.headers)
+        with telmoni.step("work", trace=trace):
             ...
     ```
   </Tab>
   <Tab value="TypeScript">
     ```ts
-    // The orchestrator, inside a run.
-    await run.step('delegate', async (step) => {
+    // The orchestrator, inside a trace.
+    await trace.step('delegate', async (step) => {
       const headers = new Headers({ 'content-type': 'application/json' });
       telmoni.inject(headers, step);
       await fetch('https://worker.internal/work', { method: 'POST', headers, body });
@@ -774,15 +775,15 @@ where it was asked for, and the trace list shows one run, not one a service.
 
     // The worker.
     app.post('/work', async (req, res) => {
-      const run = telmoni.extract(req.headers);
-      await run?.step('work', async (step) => { /* ... */ });
+      const trace = telmoni.extract(req.headers);
+      await trace?.step('work', async (step) => { /* ... */ });
     });
     ```
   </Tab>
   <Tab value="Go">
     ```go
-    // The orchestrator, inside a run.
-    stepCtx, step := run.Step(ctx, "delegate")
+    // The orchestrator, inside a trace.
+    stepCtx, step := trace.Step(ctx, "delegate")
     req, _ := http.NewRequestWithContext(stepCtx, http.MethodPost, "https://worker.internal/work", body)
     client.Inject(stepCtx, req.Header)
     resp, err := httpClient.Do(req)
@@ -791,8 +792,8 @@ where it was asked for, and the trace list shows one run, not one a service.
     // The worker.
     func work(w http.ResponseWriter, r *http.Request) {
     	ctx := client.Extract(r.Context(), r.Header)
-    	run := telmoni.RunFromContext(ctx)
-    	workCtx, step := run.Step(ctx, "work")
+    	trace := telmoni.TraceFromContext(ctx)
+    	workCtx, step := trace.Step(ctx, "work")
     	defer step.End()
     	// ...
     }
@@ -800,8 +801,8 @@ where it was asked for, and the trace list shows one run, not one a service.
   </Tab>
   <Tab value="Rust">
     ```rust
-    // The orchestrator, inside a run.
-    let step = run.step("delegate")?;
+    // The orchestrator, inside a trace.
+    let step = trace.step("delegate")?;
     let mut headers: HashMap<String, String> = HashMap::new();
     telmoni.inject_from(&step.context(), &mut headers);
     // or, with the step attached or a future run with its context: telmoni.inject(&mut headers)
@@ -810,8 +811,8 @@ where it was asked for, and the trace list shows one run, not one a service.
 
     // The worker.
     let headers: HashMap<String, String> = request.headers_as_map();
-    if let Some(run) = telmoni.extract(&headers) {
-        let step = run.step("work")?;
+    if let Some(trace) = telmoni.extract(&headers) {
+        let step = trace.step("work")?;
         // ...
     }
     ```
@@ -826,13 +827,13 @@ In TypeScript, `inject` takes the handle to write from, or writes from the
 active context where your application runs OpenTelemetry's context manager;
 in Rust, `inject` reads the current context, which a handle's `attach()` or
 `FutureExt::with_context` sets, and `inject_from` takes a handle's `context()`.
-The worker never ends a run it continued: the orchestrator's own span does,
-and until it arrives the run is open with what the worker sent. Headers that
-name no run — no `traceparent`, no `telmoni.run_id`, a malformed one —
-continue nothing, and a step opened then is outside a run and sends nothing.
-The headers carry the run's id and agent and nothing else; a service sending
-under another project's key records the spans as that project's own run, so a
-forged header reaches no other tenant. Telmoni's own helpers write and read
+The worker never ends a trace it continued: the orchestrator's own span does,
+and until it arrives the trace is open with what the worker sent. Headers that
+name no trace — no `traceparent`, no `telmoni.agent`, a malformed one —
+continue nothing, and a step opened then is outside a trace and sends nothing.
+The headers carry the trace's id and agent and nothing else; a service sending
+under another project's key records the spans as that project's own trace, so
+a forged header reaches no other tenant. Telmoni's own helpers write and read
 the headers; no propagator is set globally, since your application's
 propagators are its own.
 
@@ -840,12 +841,12 @@ propagators are its own.
 
 ## The guard
 
-A run opened with a cap is held to it in the agent's own process, with no
+A trace opened with a cap is held to it in the agent's own process, with no
 call to Telmoni: `max_steps` caps its steps, and `max_spend`, in US dollars,
-what its model calls cost. Once the run reaches a cap, what it opens next is
+what its model calls cost. Once the trace reaches a cap, what it opens next is
 refused before it opens: a step past its step cap, and, once what it spent is
 its spend cap or more, any step, model call, tool call or retrieval. A call's cost is
-known only once it answers, so a run can spend past its cap by the calls
+known only once it answers, so a trace can spend past its cap by the calls
 already open as it crossed: one, where it makes them one at a time.
 
 Each call is counted as Telmoni counts it: its cost as reported in the usage
@@ -860,14 +861,14 @@ provider otherwise, `gemini` or `bedrock` say, finds no price there. Prices of
 your own, handed to the
 client as `prices`, come before the table's, for a model it lacks or prices
 otherwise than you pay; the SDK alone holds them, so Telmoni's own reads, an
-alert on what each run spent among them, still price that call by the table.
+alert on what each trace spent among them, still price that call by the table.
 A call answered more than once, as a stream's counts arrive, counts as its
 span then holds it: each count and the cost as last given, Go's `Usage` giving
 its four counts each time. An answer given after its call ended is not sent
 and counts nothing, with one warning; in Rust, `end` takes the call, so none
 can come. A call with neither a cost nor a price is never
 stopped on cost, and under a spend cap the SDK warns once of each such model.
-`spent` reads what a run's calls have cost so far, as the guard counts them.
+`spent` reads what a trace's calls have cost so far, as the guard counts them.
 
 <Tabs items={['Python', 'TypeScript', 'Go', 'Rust']}>
   <Tab value="Python">
@@ -879,7 +880,7 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     )
 
     try:
-        with telmoni.run("support-bot", max_steps=20, max_spend=0.50) as run:
+        with telmoni.trace("support-bot", max_steps=20, max_spend=0.50) as trace:
             ...
     except CapExceededError as stopped:
         print(stopped.cap, stopped.limit, stopped.used)  # spend 0.5 0.5213
@@ -887,7 +888,7 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
 
     `CapExceededError`, a `RuntimeError`, is raised where the step, model
     call, tool call or retrieval would open, naming the `cap` (`steps` or `spend`), its
-    `limit` and what the run had `used`; escaping the run, it marks the run
+    `limit` and what the trace had `used`; escaping the trace, it marks the trace
     failed with its class. A cap that is not above 0 raises `ValueError`, as a
     price that names no provider or model, or is no number from 0, does; a
     cache price not given is the input price.
@@ -900,14 +901,14 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
       prices: [{ provider: 'vllm', model: 'llama-3.1-70b', input: 2e-7, output: 6e-7 }],
     });
 
-    await telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, async (run) => {
+    await telmoni.trace('support-bot', { maxSteps: 20, maxSpend: 0.5 }, async (trace) => {
       // ...
-    }); // rejects with a CapExceededError once the run reached a cap
+    }); // rejects with a CapExceededError once the trace reached a cap
     ```
 
     `step`, `modelCall`, `toolCall` and `retrieval` throw `CapExceededError` before their
     callback runs, naming the `cap` (`steps` or `spend`), its `limit` and what
-    the run had `used`; escaping the run, it marks the run failed with its
+    the trace had `used`; escaping the trace, it marks the trace failed with its
     class. A cap that is not above 0 throws a `RangeError`; a price that names
     no provider or model throws a `TypeError`, and one that is no number from
     0 a `RangeError`; a cache price not given is the input price.
@@ -918,10 +919,10 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     	Prices: []telmoni.Price{{Provider: "vllm", Model: "llama-3.1-70b", Input: 2e-7, Output: 6e-7}},
     })
 
-    ctx, run := client.Run(ctx, "support-bot", telmoni.RunOptions{MaxSteps: 20, MaxSpend: 0.50})
-    defer run.End()
+    ctx, trace := client.Trace(ctx, "support-bot", telmoni.TraceOptions{MaxSteps: 20, MaxSpend: 0.50})
+    defer trace.End()
 
-    callCtx, call := run.ModelCall(ctx, "llama-3.1-70b", telmoni.ModelCallOptions{Provider: "vllm"})
+    callCtx, call := trace.ModelCall(ctx, "llama-3.1-70b", telmoni.ModelCallOptions{Provider: "vllm"})
     reply, err := askTheModel(callCtx, question) // fails at once past a cap
     if err != nil {
     	call.Fail(err)
@@ -933,16 +934,16 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
     call.End()
     var capped *telmoni.CapExceededError
     if errors.As(context.Cause(callCtx), &capped) {
-    	run.Fail(capped)
+    	trace.Fail(capped)
     }
     ```
 
     Go's openers return no error: past a cap, `Step`, `ModelCall`,
     `ToolCall` and `Retrieval` open nothing and return a context already cancelled, its
     `context.Cause` a `*CapExceededError` naming the `Cap`, its `Limit` and
-    what the run had `Used`, so a request made with it fails at once, as one
-    past its deadline does, and nothing opens under it; `run.Err()` gives the
-    last refusal too. Once the run was refused, the run's `Fail(err)`, and
+    what the trace had `Used`, so a request made with it fails at once, as one
+    past its deadline does, and nothing opens under it; `trace.Err()` gives the
+    last refusal too. Once the trace was refused, the trace's `Fail(err)`, and
     each step's and call's, marks it failed with the refusal's type,
     `telmoni.CapExceededError`, for an `err` that is or wraps
     `context.Canceled`, as such a request's is, where it would otherwise mark
@@ -954,25 +955,25 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
   </Tab>
   <Tab value="Rust">
     ```rust
-    use telmoni::{Config, Error, Price, RunOptions, Telmoni};
+    use telmoni::{Config, Error, Price, Telmoni, TraceOptions};
 
     let telmoni = Telmoni::new(Config {
         prices: vec![Price { provider: "vllm".into(), model: "llama-3.1-70b".into(), input: 2e-7, output: 6e-7, ..Price::default() }],
         ..Config::from_env()
     });
 
-    let run = telmoni.run("support-bot", RunOptions { max_steps: Some(20), max_spend: Some(0.50), ..RunOptions::default() })?;
-    match run.step("plan") {
+    let trace = telmoni.trace("support-bot", TraceOptions { max_steps: Some(20), max_spend: Some(0.50), ..TraceOptions::default() })?;
+    match trace.step("plan") {
         Ok(step) => { /* ... */ }
-        Err(Error::CapExceeded { .. }) => { /* the run reached a cap: stop */ }
+        Err(Error::CapExceeded { .. }) => { /* the trace reached a cap: stop */ }
         Err(other) => return Err(other.into()),
     }
     ```
 
     `step`, `model_call`, `tool_call` and `retrieval` return `Error::CapExceeded`, naming
-    the `cap` (`Cap::Steps` or `Cap::Spend`), its `limit` and what the run had
-    `used`, and open nothing; carried out of `try_run_with`, it marks the run
-    failed with its type, `Error`. `run` returns `Error::MaxSteps` for a step
+    the `cap` (`Cap::Steps` or `Cap::Spend`), its `limit` and what the trace had
+    `used`, and open nothing; carried out of `try_trace_with`, it marks the trace
+    failed with its type, `Error`. `trace` returns `Error::MaxSteps` for a step
     cap of 0 and `Error::MaxSpend` for a spend cap that is no finite number
     above 0.
     A price that names no provider or model, or is no number from 0, is left
@@ -981,28 +982,29 @@ stopped on cost, and under a spend cap the SDK warns once of each such model.
   </Tab>
 </Tabs>
 
-A run [continued in another service](#a-run-across-services) carries no cap
+A trace [continued in another service](#a-trace-across-services) carries no cap
 there, and counts there only what its calls in that process cost; a
-[recorded run](#a-run-recorded-after-it-ended) has ended, and no cap holds it.
+[recorded trace](#a-trace-recorded-after-it-ended) has ended, and no cap holds it.
 
 ---
 
-## What a run sends
+## What a trace sends
 
-A run is a span of its own, named `invoke_agent <agent>`, inside your current
-trace when one is current and a trace of its own otherwise. It carries the
-run's id (`telmoni.run_id`, a UUID), its agent (`telmoni.agent`), the user
-and session you named (`user.id`, `gen_ai.conversation.id`), the first 32
-of its tags Telmoni would keep, the most it keeps, as `telmoni.tag.<key>`.
-Every span inside the run carries the run's id, agent, user and session, so
-Telmoni knows each span's run without waiting
-for the trace's tree. As the run opens, the SDK also sends its opening,
-`telmoni.run.start`, a span of no length under the run's own carrying the
-same four, at once rather than with the next batch: the trace list shows the
-run **Running** from its start, and a run that stops sending with no end is
-[left open](/docs/monitoring/alerts#loops-and-stalls) rather than unseen. It counts against no
-plan. A run continued from another service's headers sends none, nor does a
-recorded run. The resource every span of an export shares names the
+A trace is a trace of its own, at whose root stands the agent's span, named
+`invoke_agent <agent>`; opened while one of your application's spans is
+current, it is linked to that span rather than nested in its trace. The
+agent's span carries its agent (`telmoni.agent`), the user and session you
+named (`user.id`, `gen_ai.conversation.id`), the first 32 of its tags Telmoni
+would keep, the most it keeps, as `telmoni.tag.<key>`. Every span inside the
+trace carries the agent, user and session, so Telmoni knows each span's agent
+without waiting for the trace's tree. As the trace opens, the SDK also sends
+its opening, `telmoni.trace.start`, a span of no length under the agent's own
+carrying the same three, at once rather than with the next batch: the trace
+list shows the trace **Running** from its start, and a trace that stops
+sending with no end is [left open](/docs/monitoring/alerts#loops-and-stalls)
+rather than unseen. It counts against no plan. A trace continued from another
+service's headers sends none, nor does a recorded trace. The resource every
+span of an export shares names the
 SDK (`telemetry.distro.name` `telmoni`, its version, and the OpenTelemetry
 SDK's name, language and version) and, where you set them, the deployment:
 `deployment.environment.name` from the `environment` option or
@@ -1028,7 +1030,7 @@ from `prompt` and `prompt_version` (`promptVersion` in TypeScript, `Prompt` and
 `PromptVersion` in Go). Both are metadata, sent in every content mode and never
 handed to your [mask](#masking-content) or the
 [scrubbers](#scrubbing-secrets-and-personal-data), so a prompt's name names a
-prompt and never a person: a person goes in the run's `user_id`. A recorded
+prompt and never a person: a person goes in the trace's `user_id`. A recorded
 call carries none. A tool call is
 `execute_tool <name>`, and a retrieval `retrieval <source>`, or a memory's
 search `search_memory`, with what it asked for and how many came back
@@ -1047,16 +1049,16 @@ Prompts, completions, tool arguments and results, and a retrieval's query and
 documents — `input_messages`, `output_messages`, `system_instructions`,
 `arguments`, `returned(...)`, `query` — are
 recorded on the span and taken off by the exporter before anything leaves
-the process. A run carries its own messages the same way, on its own span:
-what it was asked as it opens, and what it answered by `answered` (Python's
-`run(input_messages=…)` and `run.answered(output_messages=…)`, TypeScript's
-`{ inputMessages }` and `run.answered({ outputMessages })`, Go's
-`RunOptions{InputMessages: …}` and `run.Answered(telmoni.RunAnswer{OutputMessages: …})`,
-Rust's `RunOptions { input_messages, .. }` and
-`run.answered(RunReply { output_messages })`), and a recorded run its
+the process. The agent carries its own messages the same way, on its own span:
+what it was asked as the trace opens, and what it answered by `answered` (Python's
+`trace(input_messages=…)` and `trace.answered(output_messages=…)`, TypeScript's
+`{ inputMessages }` and `trace.answered({ outputMessages })`, Go's
+`TraceOptions{InputMessages: …}` and `trace.Answered(telmoni.TraceReply{OutputMessages: …})`,
+Rust's `TraceOptions { input_messages, .. }` and
+`trace.answered(TraceReply { output_messages })`), and a recorded trace its
 `input_messages` and `output_messages`, `inputMessages` and `outputMessages`
-in TypeScript and Go. An answer given after its run ended is not sent, with
-one warning; in Rust, `end` takes the run, so none can come. A failure's
+in TypeScript and Go. An answer given after its trace ended is not sent, with
+one warning; in Rust, `end` takes the trace, so none can come. A failure's
 message and stack trace — its `exception` event and its status's message —
 and every event your code adds to an SDK span through OpenTelemetry, a
 [score](#scores)'s own keys apart, are content too; without both locks below, a failed span leaves with its
@@ -1197,7 +1199,7 @@ your application alone knows.
 
 A span whose content a scrubber changed carries `telmoni.scrubbed`, the count
 of each kind it replaced and never a value, `{"pii:email":2,"secret:aws_key":1}`,
-which the run's page shows beside the span's content. A scrubber that fails on
+which the trace's page shows beside the span's content. A scrubber that fails on
 a field sends the span without that field and counts it under `dropped:` and
 the field's key: it never sends the field as it was.
 
@@ -1224,16 +1226,19 @@ tool output, measured on a busy eight-core laptop:
 
 The SDK builds every part of its tracer provider itself — resource, sampler,
 limits, batching — so none of your `OTEL_*` variables reaches it, and it
-neither replaces your provider nor sends your spans to Telmoni. A run joins
-the trace that is current where it begins, and your spans opened inside it
-nest under the run. The run's sampled flag follows the trace it joins; a run
-that starts a trace of its own takes the decision your own sampler gives it —
-given as the `sampler` option in every SDK, Python falling back to your
-provider's sampler when you give none — so your application keeps its own sampling rate inside runs as
-outside them. A run inside a trace your application does not sample is still
-sent. In Rust, joining and nesting take your application on the SDK's
-`opentelemetry` minor, which `telmoni::opentelemetry` re-exports: cargo builds
-each 0.x minor apart, each with a current context of its own.
+neither replaces your provider nor sends your spans to Telmoni. A trace opened
+while one of your application's spans is current is a trace of its own, linked
+to that span rather than nested in its trace, so a request that runs an agent
+a hundred times shows a hundred traces, each whole; your spans opened inside
+it nest under the agent's span. Each trace takes the decision your own sampler
+gives it as it opens — given as the `sampler` option in every SDK, Python
+falling back to your provider's sampler when you give none — and your
+application's own spans inside it follow that flag, so its sampling rate holds
+inside traces as outside them. Every trace is sent whatever the flag says, one
+beside an application span the application does not sample too. In Rust, the
+link and the nesting take your application on the SDK's `opentelemetry` minor,
+which `telmoni::opentelemetry` re-exports: cargo builds each 0.x minor apart,
+each with a current context of its own.
 
 ### Answers and warnings
 
@@ -1265,7 +1270,7 @@ infinity, is sent as no value, and so dropped, and a whole number past 64 bits
 as its text or a double, never costing its batch. Each attempt carries
 `Telmoni-Sent-At`, the agent's clock as it leaves, so
 [ingest](/docs/api/ingest#what-is-kept) can move
-a run from a clock a time zone or a date out as one. A flush waits up to 30 seconds, and a
+a trace from a clock a time zone or a date out as one. A flush waits up to 30 seconds, and a
 shutdown drains for as long, then gives up what is left, sending nothing more. An attribute the
 server drops is logged once: content with the project's content mode, which
 decides the drop, and a link to [what is dropped at the

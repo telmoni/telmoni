@@ -1,7 +1,7 @@
 //! A project's hourly totals over a window, by the hour or the day and, where
 //! asked, by one column: what `/v1/metrics` publishes and the dashboards page
 //! draws. Spend is priced as it is read ([`crate::spend`]), never written, and
-//! scaled by each row's sample rate, a sum over runs. A tag, an end user and
+//! scaled by each row's sample rate, a sum over traces. A tag, an end user and
 //! a session are no column of the totals, so a split by one reads the spans,
 //! within the plan's retention, its most costly values each and the rest as one.
 
@@ -62,8 +62,8 @@ const METRICS_SQL: &str = concat!(
     "{group:String} = 'status', h.status, {group:String} = 'environment', h.environment, ",
     "{group:String} = 'release', h.release, '')) AS key, toUInt8(0) AS folded, ",
     "toUInt64(sum(h.spans)) AS spans, toUInt64(sumIf(h.spans, h.status = 'error')) AS failed, ",
-    "toUInt64(sumIf(h.spans, h.kind = 'run')) AS runs, ",
-    "toUInt64(sumIf(h.spans, h.kind = 'run' AND h.status = 'error')) AS failed_runs, ",
+    "toUInt64(sumIf(h.spans, h.kind = 'agent')) AS traces, ",
+    "toUInt64(sumIf(h.spans, h.kind = 'agent' AND h.status = 'error')) AS failed_traces, ",
     "toUInt64(sum(h.input_tokens)) AS input_tokens, ",
     "toUInt64(sum(h.output_tokens)) AS output_tokens, ",
     "toUInt64(sum(h.cache_read_input_tokens)) AS cache_read_input_tokens, ",
@@ -73,12 +73,12 @@ const METRICS_SQL: &str = concat!(
     ") / h.sample_rate) AS spend, ",
     "sum(h.duration_ms_sum) AS duration_ms_sum, ",
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(h.duration_ms) AS Array(Float64)) AS quantiles, ",
-    "CAST(quantilesTDigestMergeIf(0.5, 0.95, 0.99)(h.duration_ms, h.kind = 'run') ",
-    "AS Array(Float64)) AS run_quantiles ",
+    "CAST(quantilesTDigestMergeIf(0.5, 0.95, 0.99)(h.duration_ms, h.kind = 'agent') ",
+    "AS Array(Float64)) AS trace_quantiles ",
     "FROM telemetry.spans_hourly AS h ",
-    // A run's opening is the run's, counted by its own span.
+    // A trace's opening is the agent's, counted by its own span.
     "WHERE h.project_id IN {projects:Array(String)} AND h.hour >= {from:DateTime('UTC')} ",
-    "AND h.kind != 'run_start' ",
+    "AND h.kind != 'trace_start' ",
     // Newest first, so a window past the limit loses its oldest points.
     "GROUP BY at, key ORDER BY at DESC, key DESC LIMIT {max:UInt32}"
 );
@@ -90,31 +90,31 @@ macro_rules! span_ms {
     };
 }
 
-/// The spans over the window, by the hour or the day and by their run's tag
-/// value, end user or session, each summed as the totals are. A run's value
-/// is read off its spans from a day before the window, within what the plan
-/// keeps, since a call landing after midnight belongs to a run that may have
-/// started before it; a tag off the run's own span first, so a run whose
-/// spans disagree counts once.
+/// The spans over the window, by the hour or the day and by their trace's
+/// tag value, end user or session, each summed as the totals are. A trace's
+/// value is read off its spans from a day before the window, within what the
+/// plan keeps, since a call landing after midnight belongs to a trace that
+/// may have started before it; a tag off the agent's own span first, so a
+/// trace whose spans disagree counts once.
 /// The [`GROUP_TOP`] values that spent most are named, and the rest folded.
 const SPANS_METRICS_SQL: &str = concat!(
     "SELECT at, if(folded = 1, '', group_key) AS key, folded, ",
-    "toUInt64(sum(n_spans)) AS spans, toUInt64(sum(fails)) AS failed, toUInt64(sum(n_runs)) AS runs, ",
-    "toUInt64(sum(n_failed_runs)) AS failed_runs, toUInt64(sum(in_tokens)) AS input_tokens, ",
+    "toUInt64(sum(n_spans)) AS spans, toUInt64(sum(fails)) AS failed, toUInt64(sum(n_traces)) AS traces, ",
+    "toUInt64(sum(n_failed_traces)) AS failed_traces, toUInt64(sum(in_tokens)) AS input_tokens, ",
     "toUInt64(sum(out_tokens)) AS output_tokens, toUInt64(sum(cache_read)) AS cache_read_input_tokens, ",
     "toUInt64(sum(cache_write)) AS cache_write_input_tokens, sum(spent) AS spend, ",
     "sum(ms_sum) AS duration_ms_sum, ",
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(ms_digest) AS Array(Float64)) AS quantiles, ",
-    "CAST(quantilesTDigestMerge(0.5, 0.95, 0.99)(run_ms_digest) AS Array(Float64)) AS run_quantiles ",
-    // A run with no value is its own row, never folded, and ranks after every value.
+    "CAST(quantilesTDigestMerge(0.5, 0.95, 0.99)(trace_ms_digest) AS Array(Float64)) AS trace_quantiles ",
+    // A trace with no value is its own row, never folded, and ranks after every value.
     "FROM (SELECT *, toUInt8(group_key != '' AND dense_rank() OVER ",
     "(ORDER BY group_key = '', key_spend DESC, key_spans DESC, group_key) > {top:UInt32}) AS folded ",
     "FROM (SELECT *, sum(spent) OVER (PARTITION BY group_key) AS key_spend, ",
     "sum(n_spans) OVER (PARTITION BY group_key) AS key_spans FROM (",
     "SELECT if({daily:UInt8} = 1, toStartOfDay(toDateTime(s.received_at, 'UTC')), ",
     "toStartOfHour(toDateTime(s.received_at, 'UTC'))) AS at, k.group_key AS group_key, ",
-    "count() AS n_spans, countIf(s.status = 'error') AS fails, countIf(s.kind = 'run') AS n_runs, ",
-    "countIf(s.kind = 'run' AND s.status = 'error') AS n_failed_runs, sum(s.input_tokens) AS in_tokens, ",
+    "count() AS n_spans, countIf(s.status = 'error') AS fails, countIf(s.kind = 'agent') AS n_traces, ",
+    "countIf(s.kind = 'agent' AND s.status = 'error') AS n_failed_traces, sum(s.input_tokens) AS in_tokens, ",
     "sum(s.output_tokens) AS out_tokens, sum(s.cache_read_input_tokens) AS cache_read, ",
     "sum(s.cache_write_input_tokens) AS cache_write, sum((",
     crate::spend::spent_of!(),
@@ -125,18 +125,18 @@ const SPANS_METRICS_SQL: &str = concat!(
     span_ms!(),
     ") AS ms_digest, quantilesTDigestStateIf(0.5, 0.95, 0.99)(",
     span_ms!(),
-    ", s.kind = 'run') AS run_ms_digest ",
+    ", s.kind = 'agent') AS trace_ms_digest ",
     "FROM telemetry.spans AS s LEFT ANY JOIN (",
-    "SELECT run_id, multiIf({group:String} = 'user', anyIf(user_id, user_id != ''), ",
+    "SELECT trace_id, multiIf({group:String} = 'user', anyIf(user_id, user_id != ''), ",
     "{group:String} = 'session', anyIf(session_id, session_id != ''), ",
-    "if(countIf(kind = 'run' AND mapContains(tags, {tag:String})) > 0, ",
-    "anyIf(tags[{tag:String}], kind = 'run' AND mapContains(tags, {tag:String})), ",
+    "if(countIf(kind = 'agent' AND mapContains(tags, {tag:String})) > 0, ",
+    "anyIf(tags[{tag:String}], kind = 'agent' AND mapContains(tags, {tag:String})), ",
     "anyIf(tags[{tag:String}], mapContains(tags, {tag:String})))) AS group_key ",
     "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
-    "AND received_at >= {keys_from:DateTime('UTC')} GROUP BY run_id",
-    ") AS k ON s.run_id = k.run_id ",
+    "AND received_at >= {keys_from:DateTime('UTC')} GROUP BY trace_id",
+    ") AS k ON s.trace_id = k.trace_id ",
     "WHERE s.project_id IN {projects:Array(String)} AND s.received_at >= {from:DateTime('UTC')} ",
-    "AND s.kind != 'run_start' ",
+    "AND s.kind != 'trace_start' ",
     "GROUP BY at, group_key))) ",
     "GROUP BY at, folded, key ORDER BY at DESC, folded DESC, key DESC LIMIT {max:UInt32}"
 );
@@ -150,8 +150,8 @@ struct MetricRow {
     folded: u8,
     spans: u64,
     failed: u64,
-    runs: u64,
-    failed_runs: u64,
+    traces: u64,
+    failed_traces: u64,
     input_tokens: u64,
     output_tokens: u64,
     cache_read_input_tokens: u64,
@@ -159,7 +159,7 @@ struct MetricRow {
     spend: f64,
     duration_ms_sum: f64,
     quantiles: Vec<f64>,
-    run_quantiles: Vec<f64>,
+    trace_quantiles: Vec<f64>,
 }
 
 /// What a read of the totals answers.
@@ -192,23 +192,23 @@ pub struct MetricPoint {
     pub others: bool,
     pub spans: u64,
     pub failed: u64,
-    /// The runs that ended in it, and those that failed.
-    pub runs: u64,
-    pub failed_runs: u64,
+    /// The traces that ended in it, and those that failed.
+    pub traces: u64,
+    pub failed_traces: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
     /// What its model calls cost, in US dollars: each as reported, else its
-    /// tokens at the project's price or the table's, scaled by its run's
+    /// tokens at the project's price or the table's, scaled by its trace's
     /// sample rate.
     pub spend: f64,
     /// Every span's, in milliseconds: the mean and the 50th, 90th and 99th
     /// percentiles.
     pub duration_ms: Durations,
-    /// Its runs' durations at the 50th, 95th and 99th percentiles, in
-    /// milliseconds; none where no run ended in it.
-    pub run_duration_ms: RunDurations,
+    /// Its traces' durations at the 50th, 95th and 99th percentiles, in
+    /// milliseconds; none where no trace ended in it.
+    pub trace_duration_ms: TraceDurations,
 }
 
 /// A point's durations, in milliseconds.
@@ -220,9 +220,9 @@ pub struct Durations {
     pub p99: Option<f64>,
 }
 
-/// A point's runs' durations, in milliseconds.
+/// A point's traces' durations, in milliseconds.
 #[derive(Debug, Serialize)]
-pub struct RunDurations {
+pub struct TraceDurations {
     pub p50: Option<f64>,
     pub p95: Option<f64>,
     pub p99: Option<f64>,
@@ -266,7 +266,7 @@ pub async fn read(
     };
     let tag = tag_of(group, asked.tag.as_deref())?;
     let spanned = group.is_some_and(from_spans);
-    // What the plan keeps of the spans bounds a split's window and the runs it reads.
+    // What the plan keeps of the spans bounds a split's window and the traces it reads.
     let kept = if spanned {
         crate::capacity::visible_days(state, project_id, crate::traces::MAX_DAYS).await
     } else {
@@ -371,10 +371,10 @@ fn point(row: MetricRow, grouped: bool) -> MetricPoint {
         row.duration_ms_sum / row.spans as f64
     };
     let ran = |n: usize| {
-        if row.runs == 0 {
+        if row.traces == 0 {
             None
         } else {
-            at(&row.run_quantiles, n)
+            at(&row.trace_quantiles, n)
         }
     };
     MetricPoint {
@@ -383,8 +383,8 @@ fn point(row: MetricRow, grouped: bool) -> MetricPoint {
         others: row.folded == 1,
         spans: row.spans,
         failed: row.failed,
-        runs: row.runs,
-        failed_runs: row.failed_runs,
+        traces: row.traces,
+        failed_traces: row.failed_traces,
         input_tokens: row.input_tokens,
         output_tokens: row.output_tokens,
         cache_read_input_tokens: row.cache_read_input_tokens,
@@ -396,7 +396,7 @@ fn point(row: MetricRow, grouped: bool) -> MetricPoint {
             p90: at(&row.quantiles, 1),
             p99: at(&row.quantiles, 2),
         },
-        run_duration_ms: RunDurations {
+        trace_duration_ms: TraceDurations {
             p50: ran(0),
             p95: ran(1),
             p99: ran(2),

@@ -1,6 +1,7 @@
 //! The SDK beside an application's own OpenTelemetry: its spans stay in their
-//! traces at their own sampling rate, a run inside a trace it does not sample
-//! is still sent, and its `OTEL_*` variables change nothing of ours.
+//! traces at their own sampling rate, a trace opened inside a span it does
+//! not sample is still sent, and its `OTEL_*` variables change nothing of
+//! ours.
 
 mod common;
 
@@ -26,7 +27,7 @@ use opentelemetry_sdk::trace::{
     SpanExporter,
 };
 use serde_json::json;
-use telmoni::{Config, RunOptions};
+use telmoni::{Config, TraceOptions};
 
 /// The application's exporter: what its provider sent, kept in memory.
 #[derive(Debug, Clone, Default)]
@@ -86,8 +87,11 @@ fn application(root: impl ShouldSample + 'static, memory: &Memory) -> SdkTracerP
         .build()
 }
 
+/// A trace opened while an application span is current is a trace of its
+/// own, linked to that span; the application's span opened under it nests
+/// in ours.
 #[test]
-fn a_run_joins_the_current_trace_and_the_application_keeps_its_span() -> Outcome {
+fn a_trace_is_its_own_linked_to_the_applications_span() -> Outcome {
     let memory = Memory::default();
     let provider = application(Sampler::AlwaysOn, &memory);
     let app = provider.tracer("the-application");
@@ -98,21 +102,26 @@ fn a_run_joins_the_current_trace_and_the_application_keeps_its_span() -> Outcome
     let request_span = request.span().span_context().span_id().to_string();
     {
         let _current = request.clone().attach();
-        let run = harness.telmoni.run("bot", RunOptions::default())?;
+        let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
         {
-            let _inside = run.attach();
+            let _inside = trace.attach();
             let mut query = app.start("db.query");
             query.end();
         }
-        run.end();
+        trace.end();
     }
     request.span().end();
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let run = only(&spans, "invoke_agent ")?;
-    assert_eq!(run.get("traceId"), Some(&json!(request_trace)));
-    assert_eq!(run.get("parentSpanId"), Some(&json!(request_span)));
+    let agent = only(&spans, "invoke_agent ")?;
+    assert_ne!(agent.get("traceId"), Some(&json!(request_trace)));
+    assert!(agent.get("parentSpanId").is_none(), "a trace of its own");
+    assert_eq!(
+        agent.get("links"),
+        Some(&json!([{ "traceId": request_trace, "spanId": request_span }])),
+        "linked to the application's span"
+    );
     let app_spans = memory.finished();
     let mut names: Vec<&str> = app_spans.iter().map(|span| span.name.as_ref()).collect();
     names.sort_unstable();
@@ -122,12 +131,12 @@ fn a_run_joins_the_current_trace_and_the_application_keeps_its_span() -> Outcome
         .find(|span| span.name == "db.query")
         .ok_or("db.query")?;
     assert_eq!(
-        run.get("spanId"),
+        agent.get("spanId"),
         Some(&json!(query.parent_span_id.to_string())),
-        "nested under the run"
+        "nested under the agent's span"
     );
     assert_eq!(
-        run.get("traceId"),
+        agent.get("traceId"),
         Some(&json!(query.span_context.trace_id().to_string()))
     );
     assert!(
@@ -141,7 +150,7 @@ fn a_run_joins_the_current_trace_and_the_application_keeps_its_span() -> Outcome
 }
 
 #[test]
-fn the_application_keeps_its_own_sampling_rate_inside_runs() -> Outcome {
+fn the_application_keeps_its_own_sampling_rate_inside_traces() -> Outcome {
     let memory = Memory::default();
     let every_other = EveryOther::default();
     let provider = application(every_other.clone(), &memory);
@@ -154,32 +163,34 @@ fn the_application_keeps_its_own_sampling_rate_inside_runs() -> Outcome {
     })?;
 
     for _ in 0..100 {
-        let run = harness.telmoni.run("bot", RunOptions::default())?;
+        let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
         {
-            let _inside = run.attach();
+            let _inside = trace.attach();
             let mut inside = app.start("inside");
             inside.end();
         }
-        run.end();
+        trace.end();
     }
     harness.flush()?;
     assert_eq!(
         starting_with(&harness.spans()?, "invoke_agent ").len(),
         100,
-        "every run reaches Telmoni"
+        "every trace reaches Telmoni"
     );
-    assert_eq!(memory.finished().len(), 50, "half, as outside runs");
+    assert_eq!(memory.finished().len(), 50, "half, as outside traces");
     assert_eq!(
         every_other.calls.load(Ordering::SeqCst),
         100,
-        "asked once per run, for the root, and never for a span with a parent"
+        "asked once per trace, for the root, and never for a span with a parent"
     );
     provider.shutdown()?;
     Ok(())
 }
 
+/// The application's span is not sampled, yet the trace linked to it is
+/// decided by our own sampler and sent whole.
 #[test]
-fn a_run_inside_a_trace_the_application_does_not_sample_is_still_sent() -> Outcome {
+fn a_trace_inside_a_span_the_application_does_not_sample_is_still_sent() -> Outcome {
     let memory = Memory::default();
     let provider = application(Sampler::AlwaysOff, &memory);
     let app = provider.tracer("the-application");
@@ -190,17 +201,22 @@ fn a_run_inside_a_trace_the_application_does_not_sample_is_still_sent() -> Outco
     let request_trace = request.span().span_context().trace_id().to_string();
     {
         let _current = request.clone().attach();
-        let run = harness.telmoni.run("bot", RunOptions::default())?;
-        let step = run.step("s")?;
+        let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+        let step = trace.step("s")?;
         step.end();
-        run.end();
+        trace.end();
     }
     request.span().end();
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let run = only(&spans, "invoke_agent ")?;
-    assert_eq!(run.get("traceId"), Some(&json!(request_trace)));
+    let agent = only(&spans, "invoke_agent ")?;
+    assert_ne!(agent.get("traceId"), Some(&json!(request_trace)));
+    assert_eq!(
+        agent.pointer("/links/0/traceId"),
+        Some(&json!(request_trace)),
+        "linked to the span it was opened under"
+    );
     assert!(named(&spans, "s").is_ok());
     assert!(memory.finished().is_empty());
     provider.shutdown()?;
@@ -231,21 +247,21 @@ impl ShouldSample for Tagging {
 
 /// A root sampler's decision is taken, never its attributes, as in every SDK.
 #[test]
-fn a_root_samplers_attributes_never_reach_the_run() -> Outcome {
+fn a_root_samplers_attributes_never_reach_the_trace() -> Outcome {
     let harness = Harness::with(Config {
         sampler: Some(Box::new(Tagging)),
         ..keyed()
     })?;
-    harness.telmoni.run("bot", RunOptions::default())?.end();
+    harness.telmoni.trace("bot", TraceOptions::default())?.end();
     harness.flush()?;
     let spans = harness.spans()?;
-    let run = only(&spans, "invoke_agent ")?;
-    assert!(attributes_of(run)?.get("sampler.rule").is_none());
+    let trace = only(&spans, "invoke_agent ")?;
+    assert!(attributes_of(trace)?.get("sampler.rule").is_none());
     Ok(())
 }
 
 #[test]
-fn a_configured_sampler_decides_a_root_run() -> Outcome {
+fn a_configured_sampler_decides_a_trace() -> Outcome {
     let memory = Memory::default();
     let provider = application(Sampler::AlwaysOn, &memory);
     let app = provider.tracer("the-application");
@@ -254,17 +270,17 @@ fn a_configured_sampler_decides_a_root_run() -> Outcome {
         ..keyed()
     })?;
 
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     {
-        let _inside = run.attach();
+        let _inside = trace.attach();
         let mut inside = app.start("inside");
         assert!(
             !inside.span_context().is_sampled(),
-            "the run's trace is not sampled, so the application's span is not"
+            "the trace is not sampled, so the application's span in it is not"
         );
         inside.end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
     assert_eq!(
         starting_with(&harness.spans()?, "invoke_agent ").len(),
@@ -280,16 +296,16 @@ fn a_configured_sampler_decides_a_root_run() -> Outcome {
 fn otel_variables_change_nothing_of_ours() -> Outcome {
     if is_child() {
         let harness = Harness::new()?;
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             "bot",
-            RunOptions {
+            TraceOptions {
                 user_id: Some("c".to_owned()),
                 session_id: Some("v".to_owned()),
                 tags: tags(&[("a", "b")]),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
-        run.end();
+        trace.end();
         harness.flush()?;
         let spans = harness.spans()?;
         let attributes = attributes_of(only(&spans, "invoke_agent ")?)?;
@@ -335,12 +351,12 @@ fn otel_variables_change_nothing_of_ours() -> Outcome {
 }
 
 #[test]
-fn the_context_carries_the_run_into_a_future() -> Outcome {
+fn the_context_carries_the_trace_into_a_future() -> Outcome {
     let memory = Memory::default();
     let provider = application(Sampler::AlwaysOn, &memory);
     let app = provider.tracer("the-application");
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
 
     let work = async {
         let mut inside = app.start("inside");
@@ -348,7 +364,7 @@ fn the_context_carries_the_run_into_a_future() -> Outcome {
         inside.end();
         context
     }
-    .with_context(run.context());
+    .with_context(trace.context());
     let mut work = pin!(work);
     let Poll::Ready(inside) = work
         .as_mut()
@@ -356,17 +372,17 @@ fn the_context_carries_the_run_into_a_future() -> Outcome {
     else {
         return Err("the future was not ready".into());
     };
-    let run_context = run.context();
-    let run_span = run_context.span().span_context().clone();
-    assert_eq!(inside.trace_id(), run_span.trace_id());
+    let trace_context = trace.context();
+    let agent_span = trace_context.span().span_context().clone();
+    assert_eq!(inside.trace_id(), agent_span.trace_id());
     let exported = memory.finished();
     let span = exported.first().ok_or("the application's span")?;
     assert_eq!(
         span.parent_span_id,
-        run_span.span_id(),
-        "nested under the run"
+        agent_span.span_id(),
+        "nested under the agent's span"
     );
-    run.end();
+    trace.end();
     harness.flush()?;
     provider.shutdown()?;
     Ok(())

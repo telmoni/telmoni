@@ -34,7 +34,7 @@ import {
 
 // An agent's versions side by side, in the console's side panel beside the
 // Agents page: its releases, its models or one prompt's versions, a row each
-// of the runs that carried it, each number over its change from the version
+// of the traces that carried it, each number over its change from the version
 // first seen before it. Read once opened, and again as a tab or a picker moves.
 
 const readVersions = (url: string, signal: AbortSignal) => readRoute(url, VersionsSchema, { signal });
@@ -122,7 +122,7 @@ function VersionsTable({ answer }: { answer: Versions }) {
     <DataTable>
       <THead>
         <Th>{column}</Th>
-        <Th className="text-right">Runs</Th>
+        <Th className="text-right">Traces</Th>
         <Th className="text-right">Failed</Th>
         <Th className="text-right">Median</Th>
         <Th className="text-right">p95</Th>
@@ -149,7 +149,7 @@ function VersionsTable({ answer }: { answer: Versions }) {
                 )}
                 <span className="block text-xs whitespace-nowrap text-muted-foreground">
                   {version.value === "" ? (
-                    `Runs that carried no ${one}`
+                    `Traces that carried no ${one}`
                   ) : (
                     <>
                       First seen <LocalTime iso={version.first_at} />
@@ -157,7 +157,7 @@ function VersionsTable({ answer }: { answer: Versions }) {
                   )}
                 </span>
               </Td>
-              <Td className={NUMBER}>{formatCount(version.runs)}</Td>
+              <Td className={NUMBER}>{formatCount(version.traces)}</Td>
               <Td className={NUMBER}>
                 {share === null ? "—" : formatShare(share)}
                 <Delta delta={change?.failed} kind="failed" />
@@ -195,7 +195,7 @@ function VersionsTable({ answer }: { answer: Versions }) {
 function Failed({ read, retry }: { read: Exclude<RouteRead<unknown>, { kind: "ok" }>; retry: () => void }) {
   if (read.kind === "forbidden") {
     return (
-      <PeekNote title="This project's runs are not yours to read.">
+      <PeekNote title="This project's traces are not yours to read.">
         Ask an owner of the project for a role that reads them.
       </PeekNote>
     );
@@ -279,8 +279,8 @@ function VersionsPanel({
     body = (
       <PeekNote title={`Nothing to set side by side in ${span}.`}>
         {by === ChangeKind.Prompt
-          ? `None of its runs in ${here} named a prompt.`
-          : `None of its runs had a span in ${here}.`}
+          ? `None of its traces in ${here} named a prompt.`
+          : `None of its traces had a span in ${here}.`}
       </PeekNote>
     );
   } else {
@@ -288,10 +288,10 @@ function VersionsPanel({
       <div className="grid gap-gutter">
         <VersionsTable answer={read.value} />
         <p className="text-sm text-muted-foreground">
-          A row is the runs whose spans in {environmentLabel(read.value.environment)} carried it over {span}, the
+          A row is the traces whose spans in {environmentLabel(read.value.environment)} carried it over {span}, the
           newest first seen first: first seen in those days, which is not when it was deployed. The figure under a
           number is its plain difference from the row below, and nothing is inferred from it.
-          {by === ChangeKind.Model && " A run counts under every model it called."}
+          {by === ChangeKind.Model && " A trace counts under every model it called."}
           {read.value.more && " More were seen than are shown: the oldest are left out."}
         </p>
       </div>
@@ -309,7 +309,7 @@ function VersionsPanel({
         <div className="grid gap-gutter py-gutter" aria-busy={read === null}>
           <div className="flex flex-wrap items-center gap-gutter">
             <Tabs value={by} onValueChange={(next) => isOneOf(VERSIONS_BY, next) && setBy(next)}>
-              <TabsList aria-label="What its runs are split by">
+              <TabsList aria-label="What its traces are split by">
                 {VERSIONS_BY.map((each) => (
                   <TabsTrigger key={each} value={each}>
                     {BY_LABEL[each].tab}
@@ -329,7 +329,7 @@ function VersionsPanel({
                 label={(at) => environmentLabel(environments[Number(at)]?.value ?? "")}
                 onChange={(at) => {
                   setEnvironment(environments[Number(at)]?.value);
-                  // Each environment's runs name their own prompts.
+                  // Each environment's traces name their own prompts.
                   setPrompt(undefined);
                 }}
               />

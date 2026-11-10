@@ -13,12 +13,12 @@ afterEach(async () => {
 });
 
 describe('a step', () => {
-  it('nests under its run and carries its ids', async () => {
-    const run = h.telmoni.run('bot', { userId: 'c', sessionId: 'v' }, (run) => {
-      run.step('plan', (plan) => {
+  it("nests under the agent's span and carries its trace", async () => {
+    const opened = h.telmoni.trace('bot', { userId: 'c', sessionId: 'v' }, (trace) => {
+      trace.step('plan', (plan) => {
         plan.step('plan.inner', () => {});
       });
-      return run;
+      return trace;
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = byName(h.transport);
@@ -27,10 +27,10 @@ describe('a step', () => {
     const agent = spans['invoke_agent bot']!;
     expect(plan.parentSpanId).toBe(agent.spanId);
     expect(inner.parentSpanId).toBe(plan.spanId);
+    expect(agent.traceId).toBe(opened.traceId);
     expect(plan.traceId).toBe(agent.traceId);
     expect(inner.traceId).toBe(agent.traceId);
     expect(attributesOf(plan)).toEqual({
-      'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
       'user.id': 'c',
       'gen_ai.conversation.id': 'v',
@@ -39,33 +39,33 @@ describe('a step', () => {
     expect(plan.status).toBeUndefined();
   });
 
-  it('opened on the run nests under the run, even from inside another step', async () => {
-    h.telmoni.run('bot', (run) => {
-      run.step('outer', (outer) => {
+  it("opened on the trace nests under the agent's span, even from inside another step", async () => {
+    h.telmoni.trace('bot', (trace) => {
+      trace.step('outer', (outer) => {
         outer.step('under-outer', () => {});
-        run.step('under-run', () => {});
+        trace.step('under-agent', () => {});
       });
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = byName(h.transport);
     expect(spans['under-outer']!.parentSpanId).toBe(spans['outer']!.spanId);
-    expect(spans['under-run']!.parentSpanId).toBe(spans['invoke_agent bot']!.spanId);
+    expect(spans['under-agent']!.parentSpanId).toBe(spans['invoke_agent bot']!.spanId);
   });
 
   it('returns what its callback returns, sync or async', async () => {
-    const [sync, later] = await h.telmoni.run('bot', async (run) => [
-      run.step('a', () => 1),
-      await run.step('b', async () => 2),
+    const [sync, later] = await h.telmoni.trace('bot', async (trace) => [
+      trace.step('a', () => 1),
+      await trace.step('b', async () => 2),
     ]);
     expect(sync).toBe(1);
     expect(later).toBe(2);
   });
 
-  it('records the error class of a failure and rethrows it, the run going on', async () => {
+  it('records the error class of a failure and rethrows it, the trace going on', async () => {
     class PlanningFailed extends Error {}
-    await h.telmoni.run('bot', async (run) => {
+    await h.telmoni.trace('bot', async (trace) => {
       await expect(
-        run.step('plan', async () => {
+        trace.step('plan', async () => {
           throw new PlanningFailed('secret details');
         }),
       ).rejects.toBeInstanceOf(PlanningFailed);
@@ -74,16 +74,16 @@ describe('a step', () => {
     const spans = byName(h.transport);
     expect(spans['plan']!.status).toEqual({ code: 2 });
     expect(attributesOf(spans['plan']!)['error.type']).toBe('PlanningFailed');
-    expect(spans['invoke_agent bot']!.status, 'the run itself went on').toBeUndefined();
+    expect(spans['invoke_agent bot']!.status, 'the trace itself went on').toBeUndefined();
     expect(h.transport.text()).not.toContain('secret details');
   });
 
   it('ends when its promise settles, so its span covers the await', async () => {
-    await h.telmoni.run('bot', async (run) => {
-      await run.step('first', async () => {
+    await h.telmoni.trace('bot', async (trace) => {
+      await trace.step('first', async () => {
         await new Promise<void>((resolve) => setTimeout(resolve, 5));
       });
-      await run.step('second', async () => {});
+      await trace.step('second', async () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = byName(h.transport);
@@ -96,12 +96,12 @@ describe('a step', () => {
 });
 
 describe('a name of no string', () => {
-  it('goes as its text with one warning, and keeps the batch, every run in it', async () => {
-    h.telmoni.run('other', (run) => run.step('fine', () => {}));
-    h.telmoni.run(42 as unknown as string, (run) => {
-      run.step(7 as unknown as string, () => {});
-      run.modelCall(5 as unknown as string, () => {});
-      run.toolCall({ name: 'search' } as unknown as string, () => {});
+  it('goes as its text with one warning, and keeps the batch, every trace in it', async () => {
+    h.telmoni.trace('other', (trace) => trace.step('fine', () => {}));
+    h.telmoni.trace(42 as unknown as string, (trace) => {
+      trace.step(7 as unknown as string, () => {});
+      trace.modelCall(5 as unknown as string, () => {});
+      trace.toolCall({ name: 'search' } as unknown as string, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     expect(h.transport.spans().map((span) => span.name).sort()).toEqual([
@@ -117,8 +117,8 @@ describe('a name of no string', () => {
   });
 
   it("is named step where empty, and cut past ingest's 145 characters, warned once, where either lost the span", async () => {
-    h.telmoni.run('bot', (run) => {
-      for (const name of ['', '', 'n'.repeat(146), 'n'.repeat(146), 'n'.repeat(145)]) run.step(name, () => {});
+    h.telmoni.trace('bot', (trace) => {
+      for (const name of ['', '', 'n'.repeat(146), 'n'.repeat(146), 'n'.repeat(145)]) trace.step(name, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     const steps = h.transport
@@ -134,7 +134,7 @@ describe('a name of no string', () => {
   });
 
   it('goes with the replacement character for a lone surrogate, which ingest would refuse with the request', async () => {
-    for (const name of ['a\ud800b', 'c\udc80d', 'e\ud83d\ude00f']) h.telmoni.run('bot', (run) => run.step(name, () => {}));
+    for (const name of ['a\ud800b', 'c\udc80d', 'e\ud83d\ude00f']) h.telmoni.trace('bot', (trace) => trace.step(name, () => {}));
     expect(await h.telmoni.flush()).toBe(true);
     const names = h.transport.spans().map((span) => span.name);
     expect(names).toEqual(expect.arrayContaining(['a\ufffdb', 'c\ufffdd', 'e\ud83d\ude00f']));

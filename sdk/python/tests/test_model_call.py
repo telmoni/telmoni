@@ -14,8 +14,8 @@ from conftest import FakeTransport, attributes_of, infos_in, kept
 from telmoni import (
     Config,
     ModelCallRecord,
-    RunRecord,
     Telmoni,
+    TraceRecord,
     Usage,
     WarningInfo,
 )
@@ -30,7 +30,7 @@ def test_a_model_call_carries_the_conventions_names(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot", session_id="conv") as run,
+        telmoni.trace("bot", session_id="conv") as trace,
         telmoni.model_call("gpt-4o-mini", provider="openai") as call,
     ):
         call.answered(
@@ -40,8 +40,8 @@ def test_a_model_call_carries_the_conventions_names(
     assert telmoni.flush()
     (span,) = calls(transport)
     assert span["name"] == "chat gpt-4o-mini" and span["kind"] == 3
+    assert span["traceId"] == trace.trace_id
     assert attributes_of(span) == {
-        "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
         "gen_ai.conversation.id": "conv",
         "gen_ai.operation.name": "chat",
@@ -72,14 +72,14 @@ def test_a_token_count_goes_as_a_whole_number_from_0_and_another_is_left_off(
             cache_write_input_tokens=-5,
         ),
     )
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         for usage in usages:
             with telmoni.model_call("m") as call:
                 call.answered(usage=usage)
     at = datetime(2026, 10, 18, 9, tzinfo=timezone.utc)
-    telmoni.record_run(
-        RunRecord(
-            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+    telmoni.record_trace(
+        TraceRecord(
+            trace_id="3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
             agent="bot",
             start=at,
             end=at,
@@ -111,8 +111,8 @@ def test_a_token_count_goes_as_a_whole_number_from_0_and_another_is_left_off(
 def test_a_calls_time_to_first_token_goes_in_seconds(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    with telmoni.run("bot") as run:
-        with run.model_call("m") as call:
+    with telmoni.trace("bot") as trace:
+        with trace.model_call("m") as call:
             call.answered(time_to_first_token=0.35)
         with telmoni.model_call("m") as call:
             call.answered()
@@ -130,7 +130,7 @@ def test_a_time_to_first_token_ingest_cannot_take_is_left_off(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ingest refuses the call over a time to first token below 0 or not finite."""
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         with telmoni.model_call("m") as call:
             call.answered(response_model="m-1", time_to_first_token=-0.1)
         with telmoni.model_call("m") as call:
@@ -176,12 +176,12 @@ def test_a_usage_that_is_not_a_usage_is_taken_as_none_with_one_warning(
     """A provider's own usage, handed as it came, never raises into the turn."""
     anthropic = AnthropicUsage(input_tokens=12, output_tokens=7)
     openai = CompletionUsage(prompt_tokens=12, completion_tokens=7, total_tokens=19)
-    with telmoni.run("bot", max_spend=1.0) as run:
+    with telmoni.trace("bot", max_spend=1.0) as trace:
         with telmoni.model_call("m", provider="anthropic") as call:
             call.answered(response_model="m-1", usage=anthropic)  # type: ignore[arg-type]
         with telmoni.model_call("m", provider="openai") as call:
             call.answered(usage=openai)  # type: ignore[arg-type]
-        spent = run.spent
+        spent = trace.spent
     assert telmoni.flush()
     first, second = (attributes_of(span) for span in calls(transport))
     assert first["gen_ai.response.model"] == "m-1"
@@ -199,12 +199,12 @@ def test_a_usage_that_is_not_a_usage_is_taken_as_none_with_one_warning(
 def test_a_blank_operation_is_chat(telmoni: Telmoni, transport: FakeTransport) -> None:
     # As one left out is: sent blank, the span would be named " m" and ingest
     # would read it as a step. One that is no string is no operation either.
-    with telmoni.run("bot") as run:
+    with telmoni.trace("bot") as trace:
         with telmoni.model_call("m", operation=""):
             pass
-        with run.model_call("m", operation="  "):
+        with trace.model_call("m", operation="  "):
             pass
-        with run.model_call("m", operation=5):  # type: ignore[arg-type]
+        with trace.model_call("m", operation=5):  # type: ignore[arg-type]
             pass
     assert telmoni.flush()
     spans = [s for s in transport.spans() if s["name"] == "chat m"]
@@ -216,7 +216,7 @@ def test_a_provider_or_response_model_goes_as_text_and_an_empty_one_not_at_all(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ingest refuses the call over an empty one, or over a tuple."""
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         with telmoni.model_call(
             "m",
             provider=("open", "ai"),  # type: ignore[arg-type]
@@ -242,18 +242,18 @@ def test_a_model_calls_text_past_ingests_caps_keeps_its_call(
 ) -> None:
     """Ingest refuses a call over an empty model, or text past its cap, and files
     one whose operation is none of its four as no model call."""
-    with telmoni.run("bot") as run:
+    with telmoni.trace("bot") as trace:
         for _ in range(2):
-            with run.model_call(""):
+            with trace.model_call(""):
                 pass
-            with run.model_call(
+            with trace.model_call(
                 "m" * 129, provider="p" * 129, operation="generate_content"
             ) as call:
                 call.answered(response_model="r" * 129)
-            with run.model_call("m" * 128, operation="o" * 20):
+            with trace.model_call("m" * 128, operation="o" * 20):
                 pass
         # At their caps: the longest operation and a model at its cap fit.
-        with run.model_call("😀" * 128, operation="generate_content") as call:
+        with trace.model_call("😀" * 128, operation="generate_content") as call:
             call.answered(response_model="😀" * 128)
     assert telmoni.flush()
     sent = {
@@ -310,15 +310,15 @@ def test_a_prompt_goes_on_its_call_alone_and_a_recorded_call_names_none(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot") as run,
+        telmoni.trace("bot") as trace,
         telmoni.step("plan"),
-        run.model_call("m", prompt="support-reply", prompt_version="3"),
+        trace.model_call("m", prompt="support-reply", prompt_version="3"),
     ):
         pass
     at = datetime(2026, 10, 18, 9, tzinfo=timezone.utc)
-    telmoni.record_run(
-        RunRecord(
-            run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+    telmoni.record_trace(
+        TraceRecord(
+            trace_id="3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
             agent="recorder",
             start=at,
             end=at,
@@ -340,7 +340,7 @@ def test_a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off(
 ) -> None:
     """A blank one is none, as an empty provider is; a version alone names no
     prompt."""
-    with telmoni.run("bot") as run:
+    with telmoni.trace("bot") as trace:
         for prompt, version in (
             ("", ""),
             (" ", "\N{IDEOGRAPHIC SPACE}"),
@@ -349,7 +349,7 @@ def test_a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off(
             (None, "3"),
             ("\N{EM SPACE}", "3"),
         ):
-            with run.model_call("m", prompt=prompt, prompt_version=version):
+            with trace.model_call("m", prompt=prompt, prompt_version=version):
                 pass
     assert telmoni.flush()
     sent = [prompts_of(span) for span in calls(transport)]
@@ -369,13 +369,13 @@ def test_a_prompt_past_ingests_cap_is_left_off_never_cut(
 ) -> None:
     """Cut, a prompt or its version would name another, as a cut user would."""
     widest = "😀" * 1024
-    with telmoni.run("bot") as run:
+    with telmoni.trace("bot") as trace:
         for _ in range(2):
-            with run.model_call("m", prompt=widest, prompt_version="v" * 1024):
+            with trace.model_call("m", prompt=widest, prompt_version="v" * 1024):
                 pass
-            with run.model_call("m", prompt="p" * 1025, prompt_version="3"):
+            with trace.model_call("m", prompt="p" * 1025, prompt_version="3"):
                 pass
-            with run.model_call("m", prompt="p", prompt_version="😀" * 1025):
+            with trace.model_call("m", prompt="p", prompt_version="😀" * 1025):
                 pass
     assert telmoni.flush()
     sent = [prompts_of(span) for span in calls(transport)]
@@ -414,8 +414,8 @@ def test_a_prompt_that_is_no_string_goes_as_its_text(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     with (
-        telmoni.run("bot") as run,
-        run.model_call(
+        telmoni.trace("bot") as trace,
+        trace.model_call(
             "m",
             prompt=Prompt.REPLY,  # type: ignore[arg-type]
             prompt_version=3,  # type: ignore[arg-type]
@@ -452,11 +452,11 @@ def test_a_prompt_leaves_as_given_where_content_does_never_masked_or_scrubbed(
         transport=transport,
     )
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
         with (
-            client.run("bot"),
+            client.trace("bot"),
             client.model_call(
                 "m",
                 prompt="reply-to-ada@example.com",
@@ -481,7 +481,7 @@ def test_content_is_taken_off_before_it_leaves(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot"),
+        telmoni.trace("bot"),
         telmoni.model_call(
             "m", input_messages=[{"role": "user", "content": "my secret prompt"}]
         ) as call,
@@ -501,7 +501,7 @@ def test_a_content_mode_with_blanks_about_it_is_read_trimmed(
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": " on\t"}, b"{}")]
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
         assert client.content_mode == "on"
@@ -520,11 +520,11 @@ def test_a_mode_ingest_does_not_send_keeps_content_home(
     client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
     try:
         for _ in range(2):
-            with client.run("bot"):
+            with client.trace("bot"):
                 pass
             assert client.flush()
         assert client.content_mode is None
-        with client.run("bot"), client.model_call("m", input_messages="kept home"):
+        with client.trace("bot"), client.model_call("m", input_messages="kept home"):
             pass
         assert client.flush()
     finally:
@@ -536,21 +536,21 @@ def test_content_leaves_only_when_asked_and_the_project_allows(
     transport: FakeTransport,
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b'{"partialSuccess":null}')
-    # An empty run's export is answered `off`, the next two runs' `on`; each run
-    # flushed before the next opens, the mode each call is encoded under is the
-    # same on every machine.
+    # An empty trace's export is answered `off`, the next two traces' `on`; each
+    # trace flushed before the next opens, the mode each call is encoded under
+    # is the same on every machine.
     transport.answers = [kept(), on, on]
     client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
         assert client.content_mode == "off"
-        with client.run("bot"), client.model_call("m", input_messages="first"):
+        with client.trace("bot"), client.model_call("m", input_messages="first"):
             pass
         assert client.flush()
         assert client.content_mode == "on"
-        with client.run("bot"), client.model_call("m", input_messages="second"):
+        with client.trace("bot"), client.model_call("m", input_messages="second"):
             pass
         assert client.flush()
     finally:
@@ -567,10 +567,10 @@ def test_content_goes_as_compact_utf8_json(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
     messages = [{"role": "user", "content": "héllo, 世界 🙂"}]
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
-        with client.run("bot"), client.model_call("m", input_messages=messages):
+        with client.trace("bot"), client.model_call("m", input_messages=messages):
             pass
         assert client.flush()
     finally:
@@ -589,10 +589,10 @@ def test_content_stays_home_without_capture_content_even_when_allowed(
     transport.answers = [on] * 2
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
-        with client.run("bot"), client.model_call("m", input_messages="never"):
+        with client.trace("bot"), client.model_call("m", input_messages="never"):
             pass
         assert client.flush()
     finally:
@@ -603,7 +603,7 @@ def test_content_stays_home_without_capture_content_even_when_allowed(
 def test_a_failed_call_records_the_error_class(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         try:
             with telmoni.model_call("m", operation="generate_content"):
                 raise ConnectionError("provider down")
@@ -655,7 +655,7 @@ def media_client(transport: FakeTransport) -> Telmoni:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on] * 4
     client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
-    with client.run("warm"):
+    with client.trace("warm"):
         pass
     assert client.flush()
     return client
@@ -664,7 +664,7 @@ def media_client(transport: FakeTransport) -> Telmoni:
 def test_an_image_is_put_once_with_its_type_and_key(transport: FakeTransport) -> None:
     client = media_client(transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             for _ in range(2):
                 with client.model_call("m", input_messages=blob(PNG)):
                     pass
@@ -693,7 +693,7 @@ def test_a_failed_upload_still_names_the_file_and_warns_once(
     client = media_client(transport)
     try:
         for _ in range(2):
-            with client.run("bot"), client.model_call("m", input_messages=blob(PNG)):
+            with client.trace("bot"), client.model_call("m", input_messages=blob(PNG)):
                 pass
             assert client.flush()
     finally:
@@ -710,7 +710,7 @@ def test_a_file_past_the_cap_is_named_but_never_put(transport: FakeTransport) ->
     big = b"\x89" * (5 * 1024 * 1024 + 1)
     client = media_client(transport)
     try:
-        with client.run("bot"), client.model_call("m", input_messages=blob(big)):
+        with client.trace("bot"), client.model_call("m", input_messages=blob(big)):
             pass
         assert client.flush()
     finally:

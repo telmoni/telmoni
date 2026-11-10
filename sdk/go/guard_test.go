@@ -44,7 +44,7 @@ type guardFixture struct {
 		Answers  []guardAnswer `json:"answers"`
 		Counted  float64       `json:"counted"`
 	} `json:"calls"`
-	Runs []struct {
+	Traces []struct {
 		Name     string            `json:"name"`
 		MaxSteps int               `json:"max_steps"`
 		MaxSpend float64           `json:"max_spend"`
@@ -56,7 +56,7 @@ type guardFixture struct {
 			Used  float64 `json:"used"`
 		} `json:"refused"`
 		Spent float64 `json:"spent"`
-	} `json:"runs"`
+	} `json:"traces"`
 	Refusals []struct {
 		telmoni.CapExceededError
 		Says string `json:"says"`
@@ -74,11 +74,11 @@ func loadGuard(t *testing.T) guardFixture {
 
 func near(a, b float64) bool { return math.Abs(a-b) <= 1e-12 }
 
-// call opens fixture.Calls[n] under run and answers it as the fixture does,
+// call opens fixture.Calls[n] under tr and answers it as the fixture does,
 // answering the context it opened with.
-func (f guardFixture) call(ctx context.Context, run *telmoni.Run, n int) context.Context {
+func (f guardFixture) call(ctx context.Context, tr *telmoni.Trace, n int) context.Context {
 	spec := f.Calls[n]
-	callCtx, call := run.ModelCall(ctx, spec.Model, telmoni.ModelCallOptions{Provider: spec.Provider})
+	callCtx, call := tr.ModelCall(ctx, spec.Model, telmoni.ModelCallOptions{Provider: spec.Provider})
 	answers := spec.Answers
 	if answers == nil {
 		answers = []guardAnswer{spec.guardAnswer}
@@ -100,22 +100,22 @@ func (f guardFixture) call(ctx context.Context, run *telmoni.Run, n int) context
 	return callCtx
 }
 
-// perform does op under run, answering the context it opened with.
-func (f guardFixture) perform(t *testing.T, ctx context.Context, run *telmoni.Run, op json.RawMessage) context.Context {
+// perform does op under tr, answering the context it opened with.
+func (f guardFixture) perform(t *testing.T, ctx context.Context, tr *telmoni.Trace, op json.RawMessage) context.Context {
 	t.Helper()
 	var word string
 	if json.Unmarshal(op, &word) == nil {
 		switch word {
 		case "step":
-			opened, step := run.Step(ctx, "step")
+			opened, step := tr.Step(ctx, "step")
 			step.End()
 			return opened
 		case "tool_call":
-			opened, tool := run.ToolCall(ctx, "lookup", telmoni.ToolCallOptions{})
+			opened, tool := tr.ToolCall(ctx, "lookup", telmoni.ToolCallOptions{})
 			tool.End()
 			return opened
 		case "retrieval":
-			opened, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+			opened, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
 			found.End()
 			return opened
 		}
@@ -127,32 +127,32 @@ func (f guardFixture) perform(t *testing.T, ctx context.Context, run *telmoni.Ru
 	if err := json.Unmarshal(op, &call); err != nil {
 		t.Fatalf("an op: %s", op)
 	}
-	return f.call(ctx, run, call.ModelCall)
+	return f.call(ctx, tr, call.ModelCall)
 }
 
 func TestTheGuardCountsEachCallAsTheServerCountsIt(t *testing.T) {
 	fixture := loadGuard(t)
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: fixture.Prices}, nil)
 	for n, spec := range fixture.Calls {
-		ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
-		fixture.call(ctx, run, n)
+		ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{})
+		fixture.call(ctx, tr, n)
 		// Exactly: a multiply fused into its add, as arm64 may, ends a bit off.
-		if got := run.Spent(); got != spec.Counted {
+		if got := tr.Spent(); got != spec.Counted {
 			t.Errorf("%s: counted %v, want %v", spec.Name, got, spec.Counted)
 		}
-		run.End()
+		tr.End()
 	}
 }
 
-func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
+func TestATracePastACapIsRefusedWhatItOpensNext(t *testing.T) {
 	fixture := loadGuard(t)
-	for _, spec := range fixture.Runs {
+	for _, spec := range fixture.Traces {
 		t.Run(spec.Name, func(t *testing.T) {
 			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: fixture.Prices}, nil)
-			ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: spec.MaxSteps, MaxSpend: spec.MaxSpend})
+			ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSteps: spec.MaxSteps, MaxSpend: spec.MaxSpend})
 			performed := len(spec.Ops)
 			for at, op := range spec.Ops {
-				opened := fixture.perform(t, ctx, run, op)
+				opened := fixture.perform(t, ctx, tr, op)
 				if spec.Refused == nil || at != spec.Refused.At {
 					if opened.Err() != nil {
 						t.Fatalf("op %d was refused: %v", at, context.Cause(opened))
@@ -166,16 +166,16 @@ func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
 				if refusal.Cap != spec.Refused.Cap || !near(refusal.Limit, spec.Refused.Limit) || !near(refusal.Used, spec.Refused.Used) {
 					t.Errorf("refused as %+v, want %+v", *refusal, *spec.Refused)
 				}
-				if !errors.Is(run.Err(), refusal) {
-					t.Errorf("the run's Err is %v, want its refusal", run.Err())
+				if !errors.Is(tr.Err(), refusal) {
+					t.Errorf("the trace's Err is %v, want its refusal", tr.Err())
 				}
 				performed = at
 				break
 			}
-			if !near(run.Spent(), spec.Spent) {
-				t.Errorf("spent %g, want %g", run.Spent(), spec.Spent)
+			if !near(tr.Spent(), spec.Spent) {
+				t.Errorf("spent %g, want %g", tr.Spent(), spec.Spent)
 			}
-			run.End()
+			tr.End()
 			h.flush()
 			opened := 0
 			for _, span := range h.transport.spans(t) {
@@ -191,26 +191,26 @@ func TestARunPastACapIsRefusedWhatItOpensNext(t *testing.T) {
 }
 
 // The cap is the process's own count: with every export failing, the third
-// step of a run capped at two is refused all the same.
-func TestACapStopsARunWithTheNetworkCut(t *testing.T) {
+// step of a trace capped at two is refused all the same.
+func TestACapStopsATraceWithTheNetworkCut(t *testing.T) {
 	cut := make([]any, 16)
 	for i := range cut {
 		cut[i] = errors.New("unreachable")
 	}
 	transport := newFakeTransport(t, cut...)
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: loadGuard(t).Prices}, transport)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 2})
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSteps: 2})
 	for range 2 {
-		_, step := run.Step(ctx, "step")
+		_, step := tr.Step(ctx, "step")
 		step.End()
 	}
-	opened, third := run.Step(ctx, "step")
+	opened, third := tr.Step(ctx, "step")
 	third.End()
 	var refusal *telmoni.CapExceededError
 	if !errors.As(context.Cause(opened), &refusal) || refusal.Cap != "steps" || refusal.Used != 2 {
 		t.Fatalf("the third step was not refused at its cap: %v", context.Cause(opened))
 	}
-	run.End()
+	tr.End()
 	flushed, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	_ = h.client.Flush(flushed)
@@ -232,10 +232,10 @@ func TestARefusalSaysWhatTheOtherSDKsSay(t *testing.T) {
 
 func TestARefusedOpeningsContextIsCancelledWithTheCap(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
-	_, first := run.Step(ctx, "first")
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSteps: 1})
+	_, first := tr.Step(ctx, "first")
 	first.End()
-	stepCtx, second := run.Step(ctx, "second")
+	stepCtx, second := tr.Step(ctx, "second")
 	second.End()
 	if !errors.Is(stepCtx.Err(), context.Canceled) {
 		t.Fatalf("the refused step's context is %v, want cancelled", stepCtx.Err())
@@ -243,51 +243,52 @@ func TestARefusedOpeningsContextIsCancelledWithTheCap(t *testing.T) {
 	if !strings.Contains(context.Cause(stepCtx).Error(), "its step cap of 1") {
 		t.Errorf("cause %v", context.Cause(stepCtx))
 	}
-	if telmoni.RunFromContext(stepCtx) != run {
-		t.Error("the refused context lost its run")
+	if telmoni.TraceFromContext(stepCtx) != tr {
+		t.Error("the refused context lost its trace")
 	}
 	if ctx.Err() != nil {
-		t.Error("the run's own context was cancelled")
+		t.Error("the trace's own context was cancelled")
 	}
-	run.End()
+	tr.End()
 }
 
 func TestNothingOpensUnderARefusedOpeningsContext(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
-	_, first := run.Step(ctx, "first")
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSteps: 1})
+	_, first := tr.Step(ctx, "first")
 	first.End()
-	stepCtx, second := run.Step(ctx, "second")
+	stepCtx, second := tr.Step(ctx, "second")
 	second.End()
-	callCtx, call := run.ModelCall(stepCtx, "m", telmoni.ModelCallOptions{})
+	callCtx, call := tr.ModelCall(stepCtx, "m", telmoni.ModelCallOptions{})
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10}})
 	call.End()
-	toolCtx, tool := run.ToolCall(stepCtx, "lookup", telmoni.ToolCallOptions{})
+	toolCtx, tool := tr.ToolCall(stepCtx, "lookup", telmoni.ToolCallOptions{})
 	tool.End()
 	for _, opened := range []context.Context{callCtx, toolCtx} {
-		if context.Cause(opened) != context.Cause(stepCtx) || telmoni.RunFromContext(opened) != run {
-			t.Errorf("opened under %v, want the step's refusal and its run", context.Cause(opened))
+		if context.Cause(opened) != context.Cause(stepCtx) || telmoni.TraceFromContext(opened) != tr {
+			t.Errorf("opened under %v, want the step's refusal and its trace", context.Cause(opened))
 		}
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	if got := sortedNames(h.transport.spans(t)); !slices.Equal(got, []string{"first", "invoke_agent guarded"}) {
 		t.Errorf("spans sent: %v", got)
 	}
 }
 
-// A run failed with the cancellation of a refused opening fails as the refusal.
-func TestARefusalEscapingTheRunFailsItWithItsType(t *testing.T) {
+// A trace failed with the cancellation of a refused opening fails as the
+// refusal.
+func TestARefusalEscapingTheTraceFailsItWithItsType(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
-	_, first := run.Step(ctx, "first")
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSteps: 1})
+	_, first := tr.Step(ctx, "first")
 	first.End()
-	stepCtx, second := run.Step(ctx, "second")
+	stepCtx, second := tr.Step(ctx, "second")
 	second.End()
-	run.Fail(fmt.Errorf("asking the model: %w", stepCtx.Err()))
-	run.End()
+	tr.Fail(fmt.Errorf("asking the model: %w", stepCtx.Err()))
+	tr.End()
 	h.flush()
-	span := runSpan(t, h)
+	span := traceSpan(t, h)
 	attributes := attributesOf(t, span)
 	if attributes["error.type"] != "telmoni.CapExceededError" || attributes["telmoni.cancelled"] != nil {
 		t.Errorf("error.type %v, telmoni.cancelled %v", attributes["error.type"], attributes["telmoni.cancelled"])
@@ -300,11 +301,11 @@ func TestARefusalEscapingTheRunFailsItWithItsType(t *testing.T) {
 // A step or call failed with that cancellation fails as the refusal too.
 func TestARefusalPassingThroughAStepOrCallFailsItWithItsType(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSteps: 1})
-	stepCtx, step := run.Step(ctx, "outer")
-	toolCtx, tool := run.ToolCall(stepCtx, "lookup", telmoni.ToolCallOptions{})
-	callCtx, call := run.ModelCall(toolCtx, "m", telmoni.ModelCallOptions{})
-	innerCtx, _ := run.Step(callCtx, "inner")
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSteps: 1})
+	stepCtx, step := tr.Step(ctx, "outer")
+	toolCtx, tool := tr.ToolCall(stepCtx, "lookup", telmoni.ToolCallOptions{})
+	callCtx, call := tr.ModelCall(toolCtx, "m", telmoni.ModelCallOptions{})
+	innerCtx, _ := tr.Step(callCtx, "inner")
 	for _, opened := range []interface {
 		Fail(error)
 		End()
@@ -312,7 +313,7 @@ func TestARefusalPassingThroughAStepOrCallFailsItWithItsType(t *testing.T) {
 		opened.Fail(fmt.Errorf("asking the model: %w", innerCtx.Err()))
 		opened.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	var failed []string
 	for _, span := range h.transport.spans(t) {
@@ -342,12 +343,12 @@ func TestATableNameIsPricedByTheTableTheReleaseCarries(t *testing.T) {
 	var spent []float64
 	for _, prices := range [][]telmoni.Price{nil, {file.Prices[i]}} {
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: prices}, nil)
-		ctx, run := h.client.Run(context.Background(), "priced", telmoni.RunOptions{})
-		_, call := run.ModelCall(ctx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+		ctx, tr := h.client.Trace(context.Background(), "priced", telmoni.TraceOptions{})
+		_, call := tr.ModelCall(ctx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
 		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10_000, OutputTokens: 2_000, CacheReadInputTokens: 4_000}})
 		call.End()
-		spent = append(spent, run.Spent())
-		run.End()
+		spent = append(spent, tr.Spent())
+		tr.End()
 	}
 	if spent[0] <= 0 || spent[0] != spent[1] {
 		t.Errorf("the table priced it at %g, the same row handed at %g", spent[0], spent[1])
@@ -356,8 +357,8 @@ func TestATableNameIsPricedByTheTableTheReleaseCarries(t *testing.T) {
 
 func TestACallAnsweredAgainCountsWhatItsSpanHolds(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6, Output: 1e-5}}}, nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
 	// Answers given at once, from goroutines of the agent's own.
 	var wg sync.WaitGroup
 	for range 8 {
@@ -373,8 +374,8 @@ func TestACallAnsweredAgainCountsWhatItsSpanHolds(t *testing.T) {
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 2000}})
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{OutputTokens: 100}})
 	call.End()
-	spent := run.Spent()
-	run.End()
+	spent := tr.Spent()
+	tr.End()
 	h.flush()
 	var held map[string]any
 	for _, span := range h.transport.spans(t) {
@@ -391,15 +392,15 @@ func TestACallAnsweredAgainCountsWhatItsSpanHolds(t *testing.T) {
 
 func TestAnAnswerAfterItsCallEndedCountsNothingWithOneWarning(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Prices: []telmoni.Price{{Provider: "p", Model: "m", Input: 1e-6}}}, nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{Provider: "p"})
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 1000}})
 	call.End()
 	for range 2 {
 		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 5000}})
 	}
-	spent := run.Spent()
-	run.End()
+	spent := tr.Spent()
+	tr.End()
 	h.flush()
 	var held map[string]any
 	for _, span := range h.transport.spans(t) {
@@ -410,7 +411,7 @@ func TestAnAnswerAfterItsCallEndedCountsNothingWithOneWarning(t *testing.T) {
 	if held["gen_ai.usage.input_tokens"] != int64(1000) || !near(spent, 0.001) {
 		t.Errorf("spent %g, the span holding %v", spent, held["gen_ai.usage.input_tokens"])
 	}
-	want := []string{"telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the run's spend"}
+	want := []string{"telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the trace's spend"}
 	if got := h.logs.warnings(); !slices.Equal(got, want) {
 		t.Errorf("warned %q", got)
 	}
@@ -432,14 +433,14 @@ func TestTheReleaseCarriesThePriceFileWhole(t *testing.T) {
 
 func TestACallWithNeitherUnderASpendCapIsWarnedOfOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSpend: 1})
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSpend: 1})
 	for range 3 {
-		_, call := run.ModelCall(ctx, "my-model", telmoni.ModelCallOptions{Provider: "vllm"})
+		_, call := tr.ModelCall(ctx, "my-model", telmoni.ModelCallOptions{Provider: "vllm"})
 		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10}})
 		call.End()
 	}
-	run.End()
-	ctx, other := h.client.Run(context.Background(), "unguarded", telmoni.RunOptions{})
+	tr.End()
+	ctx, other := h.client.Trace(context.Background(), "unguarded", telmoni.TraceOptions{})
 	_, call := other.ModelCall(ctx, "other-model", telmoni.ModelCallOptions{Provider: "vllm"})
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10}})
 	call.End()
@@ -450,16 +451,16 @@ func TestACallWithNeitherUnderASpendCapIsWarnedOfOnce(t *testing.T) {
 			warned = append(warned, w)
 		}
 	}
-	want := []string{"telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the run's spend cap"}
+	want := []string{"telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the trace's spend cap"}
 	if !slices.Equal(warned, want) {
 		t.Errorf("warned %q", warned)
 	}
 }
 
-// spendReader is a logger's handler that reads the run's spend from another
+// spendReader is a logger's handler that reads the trace's spend from another
 // goroutine on each warning, and notes whether the read was held up.
 type spendReader struct {
-	run     atomic.Pointer[telmoni.Run]
+	trace   atomic.Pointer[telmoni.Trace]
 	stalled atomic.Bool
 }
 
@@ -468,9 +469,9 @@ func (s *spendReader) WithAttrs([]slog.Attr) slog.Handler       { return s }
 func (s *spendReader) WithGroup(string) slog.Handler            { return s }
 
 func (s *spendReader) Handle(context.Context, slog.Record) error {
-	if run := s.run.Load(); run != nil {
+	if tr := s.trace.Load(); tr != nil {
 		read := make(chan struct{})
-		go func() { run.Spent(); close(read) }()
+		go func() { tr.Spent(); close(read) }()
 		select {
 		case <-read:
 		case <-time.After(waitTimeout):
@@ -480,33 +481,33 @@ func (s *spendReader) Handle(context.Context, slog.Record) error {
 	return nil
 }
 
-// The application's logger runs with the run's lock released.
-func TestALoggerReadingTheRunsSpendIsNeverHeldUp(t *testing.T) {
+// The application's logger runs with the trace's lock released.
+func TestALoggerReadingTheTracesSpendIsNeverHeldUp(t *testing.T) {
 	reader := &spendReader{}
 	h := newHarness(t, testConfig(), nil, telmoni.WithLogger(slog.New(reader)))
-	ctx, run := h.client.Run(context.Background(), "guarded", telmoni.RunOptions{MaxSpend: 1})
-	reader.run.Store(run)
-	_, call := run.ModelCall(ctx, "my-model", telmoni.ModelCallOptions{Provider: "vllm"})
+	ctx, tr := h.client.Trace(context.Background(), "guarded", telmoni.TraceOptions{MaxSpend: 1})
+	reader.trace.Store(tr)
+	_, call := tr.ModelCall(ctx, "my-model", telmoni.ModelCallOptions{Provider: "vllm"})
 	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 10}})
 	call.End()
-	run.End()
+	tr.End()
 	if reader.stalled.Load() {
-		t.Error("the logger ran under the run's lock")
+		t.Error("the logger ran under the trace's lock")
 	}
 }
 
 func TestACapThatIsNoCapIsNoneWithOneWarning(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	for _, opts := range []telmoni.RunOptions{{MaxSteps: -1}, {MaxSpend: -1}, {MaxSpend: math.NaN()}, {MaxSpend: math.Inf(1)}} {
-		ctx, run := h.client.Run(context.Background(), "guarded", opts)
+	for _, opts := range []telmoni.TraceOptions{{MaxSteps: -1}, {MaxSpend: -1}, {MaxSpend: math.NaN()}, {MaxSpend: math.Inf(1)}} {
+		ctx, tr := h.client.Trace(context.Background(), "guarded", opts)
 		for range 3 {
-			stepCtx, step := run.Step(ctx, "step")
+			stepCtx, step := tr.Step(ctx, "step")
 			if stepCtx.Err() != nil {
 				t.Errorf("%+v: a step was refused", opts)
 			}
 			step.End()
 		}
-		run.End()
+		tr.End()
 	}
 	if got := len(h.logs.warnings()); got != 2 {
 		t.Errorf("%d warnings, want one for MaxSteps and one for MaxSpend: %q", got, h.logs.warnings())
@@ -530,13 +531,13 @@ func TestAPriceHandedIsANameAndNumbersFrom0(t *testing.T) {
 
 func TestACostGoesAsADoubleAndOneThatIsNoCostIsLeftOff(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, cost := range []float64{3, 0.0123, -0.5, math.NaN(), math.Inf(1)} {
-		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
+		_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
 		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: 1, Cost: &cost}})
 		call.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	var sent []any
 	for _, span := range h.transport.spans(t) {

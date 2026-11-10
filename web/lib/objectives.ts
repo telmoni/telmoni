@@ -1,4 +1,4 @@
-// An objective's form and words: one agent's runs promised to succeed, or to
+// An objective's form and words: one agent's traces promised to succeed, or to
 // end inside a latency, over 7, 28 or 30 days, kept as the burn alert it is
 // (`crates/telemetry/src/rules/mod.rs`, `Objective`), and checked here as the
 // lane checks it so a mistake is said beside its field.
@@ -34,14 +34,14 @@ export const OBJECTIVE_DAYS = [30, 28, 7] as const;
 export const FAST_BURN = 14.4;
 export const SLOW_BURN = 6;
 
-/** The share of runs an objective may promise, in percent. */
+/** The share of traces an objective may promise, in percent. */
 const TARGET_MIN = 50;
 const TARGET_MAX = 99.99;
 
-/** The longest a latency objective's runs are given, in milliseconds. */
+/** The longest a latency objective's traces are given, in milliseconds. */
 const LATENCY_MAX_MS = 3_600_000;
 
-/** What an objective promises of its runs. */
+/** What an objective promises of its traces. */
 export type Promised = "success" | "latency";
 
 /** The form's state, every value as typed. */
@@ -97,16 +97,16 @@ export function objectiveInputOf(
     return fail(`Name the objective: 1 to ${ALERT_NAME_MAX} characters.`);
   }
   const agents = splitValues(draft.agent);
-  if (agents.length !== 1) return fail("Name the one agent whose runs it promises.");
+  if (agents.length !== 1) return fail("Name the one agent whose traces it promises.");
   const target = numberOf(draft.target);
   if (target === null || target < TARGET_MIN || target > TARGET_MAX) {
-    return fail(`Promise ${TARGET_MIN}% to ${TARGET_MAX}% of its runs.`);
+    return fail(`Promise ${TARGET_MIN}% to ${TARGET_MAX}% of its traces.`);
   }
   let latency: number | null = null;
   if (draft.promise === "latency") {
     latency = numberOf(draft.latencyMs);
     if (latency === null || !Number.isInteger(latency) || latency < 1 || latency > LATENCY_MAX_MS) {
-      return fail(`Its runs end inside 1 to ${LATENCY_MAX_MS.toLocaleString("en-US")} ms, a whole number.`);
+      return fail(`Its traces end inside 1 to ${LATENCY_MAX_MS.toLocaleString("en-US")} ms, a whole number.`);
     }
   }
   const again = renotifyOf(draft.renotifyMinutes);
@@ -117,7 +117,7 @@ export function objectiveInputOf(
     ok: true,
     input: {
       name,
-      kind: SpanKind.Run,
+      kind: SpanKind.Agent,
       measure: RuleMeasure.Burn,
       aggregation: RuleAggregation.Avg,
       filters: { agent: agents },
@@ -136,19 +136,19 @@ export function objectiveInputOf(
   };
 }
 
-/** The agents `history` holds runs of, by name. */
+/** The agents `history` holds traces of, by name. */
 export function agentsOf(history: History | null): string[] {
   return (history?.agents ?? [])
-    .filter((row) => row.agent !== null && row.kind === SpanKind.Run)
+    .filter((row) => row.agent !== null && row.kind === SpanKind.Agent)
     .map((row) => row.agent as string)
     .toSorted((a, b) => a.localeCompare(b));
 }
 
-/** The agent's runs' durations, which a latency may start from; none where
- *  its history holds no run. */
-export function runDurationsOf(history: History | null, agent: string): Percentiles | null {
+/** The agent's traces' durations, which a latency may start from; none where
+ *  its history holds no trace. */
+export function traceDurationsOf(history: History | null, agent: string): Percentiles | null {
   const name = agent.trim();
-  return history?.agents.find((row) => row.agent === name && row.kind === SpanKind.Run)?.duration_ms ?? null;
+  return history?.agents.find((row) => row.agent === name && row.kind === SpanKind.Agent)?.duration_ms ?? null;
 }
 
 /** How long a budget lasts at `burn`, in words: none where nothing burns. */

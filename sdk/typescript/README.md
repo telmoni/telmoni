@@ -2,10 +2,15 @@
 
 `telmoni`, the TypeScript and JavaScript SDK for
 [Telmoni](https://github.com/telmoni/telmoni), privacy-first, open-source
-monitoring for AI agents: an agent's runs, steps, model calls, tool calls and
-retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else. It takes prompts,
-completions and tool payloads off every span before it leaves the process
-unless you ask and the project allows. Node 18.19 or 20.6 and later.
+monitoring for AI agents: an agent's traces, steps, model calls, tool calls and
+retrievals as OpenTelemetry spans, sent to Telmoni and nowhere else. The client
+owns a tracer provider of its own, built part by part so no `OTEL_*` variable
+reaches it, and runs beside whatever OpenTelemetry the application already has:
+a trace opened while an application span is current is a trace of its own,
+linked to that span, and the application's spans stay with the application's
+exporter. It takes prompts, completions and tool payloads off every span before
+it leaves the process unless you ask and the project allows. Node 18.19 or 20.6
+and later.
 
 ## Installation
 
@@ -28,11 +33,11 @@ import { Telmoni } from 'telmoni';
 // TELMONI_CAPTURE_CONTENT, TELMONI_SCRUB_SECRETS and TELMONI_SCRUB_PII
 const telmoni = Telmoni.fromEnv();
 
-const reply = await telmoni.run(
+const reply = await telmoni.trace(
   'support-bot',
   { userId: 'user_42', sessionId: 'conv_7' },
-  async (run) => {
-    const plan = await run.step('plan', (step) =>
+  async (trace) => {
+    const plan = await trace.step('plan', (step) =>
       step.modelCall('gpt-4o-mini', { provider: 'openai', inputMessages: messages }, async (call) => {
         const completion = await openai.chat.completions.create({ model: 'gpt-4o-mini', messages });
         call.answered({
@@ -46,10 +51,10 @@ const reply = await telmoni.run(
         return completion.choices[0]?.message.content ?? '';
       }),
     );
-    await run.retrieval('kb-articles', { query: plan, topK: 5 }, async (retrieval) => {
+    await trace.retrieval('kb-articles', { query: plan, topK: 5 }, async (retrieval) => {
       retrieval.returned(await index.search(plan, 5)); // your vector store's call
     });
-    return run.toolCall('search', { arguments: { q: plan } }, async (tool) => {
+    return trace.toolCall('search', { arguments: { q: plan } }, async (tool) => {
       const found = await search(plan);
       tool.returned(found);
       return found;
@@ -60,45 +65,49 @@ const reply = await telmoni.run(
 await telmoni.shutdown(); // before the process exits: sends what is still queued
 ```
 
-Each callback gets a handle and runs with its span current; the span ends when
-the callback settles, and the callback's result is returned, so a synchronous
+A trace is one execution of an agent: the span `invoke_agent <agent>` at the
+root of a trace of its own, whose id `trace.traceId` hands back as 32 hex
+digits, linked to whatever span the application had current when it opened, so
+a job looping over a thousand executions is a thousand traces, never one. Each
+callback gets a handle and runs with its span current; the span ends when the
+callback settles, and the callback's result is returned, so a synchronous
 callback returns synchronously and an `async` one returns its promise. An error
 thrown or rejected inside marks the span with the error's class name
 (`error.type`), records an `Error`'s message and stack on the span as an
 `exception` event and the status's message, content ([Content](#content)), and
-is rethrown; an error named `AbortError`
-marks the span cancelled instead. `run.fail('RateLimit')` and `run.cancel()`
-mark a span by hand. Steps nest: `step.step(...)`, `step.modelCall(...)`,
-`step.toolCall(...)` and `step.retrieval(...)` open under the step; the same
-methods on `run` open under the run. A retrieval is a search of a vector store
-or an index, sent as `retrieval <source>`, or with `memory: true` of a memory
-store, sent as `search_memory`; `returned(documents)` takes the array it found
-and sends how many it holds in every mode beside the documents themselves,
-content ([Content](#content)), the last array given standing whole, and
-anything else, a typed array among them, not sent, with one warning. `run`
-throws a `TypeError` for a blank agent name and a `RangeError`
-for a cap that is no cap
+is rethrown; an error named `AbortError` marks the span cancelled instead.
+`trace.fail('RateLimit')` and `trace.cancel()` mark a span by hand. Steps nest:
+`step.step(...)`, `step.modelCall(...)`, `step.toolCall(...)` and
+`step.retrieval(...)` open under the step; the same methods on `trace` open
+under the agent's span. A retrieval is a search of a vector store or an index,
+sent as `retrieval <source>`, or with `memory: true` of a memory store, sent as
+`search_memory`; `returned(documents)` takes the array it found and sends how
+many it holds in every mode beside the documents themselves, content
+([Content](#content)), the last array given standing whole, and anything else,
+a typed array among them, not sent, with one warning. `trace` throws a
+`TypeError` for a blank agent name and a `RangeError` for a cap that is no cap
 ([The guard](#the-guard)). A token count, or a retrieval's `topK`, is read from
 a number, a bigint or a decimal numeral's text, its fraction cut, and the
 usage's `cost` is what the call cost in US dollars, where your provider reports
 it; of what ingest would refuse, these are left off with one warning: a count
-below 0 or past 64 bits, a cost below 0, not finite, or no number, a tag whose key is not 1 to 64 characters or whose
-value is past 256, and the tags past the first 32 kept,
-the most ingest keeps; an empty user, session, provider or response model is
-left off as unset. A name, source, model, provider, user, session, response model or
-error type that is no string goes as its text with one warning, as does a tag
-that is no string, finite number or boolean; an error, or a class, handed to
-`fail()` goes as its class's name, an `Error`'s message and stack recorded as
-content. Past ingest's caps,
-counted in characters, a name, the agent, a model, a provider, a response
-model or an error type is cut to its cap — a step's or a tool's name or a
-retrieval's source to 145, the rest to 128 — and a user past 128 or a session
-past 200 is left off, since cut it would name another; a step named nothing
-goes as `step`, a model call with no model and a retrieval with a blank source
-are named by their operation alone, and a model call of an operation ingest
-reads as no model call, any but `chat`, `generate_content`, `text_completion` and `embeddings`, goes
-as `chat`; each with one warning, where ingest would refuse the span, or the
-whole run for its agent, user or session, or file the call elsewhere.
+below 0 or past 64 bits, a cost below 0, not finite, or no number, a tag whose
+key is not 1 to 64 characters or whose value is past 256, and the tags past the
+first 32 kept, the most ingest keeps; an empty user, session, provider or
+response model is left off as unset. A name, source, model, provider, user,
+session, response model or error type that is no string goes as its text with
+one warning, as does a tag that is no string, finite number or boolean; an
+error, or a class, handed to `fail()` goes as its class's name, an `Error`'s
+message and stack recorded as content. Past ingest's caps, counted in
+characters, a name, the agent, a model, a provider, a response model or an
+error type is cut to its cap — a step's or a tool's name or a retrieval's
+source to 145, the rest to 128 — and a user past 128 or a session past 200 is
+left off, since cut it would name another; a step named nothing goes as `step`,
+a model call with no model and a retrieval with a blank source are named by
+their operation alone, and a model call of an operation ingest reads as no
+model call, any but `chat`, `generate_content`, `text_completion` and
+`embeddings`, goes as `chat`; each with one warning, where ingest would refuse
+the span, or the whole trace for its agent, user or session, or file the call
+elsewhere.
 
 `modelCall(model, { prompt: 'support-reply', promptVersion: '3' }, fn)` names
 the prompt the call used, sent on its span in every content mode, so a prompt's
@@ -107,29 +116,29 @@ none; one past ingest's 1,024 characters is left off, never cut, and so is a
 version whose name is none or was left off, each with one warning; one that is
 no string goes as its text, with one warning. A recorded call names no prompt.
 
-`telmoni.wrap(agent, options, fn)` returns `fn` opening a run per call, with
-the run's handle as `fn`'s last argument:
+`telmoni.wrap(agent, options, fn)` returns `fn` opening a trace per call, with
+the trace's handle as `fn`'s last argument:
 
 ```ts
-import type { Run } from 'telmoni';
+import type { Trace } from 'telmoni';
 
-const answer = telmoni.wrap('support-bot', async (question: string, run: Run) => {
-  return run.step('think', () => think(question));
+const answer = telmoni.wrap('support-bot', async (question: string, trace: Trace) => {
+  return trace.step('think', () => think(question));
 });
 await answer('why is the sky blue?');
 ```
 
-Nothing can be opened outside a run: steps and calls exist on a run's handle,
-or a step's, and nothing is sent outside one.
+Nothing can be opened outside a trace: steps and calls exist on a trace's
+handle, or a step's, and nothing is sent outside one.
 
-## A run recorded after it ended
+## A trace recorded after it ended
 
 A job that keeps its own log, or a hook that runs once the turn it reports is
-over, hands the finished run to `recordRun` as data:
+over, hands the finished trace to `recordTrace` as data:
 
 ```ts
-telmoni.recordRun({
-  runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d', // yours, kept with the log
+telmoni.recordTrace({
+  traceId: '3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d', // yours, kept with the log: 32 hex digits
   agent: 'nightly-triage',
   sessionId: 'conv_7',
   start: new Date('2026-10-12T09:00:00.000Z'),
@@ -158,15 +167,16 @@ await telmoni.flush();
 A time is a `Date` or milliseconds since the Unix epoch; a step (`type: 'step'`)
 holds its own `calls`, steps among them, a subagent's own subagents say, up to
 16 deep, each under the step that holds it. A model call's `reasoningEffort`,
-how hard it was asked to reason, is sent in every content mode. The run is sent as the live calls would have sent it,
-through the same exporter and content rules, in a trace of its own
-named by the run's id, whatever context is active. Each span's id is derived
-from the run's id and the span's place in the record, so the same record sent
-again is the same bytes, which ingest answers once: give a run the same id each
-time you send it. A record's content is its run's messages (`inputMessages`,
-`outputMessages`), a model call's (`inputMessages`, `outputMessages`), a tool call's
-`arguments` and `result`, and a step's messages, a subagent's task and answer. A blank agent, a run id that is
-neither a hyphenated UUID nor 32 hex digits, or is the nil UUID, or an empty
+how hard it was asked to reason, is sent in every content mode. The trace is
+sent as the live calls would have sent it, through the same exporter and
+content rules, under the trace id the record gives, whatever context is
+active, linked to nothing. Each span's id is derived from that id and the
+span's place in the record, so the same record sent again is the same bytes,
+which ingest answers once: give a trace the same id each time you send it. A
+record's content is the agent's messages (`inputMessages`, `outputMessages`), a
+model call's (`inputMessages`, `outputMessages`), a tool call's `arguments` and
+`result`, and a step's messages, a subagent's task and answer. A blank agent, a
+trace id that is not 32 hex digits, either case, or is all zeros, or an empty
 step's name or model throws a `TypeError`, as does a field of the wrong type —
 a time that is not one, an item of no known `type`, `inside` or `calls` that is
 no array, in the order it ran, tags or a usage that is no object (an array or a
@@ -176,31 +186,30 @@ Unix epoch, and less than 2^64 nanoseconds after it, in July 2554), text longer
 than ingest keeps (a step's or a tool's name past 145 characters, the agent, a
 model, a provider, a user or an error type past 128, a session past 200, or a
 reasoning effort past 1,024, counted in characters, not UTF-16's units), a step
-nested past 16 deep, or a span
-that ends before it starts throws a `RangeError`. Either sends nothing. A
-record the export queue has no room for throws `QueueFullError`, nothing of it
-queued: flush, or wait, and record it again. One of more spans than the queue
-holds, 2,048 unless the `processor` hook's `maxQueueSize` raises it, is never
-taken, and its error says so. One made once the client is shut down throws
-`ShutdownError`.
+nested past 16 deep, or a span that ends before it starts throws a
+`RangeError`. Either sends nothing. A record the export queue has no room for
+throws `QueueFullError`, nothing of it queued: flush, or wait, and record it
+again. One of more spans than the queue holds, 2,048 unless the `processor`
+hook's `maxQueueSize` raises it, is never taken, and its error says so. One
+made once the client is shut down throws `ShutdownError`.
 
 ## Scores
 
 A score is a name and a number, a yes or no, or a category. On a handle still
-open, `run.score('relevance', 0.75, { range: [0, 1], version: 'judge-2' })`
+open, `trace.score('relevance', 0.75, { range: [0, 1], version: 'judge-2' })`
 adds it to that span, timed now; `true` or `false` is a yes or no, and text a
 category. Once it has ended, the client's `score` sends it, naming what it
-scores — a run, a run and one of its spans (`run.runId`, `step.spanId`), or a
-session:
+scores — a trace, a trace and one of its spans (`trace.traceId`,
+`step.spanId`), or a session:
 
 ```ts
-telmoni.score('thumbs', true, { runId });
-telmoni.score('relevance', 0.5, { runId, spanId, range: [0, 1] });
+telmoni.score('thumbs', true, { traceId });
+telmoni.score('relevance', 0.5, { traceId, spanId, range: [0, 1] });
 telmoni.score('outcome', 'resolved', { sessionId: 'conv_7' });
 ```
 
 It goes with the next export, through the same queue, so `flush` and
-`shutdown` hold it. A recorded run, and each step and call in it, takes
+`shutdown` hold it. A recorded trace, and each step and call in it, takes
 `scores: [{ name, value, range?, version? }]`, each timed at that span's end. A
 name, a category or a version is trimmed and up to 64 characters; a number is
 finite and within its range; a span holds up to 16. A score that breaks a rule
@@ -210,18 +219,18 @@ to the mask.
 
 ## The guard
 
-`telmoni.run('support-bot', { maxSteps: 20, maxSpend: 0.5 }, callback)` holds
-a run to caps on its steps and on what its model calls cost, in US dollars,
+`telmoni.trace('support-bot', { maxSteps: 20, maxSpend: 0.5 }, callback)` holds
+a trace to caps on its steps and on what its model calls cost, in US dollars,
 counted in this process with no call to Telmoni. Past one, `step`, `modelCall`,
 `toolCall` and `retrieval` throw `CapExceededError`, naming the `cap` (`steps` or
-`spend`), its `limit` and what the run had `used`, before their callback runs:
-a step past the step cap, and anything once the run spent its spend cap or
+`spend`), its `limit` and what the trace had `used`, before their callback runs:
+a step past the step cap, and anything once the trace spent its spend cap or
 more. A call counts its reported `cost`; else its tokens at a price handed as
 `prices: [{ provider, model, input, output }]`, which the SDK alone holds, so
 Telmoni's own reads still price that call by the table; else at the price
 table this package carries, LiteLLM's, by its provider and the model it
 answered as; else nothing. A call answered again counts as its span then
-holds it. `run.spent` reads the count; a continued run carries no cap.
+holds it. `trace.spent` reads the count; a continued trace carries no cap.
 
 ## Configuration
 
@@ -256,24 +265,24 @@ number from 0; nothing of them is sent. The key is never printed or serialized: 
 `util.inspect` and `JSON.stringify` of the client or its configuration leave
 it out.
 
-## A run across services
+## A trace across services
 
-Before a request leaves a run, `telmoni.inject(headers, step)` writes the W3C
-`traceparent` of the step's span and the run's id and agent as
-`baggage` members into a record or a `Headers`; without a handle it writes from the
-active context, where your application runs OpenTelemetry's context manager.
-In the service that answers, `telmoni.extract(req.headers)` gives the run
-back, continued there: its steps and calls nest under the caller's span and
-carry the caller's run, and nothing of the run itself is sent from this side.
-Headers that name no run give `undefined`.
+Before a request leaves a trace, `telmoni.inject(headers, step)` writes the W3C
+`traceparent` of the step's span and the agent as a `baggage` member into a
+record or a `Headers`; without a handle it writes from the active context,
+where your application runs OpenTelemetry's context manager. In the service
+that answers, `telmoni.extract(req.headers)` gives the trace back, continued
+there: its steps and calls nest under the caller's span and carry the caller's
+agent, and nothing of the trace itself is sent from this side. Headers that
+name no trace give `undefined`.
 
 ## Content
 
 Prompts, completions, system instructions, tool arguments and tool results, and
 a retrieval's query and documents —
 `inputMessages`, `systemInstructions`, `outputMessages`, `arguments`, `query` and
-`returned(...)`, and a run's own `inputMessages` and
-`run.answered({ outputMessages })` — are content, and so are a failure's message
+`returned(...)`, and the agent's own `inputMessages` and
+`trace.answered({ outputMessages })` — are content, and so are a failure's message
 and stack, its `exception` event and its status's message, and every event the
 application adds to a span through OpenTelemetry, a score's own keys apart
 ([Scores](#scores)): without them, a failed span
@@ -340,22 +349,25 @@ counted as `dropped:<key>`, never as it was.
 
 The SDK builds a tracer provider of its own, part by part, and sends only to
 Telmoni: an application's own provider, exporters and sampling are untouched. A
-run opened while one of the application's spans is current joins its trace, as
-a child of that span; with OpenTelemetry's Node context manager registered,
-the application's spans opened inside a callback nest under ours, and
-`currentRun()` finds the run. Without a context manager, nest explicitly:
-`tracer.startSpan('db.query', {}, run.context)`.
+trace opened while one of the application's spans is current is a trace of its
+own, linked to that span rather than nested in its trace, so an application
+request that runs an agent a hundred times shows a hundred traces, each whole;
+with OpenTelemetry's Node context manager registered, the application's spans
+opened inside a callback nest under the agent's span, and `currentTrace()`
+finds the trace. Without a context manager, nest explicitly:
+`tracer.startSpan('db.query', {}, trace.context)`.
 
-A run takes the sampled flag of the trace it joins, so the application's own
-sampling rate holds inside runs as outside them. Every run is sent whatever the
-flag says, one inside a trace the application does not sample too. The optional
-`sampler` is an OpenTelemetry `Sampler` whose decision a run takes when it
-starts a trace of its own.
+Each trace takes the decision of the optional `sampler`, an OpenTelemetry
+`Sampler`, as it opens, every one sampled without it; a continued trace takes
+the caller's flag. The application's own spans inside a trace follow that flag,
+as under its `ParentBased` sampler they would, so its sampling rate holds
+inside traces as outside them. Every trace is sent whatever the flag says, one
+beside an application span the application does not sample too.
 
 ## Sending
 
 Spans are batched (a queue of 2048, batches of 512, every five seconds; a
-recorded run goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
+recorded trace goes at once) and sent as OTLP/JSON to `POST {endpoint}/otlp/v1/traces`
 over HTTPS: a plain-HTTP endpoint is refused with a `TypeError` unless its host
 is this machine — `localhost`, a name under it, 127.0.0.0/8 or `::1`, an
 IPv4-mapped address read as its IPv4 — and no redirect is followed, since every
@@ -370,7 +382,7 @@ segment or a character a URL parser would escape, or a port of 0 or past
 hyphens and underscores, in labels of 1 to 63 characters with no hyphen at
 either end and the last no number, nor an IPv4 address in four decimal parts,
 nor an IPv6 one in brackets. Each attempt carries `Telmoni-Sent-At`, this clock
-as it leaves, by which ingest moves a run from a clock a zone or a date out as
+as it leaves, by which ingest moves a trace from a clock a zone or a date out as
 one. A `429`, `502`, `503` or `504` is retried, after `Retry-After` where one
 came, three attempts in all; an
 answer whose body breaks after its status is decided by that status, as a whole

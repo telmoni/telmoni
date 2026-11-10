@@ -16,7 +16,7 @@ from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.trace import SpanContext
 
 from conftest import FakeTransport, answer_from, infos_in, load_fixture
-from telmoni import Config, RunRecord, StepRecord, Telmoni, WarningInfo, contract
+from telmoni import Config, StepRecord, Telmoni, TraceRecord, WarningInfo, contract
 from telmoni.exporter import Answer
 
 FIXTURE = load_fixture("scores.json")
@@ -48,7 +48,7 @@ def posted(transport: FakeTransport) -> list[tuple[dict[str, str], dict[str, Any
 
 
 def exported(transport: FakeTransport) -> list[dict[str, Any]]:
-    """Every span of every OTLP export but a run's opening."""
+    """Every span of every OTLP export but a trace's opening."""
     return [
         span
         for url, _headers, body in transport.requests
@@ -56,11 +56,11 @@ def exported(transport: FakeTransport) -> list[dict[str, Any]]:
         for resource_spans in json.loads(body)["resourceSpans"]
         for scope_spans in resource_spans["scopeSpans"]
         for span in scope_spans["spans"]
-        if span["name"] != "telmoni.run.start"
+        if span["name"] != "telmoni.trace.start"
     ]
 
 
-def run_span(transport: FakeTransport) -> dict[str, Any]:
+def agent_span(transport: FakeTransport) -> dict[str, Any]:
     (span,) = [s for s in exported(transport) if s["name"] == "invoke_agent bot"]
     return span
 
@@ -100,8 +100,8 @@ def test_a_live_score_is_kept_or_refused_as_the_fixture_says(
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot") as run:
-            run.score(
+        with client.trace("bot") as opened:
+            opened.score(
                 case["name"],
                 given(case["value"], case["type"]),
                 range=bounds(case),
@@ -110,7 +110,7 @@ def test_a_live_score_is_kept_or_refused_as_the_fixture_says(
         assert client.flush()
     finally:
         client.shutdown()
-    events = run_span(transport).get("events", [])
+    events = agent_span(transport).get("events", [])
     if case.get("refused"):
         assert events == []
         (warning,) = warnings_in(caplog)
@@ -143,7 +143,7 @@ def test_a_late_scores_target_is_kept_or_refused_as_the_fixture_says(
         client.score(
             "relevance",
             0.5,
-            run_id=case.get("run_id"),
+            trace_id=case.get("trace_id"),
             span_id=case.get("span_id"),
             session_id=case.get("session_id"),
         )
@@ -154,15 +154,18 @@ def test_a_late_scores_target_is_kept_or_refused_as_the_fixture_says(
         assert transport.requests == []
         assert warnings_in(caplog) == [
             (
-                "telmoni: a score was not sent: it names a run, a run and one of its "
-                "spans by 16 hex digits, or a session of up to 200 characters"
+                "telmoni: a score was not sent: it names a trace by 32 hex digits, "
+                "a trace and one of its spans by 16, or a session of up to 200 "
+                "characters"
             )
         ]
         return
     assert warnings_in(caplog) == []
     ((_headers, body),) = posted(transport)
     (item,) = body["scores"]
-    ids = {key: item[key] for key in ("run_id", "span_id", "session_id") if key in item}
+    ids = {
+        key: item[key] for key in ("trace_id", "span_id", "session_id") if key in item
+    }
     assert ids == case["kept"]
 
 
@@ -201,9 +204,9 @@ def test_live_scores_are_the_fixtures_events_without_content() -> None:
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot") as run:
+        with client.trace("bot") as opened:
             for each in FIXTURE["live"]["scores"]:
-                run.score(
+                opened.score(
                     each["name"],
                     given(each["value"], each["type"]),
                     range=bounds(each),
@@ -212,7 +215,7 @@ def test_live_scores_are_the_fixtures_events_without_content() -> None:
         assert client.flush()
     finally:
         client.shutdown()
-    assert events_of(run_span(transport)) == FIXTURE["live"]["events"]
+    assert events_of(agent_span(transport)) == FIXTURE["live"]["events"]
 
 
 def test_an_evaluation_events_other_attributes_are_content() -> None:
@@ -221,7 +224,7 @@ def test_an_evaluation_events_other_attributes_are_content() -> None:
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             trace.get_current_span().add_event(
                 contract.EVALUATION_EVENT,
                 {
@@ -233,7 +236,7 @@ def test_an_evaluation_events_other_attributes_are_content() -> None:
         assert client.flush()
     finally:
         client.shutdown()
-    (event,) = run_span(transport)["events"]
+    (event,) = agent_span(transport)["events"]
     assert {a["key"] for a in event["attributes"]} == {
         contract.EVALUATION_NAME,
         contract.EVALUATION_VALUE,
@@ -321,16 +324,19 @@ def test_late_scores_beside_spans_leave_apart_from_them() -> None:
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot") as run:
-            client.score("thumbs", False, run_id=run.run_id, span_id=run.span_id)
+        with client.trace("bot") as opened:
+            client.score(
+                "thumbs", False, trace_id=opened.trace_id, span_id=opened.span_id
+            )
         assert client.flush()
     finally:
         client.shutdown()
-    span = run_span(transport)
+    span = agent_span(transport)
     assert [s["name"] for s in exported(transport)] == ["invoke_agent bot"]
     ((_headers, body),) = posted(transport)
     (item,) = body["scores"]
-    assert (item["run_id"], item["span_id"]) == (run.run_id, span["spanId"])
+    assert (item["trace_id"], item["span_id"]) == (opened.trace_id, span["spanId"])
+    assert span["traceId"] == opened.trace_id
 
 
 def test_a_score_past_its_spans_cap_or_its_end_is_not_sent(
@@ -340,9 +346,9 @@ def test_a_score_past_its_spans_cap_or_its_end_is_not_sent(
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot") as run:
+        with client.trace("bot") as opened:
             for at in range(most + 1):
-                run.score(f"s{at}", 0.5)
+                opened.score(f"s{at}", 0.5)
             with client.step("plan") as step:
                 pass
             step.score("late", 0.5)
@@ -350,7 +356,7 @@ def test_a_score_past_its_spans_cap_or_its_end_is_not_sent(
         assert client.flush()
     finally:
         client.shutdown()
-    assert len(run_span(transport)["events"]) == most
+    assert len(agent_span(transport)["events"]) == most
     (step_span,) = [s for s in exported(transport) if s["name"] == "plan"]
     assert "events" not in step_span
     assert warnings_in(caplog) == [
@@ -368,16 +374,16 @@ def test_a_score_of_the_wrong_type_or_a_range_off_a_number_is_refused(
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot") as run:
-            run.score("relevance", None)  # type: ignore[arg-type]
-            run.score("relevance", [0.5])  # type: ignore[arg-type]
-            run.score("tone", "polite", range=[0, 1])
-            run.score("grounded", True, range=[0, 1])
-            run.score("relevance", 10**400)
+        with client.trace("bot") as opened:
+            opened.score("relevance", None)  # type: ignore[arg-type]
+            opened.score("relevance", [0.5])  # type: ignore[arg-type]
+            opened.score("tone", "polite", range=[0, 1])
+            opened.score("grounded", True, range=[0, 1])
+            opened.score("relevance", 10**400)
         assert client.flush()
     finally:
         client.shutdown()
-    assert "events" not in run_span(transport)
+    assert "events" not in agent_span(transport)
     assert warnings_in(caplog) == [
         (
             "telmoni: a score was not sent: its value is a number, a yes or no, "
@@ -395,13 +401,13 @@ def test_a_handle_names_its_spans_id() -> None:
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot") as run:
+        with client.trace("bot") as opened:
             pass
         assert client.flush()
     finally:
         client.shutdown()
-    assert re.fullmatch("[0-9a-f]{16}", run.span_id)
-    assert run.span_id == run_span(transport)["spanId"]
+    assert re.fullmatch("[0-9a-f]{16}", opened.span_id)
+    assert opened.span_id == agent_span(transport)["spanId"]
 
 
 def test_a_recorded_score_is_timed_at_its_spans_end(
@@ -410,8 +416,8 @@ def test_a_recorded_score_is_timed_at_its_spans_end(
     def at(text: str) -> datetime:
         return datetime.fromisoformat(text)
 
-    record = RunRecord(
-        run_id="5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+    record = TraceRecord(
+        trace_id="5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
         agent="bot",
         start=at("2026-10-01T10:00:00+00:00"),
         end=at("2026-10-01T10:00:05+00:00"),
@@ -433,7 +439,7 @@ def test_a_recorded_score_is_timed_at_its_spans_end(
         transport = FakeTransport()
         client = Telmoni(Config(api_key="k"), transport=transport)
         try:
-            client.record_run(record)
+            client.record_trace(record)
             assert client.flush()
         finally:
             client.shutdown()
@@ -461,9 +467,9 @@ def test_a_recorded_score_that_is_no_mapping_refuses_the_record() -> None:
     client = Telmoni(Config(api_key="k"), transport=FakeTransport())
     try:
         with pytest.raises(TypeError):
-            client.record_run(
-                RunRecord(
-                    run_id="5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+            client.record_trace(
+                TraceRecord(
+                    trace_id="5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
                     agent="bot",
                     start=datetime.fromisoformat("2026-10-01T10:00:00+00:00"),
                     end=datetime.fromisoformat("2026-10-01T10:00:05+00:00"),
@@ -497,12 +503,12 @@ def test_a_score_event_leaves_untouched_by_a_mask_dropping_everything() -> None:
         Config(api_key="k", capture_content=True, mask=mask), transport=transport
     )
     try:
-        with client.run("warm"):
+        with client.trace("warm"):
             pass
         assert client.flush()
-        with client.run("bot") as run:
+        with client.trace("bot") as opened:
             score = FIXTURE["live"]["scores"][0]
-            run.score(
+            opened.score(
                 score["name"],
                 score["value"],
                 range=score["range"],
@@ -512,23 +518,23 @@ def test_a_score_event_leaves_untouched_by_a_mask_dropping_everything() -> None:
         assert client.flush()
     finally:
         client.shutdown()
-    scored, missed = events_of(run_span(transport))
+    scored, missed = events_of(agent_span(transport))
     assert scored == FIXTURE["live"]["events"][0]
     assert missed["attributes"] == [], "the mask dropped the other event's"
     assert handed == ["key"]
 
 
-def test_a_late_scores_run_in_32_hex_digits_is_sent_written_out() -> None:
-    """Read as ``record_run`` reads a run's id."""
+def test_a_late_scores_trace_in_capitals_is_sent_lowercase() -> None:
+    """Read as ``record_trace`` reads a trace's id."""
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        client.score("thumbs", True, run_id="5B7E1C2A9D4F4E8BA6C31F2E3D4C5B6A")
+        client.score("thumbs", True, trace_id="5B7E1C2A9D4F4E8BA6C31F2E3D4C5B6A")
         assert client.flush()
     finally:
         client.shutdown()
     ((_headers, body),) = posted(transport)
-    assert body["scores"][0]["run_id"] == "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+    assert body["scores"][0]["trace_id"] == "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a"
 
 
 def test_a_span_trimmed_to_fit_keeps_its_scores_keys(

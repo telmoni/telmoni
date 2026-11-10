@@ -1,11 +1,11 @@
 //! The notices telemetry raises: a project's starter alerts, told once its
-//! first run made them; an alert's incidents, told after the
+//! first trace made them; an alert's incidents, told after the
 //! evaluation that moved them commits, or when a member resolves one. An
 //! opening and a resolution go to the project's feed and its connectors,
 //! keyed by the incident and the kind, so an incident has one feed row of
 //! each; what it says again goes to the connectors alone. A notice names the
-//! alert, where it stands and the numbers that crossed it, the run that shows
-//! it, what its agents changed to in the day before it opened
+//! alert, where it stands and the numbers that crossed it, the trace that
+//! shows it, what its agents changed to in the day before it opened
 //! ([`crate::changes`]) and the traces it read: names and numbers alone,
 //! never a span's content, since every connector is a third party.
 
@@ -29,7 +29,7 @@ use crate::changes::{self, BEFORE_INCIDENT, Change, Opened, Scope};
 use crate::db::TelemetryLane;
 use crate::monitors::{Judged, MonitorRow};
 use crate::rules::db::{self, RuleRow};
-use crate::rules::example::{self, ExampleRun, Pick, Repeated};
+use crate::rules::example::{self, ExampleTrace, Pick, Repeated};
 use crate::rules::incidents::{self, IncidentRow, Move, Owner, Telling, Told};
 use crate::rules::{Link, deliveries, mutes};
 use crate::spend::Unread;
@@ -63,7 +63,7 @@ pub async fn tell_incidents(
         }
     };
     let muted = muted_at(state, &rule.project_id, owner, at).await;
-    let run = run_of(state, rule, told).await;
+    let trace = trace_of(state, rule, told).await;
     let scope = Scope::of_alert(&rule.definition.filters);
     let changed = changed_of(state, &rule.project_id, &scope, told).await;
     for one in told.iter().filter(|one| one.telling != Telling::Silent) {
@@ -74,8 +74,8 @@ pub async fn tell_incidents(
             .map(|link| link.connection_id)
             .collect();
         let shown = Shown {
-            run: run.as_ref().filter(|_| shows_run(one)),
-            changed: changed.as_ref().filter(|_| shows_run(one)),
+            trace: trace.as_ref().filter(|_| shows_trace(one)),
+            changed: changed.as_ref().filter(|_| shows_trace(one)),
         };
         tell_one(state, rule, value, one, &hearers, shown).await;
     }
@@ -147,11 +147,11 @@ pub async fn tell_held(state: &AppState, rule: &RuleRow, value: Option<f64>) {
     tell_one(state, rule, value, &one, &hearers, Shown::default()).await;
 }
 
-/// What a breach's notice shows beside its words: the run, and what its
+/// What a breach's notice shows beside its words: the trace, and what its
 /// agents changed to before it opened.
 #[derive(Clone, Copy, Default)]
 struct Shown<'a> {
-    run: Option<&'a ExampleRun>,
+    trace: Option<&'a ExampleTrace>,
     changed: Option<&'a Changed>,
 }
 
@@ -164,7 +164,7 @@ async fn tell_one(
     one: &Told,
     hearers: &[Uuid],
     Shown {
-        run: shown,
+        trace: shown,
         changed,
     }: Shown<'_>,
 ) {
@@ -173,7 +173,7 @@ async fn tell_one(
     let body = carrying(
         body,
         [
-            shown.map(|run| run_line(state, rule, run, one.severity)),
+            shown.map(|trace| trace_line(state, rule, trace, one.severity)),
             traces_url.as_ref().map(|url| format!("Traces: {url}")),
         ],
         changed,
@@ -186,15 +186,15 @@ async fn tell_one(
         "alert_threshold": rule.definition.alert_threshold,
         "warning_threshold": rule.definition.warning_threshold,
         "reminder": one.telling == Telling::Reminder,
-        "run": shown.map(|run| run_json(state, rule, run)),
+        "trace": shown.map(|trace| trace_json(state, rule, trace)),
         "traces_url": traces_url,
     });
     let key = incident_key(one.incident_id, one.change);
     // An opening, or its reminder, is what a person may act on where it is told.
-    let run_url = shown.and_then(|run| run_link(state, rule, run.run_id));
+    let trace_url = shown.and_then(|trace| trace_link(state, rule, &trace.trace_id));
     let incident = (one.change == Move::Opened).then_some(IncidentNotice {
         id: one.incident_id,
-        run_url: run_url.as_deref(),
+        trace_url: trace_url.as_deref(),
     });
     let notice = |dedup_key| Notice {
         kind: kind_of(one.change),
@@ -213,7 +213,9 @@ async fn tell_one(
     let reached = told(state, of, hearers, notice, &key, one.telling.again()).await;
     match reached {
         Ok(reached) => {
-            let run = shown.filter(|_| reached.anyone).map(|run| run.run_id);
+            let trace = shown
+                .filter(|_| reached.anyone)
+                .map(|trace| trace.trace_id.as_str());
             keep_told(
                 state,
                 (
@@ -223,7 +225,7 @@ async fn tell_one(
                 ),
                 one.incident_id,
                 &reached.connections,
-                run,
+                trace,
                 one.telling,
             )
             .await;
@@ -290,7 +292,7 @@ async fn tell<'a>(
     })
 }
 
-/// Where one of an incident's notices went, and the run it showed, kept on
+/// Where one of an incident's notices went, and the trace it showed, kept on
 /// the incident, and on its alert or monitor as its last notice's hearers — a move's in
 /// place of the last, a reminder's beside them; logged by its ids where it
 /// cannot be, as the notice stands.
@@ -299,11 +301,11 @@ async fn keep_told(
     (organization_id, project_id, owner): (&OrganizationId, &ProjectId, Owner),
     incident_id: Uuid,
     connections: &[Uuid],
-    run: Option<Uuid>,
+    trace: Option<&str>,
     telling: Telling,
 ) {
     let replaces = telling != Telling::Reminder;
-    if !replaces && connections.is_empty() && run.is_none() {
+    if !replaces && connections.is_empty() && trace.is_none() {
         return;
     }
     let write = async {
@@ -311,7 +313,7 @@ async fn keep_told(
             .await?
             .bind_organization(organization_id)
             .await?;
-        incidents::told(&mut tx, project_id, incident_id, connections, run).await?;
+        incidents::told(&mut tx, project_id, incident_id, connections, trace).await?;
         let sql = match owner {
             Owner::Rule(_) => {
                 "UPDATE telemetry.rules
@@ -418,7 +420,7 @@ struct Changed {
     several: bool,
 }
 
-/// The changes an evaluation's breach names, read once as its run is; none
+/// The changes an evaluation's breach names, read once as its trace is; none
 /// where no move shows them.
 async fn changed_of(
     state: &AppState,
@@ -428,7 +430,7 @@ async fn changed_of(
 ) -> Option<Changed> {
     let one = told
         .iter()
-        .find(|one| one.telling != Telling::Silent && shows_run(one))?;
+        .find(|one| one.telling != Telling::Silent && shows_trace(one))?;
     let incident_id = one.incident_id;
     let read = async {
         let mut tx = project_scope(&state.db, project_id).await?;
@@ -558,32 +560,32 @@ fn before(ago: TimeDelta) -> String {
     }
 }
 
-/// Whether a move shows the run, and the changes before its incident: a
+/// Whether a move shows the trace, and the changes before its incident: a
 /// breach opened, reopened or risen, which a window with no span cannot
 /// show; a recovery need not, nor a reminder, which may come every minute
 /// and whose opening named them.
-fn shows_run(one: &Told) -> bool {
+fn shows_trace(one: &Told) -> bool {
     one.change == Move::Opened
         && one.severity != Severity::NoData
         && one.telling != Telling::Reminder
 }
 
-/// The run an evaluation's breaches show, read once; none, logged by the
+/// The trace an evaluation's breaches show, read once; none, logged by the
 /// error's kind, where a store does not answer, and the notice goes on.
-async fn run_of(state: &AppState, rule: &RuleRow, told: &[Told]) -> Option<ExampleRun> {
+async fn trace_of(state: &AppState, rule: &RuleRow, told: &[Told]) -> Option<ExampleTrace> {
     if !told
         .iter()
-        .any(|one| one.telling != Telling::Silent && shows_run(one))
+        .any(|one| one.telling != Telling::Silent && shows_trace(one))
     {
         return None;
     }
     match example::example(state, rule, Utc::now()).await {
-        Ok(run) => run,
+        Ok(trace) => trace,
         Err(Unread::Store(error)) => {
             tracing::warn!(
                 rule_id = %rule.id,
                 kind = crate::store::Fault::of(&error).as_str(),
-                "telemetry: the run an alert's notice shows could not be read; it goes without"
+                "telemetry: the trace an alert's notice shows could not be read; it goes without"
             );
             None
         }
@@ -591,7 +593,7 @@ async fn run_of(state: &AppState, rule: &RuleRow, told: &[Told]) -> Option<Examp
             tracing::warn!(
                 rule_id = %rule.id,
                 error = %error,
-                "telemetry: the prices of the run an alert's notice shows could not be read; \
+                "telemetry: the prices of the trace an alert's notice shows could not be read; \
                  it goes without"
             );
             None
@@ -613,7 +615,7 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
     .ok()?;
     let filters = &rule.definition.filters;
     let failed = vec![SpanStatus::Error];
-    // An objective's runs miss it by failing, but a latency one's by running long.
+    // An objective's traces miss it by failing, but a latency one's by running long.
     let failures = match rule.definition.objective {
         Some(objective) => objective.latency_ms.is_none(),
         None => rule.definition.measure == RuleMeasure::Failures,
@@ -654,69 +656,74 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
 /// The longest trace list link a notice carries, in bytes.
 const LINK_MAX: usize = 1_024;
 
-/// A run's own page in the console, spelled with ids.
-fn run_link(state: &AppState, rule: &RuleRow, run_id: Uuid) -> Option<String> {
-    run_page(state, &rule.organization_id, &rule.project_id, run_id)
+/// A trace's own page in the console, spelled with ids.
+fn trace_link(state: &AppState, rule: &RuleRow, trace_id: &str) -> Option<String> {
+    trace_page(state, &rule.organization_id, &rule.project_id, trace_id)
 }
 
-/// A run's own page in the console, by the project's ids.
-fn run_page(
+/// A trace's own page in the console, by the project's ids.
+fn trace_page(
     state: &AppState,
     organization_id: &OrganizationId,
     project_id: &ProjectId,
-    run_id: Uuid,
+    trace_id: &str,
 ) -> Option<String> {
     let origin = state.config.app_url.as_deref()?;
     Some(format!(
-        "{origin}/{organization_id}/{project_id}/traces/{run_id}"
+        "{origin}/{organization_id}/{project_id}/traces/{trace_id}"
     ))
 }
 
-/// The line naming the run a notice shows: which it is, or the loop it shows
-/// at the threshold `severity` crossed, its last step, its error, its steps,
-/// its tokens and what it spent, the models it called that no price covers,
-/// and where it opens.
-fn run_line(state: &AppState, rule: &RuleRow, run: &ExampleRun, severity: Severity) -> String {
-    let label = run.repeated.as_ref().map_or_else(
-        || picked(rule.definition.kind, run.pick),
+/// The line naming the trace a notice shows: which it is, or the loop it
+/// shows at the threshold `severity` crossed, its last step, its error, its
+/// steps, its tokens and what it spent, the models it called that no price
+/// covers, and where it opens.
+fn trace_line(
+    state: &AppState,
+    rule: &RuleRow,
+    trace: &ExampleTrace,
+    severity: Severity,
+) -> String {
+    let label = trace.repeated.as_ref().map_or_else(
+        || picked(rule.definition.kind, trace.pick),
         |repeated| repeated_words(&rule.definition, repeated, severity),
     );
     let mut parts = Vec::new();
-    if let Some(step) = &run.last_step {
+    if let Some(step) = &trace.last_step {
         parts.push(format!("last step {}", clipped(step)));
     }
-    if let Some(error) = &run.error_type {
+    if let Some(error) = &trace.error_type {
         parts.push(clipped(error));
     }
     parts.push(format!(
         "{} {}",
-        run.steps,
-        if run.steps == 1 { "step" } else { "steps" }
+        trace.steps,
+        if trace.steps == 1 { "step" } else { "steps" }
     ));
     parts.push(format!(
         "{} tokens and {}{}",
-        run.tokens,
-        dollars(run.spent),
-        if run.ended { "" } else { " so far" }
+        trace.tokens,
+        dollars(trace.spent),
+        if trace.ended { "" } else { " so far" }
     ));
-    if !run.unpriced.is_empty() {
-        parts.push(format!("no price for {}", unpriced_names(&run.unpriced)));
+    if !trace.unpriced.is_empty() {
+        parts.push(format!("no price for {}", unpriced_names(&trace.unpriced)));
     }
     let details = parts.join(", ");
-    match run_link(state, rule, run.run_id) {
+    match trace_link(state, rule, &trace.trace_id) {
         Some(url) => format!("{label}: {details}. {url}"),
-        None => format!("{label} ({}): {details}.", run.run_id),
+        None => format!("{label} ({}): {details}.", trace.trace_id),
     }
 }
 
-/// A loop in words, its runs counted at the threshold `severity` crossed:
-/// "3 runs of support-agent called search 10 or more times in a row, this one 12".
+/// A loop in words, its traces counted at the threshold `severity` crossed:
+/// "3 traces of support-agent called search 10 or more times in a row, this one 12".
 fn repeated_words(
     definition: &crate::rules::Definition,
     repeated: &Repeated,
     severity: Severity,
 ) -> String {
-    let (at, runs) = match (severity, definition.warning_threshold) {
+    let (at, traces) = match (severity, definition.warning_threshold) {
         (Severity::Warning, Some(warning)) => (warning, repeated.past_warning),
         _ => (definition.alert_threshold, repeated.past_alert),
     };
@@ -730,24 +737,24 @@ fn repeated_words(
         RuleOperator::Gte => format!("{} or more", amount(definition, at)),
         _ => String::new(),
     };
-    if bound.is_empty() || runs == 0 {
-        return format!("The run where {called} {} times in a row", repeated.times);
+    if bound.is_empty() || traces == 0 {
+        return format!("The trace where {called} {} times in a row", repeated.times);
     }
-    let runs = if runs == 1 {
-        "1 run".to_owned()
+    let traces = if traces == 1 {
+        "1 trace".to_owned()
     } else {
-        format!("{runs} runs")
+        format!("{traces} traces")
     };
     format!(
-        "{runs} of {called} {bound} times in a row, this one {}",
+        "{traces} of {called} {bound} times in a row, this one {}",
         repeated.times
     )
 }
 
-/// The most unpriced names a run's line carries, the rest counted.
+/// The most unpriced names a trace's line carries, the rest counted.
 const UNPRICED_SHOWN: usize = 3;
 
-/// A run's unpriced names in words: `gpt-x (openai), ft-model (openai) and 2 more`.
+/// A trace's unpriced names in words: `gpt-x (openai), ft-model (openai) and 2 more`.
 fn unpriced_names(names: &[(String, String)]) -> String {
     let shown: Vec<String> = names
         .iter()
@@ -768,27 +775,27 @@ fn unpriced_names(names: &[(String, String)]) -> String {
     }
 }
 
-/// The run a notice shows, as its metadata carries it: names clipped and the
-/// unpriced models counted, so it stays within what the feed keeps.
-fn run_json(state: &AppState, rule: &RuleRow, run: &ExampleRun) -> serde_json::Value {
+/// The trace a notice shows, as its metadata carries it: names clipped and
+/// the unpriced models counted, so it stays within what the feed keeps.
+fn trace_json(state: &AppState, rule: &RuleRow, trace: &ExampleTrace) -> serde_json::Value {
     json!({
-        "run_id": run.run_id,
-        "url": run_link(state, rule, run.run_id),
-        "last_step": run.last_step.as_deref().map(clipped),
-        "error_type": run.error_type.as_deref().map(clipped),
-        "steps": run.steps,
-        "tokens": run.tokens,
-        "spent": run.spent,
-        "unpriced": run.unpriced.len(),
-        "ended": run.ended,
+        "trace_id": trace.trace_id,
+        "url": trace_link(state, rule, &trace.trace_id),
+        "last_step": trace.last_step.as_deref().map(clipped),
+        "error_type": trace.error_type.as_deref().map(clipped),
+        "steps": trace.steps,
+        "tokens": trace.tokens,
+        "spent": trace.spent,
+        "unpriced": trace.unpriced.len(),
+        "ended": trace.ended,
     })
 }
 
-/// Which run a notice shows, in words.
+/// Which trace a notice shows, in words.
 fn picked(kind: SpanKind, pick: Pick) -> String {
     let one = match kind {
-        SpanKind::Run => "run",
-        SpanKind::RunStart => "run opening",
+        SpanKind::Agent => "trace",
+        SpanKind::TraceStart => "trace opening",
         SpanKind::Step => "step",
         SpanKind::ModelCall => "model call",
         SpanKind::ToolCall => "tool call",
@@ -796,22 +803,22 @@ fn picked(kind: SpanKind, pick: Pick) -> String {
         SpanKind::Span => "span",
     };
     match (pick, kind) {
-        (Pick::LatestFailed, SpanKind::Run) => "The latest failed run".to_owned(),
-        (Pick::LatestFailed, _) => format!("The run of the latest failed {one}"),
-        (Pick::Slowest, SpanKind::Run) => "The slowest run".to_owned(),
-        (Pick::Slowest, _) => format!("The run of the slowest {one}"),
-        (Pick::MostTokens, SpanKind::Run) => "The run with the most tokens".to_owned(),
-        (Pick::MostTokens, _) => format!("The run of the {one} with the most tokens"),
-        (Pick::MostSpent, _) => "The run that spent the most".to_owned(),
-        (Pick::LowestScored, _) => "The run scored lowest".to_owned(),
-        (Pick::HighestScored, _) => "The run scored highest".to_owned(),
-        (Pick::MostSteps, _) => "The run with the most steps".to_owned(),
+        (Pick::LatestFailed, SpanKind::Agent) => "The latest failed trace".to_owned(),
+        (Pick::LatestFailed, _) => format!("The trace of the latest failed {one}"),
+        (Pick::Slowest, SpanKind::Agent) => "The slowest trace".to_owned(),
+        (Pick::Slowest, _) => format!("The trace of the slowest {one}"),
+        (Pick::MostTokens, SpanKind::Agent) => "The trace with the most tokens".to_owned(),
+        (Pick::MostTokens, _) => format!("The trace of the {one} with the most tokens"),
+        (Pick::MostSpent, _) => "The trace that spent the most".to_owned(),
+        (Pick::LowestScored, _) => "The trace scored lowest".to_owned(),
+        (Pick::HighestScored, _) => "The trace scored highest".to_owned(),
+        (Pick::MostSteps, _) => "The trace with the most steps".to_owned(),
         (Pick::LongestRepeat, _) => {
-            "The run that called one tool the most times in a row".to_owned()
+            "The trace that called one tool the most times in a row".to_owned()
         }
-        (Pick::Stalest, _) => "The run quiet longest".to_owned(),
-        (Pick::Latest, SpanKind::Run) => "The latest run".to_owned(),
-        (Pick::Latest, _) => format!("The run of the latest {one}"),
+        (Pick::Stalest, _) => "The trace quiet longest".to_owned(),
+        (Pick::Latest, SpanKind::Agent) => "The latest trace".to_owned(),
+        (Pick::Latest, _) => format!("The trace of the latest {one}"),
     }
 }
 
@@ -966,7 +973,7 @@ fn words(rule: &RuleRow, value: Option<f64>, told: &Told) -> (String, String) {
     )
 }
 
-/// An objective's notice: how fast its agent's runs spend its budget, over
+/// An objective's notice: how fast its agent's traces spend its budget, over
 /// the window that set the severity, and when the budget is gone at that rate.
 fn burn_words(
     rule: &RuleRow,
@@ -1024,7 +1031,7 @@ fn burn_words(
     )
 }
 
-/// What an objective promises, in words: "99.9% of support-bot's runs
+/// What an objective promises, in words: "99.9% of support-bot's traces
 /// succeed over 30 days".
 fn promise(objective: &crate::rules::Objective, agent: &str) -> String {
     let share = format!("{:.2}", objective.target * 100.0);
@@ -1034,7 +1041,7 @@ fn promise(objective: &crate::rules::Objective, agent: &str) -> String {
         None => "succeed".to_owned(),
     };
     format!(
-        "{share}% of {agent}'s runs {how} over {} days",
+        "{share}% of {agent}'s traces {how} over {} days",
         objective.days
     )
 }
@@ -1051,7 +1058,7 @@ fn days(days: f64) -> String {
 }
 
 /// The alert's metric in words: "The p95 duration of model calls over the
-/// last hour", "The most a run spent over the last day", and against the
+/// last hour", "The most a trace spent over the last day", and against the
 /// window before, "…, against the day before".
 fn metric(rule: &RuleRow) -> String {
     let what = measured(rule);
@@ -1084,23 +1091,23 @@ fn measured(rule: &RuleRow) -> String {
         (RuleMeasure::Tokens, _) => "The tokens".to_owned(),
         (RuleMeasure::Cost, aggregation) => {
             let spent = match aggregation {
-                RuleAggregation::Max => "The most a run spent",
-                RuleAggregation::Avg => "The average a run spent",
-                _ => "What the runs spent",
+                RuleAggregation::Max => "The most a trace spent",
+                RuleAggregation::Avg => "The average a trace spent",
+                _ => "What the traces spent",
             };
             return format!("{spent} {}", over(rule.definition.window));
         }
         (RuleMeasure::Steps, aggregation) => {
             let steps = match aggregation {
-                RuleAggregation::Avg => "The average steps a run took".to_owned(),
-                RuleAggregation::Max => "The most steps a run took".to_owned(),
-                percentile => format!("The {percentile} of the steps a run took"),
+                RuleAggregation::Avg => "The average steps a trace took".to_owned(),
+                RuleAggregation::Max => "The most steps a trace took".to_owned(),
+                percentile => format!("The {percentile} of the steps a trace took"),
             };
             return format!("{steps} {}", over(rule.definition.window));
         }
         (RuleMeasure::Repeats, _) => {
             return format!(
-                "The most times a run called one tool in a row {}",
+                "The most times a trace called one tool in a row {}",
                 over(rule.definition.window)
             );
         }
@@ -1111,14 +1118,14 @@ fn measured(rule: &RuleRow) -> String {
                 RuleWindow::Week => "a week",
                 RuleWindow::Month => "a month",
             };
-            return format!("The count of runs left open and quiet for over {quiet}");
+            return format!("The count of traces left open and quiet for over {quiet}");
         }
         // Worded above, by its score's name, and an objective by its promise.
         (RuleMeasure::Score | RuleMeasure::Burn, _) => String::new(),
     };
     let of = match rule.definition.kind {
-        SpanKind::Run => "runs",
-        SpanKind::RunStart => "run openings",
+        SpanKind::Agent => "traces",
+        SpanKind::TraceStart => "trace openings",
         SpanKind::Step => "steps",
         SpanKind::ModelCall => "model calls",
         SpanKind::ToolCall => "tool calls",
@@ -1204,7 +1211,7 @@ fn amount(definition: &crate::rules::Definition, value: f64) -> String {
 }
 
 /// US dollars as a notice writes them: to the cent from a dollar, else to
-/// three figures, since a run's is often a fraction of a cent (`$5.20`,
+/// three figures, since a trace's is often a fraction of a cent (`$5.20`,
 /// `$0.0123`).
 fn dollars(value: f64) -> String {
     let cents = format!("${value:.2}");
@@ -1233,9 +1240,9 @@ fn dollars(value: f64) -> String {
 
 /// A monitor's moves, told after their commit as an alert's are: an opening
 /// and a resolution to the feed and its linked connectors, a rise to them
-/// alone; a failure shows the run that failed, and an opening what the agent
-/// changed to before it. Names the agent, the due time, the run's id and
-/// those changes alone.
+/// alone; a failure shows the trace that failed, and an opening what the
+/// agent changed to before it. Names the agent, the due time, the trace's id
+/// and those changes alone.
 pub async fn tell_monitor(
     state: &AppState,
     row: &MonitorRow,
@@ -1268,17 +1275,18 @@ pub async fn tell_monitor(
             .map(|link| link.connection_id)
             .collect();
         let failed = one.change == Move::Opened && judged.cause == Some(MonitorCause::Failed);
-        let run = judged
+        let trace = judged
             .last_ended
+            .as_ref()
             .filter(|_| failed)
-            .map(|ended| ended.run_id);
-        let run_url =
-            run.and_then(|run| run_page(state, &row.organization_id, &row.project_id, run));
+            .map(|ended| ended.trace_id.as_str());
+        let trace_url =
+            trace.and_then(|trace| trace_page(state, &row.organization_id, &row.project_id, trace));
         let (title, body) = monitor_words(row, judged, one);
         let body = carrying(
             body,
-            [run_url.as_ref().map(|url| format!("Run: {url}"))],
-            changed.as_ref().filter(|_| shows_run(one)),
+            [trace_url.as_ref().map(|url| format!("Trace: {url}"))],
+            changed.as_ref().filter(|_| shows_trace(one)),
         );
         let metadata = json!({
             "incident_id": one.incident_id,
@@ -1286,12 +1294,12 @@ pub async fn tell_monitor(
             "severity": one.severity,
             "cause": (one.change == Move::Opened).then_some(judged.cause).flatten(),
             "next_due_at": judged.next_due_at,
-            "run": run,
+            "trace": trace,
         });
         let key = incident_key(one.incident_id, one.change);
         let incident = (one.change == Move::Opened).then_some(IncidentNotice {
             id: one.incident_id,
-            run_url: run_url.as_deref(),
+            trace_url: trace_url.as_deref(),
         });
         let notice = |dedup_key| Notice {
             kind: kind_of(one.change),
@@ -1309,7 +1317,7 @@ pub async fn tell_monitor(
         };
         match told(state, of, &hearers, notice, &key, one.telling.again()).await {
             Ok(reached) => {
-                let shown = run.filter(|_| reached.anyone);
+                let shown = trace.filter(|_| reached.anyone);
                 keep_told(
                     state,
                     (&row.organization_id, &row.project_id, owner),
@@ -1331,7 +1339,7 @@ pub async fn tell_monitor(
 }
 
 /// A monitor's notice's title and body: its agent, where it stands and why,
-/// and when its run was due — never a span's content.
+/// and when its trace was due — never a span's content.
 fn monitor_words(row: &MonitorRow, judged: &Judged, one: &Told) -> (String, String) {
     let agent = &row.agent;
     let due = judged.next_due_at.map_or_else(String::new, |due| {
@@ -1341,15 +1349,15 @@ fn monitor_words(row: &MonitorRow, judged: &Judged, one: &Told) -> (String, Stri
     let (state, body) = match (one.change, one.severity, judged.cause) {
         (Move::Resolved, ..) => ("up", format!("{agent} is up again.")),
         (Move::Opened, _, Some(MonitorCause::Failed)) => {
-            ("down", format!("{agent}'s last run ended in error."))
+            ("down", format!("{agent}'s last trace ended in error."))
         }
         (Move::Opened, Severity::Warning, _) => (
             "late",
-            format!("{agent}'s run due at {due} has not started."),
+            format!("{agent}'s trace due at {due} has not started."),
         ),
         (Move::Opened, ..) => (
             "down",
-            format!("{agent}'s run due at {due} has not started within its grace of {grace}."),
+            format!("{agent}'s trace due at {due} has not started within its grace of {grace}."),
         ),
     };
     (format!("{agent}: {state}"), body)
@@ -1470,7 +1478,7 @@ async fn tell_resolved(state: &AppState, incident: &IncidentRow, links: &[Link],
     }
 }
 
-/// A project's first run told to its feed: the starter alerts it made, and
+/// A project's first trace told to its feed: the starter alerts it made, and
 /// those the plan had no room for in the plan's own words; one that fails is
 /// logged, the starters standing all the same.
 pub(crate) async fn starters_made(
@@ -1488,11 +1496,11 @@ pub(crate) async fn starters_made(
         "Starter alerts watch this project"
     };
     let mut body = if made.names.is_empty() {
-        "Its first run landed, but the plan had no room for its starter alerts.".to_owned()
+        "Its first trace landed, but the plan had no room for its starter alerts.".to_owned()
     } else {
         format!(
-            "Its first run landed, so {} now watch its runs, read every five minutes. Edit or \
-             delete them on its Alerts page.",
+            "Its first trace landed, so {} now watch its traces, read every five minutes. Edit \
+             or delete them on its Alerts page.",
             crate::starters::words(&made.names)
         )
     };
@@ -1537,11 +1545,11 @@ mod tests {
 
     use crate::rules::{RuleFilters, RuleInput};
 
-    /// A budget: what the runs spent this month, warned at 80 and alerting at 100.
+    /// A budget: what the traces spent this month, warned at 80 and alerting at 100.
     fn budget() -> crate::rules::Definition {
         RuleInput {
             name: "Budget".into(),
-            kind: SpanKind::Run,
+            kind: SpanKind::Agent,
             measure: RuleMeasure::Cost,
             aggregation: RuleAggregation::Sum,
             filters: RuleFilters::default(),
@@ -1572,7 +1580,7 @@ mod tests {
         };
         assert_eq!(
             promise(&success, "support-bot"),
-            "99.9% of support-bot's runs succeed over 30 days"
+            "99.9% of support-bot's traces succeed over 30 days"
         );
         let latency = crate::rules::Objective {
             target: 0.95,
@@ -1581,7 +1589,7 @@ mod tests {
         };
         assert_eq!(
             promise(&latency, "support-bot"),
-            "95% of support-bot's runs end inside 2000 ms over 30 days"
+            "95% of support-bot's traces end inside 2000 ms over 30 days"
         );
         let burn = crate::rules::Definition {
             measure: RuleMeasure::Burn,
@@ -1695,42 +1703,42 @@ mod tests {
         );
     }
 
-    /// A run is named for the span it was picked by, in the alert's kind.
+    /// A trace is named for the span it was picked by, in the alert's kind.
     #[test]
-    fn a_run_is_named_for_its_pick() {
+    fn a_trace_is_named_for_its_pick() {
         assert_eq!(
-            picked(SpanKind::Run, Pick::LatestFailed),
-            "The latest failed run"
+            picked(SpanKind::Agent, Pick::LatestFailed),
+            "The latest failed trace"
         );
         assert_eq!(
             picked(SpanKind::ToolCall, Pick::LatestFailed),
-            "The run of the latest failed tool call"
+            "The trace of the latest failed tool call"
         );
         assert_eq!(
             picked(SpanKind::Retrieval, Pick::LatestFailed),
-            "The run of the latest failed retrieval"
+            "The trace of the latest failed retrieval"
         );
         assert_eq!(
             picked(SpanKind::ModelCall, Pick::MostTokens),
-            "The run of the model call with the most tokens"
+            "The trace of the model call with the most tokens"
         );
         assert_eq!(
-            picked(SpanKind::Run, Pick::MostSpent),
-            "The run that spent the most"
+            picked(SpanKind::Agent, Pick::MostSpent),
+            "The trace that spent the most"
         );
         assert_eq!(
-            picked(SpanKind::Run, Pick::MostSteps),
-            "The run with the most steps"
+            picked(SpanKind::Agent, Pick::MostSteps),
+            "The trace with the most steps"
         );
         assert_eq!(
-            picked(SpanKind::Run, Pick::Stalest),
-            "The run quiet longest"
+            picked(SpanKind::Agent, Pick::Stalest),
+            "The trace quiet longest"
         );
     }
 
-    /// A loop's runs are counted at the threshold crossed, as the alert compares.
+    /// A loop's traces are counted at the threshold crossed, as the alert compares.
     #[test]
-    fn a_loop_counts_its_runs_at_the_threshold_crossed() {
+    fn a_loop_counts_its_traces_at_the_threshold_crossed() {
         let repeats = crate::rules::Definition {
             measure: RuleMeasure::Repeats,
             aggregation: RuleAggregation::Max,
@@ -1749,11 +1757,11 @@ mod tests {
         };
         assert_eq!(
             repeated_words(&repeats, &looped, Severity::Alert),
-            "3 runs of support-agent called search 10 or more times in a row, this one 12"
+            "3 traces of support-agent called search 10 or more times in a row, this one 12"
         );
         assert_eq!(
             repeated_words(&repeats, &looped, Severity::Warning),
-            "4 runs of support-agent called search 5 or more times in a row, this one 12"
+            "4 traces of support-agent called search 5 or more times in a row, this one 12"
         );
         let above = crate::rules::Definition {
             operator: RuleOperator::Gt,
@@ -1765,7 +1773,7 @@ mod tests {
         };
         assert_eq!(
             repeated_words(&above, &once, Severity::Alert),
-            "1 run of support-agent called search more than 10 times in a row, this one 12"
+            "1 trace of support-agent called search more than 10 times in a row, this one 12"
         );
         let below = crate::rules::Definition {
             operator: RuleOperator::Lt,
@@ -1774,7 +1782,7 @@ mod tests {
         };
         assert_eq!(
             repeated_words(&below, &looped, Severity::Alert),
-            "The run where support-agent called search 12 times in a row"
+            "The trace where support-agent called search 12 times in a row"
         );
     }
 
@@ -1802,7 +1810,7 @@ mod tests {
             prompt: None,
             value: value.into(),
             changed_at: opened() - ago,
-            run_id: Uuid::nil(),
+            trace_id: "0".repeat(32),
             capped: false,
         }
     }

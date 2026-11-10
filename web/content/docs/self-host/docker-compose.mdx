@@ -183,7 +183,7 @@ Telmoni includes an AI context agent with vector similarity search. You can run 
    EMBEDDINGS_MODEL=nomic-embed-text
    ```
 
-   To record the agent's own questions as runs of a project of yours, as any agent's are, add `TELMONI_API_KEY`, an ingest key of that project: the runs go to this stack's own server ([Configuration](/docs/self-host/configuration)). Unset, they are recorded nowhere.
+   To record the agent's own questions as traces of a project of yours, as any agent's are, add `TELMONI_API_KEY`, an ingest key of that project: the traces go to this stack's own server ([Configuration](/docs/self-host/configuration)). Unset, they are recorded nowhere.
 
 4. Recreate the server container to apply the changes (`restart` keeps the container's old environment):
 

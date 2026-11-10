@@ -49,10 +49,10 @@ fn mixed() -> Vec<Value> {
         alert
     };
     vec![
-        alert("Runs", "run", "count", "count", 3.0),
-        alert("Share failed", "run", "failures", "avg", 0.1),
+        alert("Traces", "agent", "count", "count", 3.0),
+        alert("Share failed", "agent", "failures", "avg", 0.1),
         with(
-            alert("Billing failed", "run", "failures", "count", 0.0),
+            alert("Billing failed", "agent", "failures", "count", 0.0),
             "filters",
             json!({ "agent": ["billing-bot"] }),
         ),
@@ -85,25 +85,25 @@ fn mixed() -> Vec<Value> {
             json!({ "status": ["error"] }),
         ),
         with(
-            alert("Runs against before", "run", "count", "count", 50.0),
+            alert("Traces against before", "agent", "count", "count", 50.0),
             "baseline",
             json!("previous"),
         ),
-        alert("Steps", "run", "steps", "max", 1.0),
-        alert("Loops", "run", "repeats", "max", 5.0),
+        alert("Steps", "agent", "steps", "max", 1.0),
+        alert("Loops", "agent", "repeats", "max", 5.0),
         with(
-            alert("Looper's loops", "run", "repeats", "max", 5.0),
+            alert("Looper's loops", "agent", "repeats", "max", 5.0),
             "filters",
             json!({ "agent": ["looper"] }),
         ),
         with(
-            alert("Stalls", "run", "stalled", "count", 0.0),
+            alert("Stalls", "agent", "stalled", "count", 0.0),
             "operator",
             json!("gte"),
         ),
         with(
             with(
-                alert("Support stalls", "run", "stalled", "count", 1.0),
+                alert("Support stalls", "agent", "stalled", "count", 1.0),
                 "operator",
                 json!("gte"),
             ),
@@ -111,20 +111,20 @@ fn mixed() -> Vec<Value> {
             json!({ "agent": ["support-bot"] }),
         ),
         with(
-            alert("Billing loops", "run", "repeats", "max", 5.0),
+            alert("Billing loops", "agent", "repeats", "max", 5.0),
             "filters",
             json!({ "agent": ["billing-bot"] }),
         ),
         with(
             with(
-                alert("Billing stalls", "run", "stalled", "count", 1.0),
+                alert("Billing stalls", "agent", "stalled", "count", 1.0),
                 "operator",
                 json!("gte"),
             ),
             "filters",
             json!({ "agent": ["billing-bot"] }),
         ),
-        alert("Cost cap", "run", "cost", "max", 0.01),
+        alert("Cost cap", "agent", "cost", "max", 0.01),
     ]
 }
 
@@ -150,7 +150,7 @@ fn spans(project: &ProjectId) -> Vec<SpanRow> {
     let looping = Uuid::new_v4();
     for n in 0..8_i64 {
         rows.push(SpanRow {
-            run_id: looping,
+            trace_id: looping.simple().to_string(),
             agent: "looper".into(),
             span_id: format!("{:016x}", 0x900 + n),
             started_at: now - TimeDelta::minutes(30) + TimeDelta::seconds(n),
@@ -174,7 +174,7 @@ fn spans(project: &ProjectId) -> Vec<SpanRow> {
         let at =
             now - TimeDelta::minutes(90) + TimeDelta::seconds(i64::try_from(n).expect("small"));
         rows.push(SpanRow {
-            run_id: stalled,
+            trace_id: stalled.simple().to_string(),
             agent: "support-bot".into(),
             span_id: format!("{:016x}", 0xa00 + n),
             status: SpanStatus::Ok,

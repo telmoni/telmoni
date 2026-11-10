@@ -4,7 +4,7 @@ import { SpanKind, SpanStatus } from "@/lib/types/enums";
 // One span for the tests, so the shape the server answers is written once:
 // a test names only what its case turns on.
 
-/** A plain span of the nightly report's run, named by its id, with every
+/** A plain span of the nightly report's trace, named by its id, with every
  *  field `over` leaves out empty, zero or none. */
 export function testSpan(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id">): TraceSpan {
   return {

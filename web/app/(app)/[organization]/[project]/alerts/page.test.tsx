@@ -79,7 +79,7 @@ const RULE = "7a1c0e52-0000-4000-8000-000000000002";
 const OTHER_RULE = "8b2d1f63-0000-4000-8000-000000000006";
 const SLACK = "3c4e2a74-0000-4000-8000-000000000004";
 const HOOK = "4d5f3b85-0000-4000-8000-000000000007";
-const RUN = "9b2d1f63-0000-4000-8000-000000000003";
+const TRACE = "9b2d1f63000040008000000000000003";
 
 function incident(id: string, over: Record<string, unknown> = {}) {
   return {
@@ -96,7 +96,7 @@ function incident(id: string, over: Record<string, unknown> = {}) {
     resolved_by: null,
     reopened: 0,
     told_to: [],
-    runs: [],
+    traces: [],
     changes: [],
     changes_more: false,
     ...over,
@@ -111,7 +111,7 @@ function change(over: Record<string, unknown> = {}) {
     kind: "release",
     value: "2026.11.3",
     changed_at: "2026-10-26T10:46:00Z",
-    run_id: RUN,
+    trace_id: TRACE,
     capped: false,
     ...over,
   });
@@ -155,7 +155,7 @@ const CAP = {
   ...SLOW,
   id: OTHER_RULE,
   name: "Cost cap",
-  kind: "run",
+  kind: "agent",
   measure: "cost",
   aggregation: "max",
   filters: {},
@@ -220,7 +220,7 @@ beforeEach(() => {
     startersWithheld: [],
     startersDetail: null,
     incidents: [
-      incident("i-open", { told_to: [SLACK, "5e6a4c96-0000-4000-8000-000000000008"], runs: [RUN] }),
+      incident("i-open", { told_to: [SLACK, "5e6a4c96-0000-4000-8000-000000000008"], traces: [TRACE] }),
       incident("i-taken", { status: "acknowledged", acknowledged_by: "user_2", acknowledged_at: "2026-10-26T11:10:00Z", severity: "warning" }),
       incident("i-done", { status: "resolved", resolved_at: "2026-10-26T09:00:00Z", reopened: 2 }),
     ],
@@ -407,7 +407,7 @@ describe("AlertsPage", () => {
     expect(within(slow).getByTestId("alert-actions").dataset.alert).toBe(RULE);
 
     const cap = document.getElementById(`alert-${OTHER_RULE}`)!;
-    expect(within(cap).getByText("The most a run spent over the last hour")).toBeInTheDocument();
+    expect(within(cap).getByText("The most a trace spent over the last hour")).toBeInTheDocument();
     expect(within(cap).getByText("Paused")).toBeInTheDocument();
     expect(detail(OTHER_RULE, "Now")).toHaveTextContent(
       /^Paused by the plan since \S.*: the organization has more alerts than its plan holds/,
@@ -509,9 +509,9 @@ describe("AlertsPage", () => {
     expect(within(open).getByText("Alert")).toBeInTheDocument();
     expect(within(open).getByText("Open")).toBeInTheDocument();
     expect(open).toHaveTextContent("told the feed, #alerts in Acme, a removed connector");
-    expect(within(open).getByRole("link", { name: /run 9b2d1f63/ })).toHaveAttribute(
+    expect(within(open).getByRole("link", { name: /trace 9b2d1f63/ })).toHaveAttribute(
       "href",
-      `/acme/web/traces/${RUN}`,
+      `/acme/web/traces/${TRACE}`,
     );
     const actions = within(open).getByTestId("incident-actions");
     expect(actions.dataset.status).toBe("open");
@@ -527,7 +527,7 @@ describe("AlertsPage", () => {
 
   // ⚠ What changed and when, the reader left to judge: the newest first, as the server ordered them.
   it("names under an incident what its alert's agents changed to before it opened", async () => {
-    const OTHER_RUN = "ab3e2074-0000-4000-8000-000000000009";
+    const OTHER_TRACE = "ab3e2074000040008000000000000009";
     mockAlerts = {
       ...(mockAlerts as object),
       incidents: [
@@ -542,7 +542,7 @@ describe("AlertsPage", () => {
               prompt: "reply",
               value: "3",
               changed_at: "2026-10-25T11:01:00Z",
-              run_id: OTHER_RUN,
+              trace_id: OTHER_TRACE,
             }),
           ],
           changes_more: true,
@@ -561,10 +561,10 @@ describe("AlertsPage", () => {
     ]);
     expect(
       within(list).getByRole("link", { name: "support: release 2026.11.3 in production" }),
-    ).toHaveAttribute("href", `/acme/web/traces/${RUN}`);
+    ).toHaveAttribute("href", `/acme/web/traces/${TRACE}`);
     expect(within(list).getByRole("link", { name: "triage: prompt reply version 3" })).toHaveAttribute(
       "href",
-      `/acme/web/traces/${OTHER_RUN}`,
+      `/acme/web/traces/${OTHER_TRACE}`,
     );
     expect(open).toHaveTextContent("and more");
 
@@ -669,8 +669,8 @@ describe("AlertsPage", () => {
         {
           ...SLOW,
           id: STARTER,
-          name: "Failing runs",
-          kind: "run",
+          name: "Failing traces",
+          kind: "agent",
           measure: "failures",
           aggregation: "avg",
           filters: {},
@@ -734,9 +734,9 @@ describe("AlertsPage", () => {
     const plan = "This organization's plan holds 10 alerts across its projects.";
     mockAlerts = { ...(mockAlerts as object), startersWithheld: ["repeats", "stalled"], startersDetail: plan };
     render(await AlertsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    const notice = screen.getByText("Not made, past the plan's number: Looping runs and Stalled runs");
+    const notice = screen.getByText("Not made, past the plan's number: Looping traces and Stalled traces");
     expect(notice.parentElement).toHaveTextContent(
-      `This project's first run found no room for these starter alerts. ${plan}`,
+      `This project's first trace found no room for these starter alerts. ${plan}`,
     );
 
     cleanup();

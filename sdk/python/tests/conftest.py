@@ -44,7 +44,7 @@ def kept() -> Answer:
 
 
 def _openings_alone(body: bytes) -> bool:
-    """Whether an export holds spans, and every one a run's opening."""
+    """Whether an export holds spans, and every one a trace's opening."""
     try:
         names = [
             span["name"]
@@ -54,13 +54,13 @@ def _openings_alone(body: bytes) -> bool:
         ]
     except (ValueError, KeyError, TypeError):
         return False
-    return bool(names) and all(name == "telmoni.run.start" for name in names)
+    return bool(names) and all(name == "telmoni.trace.start" for name in names)
 
 
 class FakeTransport:
     """Records every export and answers from a script, then with `kept`; each
     upload, a `PUT`, apart, answered from its own script, then with a 204. An
-    export of runs' openings alone, which goes whenever the worker wakes, is
+    export of traces' openings alone, which goes whenever the worker wakes, is
     kept apart too and answered naming no mode, so the counts and scripts
     hold however the openings travel."""
 
@@ -109,7 +109,7 @@ class FakeTransport:
             return [json.loads(body) for _, _, body in self.requests]
 
     def spans(self) -> list[dict[str, Any]]:
-        """Every span sent but each run's opening, which ``run-start.json``'s
+        """Every span sent but each trace's opening, which ``trace-start.json``'s
         test reads from the bodies."""
         return [
             span
@@ -117,7 +117,7 @@ class FakeTransport:
             for resource_spans in body["resourceSpans"]
             for scope_spans in resource_spans["scopeSpans"]
             for span in scope_spans["spans"]
-            if span["name"] != "telmoni.run.start"
+            if span["name"] != "telmoni.trace.start"
         ]
 
 
@@ -159,7 +159,7 @@ APP_EXPORTER = InMemorySpanExporter()
 # The global provider can be set once per process: this is the application's
 # own OpenTelemetry, which every test here runs beside.
 # ParentBased, as an application's default sampler is: its root decision is the
-# switchable target's, and a span inside a run follows the run's flag.
+# switchable target's, and a span inside a trace follows the trace's flag.
 APP_PROVIDER = TracerProvider(sampler=ParentBased(APP_SAMPLER))
 APP_PROVIDER.add_span_processor(SimpleSpanProcessor(APP_EXPORTER))
 trace.set_tracer_provider(APP_PROVIDER)

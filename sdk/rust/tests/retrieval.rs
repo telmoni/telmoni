@@ -8,7 +8,7 @@ use std::thread;
 
 use common::{Failure, Harness, Outcome, attributes_of, keyed, mode_on, name_of, named, only};
 use serde_json::{Value, json};
-use telmoni::{Config, ModelCallOptions, RetrievalOptions, RunOptions};
+use telmoni::{Config, ModelCallOptions, RetrievalOptions, TraceOptions};
 
 fn documents() -> Vec<Value> {
     vec![
@@ -47,14 +47,14 @@ fn decoded(attributes: &Value, key: &str) -> Result<Value, Failure> {
 #[test]
 fn a_retrieval_carries_the_conventions_names() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         "bot",
-        RunOptions {
+        TraceOptions {
             user_id: Some("user".to_owned()),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let found = run.retrieval(
+    let found = trace.retrieval(
         "kb-articles",
         RetrievalOptions {
             query: Some("refunds".into()),
@@ -64,18 +64,18 @@ fn a_retrieval_carries_the_conventions_names() -> Outcome {
     )?;
     found.returned(&documents());
     found.end();
-    let run_id = run.run_id().to_owned();
-    run.end();
+    let trace_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
     let span = only(&spans, "retrieval")?;
     assert_eq!(span.get("name"), Some(&json!("retrieval kb-articles")));
     assert_eq!(span.get("kind"), Some(&json!(3)));
+    assert_eq!(span.get("traceId"), Some(&json!(trace_id)));
     assert_eq!(
         attributes_of(span)?,
         json!({
-            "telmoni.run_id": run_id,
             "telmoni.agent": "bot",
             "user.id": "user",
             "gen_ai.operation.name": "retrieval",
@@ -93,8 +93,8 @@ fn a_retrieval_carries_the_conventions_names() -> Outcome {
 #[test]
 fn a_memory_search_goes_under_the_memory_names() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let step = run.step("recall")?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let step = trace.step("recall")?;
     let found = step.retrieval(
         "preferences",
         RetrievalOptions {
@@ -106,17 +106,17 @@ fn a_memory_search_goes_under_the_memory_names() -> Outcome {
     found.returned(&[json!("mem-41")]);
     found.end();
     step.end();
-    let run_id = run.run_id().to_owned();
-    run.end();
+    let trace_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
     let span = named(&spans, "search_memory")?;
     assert_eq!(span.get("kind"), Some(&json!(3)));
+    assert_eq!(span.get("traceId"), Some(&json!(trace_id)));
     assert_eq!(
         attributes_of(span)?,
         json!({
-            "telmoni.run_id": run_id,
             "telmoni.agent": "bot",
             "gen_ai.operation.name": "search_memory",
             "gen_ai.memory.store.id": "preferences",
@@ -135,19 +135,20 @@ fn a_memory_search_goes_under_the_memory_names() -> Outcome {
 #[test]
 fn a_blank_source_is_named_by_its_operation_alone_warned_once() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for source in ["", " \u{3000}"] {
-        run.retrieval(source, RetrievalOptions::default())?.end();
+        trace.retrieval(source, RetrievalOptions::default())?.end();
     }
-    run.retrieval(
-        "\u{85}",
-        RetrievalOptions {
-            memory: true,
-            ..RetrievalOptions::default()
-        },
-    )?
-    .end();
-    run.end();
+    trace
+        .retrieval(
+            "\u{85}",
+            RetrievalOptions {
+                memory: true,
+                ..RetrievalOptions::default()
+            },
+        )?
+        .end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -170,19 +171,20 @@ fn a_blank_source_is_named_by_its_operation_alone_warned_once() -> Outcome {
 #[test]
 fn a_source_past_ingests_cap_is_cut_warned_once() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for source in ["😀".repeat(146), "😀".repeat(146), "😀".repeat(145)] {
-        run.retrieval(&source, RetrievalOptions::default())?.end();
+        trace.retrieval(&source, RetrievalOptions::default())?.end();
     }
-    run.retrieval(
-        &"😀".repeat(146),
-        RetrievalOptions {
-            memory: true,
-            ..RetrievalOptions::default()
-        },
-    )?
-    .end();
-    run.end();
+    trace
+        .retrieval(
+            &"😀".repeat(146),
+            RetrievalOptions {
+                memory: true,
+                ..RetrievalOptions::default()
+            },
+        )?
+        .end();
+    trace.end();
     harness.flush()?;
 
     let cut = "😀".repeat(145);
@@ -220,14 +222,14 @@ fn a_source_past_ingests_cap_is_cut_warned_once() -> Outcome {
 #[test]
 fn the_last_list_wins_whole() -> Outcome {
     let harness = keeping(keyed())?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     let mut more = documents();
     more.push(json!({ "id": "kb-203", "score": 0.77 }));
-    let found = run.retrieval("kb", RetrievalOptions::default())?;
+    let found = trace.retrieval("kb", RetrievalOptions::default())?;
     found.returned(&more);
     found.returned(&documents()[..1]);
     found.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let attributes = attributes_of(only(&harness.spans()?, "retrieval")?)?;
@@ -245,10 +247,11 @@ fn the_last_list_wins_whole() -> Outcome {
 #[test]
 fn an_empty_list_is_counted_0_and_sent_as_one() -> Outcome {
     let harness = keeping(keyed())?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    run.retrieval("kb", RetrievalOptions::default())?
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    trace
+        .retrieval("kb", RetrievalOptions::default())?
         .returned(&[]);
-    let recalled = run.retrieval(
+    let recalled = trace.retrieval(
         "prefs",
         RetrievalOptions {
             memory: true,
@@ -257,7 +260,7 @@ fn an_empty_list_is_counted_0_and_sent_as_one() -> Outcome {
     )?;
     recalled.returned(&[]);
     recalled.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -276,8 +279,8 @@ fn an_empty_list_is_counted_0_and_sent_as_one() -> Outcome {
 #[test]
 fn the_query_and_documents_leave_only_under_both_locks() -> Outcome {
     let harness = keeping(keyed())?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let found = run.retrieval(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let found = trace.retrieval(
         "kb",
         RetrievalOptions {
             query: Some("refunds".into()),
@@ -286,7 +289,7 @@ fn the_query_and_documents_leave_only_under_both_locks() -> Outcome {
     )?;
     found.returned(&documents());
     found.end();
-    let recalled = run.retrieval(
+    let recalled = trace.retrieval(
         "prefs",
         RetrievalOptions {
             query: Some(json!({ "about": "tone" }).into()),
@@ -296,7 +299,7 @@ fn the_query_and_documents_leave_only_under_both_locks() -> Outcome {
     )?;
     recalled.returned(&documents()[..1]);
     recalled.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -335,11 +338,11 @@ fn a_mask_that_takes_documents_out_leaves_the_count() -> Outcome {
         })),
         ..keyed()
     })?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let found = run.retrieval("kb", RetrievalOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let found = trace.retrieval("kb", RetrievalOptions::default())?;
     found.returned(&documents());
     found.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let attributes = attributes_of(only(&harness.spans()?, "retrieval")?)?;
@@ -359,9 +362,9 @@ fn a_mask_that_takes_documents_out_leaves_the_count() -> Outcome {
 fn lists_returned_at_once_from_two_threads_leave_one_calls_pair() -> Outcome {
     const ROUNDS: usize = 1_000;
     let harness = keeping(keyed())?;
-    let run = harness.telmoni.run("raced", RunOptions::default())?;
+    let trace = harness.telmoni.trace("raced", TraceOptions::default())?;
     for round in 0..ROUNDS {
-        let found = run.retrieval("kb", RetrievalOptions::default())?;
+        let found = trace.retrieval("kb", RetrievalOptions::default())?;
         let start = Barrier::new(2);
         let (start, returning) = (&start, &found);
         thread::scope(|scope| {
@@ -382,7 +385,7 @@ fn lists_returned_at_once_from_two_threads_leave_one_calls_pair() -> Outcome {
             harness.flush()?;
         }
     }
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -407,8 +410,8 @@ fn lists_returned_at_once_from_two_threads_leave_one_calls_pair() -> Outcome {
 #[test]
 fn a_retrieval_opens_children_of_its_own() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let found = run.retrieval("kb", RetrievalOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let found = trace.retrieval("kb", RetrievalOptions::default())?;
     found
         .model_call(
             "embed-small",
@@ -419,7 +422,7 @@ fn a_retrieval_opens_children_of_its_own() -> Outcome {
         )?
         .end();
     found.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -448,18 +451,18 @@ fn the_retrieval_closures_return_their_value_and_mark_an_err() -> Outcome {
     }
 
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let count = run.retrieval_with("kb", RetrievalOptions::default(), |found| {
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let count = trace.retrieval_with("kb", RetrievalOptions::default(), |found| {
         found.returned(&documents());
         documents().len()
     })?;
     assert_eq!(count, 2);
     let failed: Result<(), Timeout> =
-        run.try_retrieval_with("web-index", RetrievalOptions::default(), |_found| {
+        trace.try_retrieval_with("web-index", RetrievalOptions::default(), |_found| {
             Err(Timeout)
         });
     assert!(failed.is_err());
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;

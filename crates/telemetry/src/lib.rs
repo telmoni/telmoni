@@ -227,7 +227,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(handler::traces::export_traces),
         )
         .route(
-            "/telemetry/traces/{run_id}",
+            "/telemetry/traces/{trace_id}",
             get(handler::traces::get_trace).delete(handler::traces::delete_trace),
         )
         .route("/telemetry/users/erase", post(handler::users::erase_user))

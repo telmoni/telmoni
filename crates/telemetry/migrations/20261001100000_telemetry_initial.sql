@@ -59,7 +59,7 @@ CREATE TABLE telemetry.project_settings (
     -- How long the project's spans and content are kept, in days, where an
     -- owner or admin chose fewer than the longest sold; none for the longest.
     retention_days          SMALLINT,
-    -- When the project's first run made its starter alerts, once: one deleted
+    -- When the project's first trace made its starter alerts, once: one deleted
     -- is never made again. Those its plan had no room for, by their measure.
     starters_made_at        TIMESTAMPTZ,
     starters_withheld       TEXT[]      NOT NULL DEFAULT '{}',
@@ -234,7 +234,7 @@ CREATE TABLE telemetry.rules (
     -- `baseline` is `previous`, its value then its change in percent.
     score_name        TEXT,
     baseline          TEXT             NOT NULL DEFAULT 'none',
-    -- A burn alert's objective: the share of the agent's runs that succeed,
+    -- A burn alert's objective: the share of the agent's traces that succeed,
     -- or end under `latency_ms`, over its days; checked by the lane.
     objective         JSONB,
     paused            TEXT,
@@ -250,7 +250,7 @@ CREATE TABLE telemetry.rules (
     told_to           UUID[]           NOT NULL DEFAULT '{}',
     lease_id          UUID,
     leased_until      TIMESTAMPTZ,
-    -- Made by the project's first run rather than a member (`starters.rs`),
+    -- Made by the project's first trace rather than a member (`starters.rs`),
     -- evaluated every five minutes; `tuned_at` when its threshold was
     -- settled, by the project's history or a member's edit, whichever came first.
     starter           BOOLEAN          NOT NULL DEFAULT false,
@@ -259,7 +259,7 @@ CREATE TABLE telemetry.rules (
     updated_at        TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT rules_name_check CHECK (char_length(name) BETWEEN 1 AND 60),
     CONSTRAINT rules_kind_check
-        CHECK (kind IN ('run', 'step', 'model_call', 'tool_call', 'retrieval')),
+        CHECK (kind IN ('agent', 'step', 'model_call', 'tool_call', 'retrieval')),
     CONSTRAINT rules_measure_check
         CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score', 'burn',
                            'steps', 'repeats', 'stalled')),
@@ -272,7 +272,7 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_baseline_check CHECK (baseline IN ('none', 'previous')),
     -- A month so far has no window of its length before it.
     CONSTRAINT rules_baseline_lookback_check CHECK (baseline = 'none' OR lookback <> 'month'),
-    -- A stall is a run quiet past a window of a fixed length.
+    -- A stall is a trace quiet past a window of a fixed length.
     CONSTRAINT rules_stalled_lookback_check CHECK (measure <> 'stalled' OR lookback <> 'month'),
     CONSTRAINT rules_aggregation_check
         CHECK (aggregation IN ('count', 'avg', 'sum', 'max', 'p50', 'p90', 'p95', 'p99')),
@@ -328,11 +328,11 @@ GRANT UPDATE (organization_id, paused, paused_at, value, evaluated_at, severity,
     ON telemetry.rules TO telemetry_maintenance;
 
 -- A project's monitors: each one agent's expected schedule — a period, or
--- a cron line in an IANA zone — and the grace a run due has to start in.
--- `new` until the agent's first run since it was made or resumed, nothing
+-- a cron line in an IANA zone — and the grace a trace due has to start in.
+-- `new` until the agent's first trace since it was made or resumed, nothing
 -- due; then `up`, `late` past its due time and `down` past its grace (the
--- cause `missed`), or `down` once a run fails (`failed`). The loop keeps the
--- last run it read on the row, and when the next is due.
+-- cause `missed`), or `down` once a trace fails (`failed`). The loop keeps
+-- the last trace it read on the row, and when the next is due.
 CREATE TABLE telemetry.monitors (
     id               UUID        PRIMARY KEY,
     project_id       TEXT        NOT NULL,
@@ -349,7 +349,7 @@ CREATE TABLE telemetry.monitors (
     last_started_at  TIMESTAMPTZ,
     last_ended_at    TIMESTAMPTZ,
     last_status      TEXT,
-    last_run_id      UUID,
+    last_trace_id    TEXT,
     told_at          TIMESTAMPTZ,
     told_to          UUID[]      NOT NULL DEFAULT '{}',
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -367,9 +367,9 @@ CREATE TABLE telemetry.monitors (
                AND (state <> 'late' OR cause = 'missed')),
     CONSTRAINT monitors_due_check CHECK ((state IN ('new', 'paused')) = (next_due_at IS NULL)),
     CONSTRAINT monitors_last_status_check CHECK (last_status IN ('ok', 'error', 'cancelled')),
-    CONSTRAINT monitors_last_run_check
+    CONSTRAINT monitors_last_trace_check
         CHECK ((last_ended_at IS NULL) = (last_status IS NULL)
-               AND (last_ended_at IS NULL) = (last_run_id IS NULL))
+               AND (last_ended_at IS NULL) = (last_trace_id IS NULL))
 );
 
 -- One monitor an agent of a project.
@@ -398,7 +398,7 @@ CREATE POLICY maintenance_access ON telemetry.monitors
 -- organization's; a transfer moves a project's.
 GRANT SELECT, DELETE ON telemetry.monitors TO telemetry_maintenance;
 GRANT UPDATE (organization_id, state, cause, state_since, next_due_at, last_started_at,
-              last_ended_at, last_status, last_run_id, told_at)
+              last_ended_at, last_status, last_trace_id, told_at)
     ON telemetry.monitors TO telemetry_maintenance;
 
 
@@ -415,7 +415,7 @@ GRANT UPDATE (organization_id, state, cause, state_since, next_due_at, last_star
 -- flapping alert opens one incident an hour at most. An alert holds one open
 -- at a time; its incidents go with it. Each keeps where its notices went
 -- (`told_to`, the connections they were queued to, the feed apart) and the
--- runs they showed (`runs`, the last 20, oldest first), which link back to it.
+-- traces they showed (`traces`, the last 20, oldest first), which link back to it.
 CREATE TABLE telemetry.incidents (
     id               UUID             PRIMARY KEY,
     rule_id          UUID             REFERENCES telemetry.rules (id) ON DELETE CASCADE,
@@ -434,7 +434,7 @@ CREATE TABLE telemetry.incidents (
     resolved_by      TEXT,
     reopened         INTEGER          NOT NULL DEFAULT 0,
     told_to          UUID[]           NOT NULL DEFAULT '{}',
-    runs             UUID[]           NOT NULL DEFAULT '{}',
+    traces           TEXT[]           NOT NULL DEFAULT '{}',
     updated_at       TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT incidents_owner_check CHECK (num_nonnulls(rule_id, monitor_id) = 1),
     CONSTRAINT incidents_cause_check
@@ -445,7 +445,7 @@ CREATE TABLE telemetry.incidents (
         CHECK ((acknowledged_at IS NULL) = (acknowledged_by IS NULL)),
     CONSTRAINT incidents_resolved_check CHECK ((status = 'resolved') = (resolved_at IS NOT NULL)),
     CONSTRAINT incidents_reopened_check CHECK (reopened >= 0),
-    CONSTRAINT incidents_runs_check CHECK (cardinality(runs) <= 20)
+    CONSTRAINT incidents_traces_check CHECK (cardinality(traces) <= 20)
 );
 
 -- One open incident an alert or a monitor, acknowledged or not.
@@ -670,9 +670,8 @@ CREATE TABLE telemetry.model_prices (
 -- rows.
 CREATE TABLE telemetry.plain_content (
     project_id  TEXT        NOT NULL,
-    -- The span's run, by which a trace's deletion and an end user's erasure
-    -- take its content, whenever its spans landed.
-    run_id      UUID        NOT NULL,
+    -- The span's trace, by which a trace's deletion and an end user's
+    -- erasure take its content, whenever its spans landed.
     trace_id    TEXT        NOT NULL,
     span_id     TEXT        NOT NULL,
     field       TEXT        NOT NULL,
@@ -689,10 +688,8 @@ CREATE TABLE telemetry.plain_content (
     CONSTRAINT plain_content_bytes_check CHECK (bytes >= 0)
 );
 
--- The nightly purge deletes by it.
+-- The nightly purge deletes by it; a deletion of traces by the primary key.
 CREATE INDEX plain_content_received_idx ON telemetry.plain_content (received_at);
--- A deletion of runs deletes by it.
-CREATE INDEX plain_content_run_idx ON telemetry.plain_content (project_id, run_id);
 
 ALTER TABLE telemetry.plain_content ENABLE ROW LEVEL SECURITY;
 ALTER TABLE telemetry.plain_content FORCE ROW LEVEL SECURITY;
@@ -747,22 +744,21 @@ CREATE POLICY maintenance_access ON telemetry.project_prices
 -- purges delete a project's.
 GRANT SELECT, DELETE ON telemetry.project_prices TO telemetry_maintenance;
 
--- Another exporter's spans, held until their trace's tree places them in a
--- run (`foreign.rs`), their content sealed as `plain_content`'s; landed, a
--- span keeps only its run, for a day, for a child arriving later.
+-- Another exporter's spans, held until their trace's tree names each one's
+-- agent (`foreign.rs`), their content sealed as `plain_content`'s; landed,
+-- a span keeps only its agent, for a day, for a child arriving later.
 CREATE TABLE telemetry.held_spans (
     project_id      TEXT        NOT NULL,
     trace_id        TEXT        NOT NULL,
     span_id         TEXT        NOT NULL,
     parent_span_id  TEXT        NOT NULL,
     received_at     TIMESTAMPTZ NOT NULL,
-    -- The row as ingest read it, under the nil run; none once landed.
+    -- The row as ingest read it, its agent unnamed; none once landed.
     row             JSONB,
     fields          TEXT[]      NOT NULL DEFAULT '{}',
     ciphertexts     BYTEA[]     NOT NULL DEFAULT '{}',
     nonces          BYTEA[]     NOT NULL DEFAULT '{}',
-    -- Its run and the run's agent, once landed.
-    run_id          UUID,
+    -- The agent its children sit under, once landed.
     agent           TEXT,
     landed_at       TIMESTAMPTZ,
     -- The token of a landing begun, which a retry lands it under again.
@@ -771,9 +767,9 @@ CREATE TABLE telemetry.held_spans (
     tried_at        TIMESTAMPTZ,
     PRIMARY KEY (project_id, trace_id, span_id),
     CONSTRAINT held_spans_state_check CHECK (
-        (landed_at IS NULL AND row IS NOT NULL AND run_id IS NULL)
-        OR (landed_at IS NOT NULL AND row IS NULL AND run_id IS NOT NULL
-            AND agent IS NOT NULL AND cardinality(fields) = 0)
+        (landed_at IS NULL AND row IS NOT NULL AND agent IS NULL)
+        OR (landed_at IS NOT NULL AND row IS NULL AND agent IS NOT NULL
+            AND cardinality(fields) = 0)
     )
 );
 
@@ -795,8 +791,8 @@ CREATE POLICY maintenance_access ON telemetry.held_spans
     USING      (current_user = 'telemetry_maintenance')
     WITH CHECK (current_user = 'telemetry_maintenance');
 
--- The loop lands each trace's spans, marks what it placed, drops what no run
--- holds and the day-old marks; the purges delete a project's.
+-- The loop lands each trace's spans, marks what it placed and drops the
+-- day-old marks; the purges delete a project's.
 GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.held_spans TO telemetry_maintenance;
 
 -- An image, audio or a file a message carried, kept once a project however
@@ -817,18 +813,18 @@ CREATE TABLE telemetry.media (
     CONSTRAINT media_bytes_check CHECK (bytes >= 0)
 );
 
--- Which runs name each file, so a file goes once no span within retention
+-- Which traces name each file, so a file goes once no span within retention
 -- names it, and a trace's or an end user's erasure takes the files no other
--- run names.
+-- trace names.
 CREATE TABLE telemetry.media_names (
     project_id  TEXT        NOT NULL,
     sha256      TEXT        NOT NULL,
-    run_id      UUID        NOT NULL,
+    trace_id    TEXT        NOT NULL,
     received_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (project_id, sha256, run_id)
+    PRIMARY KEY (project_id, sha256, trace_id)
 );
 
-CREATE INDEX media_names_run_idx ON telemetry.media_names (project_id, run_id);
+CREATE INDEX media_names_trace_idx ON telemetry.media_names (project_id, trace_id);
 CREATE INDEX media_names_received_idx ON telemetry.media_names (received_at);
 
 ALTER TABLE telemetry.media ENABLE ROW LEVEL SECURITY;
@@ -879,12 +875,13 @@ CREATE POLICY maintenance_access ON telemetry.content_held
 -- transfer moves a project's bytes to the organization that now holds it.
 GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.content_held TO telemetry_maintenance;
 
--- An agent's changes (`changes.rs`): a row the first run of an agent, in one
--- environment, to carry a release, a model or a prompt's version its runs
--- there had not carried in the 30 days before, written by the loop alone. A
--- row is also what the loop remembers: `hidden` past the day's cap, so a value
--- held back is not taken for new the next day, and once its run's day is past
--- retention; it goes once no span within retention carries what changed.
+-- An agent's changes (`changes.rs`): a row the first trace of an agent, in
+-- one environment, to carry a release, a model or a prompt's version its
+-- traces there had not carried in the 30 days before, written by the loop
+-- alone. A row is also what the loop remembers: `hidden` past the day's cap,
+-- so a value held back is not taken for new the next day, and once its
+-- trace's day is past retention; it goes once no span within retention
+-- carries what changed.
 CREATE TABLE telemetry.changes (
     id          UUID        PRIMARY KEY,
     project_id  TEXT        NOT NULL,
@@ -898,7 +895,7 @@ CREATE TABLE telemetry.changes (
     -- entry's size.
     identity    TEXT        NOT NULL,
     changed_at  TIMESTAMPTZ NOT NULL,
-    run_id      UUID        NOT NULL,
+    trace_id    TEXT        NOT NULL,
     -- The last arrival of a span carrying it, to the hour.
     seen_at     TIMESTAMPTZ NOT NULL,
     mark        TEXT        NOT NULL,
@@ -911,7 +908,7 @@ CREATE TABLE telemetry.changes (
     CONSTRAINT changes_value_check CHECK (char_length(value) BETWEEN 1 AND 1024),
     CONSTRAINT changes_prompt_name_check CHECK (char_length(prompt) BETWEEN 1 AND 1024),
     CONSTRAINT changes_identity_check CHECK (identity ~ '^[0-9a-f]{64}$'),
-    CONSTRAINT changes_first_run_key UNIQUE (project_id, identity, run_id)
+    CONSTRAINT changes_first_trace_key UNIQUE (project_id, identity, trace_id)
 );
 
 -- The readers, and a day's counts, read by the change's time.

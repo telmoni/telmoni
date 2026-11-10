@@ -79,13 +79,13 @@ URL](#name-and-url)). On these pages,
   and `/{organization}/settings`,
   with `/{organization}/billing` on the hosted service.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
-  the project's [agents](#a-projects-agents), each with its last run, what it
+  the project's [agents](#a-projects-agents), each with its last trace, what it
   cost and the alerts that watch it, with
-  [`/traces`](/docs/monitoring/traces), **Runs** — every run
+  [`/traces`](/docs/monitoring/traces), **Traces** — every trace
   of the project's agents, grouped by session or user where asked, and a page
   for each — [`/alerts`](/docs/monitoring/alerts) — its alerts and
   their incidents — `/objectives` — [`/dashboards`](/docs/monitoring/dashboards),
-  **Spend** — its spend, tokens, runs, latency and time to first token over a
+  **Spend** — its spend, tokens, traces, latency and time to first token over a
   window, and its budgets — and `/api-keys`, `/connectors`,
   `/members`, `/audit-log`, and `/settings` under it — its content mode, how long its
   data is kept, and an end user's data given or erased.
@@ -180,7 +180,7 @@ Windows and Linux):
   you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
   project's pages:
   - `g` `o`: Agents
-  - `g` `r`: Runs, `g` `a`: Alerts, `g` `v`: Objectives, `g` `s`: Spend
+  - `g` `t`: Traces, `g` `a`: Alerts, `g` `v`: Objectives, `g` `s`: Spend
   - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log, `g` `n`: Notifications
   - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
@@ -217,46 +217,46 @@ The foot of the sidebar shows the version of Telmoni the console runs.
 
 A project opens on its **Agents**, `/{organization}/{project}`, the first row
 of its sidebar, its tab titled by the project's name: every agent that ran
-there in the last 14 days, the one whose last run started latest first.
+there in the last 14 days, the one whose last trace started latest first.
 Anyone on the project reads it:
 
 | Column | What it shows |
 |---|---|
-| Agent | Its name, a link to its runs on **Runs**; under it, its newest [change](/docs/monitoring/traces#changes) of each kind in the 14 days — a release, a model, a prompt's version — each naming its environment and opening the run that first carried it beside the agent's runs |
-| Last run | How the run that started last ended, or **Running**, and when it started, a link that opens it beside the agent's runs on **Runs** |
-| Runs | Its runs over the 14 days, and how many ended in error |
-| Last run's cost | What that run cost, priced as **Runs** prices it, and what the agent's ended runs usually cost, their median |
-| Watched by | The [alerts](/docs/monitoring/alerts) that read its runs, those held to it and those over every agent, paused ones aside, and the open incidents of those held to it |
+| Agent | Its name, a link to its traces on **Traces**; under it, its newest [change](/docs/monitoring/traces#changes) of each kind in the 14 days — a release, a model, a prompt's version — each naming its environment and opening the trace that first carried it beside the agent's traces |
+| Last trace | How the trace that started last ended, or **Running**, and when it started, a link that opens it beside the agent's traces on **Traces** |
+| Traces | Its traces over the 14 days, and how many ended in error |
+| Last trace's cost | What that trace cost, priced as **Traces** prices it, and what the agent's ended traces usually cost, their median |
+| Watched by | The [alerts](/docs/monitoring/alerts) that read its traces, those held to it and those over every agent, paused ones aside, and the open incidents of those held to it |
 
 Each row ends in **Versions**, which opens the agent's
 [versions side by side](#an-agents-versions-side-by-side). The open incidents
 of alerts over every agent, which no one agent's row
 counts, are told once above the table. A project where no agent has run in
-the 14 days says how to send its first run. A project's notices are on its
+the 14 days says how to send its first trace. A project's notices are on its
 **Notifications** page, its budgets on **Spend**, and its name, ID and
 [content mode](#a-projects-content-mode) on its **Settings**.
 
 ### An agent's versions, side by side
 
 **Versions** on an agent's row opens a panel beside the page that sets the
-agent's versions side by side, to answer whether a new one made its runs fail
-more, run longer, cost more or score lower. Three tabs split its runs:
+agent's versions side by side, to answer whether a new one made its traces fail
+more, run longer, cost more or score lower. Three tabs split its traces:
 **Releases**, **Models**, and **Prompts**, one prompt's versions at a time,
-the prompt most of its runs name first and the others in a picker. The panel
+the prompt most of its traces name first and the others in a picker. The panel
 reads the same 14 days, or as many as your plan and the project's
 [retention](/docs/workspace/data-retention) keep of its spans where that is
 fewer, and says how many.
 
-A row is one version, and the runs that carried it:
+A row is one version, and the traces that carried it:
 
 | Column | What it shows |
 |---|---|
-| Release, Model or Version | The version, and when the first of its runs in those days started. That is when it was first seen in the window, not when it was deployed |
-| Runs | The runs that carried it, those still running among them |
+| Release, Model or Version | The version, and when the first of its traces in those days started. That is when it was first seen in the window, not when it was deployed |
+| Traces | The traces that carried it, those still running among them |
 | Failed | The share of them that ended in error |
-| Median, p95 | The 50th and 95th percentiles of how long its ended runs took, as **Runs** times a run |
-| Median cost | The median of what its ended runs cost, priced as **Runs** prices them |
-| One for each score | The mean of that [score](/docs/monitoring/scores) on its runs, a yes or no counted as 1 or 0: up to five scores, those given most often, and none of a category |
+| Median, p95 | The 50th and 95th percentiles of how long its ended traces took, as **Traces** times a trace |
+| Median cost | The median of what its ended traces cost, priced as **Traces** prices them |
+| One for each score | The mean of that [score](/docs/monitoring/scores) on its traces, a yes or no counted as 1 or 0: up to five scores, those given most often, and none of a category |
 
 The rows stand newest first seen first. Under each number is its difference
 from the row below, the version first seen before it: a failed share's in
@@ -265,22 +265,22 @@ the score's own scale. A rise in failures, duration or cost is drawn in the
 alert's colour and a fall in green; a score's is left plain, since Telmoni
 does not know whether higher is better. Nothing is inferred from a
 difference, and none is drawn where either row has no value, as a version
-with no ended run has no duration or cost, nor a difference in its failed
+with no ended trace has no duration or cost, nor a difference in its failed
 share. The oldest row has none. A version already running before those days
 is first seen at their start, so versions that old stand in the order their
-first runs in the window came, and the difference between two of them says
+first traces in the window came, and the difference between two of them says
 nothing of which came first.
 
 - **One environment at a time.** The rows are of one environment, the one most
-  of the agent's runs were sent from unless you pick another; the picker
+  of the agent's traces were sent from unless you pick another; the picker
   shows where there are two or more, with **(no environment)** for spans that
-  name none. A run belongs to the versions its spans in that environment
+  name none. A trace belongs to the versions its spans in that environment
   carry, and is measured whole: its failure, its duration, its cost and its
-  scores are the run's.
-- **A run can count twice.** A run that called two models counts under each,
-  as one whose spans carry two releases or two versions of a prompt does.
-- **(none).** The runs whose spans in the environment carried no release, no
-  model or, of the prompt's runs, no version are the last row, measured
+  scores are the trace's.
+- **A trace can count twice.** A trace that called two models counts under
+  each, as one whose spans carry two releases or two versions of a prompt does.
+- **(none).** The traces whose spans in the environment carried no release, no
+  model or, of the prompt's traces, no version are the last row, measured
   against no other.
 - **Fifty rows.** The panel names the fifty versions first seen latest, and
   says so where the days held more.
@@ -518,7 +518,7 @@ its row takes a number for each, at most the plan's, and an empty one shares
 the pool. Every change is in the [audit log](/docs/workspace/audit-log). Past
 its cap, that project alone is held as the organization is past its plan:
 
-- **Spans** past the month's cap are sampled, one run in ten kept and flagged,
+- **Spans** past the month's cap are sampled, one trace in ten kept and flagged,
   with no grace, since the cap is the team's own. A cap set partway through
   the month counts what the project sent in its earlier hours, though not in
   the hour under way when it was set.

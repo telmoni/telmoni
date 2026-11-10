@@ -97,7 +97,7 @@ describe("buildConsoleNav", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(project?.items.map((i) => i.title)).toEqual([
       "Agents",
-      "Runs",
+      "Traces",
       "Alerts",
       "Objectives",
       "Spend",
@@ -108,7 +108,7 @@ describe("buildConsoleNav", () => {
       "Notifications",
       "Settings",
     ]);
-    // Each keeps its path: Agents the project's own, Runs the trace list, Spend the dashboards.
+    // Each keeps its path: Agents the project's own, Spend the dashboards.
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
       "/acme/web/traces",
@@ -252,7 +252,7 @@ describe("the blocks of a run", () => {
   it("parts a project's housekeeping from its product rows, and nothing else", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(navBlocks(project?.items ?? []).map((b) => b.map((i) => i.title))).toEqual([
-      ["Agents", "Runs", "Alerts", "Objectives", "Spend"],
+      ["Agents", "Traces", "Alerts", "Objectives", "Spend"],
       ["API keys", "Connectors", "Members", "Audit log", "Notifications", "Settings"],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");

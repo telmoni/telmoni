@@ -59,7 +59,7 @@ pub struct AppState {
     /// `None` while the agent is off.
     pub live: Option<Arc<Live>>,
     /// The SDK each question is reported with as it ends, as any agent
-    /// reports its runs; `None` while `TELMONI_API_KEY` is unset.
+    /// reports its traces; `None` while `TELMONI_API_KEY` is unset.
     pub telmoni: Option<telmoni::Telmoni>,
     /// The module's loops this replica runs, and their beats, which the
     /// external watchdog reads ([`AppState::stale`]).

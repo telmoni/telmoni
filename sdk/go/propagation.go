@@ -1,10 +1,10 @@
 package telmoni
 
-// A run across services: the W3C traceparent of the span current inside a
-// run, and the run's id and agent as the baggage members telmoni.run_id and
-// telmoni.agent, written into an outgoing request's headers and read back
-// from an incoming one's. The SDK's own helpers, never a propagator set
-// globally: an application's propagators are its own.
+// A trace across services: the W3C traceparent of the span current inside a
+// trace, and its agent as the baggage member telmoni.agent, written into an
+// outgoing request's headers and read back from an incoming one's. The SDK's
+// own helpers, never a propagator set globally: an application's propagators
+// are its own.
 
 import (
 	"context"
@@ -16,30 +16,30 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Inject writes into header what the next service continues the run from:
-// the W3C traceparent of the span ctx carries, inside a run, and the run's id
-// and agent as the baggage members telmoni.run_id and telmoni.agent, beside
-// whatever members the header holds. Outside a run it writes nothing.
+// Inject writes into header what the next service continues the trace from:
+// the W3C traceparent of the span ctx carries, inside a trace, and its agent
+// as the baggage member telmoni.agent, beside whatever members the header
+// holds. Outside a trace it writes nothing.
 func (c *Client) Inject(ctx context.Context, header http.Header) {
-	run := RunFromContext(ctx)
-	if run == nil || run.span == nil || header == nil {
+	tr := TraceFromContext(ctx)
+	if tr == nil || tr.span == nil || header == nil {
 		return
 	}
 	span := trace.SpanContextFromContext(ctx)
 	if !span.IsValid() {
-		span = run.span.SpanContext()
+		span = tr.span.SpanContext()
 	}
 	if !span.IsValid() {
 		return
 	}
-	writeHeaders(header, span, run.id, run.agent)
+	writeHeaders(header, span, tr.agent)
 }
 
-// Extract returns ctx carrying the run header names, continued here: a step
+// Extract returns ctx carrying the trace header names, continued here: a step
 // or a call opened with it takes the caller's span as its parent and carries
-// the caller's run, so the trace shows the work where it was asked for, and
-// RunFromContext finds the run. Nothing ends a continued run here; the
-// caller's own span does. For headers that name no run, ctx is returned as
+// the caller's agent, so the trace shows the work where it was asked for, and
+// TraceFromContext finds the trace. Nothing ends a continued trace here; the
+// caller's own span does. For headers that name no trace, ctx is returned as
 // given.
 func (c *Client) Extract(ctx context.Context, header http.Header) context.Context {
 	if ctx == nil {
@@ -56,28 +56,26 @@ func (c *Client) Extract(ctx context.Context, header http.Header) context.Contex
 	// The caller's span, non-recording here: steps and calls nest under it,
 	// and nothing of it is sent or ended from this side.
 	remote := trace.SpanFromContext(trace.ContextWithRemoteSpanContext(ctx, read.spanContext))
-	agent := c.cut(read.agent, agentMax, "run's agent")
-	run := &Run{
+	agent := c.cut(read.agent, agentMax, "trace's agent")
+	tr := &Trace{
 		handle:    handle{span: remote, client: c},
-		id:        read.runID,
 		agent:     agent,
-		inherited: inheritedAttributes(read.runID, agent, "", ""),
+		inherited: inheritedAttributes(agent, "", ""),
 		guard:     &guard{},
 		displaced: displaced,
 	}
-	return contextWithRun(trace.ContextWithSpan(ctx, inContext{remote, displaced}), run)
+	return contextWithTrace(trace.ContextWithSpan(ctx, inContext{remote, displaced}), tr)
 }
 
-// continued is what headers name: the span to continue under, and the run.
+// continued is what headers name: the span to continue under, and the agent.
 type continued struct {
 	spanContext trace.SpanContext
-	runID       string
 	agent       string
 }
 
-// writeHeaders is span and the run as the next service reads them, beside
+// writeHeaders is span and the agent as the next service reads them, beside
 // the members header already holds.
-func writeHeaders(header http.Header, span trace.SpanContext, runID, agent string) {
+func writeHeaders(header http.Header, span trace.SpanContext, agent string) {
 	sampled := "00"
 	if span.IsSampled() {
 		sampled = "01"
@@ -91,11 +89,11 @@ func writeHeaders(header http.Header, span trace.SpanContext, runID, agent strin
 		}
 		kept = append(kept, member)
 	}
-	kept = append(kept, attrRunID+"="+runID, attrAgent+"="+encodeBaggageValue(agent))
+	kept = append(kept, attrAgent+"="+encodeBaggageValue(agent))
 	header.Set(headerBaggage, strings.Join(kept, ","))
 }
 
-// readHeaders is the run header names, or false for headers that name none.
+// readHeaders is the trace header names, or false for headers that name none.
 func readHeaders(header http.Header) (continued, bool) {
 	traceparent := header.Get(headerTraceparent)
 	if traceparent == "" {
@@ -105,12 +103,11 @@ func readHeaders(header http.Header) (continued, bool) {
 	if !ok {
 		return continued{}, false
 	}
-	members := baggageMembers(strings.Join(header.Values(headerBaggage), ","))
-	runID, agent := members[attrRunID], members[attrAgent]
-	if _, ok := parseUUID(runID); !ok || agent == "" {
+	agent := baggageMembers(strings.Join(header.Values(headerBaggage), ","))[attrAgent]
+	if strings.TrimSpace(agent) == "" {
 		return continued{}, false
 	}
-	return continued{spanContext: span, runID: strings.ToLower(runID), agent: agent}, true
+	return continued{spanContext: span, agent: agent}, true
 }
 
 // parseTraceparent reads a traceparent as the W3C spells it: a version that
@@ -169,7 +166,7 @@ func baggageMembers(header string) map[string]string {
 func isOurs(member string) bool {
 	key, _, _ := strings.Cut(member, "=")
 	key = strings.TrimSpace(key)
-	return key == attrRunID || key == attrAgent
+	return key == attrAgent
 }
 
 // isHex is whether s is n lowercase hex digits.
@@ -226,7 +223,7 @@ func decodeBaggageValue(value string) string {
 }
 
 // toValidUTF8 is b with one U+FFFD for each maximal subpart of no UTF-8, as the other
-// SDKs' decoders read it, where strings.ToValidUTF8 gives a whole run one.
+// SDKs' decoders read it, where strings.ToValidUTF8 gives a whole stretch one.
 func toValidUTF8(b []byte) string {
 	var out strings.Builder
 	for len(b) > 0 {

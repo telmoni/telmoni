@@ -887,6 +887,15 @@ class Exporter:
         }
         if span.parent is not None and span.parent.is_valid:
             encoded["parentSpanId"] = format(span.parent.span_id, "016x")
+        # The application's span current as the trace opened, if any.
+        if span.links:
+            encoded["links"] = [
+                {
+                    "traceId": format(link.context.trace_id, "032x"),
+                    "spanId": format(link.context.span_id, "016x"),
+                }
+                for link in span.links
+            ]
         # Events and the status message carry an exception's message and stack
         # trace: content, and the first to go from a span trimmed to fit.
         events = keep_content and not trimmed

@@ -180,10 +180,10 @@ CREATE TABLE notifications.deliveries (
     -- The producer's key a routed notice went under (`telemetry:rule:<id>`),
     -- by which its outcome is counted against the connection for that key.
     route           TEXT,
-    -- The incident an opening or its reminder is about, and the run it shows
-    -- on the console: what Slack draws the notice's buttons from.
+    -- The incident an opening or its reminder is about, and the trace it
+    -- shows on the console: what Slack draws the notice's buttons from.
     incident_id     UUID,
-    run_url         TEXT,
+    trace_url       TEXT,
     status          TEXT        NOT NULL DEFAULT 'pending',
     attempts        INTEGER     NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -194,8 +194,8 @@ CREATE TABLE notifications.deliveries (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT deliveries_status_check CHECK (status IN ('pending', 'delivered', 'failed')),
     CONSTRAINT deliveries_route_check CHECK (char_length(route) BETWEEN 1 AND 200),
-    CONSTRAINT deliveries_run_url_check CHECK (
-        run_url IS NULL OR (incident_id IS NOT NULL AND char_length(run_url) BETWEEN 1 AND 3000)
+    CONSTRAINT deliveries_trace_url_check CHECK (
+        trace_url IS NULL OR (incident_id IS NOT NULL AND char_length(trace_url) BETWEEN 1 AND 3000)
     ),
     CONSTRAINT deliveries_kind_check CHECK (kind IN (
         'organization_alert', 'member_added', 'member_left',

@@ -184,7 +184,7 @@ export default async function AlertsPage({
               title={`Not made, past the plan's number: ${starterWords(access.startersWithheld)}`}
               body={
                 <>
-                  This project&apos;s first run found no room for{" "}
+                  This project&apos;s first trace found no room for{" "}
                   {access.startersWithheld.length === 1 ? "this starter alert" : "these starter alerts"}.
                   {access.startersDetail && <> {access.startersDetail}</>}
                 </>
@@ -194,7 +194,7 @@ export default async function AlertsPage({
           {access.alerts.length === 0 ? (
             <FirstRun
               title="Hear about it before your users do"
-              lead="An alert reads a measure of this project's runs every minute and tells the channels you choose the moment it crosses its threshold."
+              lead="An alert reads a measure of this project's traces every minute and tells the channels you choose the moment it crosses its threshold."
             >
               <FirstRunStep
                 n={1}
@@ -240,7 +240,7 @@ export default async function AlertsPage({
               <FirstRunStep
                 n={2}
                 title="Decide what to watch"
-                note="This project's first run brings three starter alerts: failing runs, looping runs and stalled runs. Add your own with New alert, above: the p95 duration of model calls, the tokens they use, or a month's spend as a budget."
+                note="This project's first trace brings three starter alerts: failing traces, looping traces and stalled traces. Add your own with New alert, above: the p95 duration of model calls, the tokens they use, or a month's spend as a budget."
               />
             </FirstRun>
           ) : (
@@ -477,7 +477,7 @@ function AlertCard({
 }
 
 /** One incident of an alert: its severity, where it stands and its controls,
- *  then when it opened, where its notices went and the run its last showed,
+ *  then when it opened, where its notices went and the trace its last showed,
  *  and what the alert's agents changed to in the day before it opened. */
 function IncidentItem({
   incident,
@@ -501,7 +501,7 @@ function IncidentItem({
   namesAgent: boolean;
   who: (id: string) => string;
 }) {
-  const run = incident.runs.at(-1);
+  const trace = incident.traces.at(-1);
   return (
     <li
       id={`incident-${incident.id}`}
@@ -532,15 +532,15 @@ function IncidentItem({
         {incident.reopened > 0 &&
           `, reopened ${incident.reopened === 1 ? "once" : `${incident.reopened} times`}`}
         {` · told ${told}`}
-        {run && (
+        {trace && (
           <>
             {" · "}
             <Link
-              href={traceHref(organization, slug, run)}
+              href={traceHref(organization, slug, trace)}
               className="inline-flex items-center gap-0.5 underline-offset-4 hover:text-foreground hover:underline"
-              title="The run its last notice showed"
+              title="The trace its last notice showed"
             >
-              run {shortId(run)}
+              trace {shortId(trace)}
               <ArrowRight className="size-icon" aria-hidden="true" />
             </Link>
           </>
@@ -559,7 +559,7 @@ function IncidentItem({
 const CHANGED = "Changed in the 24 hours before it opened";
 
 /** What the incident's agents changed to in the day before it opened, the
- *  newest first, each opening the run that first carried it: nothing where
+ *  newest first, each opening the trace that first carried it: nothing where
  *  nothing changed, and a line saying so where they could not be read. */
 function IncidentChanges({
   incident,
@@ -583,11 +583,11 @@ function IncidentChanges({
         {incident.changes.map((change) => {
           const words = namesAgent ? `${change.agent}: ${changeWords(change)}` : changeWords(change);
           return (
-            <li key={`${change.run_id} ${change.agent} ${words}`}>
+            <li key={`${change.trace_id} ${change.agent} ${words}`}>
               <Link
-                href={traceHref(organization, slug, change.run_id)}
+                href={traceHref(organization, slug, change.trace_id)}
                 className="underline-offset-4 hover:text-foreground hover:underline"
-                title="The run that first carried it"
+                title="The trace that first carried it"
               >
                 {words}
               </Link>

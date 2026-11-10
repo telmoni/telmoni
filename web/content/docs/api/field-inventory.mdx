@@ -3,7 +3,7 @@ title: "Field inventory"
 description: "Every attribute Telmoni reads from a span, at the pinned commit of the GenAI semantic conventions: where it is read, what becomes of it, and the content mode it needs. Text under any other name is content."
 ---
 
-Telmoni keeps metadata about an agent's runs, and content only where a
+Telmoni keeps metadata about an agent's traces, and content only where a
 project's content mode is `on`. This page is the whole list of what ingest
 reads from a span and from its resource, and what becomes of each: the column
 it fills, the `attributes` it is kept in under its own name, or the drop.
@@ -17,7 +17,7 @@ The names are the [GenAI semantic conventions](https://github.com/open-telemetry
 at commit `6fd0d763a092db245a54104fc1124031eb3c51d2`, pinned on purpose: the
 conventions have tagged no release and rename what Telmoni sums, so a rename
 is a change to this page and to ingest, never to what is stored. What the
-conventions do not name — runs and tags — is Telmoni's own,
+conventions do not name — the agent every span is under, and tags — is Telmoni's own,
 under `telmoni.*`, but for a call's cost, read under Langfuse's name for it,
 `gen_ai.usage.cost`, which exporters already send; the user a span was for is
 `user.id`, from OpenTelemetry's general registry.
@@ -30,9 +30,9 @@ content dropped at the door among them.
 ## How to read it
 
 - **On**: the spans the attribute belongs on, where Telmoni's SDKs and the
-  conventions put it — every span of a run, the run itself, a model call, a
-  tool call, a retrieval, any span that carries it, or the resource every span
-  of an export shares. Ingest reads it
+  conventions put it — every span of a trace, the agent's own span, a model
+  call, a tool call, a retrieval, any span that carries it, or the resource
+  every span of an export shares. Ingest reads it
   from whichever span carries it, a model's name or tokens on a step among
   them.
 - **Kept as**: the column of `spans` it fills, `attributes` under its own
@@ -47,16 +47,15 @@ content dropped at the door among them.
 
 Two things on the wire are not attributes: the instrumentation scope
 `telmoni`, under which a span the conventions give no operation is a step
-rather than a plain span; and, under it, a span named `telmoni.run.start`, a
-run's opening, which lists the run as running until its own span lands, is
-never a step and counts against no plan.
+rather than a plain span; and, under it, a span named `telmoni.trace.start`,
+a trace's opening, which lists the trace as running until the agent's own
+span lands, is never a step and counts against no plan.
 
 ## Telmoni's own
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
-| `telmoni.run_id` | every span | the column `run_id` | any | a UUID, the same on every span of a run; a span without it is refused |
-| `telmoni.agent` | every span | the column `agent`, and a run's `name` where `gen_ai.agent.name` and `gen_ai.workflow.name` are unset | any | 1 to 128 characters; a span without it is refused |
+| `telmoni.agent` | every span | the column `agent`, and the agent's span's `name` where `gen_ai.agent.name` and `gen_ai.workflow.name` are unset | any | 1 to 128 characters; a span without it is held for its trace's tree, as another exporter's are |
 | `user.id` | any span | the column `user_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 128 characters |
 | `telmoni.tag.<key>` | any span | `tags`, under `<key>` | any | up to 32 tags; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values |
 | `telmoni.cancelled` | any span | the column `status`, as `cancelled` | any | `true` on a span the agent cancelled |
@@ -70,9 +69,9 @@ keeps for it alone. It is kept as any tag is, and so are the
 
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
-| `gen_ai.operation.name` | every span | the column `kind` | any | `invoke_agent` or `invoke_workflow` is the run; `chat`, `generate_content`, `text_completion` or `embeddings` a model call; `execute_tool` a tool call; `retrieval` or `search_memory` a retrieval; `plan` a step; any other span a step under the `telmoni` scope, a plain span elsewhere |
-| `gen_ai.agent.name` | the run | the column `name` | any | 1 to 145 characters |
-| `gen_ai.workflow.name` | the run | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 145 characters |
+| `gen_ai.operation.name` | every span | the column `kind` | any | `invoke_agent` or `invoke_workflow` is the agent's span, one a trace; `chat`, `generate_content`, `text_completion` or `embeddings` a model call; `execute_tool` a tool call; `retrieval` or `search_memory` a retrieval; `plan` a step; any other span a step under the `telmoni` scope, a plain span elsewhere |
+| `gen_ai.agent.name` | the agent's span | the column `name` | any | 1 to 145 characters |
+| `gen_ai.workflow.name` | the agent's span | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 145 characters |
 | `gen_ai.tool.name` | a tool call | the column `name` | any | 1 to 145 characters |
 | `error.type` | any span | the column `error_type` | any | 1 to 128 characters: the exception's class, never its message |
 | `gen_ai.response.model` | a model call | the column `model` | any | 1 to 128 characters, as the provider spells it |
@@ -118,7 +117,7 @@ them.
 | `gen_ai.response.finish_reasons` | a model call | `attributes`, under its own name | any | an array, as its JSON |
 | `gen_ai.response.status` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.request.reasoning.level` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.agent.version` | the run | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
+| `gen_ai.agent.version` | the agent's span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.tool.call.id` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.tool.type` | a tool call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.output.type` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |

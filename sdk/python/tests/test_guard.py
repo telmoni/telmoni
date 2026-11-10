@@ -1,4 +1,4 @@
-"""The guard: a run's caps on its steps and spend, counted in this process as
+"""The guard: a trace's caps on its steps and spend, counted in this process as
 the server counts a call's cost, replayed from ``sdk/fixtures/guard.json``."""
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from conftest import FakeTransport, attributes_of, load_fixture
-from telmoni import CapExceededError, Config, ModelCall, Price, Run, Telmoni, Usage
+from telmoni import CapExceededError, Config, ModelCall, Price, Telmoni, Trace, Usage
 from telmoni.guard import Guard
 
 CORE_PRICES = Path(__file__).resolve().parents[3] / "crates/telemetry/model_prices.json"
@@ -30,8 +30,10 @@ def handed(fixture: dict[str, Any]) -> list[Price]:
     return [Price(**price) for price in fixture["prices"]]
 
 
-def call(telmoni: Telmoni, run: Run, spec: dict[str, Any]) -> None:
-    with telmoni.model_call(spec["model"], provider=spec.get("provider"), run=run) as c:
+def call(telmoni: Telmoni, trace: Trace, spec: dict[str, Any]) -> None:
+    with telmoni.model_call(
+        spec["model"], provider=spec.get("provider"), trace=trace
+    ) as c:
         for answer in spec.get("answers", [spec]):
             c.answered(
                 response_model=answer.get("response_model"),
@@ -40,20 +42,20 @@ def call(telmoni: Telmoni, run: Run, spec: dict[str, Any]) -> None:
 
 
 def perform(
-    telmoni: Telmoni, run: Run, op: str | dict[str, int], calls: list[Any]
+    telmoni: Telmoni, trace: Trace, op: str | dict[str, int], calls: list[Any]
 ) -> None:
     if op == "step":
-        with telmoni.step("step", run=run):
+        with telmoni.step("step", trace=trace):
             pass
     elif op == "tool_call":
-        with telmoni.tool_call("lookup", run=run):
+        with telmoni.tool_call("lookup", trace=trace):
             pass
     elif op == "retrieval":
-        with telmoni.retrieval("kb", run=run):
+        with telmoni.retrieval("kb", trace=trace):
             pass
     else:
         assert isinstance(op, dict)
-        call(telmoni, run, calls[op["model_call"]])
+        call(telmoni, trace, calls[op["model_call"]])
 
 
 def test_each_call_is_counted_as_the_server_counts_it(transport: FakeTransport) -> None:
@@ -61,17 +63,17 @@ def test_each_call_is_counted_as_the_server_counts_it(transport: FakeTransport) 
     telmoni = client(transport, handed(fixture))
     try:
         for spec in fixture["calls"]:
-            with telmoni.run("guarded") as run:
-                call(telmoni, run, spec)
+            with telmoni.trace("guarded") as trace:
+                call(telmoni, trace, spec)
                 # Exactly, as the server rounds each product and each sum.
-                assert run.spent == spec["counted"], spec["name"]
+                assert trace.spent == spec["counted"], spec["name"]
     finally:
         telmoni.shutdown()
 
 
-def test_a_cap_stops_a_run_with_the_network_cut() -> None:
+def test_a_cap_stops_a_trace_with_the_network_cut() -> None:
     """The cap is the process's own count: with every export failing, the
-    third step of a run capped at two is refused all the same."""
+    third step of a trace capped at two is refused all the same."""
     transport = FakeTransport([OSError("unreachable")] * 16)
     telmoni = Telmoni(
         Config(api_key="k", prices=handed(load_fixture("guard.json"))),
@@ -79,13 +81,13 @@ def test_a_cap_stops_a_run_with_the_network_cut() -> None:
         sleep=lambda _: None,
     )
     try:
-        with telmoni.run("guarded", max_steps=2) as run:
+        with telmoni.trace("guarded", max_steps=2) as trace:
             for _ in range(2):
-                with telmoni.step("step", run=run):
+                with telmoni.step("step", trace=trace):
                     pass
             with (
                 pytest.raises(CapExceededError) as raised,
-                telmoni.step("step", run=run),
+                telmoni.step("step", trace=trace),
             ):
                 pass
             assert (raised.value.cap, raised.value.used) == ("steps", 2)
@@ -96,22 +98,22 @@ def test_a_cap_stops_a_run_with_the_network_cut() -> None:
 
 
 @pytest.mark.parametrize(
-    "case", load_fixture("guard.json")["runs"], ids=lambda case: case["name"]
+    "case", load_fixture("guard.json")["traces"], ids=lambda case: case["name"]
 )
-def test_a_run_past_a_cap_raises_at_what_it_opens_next(
+def test_a_trace_past_a_cap_raises_at_what_it_opens_next(
     transport: FakeTransport, case: dict[str, Any]
 ) -> None:
     fixture = load_fixture("guard.json")
     telmoni = client(transport, handed(fixture))
     refused = case["refused"]
     try:
-        with telmoni.run(
+        with telmoni.trace(
             "guarded", max_steps=case.get("max_steps"), max_spend=case.get("max_spend")
-        ) as run:
+        ) as trace:
             for at, op in enumerate(case["ops"]):
                 if refused is not None and at == refused["at"]:
                     with pytest.raises(CapExceededError) as raised:
-                        perform(telmoni, run, op, fixture["calls"])
+                        perform(telmoni, trace, op, fixture["calls"])
                     assert raised.value.cap == refused["cap"]
                     assert raised.value.limit == pytest.approx(
                         refused["limit"], abs=1e-12
@@ -120,8 +122,8 @@ def test_a_run_past_a_cap_raises_at_what_it_opens_next(
                         refused["used"], abs=1e-12
                     )
                     break
-                perform(telmoni, run, op, fixture["calls"])
-            assert run.spent == pytest.approx(case["spent"], abs=1e-12)
+                perform(telmoni, trace, op, fixture["calls"])
+            assert trace.spent == pytest.approx(case["spent"], abs=1e-12)
         assert telmoni.flush()
     finally:
         telmoni.shutdown()
@@ -140,18 +142,18 @@ def test_a_refusal_says_what_the_other_sdks_say(case: dict[str, Any]) -> None:
     assert str(refusal) == case["says"]
 
 
-def test_an_escaping_refusal_fails_the_run_with_its_class(
+def test_an_escaping_refusal_fails_the_trace_with_its_class(
     transport: FakeTransport,
 ) -> None:
     telmoni = client(transport, [])
     try:
         with (
             pytest.raises(CapExceededError, match="its step cap of 1"),
-            telmoni.run("guarded", max_steps=1) as run,
+            telmoni.trace("guarded", max_steps=1) as trace,
         ):
-            with run.step("first"):
+            with trace.step("first"):
                 pass
-            with run.step("second"):
+            with trace.step("second"):
                 pass
         assert telmoni.flush()
     finally:
@@ -175,10 +177,10 @@ def test_a_name_no_price_is_handed_for_is_priced_by_the_table_the_release_carrie
     for prices in ([], [Price(**row)]):
         telmoni = client(transport, prices)
         try:
-            with telmoni.run("priced") as run:
-                with run.model_call("gpt-4o-mini", provider="openai") as c:
+            with telmoni.trace("priced") as trace:
+                with trace.model_call("gpt-4o-mini", provider="openai") as c:
                     c.answered(usage=usage)
-                spent.append(run.spent)
+                spent.append(trace.spent)
         finally:
             telmoni.shutdown()
     assert spent[0] > 0
@@ -192,12 +194,12 @@ def test_a_call_answered_again_counts_what_its_span_holds(
         transport, [Price(provider="p", model="m", input=1e-6, output=1e-5)]
     )
     try:
-        with telmoni.run("guarded") as run:
-            with run.model_call("m", provider="p") as c:
+        with telmoni.trace("guarded") as trace:
+            with trace.model_call("m", provider="p") as c:
                 # A stream's counts, answered as they arrive.
                 c.answered(usage=Usage(input_tokens=2000))
                 c.answered(usage=Usage(output_tokens=100))
-            spent = run.spent
+            spent = trace.spent
         assert telmoni.flush()
     finally:
         telmoni.shutdown()
@@ -214,15 +216,15 @@ def test_a_call_answered_again_counts_what_its_span_holds(
 def test_an_answer_after_its_call_ended_counts_nothing_with_one_warning(
     transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An answer no span holds counts nothing toward the run's spend."""
+    """An answer no span holds counts nothing toward the trace's spend."""
     telmoni = client(transport, [Price(provider="p", model="m", input=1e-6, output=0)])
     try:
-        with telmoni.run("guarded") as run:
-            with run.model_call("m", provider="p") as c:
+        with telmoni.trace("guarded") as trace:
+            with trace.model_call("m", provider="p") as c:
                 c.answered(usage=Usage(input_tokens=1000))
             for _ in range(2):
                 c.answered(usage=Usage(input_tokens=5000))
-            spent = run.spent
+            spent = trace.spent
         assert telmoni.flush()
     finally:
         telmoni.shutdown()
@@ -233,7 +235,7 @@ def test_an_answer_after_its_call_ended_counts_nothing_with_one_warning(
     assert warnings == [
         (
             "telmoni: a model call must be answered before it ends; an answer given "
-            "after is not sent and counts nothing toward the run's spend"
+            "after is not sent and counts nothing toward the trace's spend"
         )
     ]
 
@@ -251,8 +253,8 @@ def test_answers_from_threads_at_once_count_the_call_once(
 
     monkeypatch.setattr(Guard, "counts", slowly)
     try:
-        with telmoni.run("guarded") as run:
-            with run.model_call("m", provider="p") as c:
+        with telmoni.trace("guarded") as trace:
+            with trace.model_call("m", provider="p") as c:
                 start = threading.Barrier(8)
 
                 def answer() -> None:
@@ -264,7 +266,7 @@ def test_answers_from_threads_at_once_count_the_call_once(
                     thread.start()
                 for thread in threads:
                     thread.join()
-            spent = run.spent
+            spent = trace.spent
     finally:
         telmoni.shutdown()
     assert spent == pytest.approx(0.001, abs=1e-12)
@@ -290,8 +292,8 @@ def test_a_handler_answering_the_call_it_warns_of_is_never_held_up(
     telmoni = client(transport, [])
     try:
         with (
-            telmoni.run("guarded", max_spend=1.0) as run,
-            run.model_call("my-model", provider="vllm") as c,
+            telmoni.trace("guarded", max_spend=1.0) as trace,
+            trace.model_call("my-model", provider="vllm") as c,
         ):
             assert isinstance(c, ModelCall)
             answering.append(c)
@@ -324,13 +326,13 @@ def test_a_call_with_neither_under_a_spend_cap_is_warned_of_once(
 ) -> None:
     telmoni = client(transport, [])
     try:
-        with telmoni.run("guarded", max_spend=1.0) as run:
+        with telmoni.trace("guarded", max_spend=1.0) as trace:
             for _ in range(3):
-                with run.model_call("my-model", provider="vllm") as c:
+                with trace.model_call("my-model", provider="vllm") as c:
                     c.answered(usage=Usage(input_tokens=10))
         with (
-            telmoni.run("unguarded") as run,
-            run.model_call("other-model", provider="vllm") as c,
+            telmoni.trace("unguarded") as trace,
+            trace.model_call("other-model", provider="vllm") as c,
         ):
             c.answered(usage=Usage(input_tokens=10))
     finally:
@@ -341,7 +343,7 @@ def test_a_call_with_neither_under_a_spend_cap_is_warned_of_once(
     assert warned == [
         (
             "telmoni: no price for my-model (vllm), which reported no cost; it counts "
-            "nothing toward the run's spend cap"
+            "nothing toward the trace's spend cap"
         )
     ]
 
@@ -364,7 +366,7 @@ def test_a_call_with_neither_under_a_spend_cap_is_warned_of_once(
     ],
 )
 def test_a_cap_is_above_0(telmoni: Telmoni, caps: dict[str, Any], why: str) -> None:
-    with pytest.raises(ValueError, match=why), telmoni.run("guarded", **caps):
+    with pytest.raises(ValueError, match=why), telmoni.trace("guarded", **caps):
         pass
 
 
@@ -391,10 +393,10 @@ def test_a_decimal_cap_and_price_hold_as_a_decimal_cost_does(
     price = Price(provider="p", model="m", input=Decimal("1E-6"), output=Decimal(0))  # type: ignore[arg-type]
     telmoni = client(transport, [price])
     try:
-        with telmoni.run("guarded", max_spend=Decimal("0.0005")) as run:  # type: ignore[arg-type]
-            with run.model_call("m", provider="p") as c:
+        with telmoni.trace("guarded", max_spend=Decimal("0.0005")) as trace:  # type: ignore[arg-type]
+            with trace.model_call("m", provider="p") as c:
                 c.answered(usage=Usage(input_tokens=1000))
-            with pytest.raises(CapExceededError) as refused, run.tool_call("lookup"):
+            with pytest.raises(CapExceededError) as refused, trace.tool_call("lookup"):
                 pass
     finally:
         telmoni.shutdown()
@@ -406,7 +408,7 @@ def test_a_cost_goes_as_a_double_and_one_that_is_no_cost_is_left_off(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     costs: list[object] = [3, 0.0123, -0.5, float("nan"), float("inf"), True, "0.5"]
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         for cost in costs:
             with telmoni.model_call("m") as c:
                 c.answered(usage=Usage(input_tokens=1, cost=cost))  # type: ignore[arg-type]

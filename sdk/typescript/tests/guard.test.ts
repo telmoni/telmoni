@@ -1,5 +1,5 @@
 /**
- * The guard: a run's caps on its steps and spend, counted in this process as
+ * The guard: a trace's caps on its steps and spend, counted in this process as
  * the server counts a call's cost, replayed from `sdk/fixtures/guard.json`.
  */
 
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { CapExceededError, type ModelCall, type Price, type Run, type Telmoni, type Usage } from '../src/index';
+import { CapExceededError, type ModelCall, type Price, type Telmoni, type Trace, type Usage } from '../src/index';
 import { attributesOf, harness, loadFixture, one } from './helpers';
 
 interface AnswerSpec {
@@ -32,7 +32,7 @@ interface CallSpec extends AnswerSpec {
 
 type Op = 'step' | 'tool_call' | 'retrieval' | { model_call: number };
 
-interface RunSpec {
+interface TraceSpec {
   name: string;
   max_steps?: number;
   max_spend?: number;
@@ -51,7 +51,7 @@ interface Guard {
     cache_write?: number;
   }>;
   calls: CallSpec[];
-  runs: RunSpec[];
+  traces: TraceSpec[];
   refusals: Array<{ cap: 'steps' | 'spend'; limit: number; used: number; says: string }>;
 }
 
@@ -79,19 +79,19 @@ function usageOf(answer: AnswerSpec): Usage | undefined {
   };
 }
 
-function call(run: Run, spec: CallSpec): void {
-  run.modelCall(spec.model, { provider: spec.provider }, (modelCall) => {
+function call(trace: Trace, spec: CallSpec): void {
+  trace.modelCall(spec.model, { provider: spec.provider }, (modelCall) => {
     for (const answer of spec.answers ?? [spec]) {
       modelCall.answered({ responseModel: answer.response_model, usage: usageOf(answer) });
     }
   });
 }
 
-function perform(run: Run, op: Op): void {
-  if (op === 'step') run.step('step', () => undefined);
-  else if (op === 'tool_call') run.toolCall('lookup', () => undefined);
-  else if (op === 'retrieval') run.retrieval('kb', () => undefined);
-  else call(run, FIXTURE.calls[op.model_call]!);
+function perform(trace: Trace, op: Op): void {
+  if (op === 'step') trace.step('step', () => undefined);
+  else if (op === 'tool_call') trace.toolCall('lookup', () => undefined);
+  else if (op === 'retrieval') trace.retrieval('kb', () => undefined);
+  else call(trace,FIXTURE.calls[op.model_call]!);
 }
 
 async function closed(telmoni: Telmoni): Promise<void> {
@@ -103,26 +103,26 @@ describe('guard.json', () => {
   it('counts each call as the server counts it', async () => {
     const { telmoni } = harness({ prices: handed() });
     for (const spec of FIXTURE.calls) {
-      telmoni.run('guarded', (run) => {
-        call(run, spec);
+      telmoni.trace('guarded', (trace) => {
+        call(trace,spec);
         // Exactly, as the server rounds each product and each sum.
-        expect(run.spent, spec.name).toBe(spec.counted);
+        expect(trace.spent, spec.name).toBe(spec.counted);
       });
     }
     await closed(telmoni);
   });
 
-  it.each(FIXTURE.runs.map((spec) => [spec.name, spec] as const))('%s', async (_name, spec) => {
+  it.each(FIXTURE.traces.map((spec) => [spec.name, spec] as const))('%s', async (_name, spec) => {
     const { telmoni, transport } = harness({ prices: handed() });
     const options: { maxSteps?: number; maxSpend?: number } = {};
     if (spec.max_steps !== undefined) options.maxSteps = spec.max_steps;
     if (spec.max_spend !== undefined) options.maxSpend = spec.max_spend;
-    telmoni.run('guarded', options, (run) => {
+    telmoni.trace('guarded', options, (trace) => {
       for (const [at, op] of spec.ops.entries()) {
         if (spec.refused !== null && at === spec.refused.at) {
           let thrown: unknown;
           try {
-            perform(run, op);
+            perform(trace,op);
           } catch (error) {
             thrown = error;
           }
@@ -133,9 +133,9 @@ describe('guard.json', () => {
           expect(refusal.used).toBeCloseTo(spec.refused.used, 12);
           break;
         }
-        perform(run, op);
+        perform(trace,op);
       }
-      expect(run.spent).toBeCloseTo(spec.spent, 12);
+      expect(trace.spent).toBeCloseTo(spec.spent, 12);
     });
     await closed(telmoni);
     const performed = spec.refused === null ? spec.ops : spec.ops.slice(0, spec.refused.at);
@@ -143,16 +143,16 @@ describe('guard.json', () => {
     expect(opened, 'a refused op opened nothing').toHaveLength(performed.length);
   });
 
-  it('stops a run at its cap with the network cut', async () => {
+  it('stops a trace at its cap with the network cut', async () => {
     // Every export fails: the cap is the process's own count, and nothing of Telmoni's.
     const cut = Array.from({ length: 16 }, () => new Error('unreachable'));
     const { telmoni, transport } = harness({ prices: handed() }, {}, cut);
     let thrown: unknown;
-    telmoni.run('guarded', { maxSteps: 2 }, (run) => {
-      run.step('step', () => undefined);
-      run.step('step', () => undefined);
+    telmoni.trace('guarded', { maxSteps: 2 }, (trace) => {
+      trace.step('step', () => undefined);
+      trace.step('step', () => undefined);
       try {
-        run.step('step', () => undefined);
+        trace.step('step', () => undefined);
       } catch (error) {
         thrown = error;
       }
@@ -171,18 +171,18 @@ describe('guard.json', () => {
 });
 
 describe('the guard', () => {
-  it('fails the run it escapes with its class', async () => {
+  it('fails the trace it escapes with its class', async () => {
     const { telmoni, transport } = harness();
     expect(() =>
-      telmoni.run('guarded', { maxSteps: 1 }, (run) => {
-        run.step('first', () => undefined);
-        run.step('second', () => undefined);
+      telmoni.trace('guarded', { maxSteps: 1 }, (trace) => {
+        trace.step('first', () => undefined);
+        trace.step('second', () => undefined);
       }),
     ).toThrow(/its step cap of 1/);
     await closed(telmoni);
-    const run = one(transport.spans().filter((span) => span.name === 'invoke_agent guarded'));
-    expect(attributesOf(run)['error.type']).toBe('CapExceededError');
-    expect(run.status).toEqual({ code: 2 });
+    const agent = one(transport.spans().filter((span) => span.name === 'invoke_agent guarded'));
+    expect(attributesOf(agent)['error.type']).toBe('CapExceededError');
+    expect(agent.status).toEqual({ code: 2 });
   });
 
   it('prices a name no price is handed for by the table the release carries', async () => {
@@ -199,11 +199,11 @@ describe('the guard', () => {
     const spent: number[] = [];
     for (const prices of [[], [asHanded]]) {
       const { telmoni } = harness({ prices });
-      telmoni.run('priced', (run) => {
-        run.modelCall('gpt-4o-mini', { provider: 'openai' }, (modelCall) => {
+      telmoni.trace('priced', (trace) => {
+        trace.modelCall('gpt-4o-mini', { provider: 'openai' }, (modelCall) => {
           modelCall.answered({ usage: { inputTokens: 10_000, outputTokens: 2_000, cacheReadInputTokens: 4_000 } });
         });
-        spent.push(run.spent);
+        spent.push(trace.spent);
       });
       await closed(telmoni);
     }
@@ -214,13 +214,13 @@ describe('the guard', () => {
   it('counts a call answered again as its span holds it', async () => {
     const { telmoni, transport } = harness({ prices: [{ provider: 'p', model: 'm', input: 1e-6, output: 1e-5 }] });
     let spent = Number.NaN;
-    telmoni.run('guarded', (run) => {
-      run.modelCall('m', { provider: 'p' }, (modelCall) => {
+    telmoni.trace('guarded', (trace) => {
+      trace.modelCall('m', { provider: 'p' }, (modelCall) => {
         // A stream's counts, answered as they arrive.
         modelCall.answered({ usage: { inputTokens: 2000 } });
         modelCall.answered({ usage: { outputTokens: 100 } });
       });
-      spent = run.spent;
+      spent = trace.spent;
     });
     await closed(telmoni);
     const held = attributesOf(one(transport.spans().filter((span) => span.name === 'chat m')));
@@ -234,21 +234,21 @@ describe('the guard', () => {
   it('counts nothing of an answer given after its call ended, with one warning', async () => {
     const { telmoni, transport, warnings } = harness({ prices: [{ provider: 'p', model: 'm', input: 1e-6, output: 0 }] });
     let spent = Number.NaN;
-    telmoni.run('guarded', (run) => {
+    telmoni.trace('guarded', (trace) => {
       let ended: ModelCall | undefined;
-      run.modelCall('m', { provider: 'p' }, (modelCall) => {
+      trace.modelCall('m', { provider: 'p' }, (modelCall) => {
         modelCall.answered({ usage: { inputTokens: 1000 } });
         ended = modelCall;
       });
       for (let n = 0; n < 2; n++) ended?.answered({ usage: { inputTokens: 5000 } });
-      spent = run.spent;
+      spent = trace.spent;
     });
     await closed(telmoni);
     const held = attributesOf(one(transport.spans().filter((span) => span.name === 'chat m')));
     expect(held['gen_ai.usage.input_tokens']).toBe(1000);
     expect(spent).toBeCloseTo(0.001, 12);
     expect(warnings).toEqual([
-      "telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the run's spend",
+      "telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the trace's spend",
     ]);
   });
 
@@ -258,21 +258,21 @@ describe('the guard', () => {
 
   it('warns once of a call with neither a cost nor a price under a spend cap', async () => {
     const { telmoni, warnings } = harness();
-    telmoni.run('guarded', { maxSpend: 1 }, (run) => {
+    telmoni.trace('guarded', { maxSpend: 1 }, (trace) => {
       for (let n = 0; n < 3; n++) {
-        run.modelCall('my-model', { provider: 'vllm' }, (modelCall) => {
+        trace.modelCall('my-model', { provider: 'vllm' }, (modelCall) => {
           modelCall.answered({ usage: { inputTokens: 10 } });
         });
       }
     });
-    telmoni.run('unguarded', (run) => {
-      run.modelCall('other-model', { provider: 'vllm' }, (modelCall) => {
+    telmoni.trace('unguarded', (trace) => {
+      trace.modelCall('other-model', { provider: 'vllm' }, (modelCall) => {
         modelCall.answered({ usage: { inputTokens: 10 } });
       });
     });
     await closed(telmoni);
     expect(warnings.filter((w) => w.includes('counts nothing'))).toEqual([
-      "telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the run's spend cap",
+      "telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the trace's spend cap",
     ]);
   });
 
@@ -286,7 +286,7 @@ describe('the guard', () => {
     [{ maxSpend: '1' as unknown as number }, /maxSpend/],
   ])('refuses a cap %o that is not above 0', async (options, why) => {
     const { telmoni } = harness();
-    expect(() => telmoni.run('guarded', options, () => undefined)).toThrow(why);
+    expect(() => telmoni.trace('guarded', options, () => undefined)).toThrow(why);
     await telmoni.shutdown();
   });
 
@@ -306,9 +306,9 @@ describe('the guard', () => {
   it('sends a cost as a double, and leaves off one that is no cost with one warning', async () => {
     const { telmoni, transport, warnings } = harness();
     const costs: unknown[] = [3, 0.0123, -0.5, Number.NaN, Number.POSITIVE_INFINITY, true, '0.5'];
-    telmoni.run('bot', (run) => {
+    telmoni.trace('bot', (trace) => {
       for (const cost of costs) {
-        run.modelCall('m', (modelCall) => {
+        trace.modelCall('m', (modelCall) => {
           modelCall.answered({ usage: { inputTokens: 1, cost: cost as number } });
         });
       }

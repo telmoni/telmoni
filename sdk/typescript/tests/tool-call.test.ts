@@ -18,18 +18,18 @@ function tools(transport: FakeTransport): JsonSpan[] {
 
 describe('a tool call', () => {
   it("carries the conventions' names", async () => {
-    const run = h.telmoni.run('bot', { userId: 'user' }, (run) => {
-      run.toolCall('search', { arguments: { q: 'weather' } }, (tool) => {
+    const opened = h.telmoni.trace('bot', { userId: 'user' }, (trace) => {
+      trace.toolCall('search', { arguments: { q: 'weather' } }, (tool) => {
         tool.returned({ temp: 21 });
       });
-      return run;
+      return trace;
     });
     expect(await h.telmoni.flush()).toBe(true);
     const span = one(tools(h.transport));
     expect(span.name).toBe('execute_tool search');
     expect(span.kind).toBe(1);
+    expect(span.traceId).toBe(opened.traceId);
     expect(attributesOf(span)).toEqual({
-      'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
       'user.id': 'user',
       'gen_ai.operation.name': 'execute_tool',
@@ -41,13 +41,13 @@ describe('a tool call', () => {
 
   it('records its error class, from a failure or from fail()', async () => {
     class TimeoutError extends Error {}
-    await h.telmoni.run('bot', async (run) => {
+    await h.telmoni.trace('bot', async (trace) => {
       await expect(
-        run.toolCall('search', async () => {
+        trace.toolCall('search', async () => {
           throw new TimeoutError('took 30 s');
         }),
       ).rejects.toBeInstanceOf(TimeoutError);
-      run.toolCall('lookup', (tool) => tool.fail('NotFound'));
+      trace.toolCall('lookup', (tool) => tool.fail('NotFound'));
     });
     expect(await h.telmoni.flush()).toBe(true);
     const byName = Object.fromEntries(tools(h.transport).map((span) => [span.name, span]));
@@ -59,8 +59,8 @@ describe('a tool call', () => {
   });
 
   it("cuts a name past ingest's 145 characters, warned once, where it lost the call", async () => {
-    h.telmoni.run('bot', (run) => {
-      for (const name of ['t'.repeat(146), 't'.repeat(146), 't'.repeat(145)]) run.toolCall(name, () => {});
+    h.telmoni.trace('bot', (trace) => {
+      for (const name of ['t'.repeat(146), 't'.repeat(146), 't'.repeat(145)]) trace.toolCall(name, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     expect(tools(h.transport).map((span) => attributesOf(span)['gen_ai.tool.name'])).toEqual(
@@ -72,15 +72,15 @@ describe('a tool call', () => {
   });
 
   it('returns what its callback returns', async () => {
-    expect(h.telmoni.run('bot', (run) => run.toolCall('search', () => 'cba'))).toBe('cba');
+    expect(h.telmoni.trace('bot', (trace) => trace.toolCall('search', () => 'cba'))).toBe('cba');
     expect(await h.telmoni.flush()).toBe(true);
     expect(tools(h.transport)).toHaveLength(1);
   });
 
   it('is cancelled, not failed, when the tool aborts', async () => {
-    await h.telmoni.run('bot', async (run) => {
+    await h.telmoni.trace('bot', async (trace) => {
       await expect(
-        run.toolCall('search', async () => {
+        trace.toolCall('search', async () => {
           throw AbortSignal.abort().reason;
         }),
       ).rejects.toHaveProperty('name', 'AbortError');
@@ -97,11 +97,11 @@ describe('a tool call', () => {
     // As Node's querystring.parse returns: String() throws for it.
     const bare = Object.create(null) as Record<string, unknown>;
     bare.self = bare;
-    h.telmoni.run('bot', (run) => {
-      run.toolCall('search', { arguments: cyclic }, (tool) => {
+    h.telmoni.trace('bot', (trace) => {
+      trace.toolCall('search', { arguments: cyclic }, (tool) => {
         tool.returned(cyclic);
       });
-      run.toolCall('search', { arguments: bare }, (tool) => {
+      trace.toolCall('search', { arguments: bare }, (tool) => {
         tool.returned(bare);
       });
     });

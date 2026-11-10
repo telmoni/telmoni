@@ -24,54 +24,57 @@ type planningFailed struct {
 
 func (e *planningFailed) Error() string { return e.detail }
 
-func runSpan(t *testing.T, h *harness) map[string]any {
+// traceSpan is the one agent's span sent: the trace's own.
+func traceSpan(t *testing.T, h *harness) map[string]any {
 	t.Helper()
-	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
-	if len(runs) != 1 {
-		t.Fatalf("want one run span, got %v", names(runs))
+	agents := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(agents) != 1 {
+		t.Fatalf("want one agent span, got %v", names(agents))
 	}
-	return runs[0]
+	return agents[0]
 }
 
-func TestARunIsASpanWithTheContractAttributes(t *testing.T) {
+func TestATraceIsASpanWithTheContractAttributes(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{
+	ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{
 		UserID:    "user_1",
 		SessionID: "conv_1",
 		Tags:      map[string]string{"env": "test", "team": "a"},
 	})
-	if !uuidV4.MatchString(run.ID()) {
-		t.Errorf("run id %q is not a lowercase version 4 UUID", run.ID())
+	if !hex32.MatchString(tr.TraceID()) {
+		t.Errorf("trace id %q is not 32 lowercase hex digits", tr.TraceID())
 	}
-	if run.Agent() != "support-bot" {
-		t.Errorf("Agent() = %q", run.Agent())
+	if tr.Agent() != "support-bot" {
+		t.Errorf("Agent() = %q", tr.Agent())
 	}
-	if telmoni.RunFromContext(ctx) != run {
-		t.Error("the run is not found from the context it returned")
+	if telmoni.TraceFromContext(ctx) != tr {
+		t.Error("the trace is not found from the context it returned")
 	}
 	spanID := trace.SpanContextFromContext(ctx).SpanID().String()
-	run.End()
-	if telmoni.RunFromContext(context.Background()) != nil {
-		t.Error("a run was found in a context without one")
+	tr.End()
+	if telmoni.TraceFromContext(context.Background()) != nil {
+		t.Error("a trace was found in a context without one")
 	}
 	h.flush()
-	span := runSpan(t, h)
+	span := traceSpan(t, h)
 	if span["kind"] != float64(1) {
 		t.Errorf("kind = %v, want 1", span["kind"])
 	}
 	if span["spanId"] != spanID {
-		t.Errorf("the context carries span %s, the run's is %v", spanID, span["spanId"])
+		t.Errorf("the context carries span %s, the agent's is %v", spanID, span["spanId"])
+	}
+	if span["traceId"] != tr.TraceID() {
+		t.Errorf("the agent's span is in trace %v, TraceID() says %s", span["traceId"], tr.TraceID())
 	}
 	if _, has := span["parentSpanId"]; has {
-		t.Error("a run opened with no span in its context has a parent")
+		t.Error("a trace opened with no span in its context has a parent")
 	}
 	if _, has := span["status"]; has {
-		t.Error("a run that went well has a status")
+		t.Error("a trace that went well has a status")
 	}
 	want := map[string]any{
 		"gen_ai.operation.name":  "invoke_agent",
 		"gen_ai.agent.name":      "support-bot",
-		"telmoni.run_id":         run.ID(),
 		"telmoni.agent":          "support-bot",
 		"user.id":                "user_1",
 		"gen_ai.conversation.id": "conv_1",
@@ -83,7 +86,7 @@ func TestARunIsASpanWithTheContractAttributes(t *testing.T) {
 	}
 }
 
-func TestAnErrorFailsTheRunWithItsTypeAlone(t *testing.T) {
+func TestAnErrorFailsTheTraceWithItsTypeAlone(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		want string
@@ -94,11 +97,11 @@ func TestAnErrorFailsTheRunWithItsTypeAlone(t *testing.T) {
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			h := newHarness(t, testConfig(), nil)
-			_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-			run.Fail(tc.err)
-			run.End()
+			_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+			tr.Fail(tc.err)
+			tr.End()
 			h.flush()
-			span := runSpan(t, h)
+			span := traceSpan(t, h)
 			if !reflect.DeepEqual(span["status"], map[string]any{"code": float64(2)}) {
 				t.Errorf("status = %v, want {code: 2}", span["status"])
 			}
@@ -112,54 +115,54 @@ func TestAnErrorFailsTheRunWithItsTypeAlone(t *testing.T) {
 	}
 }
 
-func TestFailWithAndCancelMarkTheRun(t *testing.T) {
+func TestFailWithAndCancelMarkTheTrace(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, failed := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, failed := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	failed.FailWith("RateLimit")
 	failed.End()
-	_, cancelled := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, cancelled := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	cancelled.Cancel()
 	cancelled.End()
 	h.flush()
 	for _, span := range withPrefix(h.transport.spans(t), "invoke_agent ") {
 		attributes := attributesOf(t, span)
-		switch attributes["telmoni.run_id"] {
-		case failed.ID():
+		switch span["traceId"] {
+		case failed.TraceID():
 			if attributes["error.type"] != "RateLimit" {
 				t.Errorf("error.type = %v, want RateLimit", attributes["error.type"])
 			}
 			if !reflect.DeepEqual(span["status"], map[string]any{"code": float64(2)}) {
 				t.Errorf("status = %v, want {code: 2}", span["status"])
 			}
-		case cancelled.ID():
+		case cancelled.TraceID():
 			if attributes["telmoni.cancelled"] != true {
 				t.Errorf("telmoni.cancelled = %v, want true", attributes["telmoni.cancelled"])
 			}
 			if _, has := span["status"]; has {
-				t.Error("a cancelled run has a status")
+				t.Error("a cancelled trace has a status")
 			}
 			if _, has := attributes["error.type"]; has {
-				t.Error("a cancelled run has an error.type")
+				t.Error("a cancelled trace has an error.type")
 			}
 		default:
-			t.Errorf("a run span of an unknown run: %v", attributes["telmoni.run_id"])
+			t.Errorf("an agent span of an unknown trace: %v", span["traceId"])
 		}
 	}
 }
 
-// Ingest refuses a span over an empty error.type: here, the run.
-func TestFailWithAnEmptyTypeFailsTheRunWithNone(t *testing.T) {
+// Ingest refuses a span over an empty error.type: here, the agent's.
+func TestFailWithAnEmptyTypeFailsTheTraceWithNone(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.FailWith("")
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.FailWith("")
+	tr.End()
 	h.flush()
 	spans := withPrefix(h.transport.spans(t), "invoke_agent ")
 	if len(spans) != 1 {
-		t.Fatalf("%d runs sent, want 1", len(spans))
+		t.Fatalf("%d agent spans sent, want 1", len(spans))
 	}
 	if _, has := attributesOf(t, spans[0])["error.type"]; has {
-		t.Error("the run has an empty error.type")
+		t.Error("the agent's span has an empty error.type")
 	}
 	if !reflect.DeepEqual(spans[0]["status"], map[string]any{"code": float64(2)}) {
 		t.Errorf("status = %v, want {code: 2}", spans[0]["status"])
@@ -172,9 +175,9 @@ type generic[T any] struct{}
 
 func (generic[T]) Error() string { return "failed" }
 
-// On every span of the run, any of these past its cap cost ingest the run
+// On every span of the trace, any of these past its cap cost ingest the trace
 // whole.
-func TestARunsTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
+func TestATracesTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	smiles := func(n int) string { return strings.Repeat("😀", n) }
 	err := generic[struct {
@@ -186,15 +189,15 @@ func TestARunsTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
 		t.Fatalf("%q is within the cap", errorType)
 	}
 	for range 2 {
-		_, run := h.client.Run(context.Background(), smiles(129), telmoni.RunOptions{
+		_, tr := h.client.Trace(context.Background(), smiles(129), telmoni.TraceOptions{
 			UserID:    strings.Repeat("u", 129),
 			SessionID: strings.Repeat("s", 201),
 		})
-		if got := run.Agent(); got != smiles(128) {
+		if got := tr.Agent(); got != smiles(128) {
 			t.Errorf("Agent() = %q, want it cut to 128 characters", got)
 		}
-		run.Fail(err)
-		run.End()
+		tr.Fail(err)
+		tr.End()
 	}
 	h.flush()
 	for _, span := range h.transport.spans(t) {
@@ -208,14 +211,14 @@ func TestARunsTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
 			}
 		}
 	}
-	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
-	if len(runs) != 2 {
-		t.Fatalf("want two runs, got %v", names(runs))
+	agents := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(agents) != 2 {
+		t.Fatalf("want two agent spans, got %v", names(agents))
 	}
-	for _, span := range runs {
+	for _, span := range agents {
 		attributes := attributesOf(t, span)
 		if span["name"] != "invoke_agent "+smiles(128) || attributes["gen_ai.agent.name"] != smiles(128) {
-			t.Errorf("the run's name and gen_ai.agent.name are not cut")
+			t.Errorf("the agent's name and gen_ai.agent.name are not cut")
 		}
 		if attributes["error.type"] != errorType[:128] {
 			t.Errorf("error.type = %v, want its first 128 characters", attributes["error.type"])
@@ -224,10 +227,10 @@ func TestARunsTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
 	warnings := h.logs.warnings()
 	slices.Sort(warnings)
 	want := []string{
-		"telmoni: a run's agent must be up to 128 characters; it is sent cut to its first 128",
-		"telmoni: a session id must be up to 200 characters; the run is sent without it",
+		"telmoni: a session id must be up to 200 characters; the trace is sent without it",
 		"telmoni: a span's error type must be up to 128 characters; it is sent cut to its first 128",
-		"telmoni: a user id must be up to 128 characters; the run is sent without it",
+		"telmoni: a trace's agent must be up to 128 characters; it is sent cut to its first 128",
+		"telmoni: a user id must be up to 128 characters; the trace is sent without it",
 	}
 	if !reflect.DeepEqual(warnings, want) {
 		t.Errorf("warnings = %q, want %q", warnings, want)
@@ -235,14 +238,14 @@ func TestARunsTextPastIngestsCapsIsCutOrLeftOffWarnedOnce(t *testing.T) {
 }
 
 // Counted in characters, as ingest counts them, never in UTF-8's bytes.
-func TestARunsTextAtIngestsCapsIsSentWhole(t *testing.T) {
+func TestATracesTextAtIngestsCapsIsSentWhole(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	smiles := func(n int) string { return strings.Repeat("😀", n) }
-	_, run := h.client.Run(context.Background(), smiles(128), telmoni.RunOptions{UserID: smiles(128), SessionID: smiles(200)})
-	run.FailWith(smiles(128))
-	run.End()
+	_, tr := h.client.Trace(context.Background(), smiles(128), telmoni.TraceOptions{UserID: smiles(128), SessionID: smiles(200)})
+	tr.FailWith(smiles(128))
+	tr.End()
 	h.flush()
-	attributes := attributesOf(t, runSpan(t, h))
+	attributes := attributesOf(t, traceSpan(t, h))
 	for key, want := range map[string]string{
 		"telmoni.agent":          smiles(128),
 		"user.id":                smiles(128),
@@ -262,11 +265,11 @@ func TestARunsTextAtIngestsCapsIsSentWhole(t *testing.T) {
 // fail a timeout with its type.
 func TestADeadlineThatRanOutIsAFailure(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.Fail(context.DeadlineExceeded)
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.Fail(context.DeadlineExceeded)
+	tr.End()
 	h.flush()
-	span := runSpan(t, h)
+	span := traceSpan(t, h)
 	attributes := attributesOf(t, span)
 	if _, has := attributes["telmoni.cancelled"]; has {
 		t.Error("a deadline that ran out was recorded as a cancellation")
@@ -286,11 +289,11 @@ func TestAContextErrorIsACancellation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, testConfig(), nil)
-			_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-			run.Fail(err)
-			run.End()
+			_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+			tr.Fail(err)
+			tr.End()
 			h.flush()
-			span := runSpan(t, h)
+			span := traceSpan(t, h)
 			attributes := attributesOf(t, span)
 			if attributes["telmoni.cancelled"] != true {
 				t.Errorf("telmoni.cancelled = %v, want true", attributes["telmoni.cancelled"])
@@ -305,13 +308,13 @@ func TestAContextErrorIsACancellation(t *testing.T) {
 	}
 }
 
-func TestAFunctionOpensARunPerCall(t *testing.T) {
+func TestAFunctionOpensATracePerCall(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	var seen []string
 	handle := func(ctx context.Context, question string) string {
-		ctx, run := h.client.Run(ctx, "bot", telmoni.RunOptions{})
-		defer run.End()
-		seen = append(seen, telmoni.RunFromContext(ctx).ID())
+		ctx, tr := h.client.Trace(ctx, "bot", telmoni.TraceOptions{})
+		defer tr.End()
+		seen = append(seen, telmoni.TraceFromContext(ctx).TraceID())
 		return strings.ToUpper(question)
 	}
 	if got := handle(context.Background(), "a"); got != "A" {
@@ -321,47 +324,47 @@ func TestAFunctionOpensARunPerCall(t *testing.T) {
 		t.Errorf("handle(b) = %q", got)
 	}
 	h.flush()
-	if runs := withPrefix(h.transport.spans(t), "invoke_agent bot"); len(runs) != 2 {
-		t.Errorf("want two runs, got %d", len(runs))
+	if agents := withPrefix(h.transport.spans(t), "invoke_agent bot"); len(agents) != 2 {
+		t.Errorf("want two traces, got %d", len(agents))
 	}
 	if len(seen) != 2 || seen[0] == seen[1] {
-		t.Errorf("want two distinct run ids, got %v", seen)
+		t.Errorf("want two distinct trace ids, got %v", seen)
 	}
 }
 
-func TestRunsAndStepsCrossGoroutines(t *testing.T) {
+func TestTracesAndStepsCrossGoroutines(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	var threaded string
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		defer run.End()
-		threaded = run.ID()
+		ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		defer tr.End()
+		threaded = tr.TraceID()
 		var inner sync.WaitGroup
 		inner.Add(1)
 		go func() {
 			defer inner.Done()
-			_, step := telmoni.RunFromContext(ctx).Step(ctx, "think")
+			_, step := telmoni.TraceFromContext(ctx).Step(ctx, "think")
 			step.End()
 		}()
 		inner.Wait()
 	}()
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	wg.Wait()
 	h.flush()
 	spans := h.transport.spans(t)
-	if runs := withPrefix(spans, "invoke_agent bot"); len(runs) != 2 {
-		t.Errorf("want two runs, got %d", len(runs))
+	if agents := withPrefix(spans, "invoke_agent bot"); len(agents) != 2 {
+		t.Errorf("want two traces, got %d", len(agents))
 	}
 	step := byName(spans)["think"]
 	if step == nil {
 		t.Fatal("the step from the goroutine was not sent")
 	}
-	if got := attributesOf(t, step)["telmoni.run_id"]; got != threaded {
-		t.Errorf("the step carries run %v, want %s", got, threaded)
+	if got := step["traceId"]; got != threaded {
+		t.Errorf("the step is in trace %v, want %s", got, threaded)
 	}
 }
 
@@ -369,7 +372,7 @@ func TestRunsAndStepsCrossGoroutines(t *testing.T) {
 // say, does nothing, whichever method it is given.
 func TestANilHandleDoesNothing(t *testing.T) {
 	var (
-		run  *telmoni.Run
+		tr   *telmoni.Trace
 		step *telmoni.Step
 		call *telmoni.ModelCall
 		tool *telmoni.ToolCall
@@ -379,7 +382,7 @@ func TestANilHandleDoesNothing(t *testing.T) {
 		Fail(error)
 		FailWith(string)
 		Cancel()
-	}{run, step, call, tool} {
+	}{tr, step, call, tool} {
 		nothing.End()
 		nothing.Fail(errors.New("x"))
 		nothing.FailWith("x")
@@ -387,21 +390,21 @@ func TestANilHandleDoesNothing(t *testing.T) {
 	}
 }
 
-func TestNothingIsSentOutsideARun(t *testing.T) {
+func TestNothingIsSentOutsideATrace(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx := context.Background()
-	none := telmoni.RunFromContext(ctx)
+	none := telmoni.TraceFromContext(ctx)
 	if none != nil {
-		t.Fatal("a run was found outside one")
+		t.Fatal("a trace was found outside one")
 	}
-	if none.ID() != "" || none.Agent() != "" {
-		t.Error("a nil run has an id or an agent")
+	if none.TraceID() != "" || none.Agent() != "" {
+		t.Error("a nil trace has an id or an agent")
 	}
 	stepCtx, step := none.Step(ctx, "alone")
 	step.Fail(errors.New("x"))
 	step.End()
 	if stepCtx != ctx {
-		t.Error("a step outside a run changed the context")
+		t.Error("a step outside a trace changed the context")
 	}
 	_, call := none.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
 	call.Answered(telmoni.Answer{ResponseModel: "m2"})
@@ -410,35 +413,35 @@ func TestNothingIsSentOutsideARun(t *testing.T) {
 	tool.Returned(map[string]int{"a": 1})
 	tool.Cancel()
 	tool.End()
-	// The nil run's own marks and End do nothing either, rather than panic.
+	// The nil trace's own marks and End do nothing either, rather than panic.
 	none.Fail(errors.New("x"))
 	none.FailWith("x")
 	none.Cancel()
 	none.End()
 	h.flush()
 	if sent := len(h.transport.all()) + len(h.transport.allOpenings()); sent != 0 {
-		t.Errorf("sent %d exports outside a run", sent)
+		t.Errorf("sent %d exports outside a trace", sent)
 	}
 }
 
-func TestABlankAgentOpensNoRunAndNeverPanics(t *testing.T) {
+func TestABlankAgentOpensNoTraceAndNeverPanics(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), " ", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), " ", telmoni.TraceOptions{})
 	// Every handle still works, and does nothing.
-	_, step := run.Step(ctx, "plan")
+	_, step := tr.Step(ctx, "plan")
 	step.FailWith("x")
 	step.End()
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
 	call.Answered(telmoni.Answer{ResponseModel: "m2"})
 	call.End()
-	run.Fail(errors.New("x"))
-	run.End()
+	tr.Fail(errors.New("x"))
+	tr.End()
 	h.flush()
 	if sent := len(h.transport.all()) + len(h.transport.allOpenings()); sent != 0 {
-		t.Errorf("a run that did not open sent %d exports", sent)
+		t.Errorf("a trace that did not open sent %d exports", sent)
 	}
-	if run.ID() != "" || telmoni.RunFromContext(ctx) != nil {
-		t.Errorf("a run that did not open has an id %q, or is in its context", run.ID())
+	if tr.TraceID() != "" || telmoni.TraceFromContext(ctx) != nil {
+		t.Errorf("a trace that did not open has an id %q, or is in its context", tr.TraceID())
 	}
 	warnings := h.logs.warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "agent's name") {
@@ -446,40 +449,40 @@ func TestABlankAgentOpensNoRunAndNeverPanics(t *testing.T) {
 	}
 }
 
-// A run sends its first 32 tags by key with one warning, the marks it ends
+// A trace sends its first 32 tags by key with one warning, the marks it ends
 // with kept.
-func TestARunSendsItsFirst32TagsByKeyWithOneWarning(t *testing.T) {
+func TestATraceSendsItsFirst32TagsByKeyWithOneWarning(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, all := h.client.Run(context.Background(), "thirty-two", telmoni.RunOptions{Tags: numberedTags(32)})
+	_, all := h.client.Trace(context.Background(), "thirty-two", telmoni.TraceOptions{Tags: numberedTags(32)})
 	all.End()
 	if warnings := h.logs.warnings(); len(warnings) != 0 {
 		t.Errorf("warnings = %q, want none for 32 tags", warnings)
 	}
-	_, failed := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: numberedTags(130)})
+	_, failed := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{Tags: numberedTags(130)})
 	failed.FailWith("RateLimit")
 	failed.End()
-	_, stopped := h.client.Run(context.Background(), "stopped", telmoni.RunOptions{Tags: numberedTags(130)})
+	_, stopped := h.client.Trace(context.Background(), "stopped", telmoni.TraceOptions{Tags: numberedTags(130)})
 	stopped.Cancel()
 	stopped.End()
 	h.flush()
-	runs := withPrefix(h.transport.spans(t), "invoke_agent ")
-	if len(runs) != 3 {
-		t.Fatalf("want three runs, got %v", names(runs))
+	agents := withPrefix(h.transport.spans(t), "invoke_agent ")
+	if len(agents) != 3 {
+		t.Fatalf("want three traces, got %v", names(agents))
 	}
 	want := slices.Sorted(maps.Keys(numberedTags(32)))
-	for _, span := range runs {
+	for _, span := range agents {
 		attributes := attributesOf(t, span)
 		if got := tagsOf(attributes); !reflect.DeepEqual(got, want) {
 			t.Errorf("%v sent the tags %v\nwant the first 32 by key: %v", span["name"], got, want)
 		}
 		if span["name"] == "invoke_agent bot" && attributes["error.type"] != "RateLimit" {
-			t.Errorf("error.type = %v, want the mark the run ended with", attributes["error.type"])
+			t.Errorf("error.type = %v, want the mark the trace ended with", attributes["error.type"])
 		}
 		if span["name"] == "invoke_agent stopped" && attributes["telmoni.cancelled"] != true {
-			t.Errorf("telmoni.cancelled = %v, want the mark the run ended with", attributes["telmoni.cancelled"])
+			t.Errorf("telmoni.cancelled = %v, want the mark the trace ended with", attributes["telmoni.cancelled"])
 		}
 	}
-	wantWarnings := []string{"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent"}
+	wantWarnings := []string{"telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent"}
 	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
 		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
 	}
@@ -494,18 +497,18 @@ func TestATagIngestDropsIsLeftOffWithOneWarningTakingNoneOfThe32(t *testing.T) {
 	tags[edge] = value
 	maps.Copy(tags, droppedTags())
 	for range 2 {
-		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: tags})
-		run.End()
+		_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{Tags: tags})
+		tr.End()
 	}
-	_, many := h.client.Run(context.Background(), "many", telmoni.RunOptions{Tags: numberedTags(40)})
+	_, many := h.client.Trace(context.Background(), "many", telmoni.TraceOptions{Tags: numberedTags(40)})
 	many.End()
 	h.flush()
-	runs := withPrefix(h.transport.spans(t), "invoke_agent bot")
-	if len(runs) != 2 {
-		t.Fatalf("want two runs, got %v", names(runs))
+	agents := withPrefix(h.transport.spans(t), "invoke_agent bot")
+	if len(agents) != 2 {
+		t.Fatalf("want two traces, got %v", names(agents))
 	}
 	want := append(slices.Sorted(maps.Keys(numberedTags(31))), edge)
-	for _, span := range runs {
+	for _, span := range agents {
 		attributes := attributesOf(t, span)
 		if got := tagsOf(attributes); !reflect.DeepEqual(got, want) {
 			t.Errorf("tags sent: %q\nwant the 32 ingest keeps: %q", got, want)
@@ -516,7 +519,7 @@ func TestATagIngestDropsIsLeftOffWithOneWarningTakingNoneOfThe32(t *testing.T) {
 	}
 	wantWarnings := []string{
 		"telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
-		"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent",
+		"telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent",
 	}
 	if warnings := h.logs.warnings(); !reflect.DeepEqual(warnings, wantWarnings) {
 		t.Errorf("warnings = %q\nwant one for the tags dropped, then one past the 32: %q", warnings, wantWarnings)
@@ -534,10 +537,10 @@ func TestALoggerThatPanicsOnAWarningNeverReachesTheAgentsCall(t *testing.T) {
 	// Two warnings on this call: a tag dropped, and the tags past the 32.
 	tags := numberedTags(40)
 	tags[""] = "v"
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{Tags: tags})
-	_, step := run.Step(ctx, "s")
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{Tags: tags})
+	_, step := tr.Step(ctx, "s")
 	step.End()
-	run.End()
+	tr.End()
 	h.flush()
 	want := []string{"invoke_agent bot", "s"}
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {
@@ -545,15 +548,15 @@ func TestALoggerThatPanicsOnAWarningNeverReachesTheAgentsCall(t *testing.T) {
 	}
 }
 
-func TestARunsOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
+func TestATracesOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{InputMessages: []map[string]string{{"role": "user", "content": "hi"}}})
-	run.Answered(telmoni.RunAnswer{OutputMessages: []map[string]string{{"role": "assistant", "content": "hello"}}})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{InputMessages: []map[string]string{{"role": "user", "content": "hi"}}})
+	tr.Answered(telmoni.TraceReply{OutputMessages: []map[string]string{{"role": "assistant", "content": "hello"}}})
+	tr.End()
 	h.flush()
 	sent := attributesOf(t, byName(h.transport.spans(t))["invoke_agent bot"])
 	if sent["gen_ai.input.messages"] != `[{"content":"hi","role":"user"}]` {
@@ -564,36 +567,36 @@ func TestARunsOwnMessagesLeaveOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	}
 }
 
-func TestARunsOwnMessagesStayHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
+func TestATracesOwnMessagesStayHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
 	if mode := h.client.ContentMode(); mode != "on" {
 		t.Fatalf("the content mode is %q, want on", mode)
 	}
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{InputMessages: "never asked"})
-	run.Answered(telmoni.RunAnswer{OutputMessages: "never answered"})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{InputMessages: "never asked"})
+	tr.Answered(telmoni.TraceReply{OutputMessages: "never answered"})
+	tr.End()
 	h.flush()
 	if text := h.transport.text(); strings.Contains(text, "never asked") || strings.Contains(text, "never answered") {
-		t.Error("a run's content left without CaptureContent")
+		t.Error("a trace's content left without CaptureContent")
 	}
 }
 
 func TestAFailureLeavesWithItsMessageUnderBothLocks(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, step := run.Step(ctx, "plan")
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, step := tr.Step(ctx, "plan")
 	step.Fail(&planningFailed{detail: "bad plan"})
 	step.End()
-	run.FailWith("RateLimit")
-	run.End()
+	tr.FailWith("RateLimit")
+	tr.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
 	plan := spans["plan"]
@@ -611,24 +614,24 @@ func TestAFailureLeavesWithItsMessageUnderBothLocks(t *testing.T) {
 		t.Errorf("event = %v", event)
 	}
 	// A type alone carries no message to record.
-	if ran := spans["invoke_agent bot"]; !reflect.DeepEqual(ran["status"], map[string]any{"code": 2.0}) || ran["events"] != nil {
-		t.Errorf("a type alone sent %v", ran)
+	if agent := spans["invoke_agent bot"]; !reflect.DeepEqual(agent["status"], map[string]any{"code": 2.0}) || agent["events"] != nil {
+		t.Errorf("a type alone sent %v", agent)
 	}
 }
 
 func TestAFailuresMessageStaysHomeWithoutCaptureContent(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.Fail(&planningFailed{detail: "bad plan"})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.Fail(&planningFailed{detail: "bad plan"})
+	tr.End()
 	h.flush()
-	ran := byName(h.transport.spans(t))["invoke_agent bot"]
-	if !reflect.DeepEqual(ran["status"], map[string]any{"code": 2.0}) || ran["events"] != nil {
-		t.Errorf("sent %v", ran)
+	agent := byName(h.transport.spans(t))["invoke_agent bot"]
+	if !reflect.DeepEqual(agent["status"], map[string]any{"code": 2.0}) || agent["events"] != nil {
+		t.Errorf("sent %v", agent)
 	}
 	if strings.Contains(h.transport.text(), "bad plan") {
 		t.Error("a failure's message left without CaptureContent")
@@ -639,12 +642,12 @@ func TestAnApplicationsEventLeavesOnlyUnderBothLocks(t *testing.T) {
 	for _, capture := range []bool{true, false} {
 		on := contentOn()
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: capture}, newFakeTransport(t, on, on))
-		_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+		_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 		warm.End()
 		h.flush()
-		ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+		ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 		trace.SpanFromContext(ctx).AddEvent("cache miss")
-		run.End()
+		tr.End()
 		h.flush()
 		_, sent := byName(h.transport.spans(t))["invoke_agent bot"]["events"]
 		if sent != capture || strings.Contains(h.transport.text(), "cache miss") != capture {
@@ -653,22 +656,22 @@ func TestAnApplicationsEventLeavesOnlyUnderBothLocks(t *testing.T) {
 	}
 }
 
-func TestARunsAnswerAfterItEndedIsNotSentWithOneWarning(t *testing.T) {
+func TestATracesAnswerAfterItEndedIsNotSentWithOneWarning(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	for range 2 {
-		run.Answered(telmoni.RunAnswer{OutputMessages: "too late"})
+		tr.Answered(telmoni.TraceReply{OutputMessages: "too late"})
 	}
 	h.flush()
 	if strings.Contains(h.transport.text(), "too late") {
-		t.Error("an answer given after the run ended was sent")
+		t.Error("an answer given after the trace ended was sent")
 	}
-	want := []string{"telmoni: a run must be answered before it ends; an answer given after is not sent"}
+	want := []string{"telmoni: a trace must be answered before it ends; an answer given after is not sent"}
 	if got := h.logs.warnings(); !slices.Equal(got, want) {
 		t.Errorf("warned %q", got)
 	}

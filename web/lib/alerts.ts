@@ -38,7 +38,7 @@ import {
 } from "@/lib/types/enums";
 
 /** The kinds of span an alert reads: every kind but the bare span. */
-export const ALERT_KINDS = [SpanKind.Run, SpanKind.Step, SpanKind.ModelCall, SpanKind.ToolCall, SpanKind.Retrieval] as const;
+export const ALERT_KINDS = [SpanKind.Agent, SpanKind.Step, SpanKind.ModelCall, SpanKind.ToolCall, SpanKind.Retrieval] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 export function isAlertKind(kind: SpanKind): kind is AlertKind {
@@ -46,7 +46,7 @@ export function isAlertKind(kind: SpanKind): kind is AlertKind {
 }
 
 export const KIND_PLURAL: Record<AlertKind, string> = {
-  [SpanKind.Run]: "runs",
+  [SpanKind.Agent]: "traces",
   [SpanKind.Step]: "steps",
   [SpanKind.ModelCall]: "model calls",
   [SpanKind.ToolCall]: "tool calls",
@@ -66,27 +66,27 @@ export const LINKS_MAX = 20;
  *  resolved ones. */
 export const INCIDENTS_MAX = 200;
 
-/** What an alert of `kind` measures: tokens on model calls alone, and on runs
- *  alone what is read run by run, or from scores. */
+/** What an alert of `kind` measures: tokens on model calls alone, and on
+ *  traces alone what is read trace by trace, or from scores. */
 export function measuresFor(kind: AlertKind): RuleMeasure[] {
   return [
     RuleMeasure.Count,
     RuleMeasure.Failures,
     RuleMeasure.Duration,
     ...(kind === SpanKind.ModelCall ? [RuleMeasure.Tokens] : []),
-    ...(kind === SpanKind.Run
+    ...(kind === SpanKind.Agent
       ? [RuleMeasure.Cost, RuleMeasure.Steps, RuleMeasure.Repeats, RuleMeasure.Stalled, RuleMeasure.Score]
       : []),
   ];
 }
 
-/** What a measure read run by run counts, as the form says it under the measure. */
+/** What a measure read trace by trace counts, as the form says it under the measure. */
 export const MEASURE_HINT: Partial<Record<RuleMeasure, string>> = {
-  [RuleMeasure.Steps]: "Each run's steps, a run still going counted as far as it has gone.",
+  [RuleMeasure.Steps]: "Each trace's steps, a trace still going counted as far as it has gone.",
   [RuleMeasure.Repeats]:
-    "The most times in a row each run called one tool, whatever it called between them: a loop.",
+    "The most times in a row each trace called one tool, whatever it called between them: a loop.",
   [RuleMeasure.Stalled]:
-    "Runs whose spans have landed and whose own has not, quiet longer than the window: a stall, counted for one window more.",
+    "Traces whose spans have landed and whose agent's own has not, quiet longer than the window: a stall, counted for one window more.",
 };
 
 /** The windows an alert on `measure` reads: a stall is quiet past a window of
@@ -175,20 +175,20 @@ export function aggregationLabel(measure: RuleMeasure, aggregation: RuleAggregat
             : aggregation;
     case RuleMeasure.Cost:
       return aggregation === RuleAggregation.Max
-        ? "Most a run spent (a cost cap)"
+        ? "Most a trace spent (a cost cap)"
         : aggregation === RuleAggregation.Avg
-          ? "Average a run spent"
-          : "What the runs spent";
+          ? "Average a trace spent"
+          : "What the traces spent";
     case RuleMeasure.Steps:
       return aggregation === RuleAggregation.Max
-        ? "Most steps a run took"
+        ? "Most steps a trace took"
         : aggregation === RuleAggregation.Avg
           ? "Average"
           : aggregation;
     case RuleMeasure.Repeats:
-      return "Most times a run called one tool in a row";
+      return "Most times a trace called one tool in a row";
     case RuleMeasure.Stalled:
-      return "How many runs";
+      return "How many traces";
     default:
       return aggregation === RuleAggregation.Avg
         ? "Average"
@@ -214,15 +214,15 @@ type Metric = Pick<Alert, "kind" | "measure" | "aggregation" | "window"> &
   Partial<Pick<Alert, "score_name" | "baseline" | "objective" | "filters">>;
 
 /** What an objective promises, as its notices say it: "99.9% of
- *  support-bot's runs succeed over 30 days". */
+ *  support-bot's traces succeed over 30 days". */
 export function promiseWords(objective: Objective, agent: string): string {
   const share = Number((objective.target * 100).toFixed(2));
   const how = objective.latency_ms === null ? "succeed" : `end inside ${NUMBER.format(objective.latency_ms)} ms`;
-  return `${share}% of ${agent}'s runs ${how} over ${objective.days} days`;
+  return `${share}% of ${agent}'s traces ${how} over ${objective.days} days`;
 }
 
 /** An alert's metric in its notices' own words: "The p95 duration of model
- *  calls over the last hour", "The most a run spent over the last day", and
+ *  calls over the last hour", "The most a trace spent over the last day", and
  *  against the window before, "…, against the day before". */
 export function metricWords(alert: Metric): string {
   const what = measuredWords(alert);
@@ -249,24 +249,24 @@ function measuredWords(alert: Metric): string {
   if (alert.measure === RuleMeasure.Cost) {
     const spent =
       alert.aggregation === RuleAggregation.Max
-        ? "The most a run spent"
+        ? "The most a trace spent"
         : alert.aggregation === RuleAggregation.Avg
-          ? "The average a run spent"
-          : "What the runs spent";
+          ? "The average a trace spent"
+          : "What the traces spent";
     return `${spent} ${over}`;
   }
   if (alert.measure === RuleMeasure.Steps) {
     const steps =
       alert.aggregation === RuleAggregation.Max
-        ? "The most steps a run took"
+        ? "The most steps a trace took"
         : alert.aggregation === RuleAggregation.Avg
-          ? "The average steps a run took"
-          : `The ${alert.aggregation} of the steps a run took`;
+          ? "The average steps a trace took"
+          : `The ${alert.aggregation} of the steps a trace took`;
     return `${steps} ${over}`;
   }
-  if (alert.measure === RuleMeasure.Repeats) return `The most times a run called one tool in a row ${over}`;
+  if (alert.measure === RuleMeasure.Repeats) return `The most times a trace called one tool in a row ${over}`;
   if (alert.measure === RuleMeasure.Stalled) {
-    return `The count of runs left open and quiet for over ${alert.window === RuleWindow.Hour ? "an" : "a"} ${alert.window}`;
+    return `The count of traces left open and quiet for over ${alert.window === RuleWindow.Hour ? "an" : "a"} ${alert.window}`;
   }
   const folded = (() => {
     switch (alert.measure) {
@@ -434,7 +434,7 @@ export const FILTER_LABEL: Record<FilterField, string> = {
 };
 
 /** The filters an alert's spans take: a model call's model and provider, a
- *  tool call's tool, a retrieval's source, and a run's cost by its calls'
+ *  tool call's tool, a retrieval's source, and a trace's cost by its calls'
  *  model and provider and its tags (`key:value`), which no hourly total keeps. */
 export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterField[] {
   // A score keeps no agent, model or release of its own.
@@ -451,8 +451,8 @@ export function filterFieldsFor(kind: AlertKind, measure: RuleMeasure): FilterFi
   return ["agent", ...own, "environment", "release", ...tag];
 }
 
-/** Whether an alert filters by status: a run's cost, steps, repeats and
- *  stalls do not, since they are read as its spans land, before the run's
+/** Whether an alert filters by status: a trace's cost, steps, repeats and
+ *  stalls do not, since they are read as its spans land, before the agent's
  *  own status is known, nor does a score, which takes no filter. */
 export function filtersStatus(measure: RuleMeasure): boolean {
   switch (measure) {
@@ -692,11 +692,11 @@ const NO_FILTERS: Record<FilterField, string> = {
   tag: "",
 };
 
-/** A new alert's form: the share of runs that failed over the last hour,
+/** A new alert's form: the share of traces that failed over the last hour,
  *  its thresholds the person's to type. */
 export const NEW_ALERT: AlertDraft = {
   name: "",
-  kind: SpanKind.Run,
+  kind: SpanKind.Agent,
   measure: RuleMeasure.Failures,
   aggregation: RuleAggregation.Avg,
   window: RuleWindow.Hour,
@@ -754,7 +754,7 @@ export function suggestionFor(draft: AlertDraft, history: History | null): Sugge
         }
         return hourly ? { percentiles: of(SpanKind.ModelCall)?.tokens_hourly, what: "an hour's tokens" } : null;
       case RuleMeasure.Cost:
-        // A run's spend is its model calls'.
+        // A trace's spend is its model calls'.
         return hourly ? { percentiles: of(SpanKind.ModelCall)?.spend_hourly, what: "an hour's spend" } : null;
       case RuleMeasure.Failures:
         return draft.aggregation === RuleAggregation.Avg && draft.window === RuleWindow.Hour
@@ -783,12 +783,12 @@ export function suggestionFor(draft: AlertDraft, history: History | null): Sugge
   return { who: agent ?? "every agent", what: read.what, days: historyDays(history), levels };
 }
 
-/** The starter alerts a project's first run makes, by measure, named as the
+/** The starter alerts a project's first trace makes, by measure, named as the
  *  server names them (`crates/telemetry/src/starters.rs`). */
 export const STARTER_NAME: Partial<Record<RuleMeasure, string>> = {
-  [RuleMeasure.Failures]: "Failing runs",
-  [RuleMeasure.Repeats]: "Looping runs",
-  [RuleMeasure.Stalled]: "Stalled runs",
+  [RuleMeasure.Failures]: "Failing traces",
+  [RuleMeasure.Repeats]: "Looping traces",
+  [RuleMeasure.Stalled]: "Stalled traces",
 };
 
 /** Starters by name in a sentence: `A`, `A and B`, `A, B and C`. */
@@ -810,7 +810,7 @@ export function draftOf(alert: Alert): AlertDraft {
   for (const field of FILTER_FIELDS) filters[field] = joinValues(alert.filters[field] ?? []);
   return {
     name: alert.name,
-    kind: isAlertKind(alert.kind) ? alert.kind : SpanKind.Run,
+    kind: isAlertKind(alert.kind) ? alert.kind : SpanKind.Agent,
     measure: alert.measure,
     aggregation: alert.aggregation,
     window: alert.window,
@@ -904,7 +904,7 @@ export function inputOf(
     return fail("A month so far has no window of its length before it: read the hour, day or week.");
   }
   if (!alertWindowsFor(draft.measure).includes(draft.window)) {
-    return fail("A stall is a run quiet past the window: the last hour, day or week.");
+    return fail("A stall is a trace quiet past the window: the last hour, day or week.");
   }
   const unit = unitOf(draft.measure, draft.aggregation, draft.baseline);
   const alert = parsed(draft.alertThreshold, unit);
@@ -1081,7 +1081,7 @@ export function beforeWords(openedAt: string, changedAt: string): string {
 }
 
 /** Whether an alert's incidents name each change's agent: it reads no single
- *  agent's runs, so a change is told from another's by whose it is. */
+ *  agent's traces, so a change is told from another's by whose it is. */
 export function changesNameAgent(alert: Pick<Alert, "filters">): boolean {
   return alert.filters.agent?.length !== 1;
 }

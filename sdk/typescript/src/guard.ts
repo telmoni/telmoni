@@ -1,7 +1,7 @@
 /**
- * The guard: a run's opt-in caps on its steps and its spend, counted in this
+ * The guard: a trace's opt-in caps on its steps and its spend, counted in this
  * process with no call to Telmoni, thrown at the step, model call, tool call
- * or retrieval the run would open past one.
+ * or retrieval the trace would open past one.
  *
  * A call's cost is counted as the server counts it: as reported, else its
  * tokens at its price in the table this release carries (`model_prices.json`,
@@ -12,7 +12,7 @@
 
 import { CapExceededError } from './errors.js';
 import file from './model_prices.json';
-import type { Price, RunOptions } from './types.js';
+import type { Price, TraceOptions } from './types.js';
 
 /** A call's counts as sent, one left off counting 0. */
 export interface Tokens {
@@ -130,7 +130,7 @@ export function checkedPrice(given: unknown): Price {
   return Object.freeze({ ...price }) as Price;
 }
 
-/** One run's caps, and what it has used of them. */
+/** One trace's caps, and what it has used of them. */
 export class Guard {
   readonly #maxSteps: number | undefined;
   readonly #maxSpend: number | undefined;
@@ -142,8 +142,8 @@ export class Guard {
     this.#maxSpend = maxSpend;
   }
 
-  /** The run's options' caps, or why they are none: whole steps above 0, and a spend above 0. */
-  static of(options: RunOptions): Guard {
+  /** The trace's options' caps, or why they are none: whole steps above 0, and a spend above 0. */
+  static of(options: TraceOptions): Guard {
     const steps: unknown = options.maxSteps ?? undefined;
     if (steps !== undefined && !(typeof steps === 'number' && Number.isInteger(steps) && steps >= 1)) {
       throw new RangeError('maxSteps must be a whole number above 0');
@@ -159,12 +159,12 @@ export class Guard {
     return this.#spent;
   }
 
-  /** Whether the run has a spend cap, which a call priced at nothing never reaches. */
+  /** Whether the trace has a spend cap, which a call priced at nothing never reaches. */
   get capped(): boolean {
     return this.#maxSpend !== undefined;
   }
 
-  /** Counts a step opening, or throws where the run reached a cap: its spend for whatever opens, its steps for a step. */
+  /** Counts a step opening, or throws where the trace reached a cap: its spend for whatever opens, its steps for a step. */
   opens(step: boolean): void {
     if (this.#maxSpend !== undefined && this.#spent >= this.#maxSpend) {
       throw new CapExceededError('spend', this.#maxSpend, this.#spent);

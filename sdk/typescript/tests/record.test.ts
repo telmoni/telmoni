@@ -1,5 +1,5 @@
 /**
- * A run recorded after it ended: `recordRun` and `sdk/fixtures/recorded.json`.
+ * A trace recorded after it ended: `recordTrace` and `sdk/fixtures/recorded.json`.
  */
 
 import { SamplingDecision, type Sampler, type SamplingResult } from '@opentelemetry/sdk-trace-base';
@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { spanIdAt } from '../src/ids';
 import { QueueFullError, ShutdownError } from '../src/index';
-import type { CallRecord, ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage } from '../src/index';
+import type { CallRecord, ModelCallRecord, StepRecord, ToolCallRecord, TraceRecord, Usage } from '../src/index';
 import {
   type Answer,
   type ExportBody,
@@ -50,7 +50,7 @@ interface ItemSpec {
 interface RecordedFixture {
   scenario: {
     record: Outcome & {
-      run_id: string;
+      trace_id: string;
       agent: string;
       user_id?: string;
       session_id?: string;
@@ -118,9 +118,9 @@ function itemFrom(spec: ItemSpec): StepRecord | CallRecord {
   return record;
 }
 
-function recordFrom(spec: RecordedFixture['scenario']['record']): RunRecord {
-  const record: RunRecord = {
-    runId: spec.run_id,
+function recordFrom(spec: RecordedFixture['scenario']['record']): TraceRecord {
+  const record: TraceRecord = {
+    traceId: spec.trace_id,
     agent: spec.agent,
     start: new Date(spec.start),
     end: new Date(spec.end),
@@ -133,7 +133,7 @@ function recordFrom(spec: RecordedFixture['scenario']['record']): RunRecord {
   return record;
 }
 
-function theRecord(): RunRecord {
+function theRecord(): TraceRecord {
   return recordFrom(loadFixture<RecordedFixture>('recorded.json').scenario.record);
 }
 
@@ -156,10 +156,6 @@ class Hooked implements Sampler {
 /** Its items as an iterator, which a first read spends. */
 function* once<T>(...items: T[]): Generator<T> {
   yield* items;
-}
-
-function traceOf(record: RunRecord): string {
-  return record.runId.replaceAll('-', '');
 }
 
 function tracesIn(body: string): Set<string> {
@@ -189,11 +185,11 @@ function normalize(body: ExportBody): ExportBody {
   return out;
 }
 
-describe('a recorded run', () => {
+describe('a recorded trace', () => {
   it('is refused once the client is shut down, never taken as sent', async () => {
     const h = harness();
     await h.telmoni.shutdown();
-    expect(() => h.telmoni.recordRun(theRecord())).toThrow(ShutdownError);
+    expect(() => h.telmoni.recordTrace(theRecord())).toThrow(ShutdownError);
     expect(h.transport.requests).toHaveLength(0);
   });
 
@@ -202,17 +198,17 @@ describe('a recorded run', () => {
     const h = harness({}, { processor: { maxQueueSize: 4, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
-    const record: RunRecord = { ...golden, inside: [call, call] };
+    const record: TraceRecord = { ...golden, inside: [call, call] };
     try {
-      // Nothing yields inside the run, so its two steps hold two of the four slots.
-      h.telmoni.run('bot', (run) => {
-        run.step('s0', () => {});
-        run.step('s1', () => {});
-        expect(() => h.telmoni.recordRun(record)).toThrow(QueueFullError);
-        expect(() => h.telmoni.recordRun(record)).toThrow('3 spans; flush or wait, then record it again');
+      // Nothing yields inside the trace, so its two steps hold two of the four slots.
+      h.telmoni.trace('bot', (trace) => {
+        trace.step('s0', () => {});
+        trace.step('s1', () => {});
+        expect(() => h.telmoni.recordTrace(record)).toThrow(QueueFullError);
+        expect(() => h.telmoni.recordTrace(record)).toThrow('3 spans; flush or wait, then record it again');
       });
       expect(await h.telmoni.flush()).toBe(true);
-      h.telmoni.recordRun(record);
+      h.telmoni.recordTrace(record);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -228,7 +224,7 @@ describe('a recorded run', () => {
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
-      expect(() => h.telmoni.recordRun({ ...golden, inside: [call, call] })).toThrow(
+      expect(() => h.telmoni.recordTrace({ ...golden, inside: [call, call] })).toThrow(
         new QueueFullError(3, 2),
       );
       expect(new QueueFullError(3, 2).message).toBe(
@@ -244,7 +240,7 @@ describe('a recorded run', () => {
     const fixture = loadFixture<RecordedFixture>('recorded.json');
     const h = harness();
     try {
-      h.telmoni.recordRun(recordFrom(fixture.scenario.record));
+      h.telmoni.recordTrace(recordFrom(fixture.scenario.record));
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -268,7 +264,7 @@ describe('a recorded run', () => {
     for (let n = 0; n < 20; n++) {
       const h = harness();
       try {
-        h.telmoni.recordRun(record);
+        h.telmoni.recordTrace(record);
         expect(await h.telmoni.flush()).toBe(true);
       } finally {
         await h.telmoni.shutdown();
@@ -281,27 +277,27 @@ describe('a recorded run', () => {
 
   it('travels in exports of its own, so it is the same bytes whatever is queued beside it', async () => {
     const record = theRecord();
-    const beside: RunRecord = { ...record, runId: '0191a3b4-2222-4aaa-8bbb-000000000002' };
+    const beside: TraceRecord = { ...record, traceId: '0191a3b422224aaa8bbb000000000002' };
     const h = harness();
     let sent = 0;
     try {
-      h.telmoni.run('live', (run) => {
-        run.step('live step', () => {});
-        h.telmoni.recordRun(record);
-        h.telmoni.recordRun(beside);
+      h.telmoni.trace('live', (trace) => {
+        trace.step('live step', () => {});
+        h.telmoni.recordTrace(record);
+        h.telmoni.recordTrace(beside);
       });
       expect(await h.telmoni.flush()).toBe(true);
       sent = h.transport.requests.length;
-      h.telmoni.recordRun(record);
+      h.telmoni.recordTrace(record);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
     const bodies = h.transport.requests.map((request) => request.body);
     for (const body of bodies) expect(tracesIn(body).size).toBe(1);
-    const alone = bodies.slice(0, sent).filter((body) => tracesIn(body).has(traceOf(record)));
+    const alone = bodies.slice(0, sent).filter((body) => tracesIn(body).has(record.traceId));
     expect(alone).toEqual(bodies.slice(sent));
-    expect(bodies.slice(0, sent).some((body) => tracesIn(body).has(traceOf(beside)))).toBe(true);
+    expect(bodies.slice(0, sent).some((body) => tracesIn(body).has(beside.traceId))).toBe(true);
   });
 
   it('larger than a batch is cut from its own start', async () => {
@@ -309,18 +305,18 @@ describe('a recorded run', () => {
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
-      await h.telmoni.run('bot', async (run) => {
-        expect(await h.transport.waitFor(1), "the run's opening, at once").toBe(true);
-        run.step('s0', () => {});
-        run.step('s1', () => {});
-        h.telmoni.recordRun({ ...golden, inside: [call, call, call] });
+      await h.telmoni.trace('bot', async (trace) => {
+        expect(await h.transport.waitFor(1), "the trace's opening, at once").toBe(true);
+        trace.step('s0', () => {});
+        trace.step('s1', () => {});
+        h.telmoni.recordTrace({ ...golden, inside: [call, call, call] });
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
     expect(h.transport.bodies().map((body) => body.resourceSpans[0]!.scopeSpans[0]!.spans.map((s) => s.name))).toEqual([
-      ['telmoni.run.start'],
+      ['telmoni.trace.start'],
       ['s0', 's1'],
       ['execute_tool t', 'execute_tool t', 'execute_tool t'],
       ['invoke_agent claude-code'],
@@ -332,9 +328,9 @@ describe('a recorded run', () => {
     const sampler = new Hooked();
     const h = harness({ sampler });
     try {
-      h.telmoni.run('live', (run) => {
-        sampler.hook = () => run.step('live step', () => {});
-        h.telmoni.recordRun(theRecord());
+      h.telmoni.trace('live', (trace) => {
+        sampler.hook = () => trace.step('live step', () => {});
+        h.telmoni.recordTrace(theRecord());
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -351,14 +347,14 @@ describe('a recorded run', () => {
     const golden = theRecord();
     const call: ToolCallRecord = { type: 'tool_call', name: 't', start: golden.start, end: golden.start };
     try {
-      await h.telmoni.run('live', async (run) => {
-        expect(await h.transport.waitFor(1), "the run's opening, out of the queue").toBe(true);
+      await h.telmoni.trace('live', async (trace) => {
+        expect(await h.transport.waitFor(1), "the trace's opening, out of the queue").toBe(true);
         // Room for one step beside the record's three spans.
         sampler.hook = () => {
-          run.step('s0', () => {});
-          run.step('s1', () => {});
+          trace.step('s0', () => {});
+          trace.step('s1', () => {});
         };
-        h.telmoni.recordRun({ ...golden, inside: [call, call] });
+        h.telmoni.recordTrace({ ...golden, inside: [call, call] });
         expect(await h.telmoni.flush()).toBe(true);
       });
       expect(await h.telmoni.flush()).toBe(true);
@@ -383,9 +379,9 @@ describe('a recorded run', () => {
   it('goes at once', async () => {
     const h = harness({}, { processor: { scheduleDelaySeconds: 60 } });
     try {
-      await h.telmoni.run('live', async (run) => {
-        run.step('live step', () => {});
-        h.telmoni.recordRun(theRecord());
+      await h.telmoni.trace('live', async (trace) => {
+        trace.step('live step', () => {});
+        h.telmoni.recordTrace(theRecord());
         expect(await h.transport.waitFor(2), 'the record waited for the delay').toBe(true);
       });
     } finally {
@@ -412,16 +408,16 @@ describe('a recorded run', () => {
       },
     });
     try {
-      expect(() => h.telmoni.recordRun({ ...golden, inside: [call] })).toThrow('the name could not be read');
+      expect(() => h.telmoni.recordTrace({ ...golden, inside: [call] })).toThrow('the name could not be read');
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(asked, 'the run had opened').toBe(1);
+    expect(asked, 'the trace had opened').toBe(1);
     expect(h.transport.requests).toEqual([]);
   });
 
-  it('is whole beside a run its warning hook records', async () => {
+  it('is whole beside a trace its warning hook records', async () => {
     // The warning is given before the record is built.
     const golden = theRecord();
     const call: ModelCallRecord = {
@@ -431,18 +427,18 @@ describe('a recorded run', () => {
       end: golden.start,
       usage: { inputTokens: Number.NaN },
     };
-    const outer: RunRecord = { ...golden, inside: [call] };
-    const inner: RunRecord = { ...golden, runId: '0191a3b4-3333-4aaa-8bbb-000000000003', inside: [] };
-    const h: Harness = harness({}, { warn: () => h.telmoni.recordRun(inner) });
+    const outer: TraceRecord = { ...golden, inside: [call] };
+    const inner: TraceRecord = { ...golden, traceId: '0191a3b433334aaa8bbb000000000003', inside: [] };
+    const h: Harness = harness({}, { warn: () => h.telmoni.recordTrace(inner) });
     try {
-      h.telmoni.recordRun(outer);
+      h.telmoni.recordTrace(outer);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
     const traces = h.transport.requests.map((request) => tracesIn(request.body));
     for (const each of traces) expect(each.size).toBe(1);
-    expect(traces.map((each) => [...each][0]).sort()).toEqual([traceOf(outer), traceOf(inner)].sort());
+    expect(traces.map((each) => [...each][0]).sort()).toEqual([outer.traceId, inner.traceId].sort());
   });
 
   it('reads milliseconds as the epoch, however early, and a Date the same', async () => {
@@ -451,65 +447,80 @@ describe('a recorded run', () => {
     try {
       // Smaller than performance.now(): read as a performance reading by
       // OpenTelemetry's own conversion.
-      asNumbers.telmoni.recordRun({ runId: theRecord().runId, agent: 'bot', start: 1000, end: 2500 });
-      asDates.telmoni.recordRun({ runId: theRecord().runId, agent: 'bot', start: new Date(1000), end: new Date(2500) });
+      asNumbers.telmoni.recordTrace({ traceId: theRecord().traceId, agent: 'bot', start: 1000, end: 2500 });
+      asDates.telmoni.recordTrace({ traceId: theRecord().traceId, agent: 'bot', start: new Date(1000), end: new Date(2500) });
       expect(await asNumbers.telmoni.flush()).toBe(true);
       expect(await asDates.telmoni.flush()).toBe(true);
     } finally {
       await asNumbers.telmoni.shutdown();
       await asDates.telmoni.shutdown();
     }
-    const run = asNumbers.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
-    expect([run.startTimeUnixNano, run.endTimeUnixNano]).toEqual(['1000000000', '2500000000']);
+    const agent = asNumbers.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
+    expect([agent.startTimeUnixNano, agent.endTimeUnixNano]).toEqual(['1000000000', '2500000000']);
     expect(asNumbers.transport.requests.map((r) => r.body)).toEqual(asDates.transport.requests.map((r) => r.body));
   });
 
   it('sends one ending at the last millisecond ingest reads, in July 2554', async () => {
     const h = harness();
     try {
-      h.telmoni.recordRun({ runId: theRecord().runId, agent: 'bot', start: 1000, end: 18_446_744_073_709 });
+      h.telmoni.recordTrace({ traceId: theRecord().traceId, agent: 'bot', start: 1000, end: 18_446_744_073_709 });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    const run = h.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
-    expect(run.endTimeUnixNano).toBe('18446744073709000000');
+    const agent = h.transport.spans().find((span) => span.name === 'invoke_agent bot')!;
+    expect(agent.endTimeUnixNano).toBe('18446744073709000000');
   });
 
-  it('takes a trace of its own and leaves the live run where it was', async () => {
+  it('goes under the id it gives, linked to nothing, and leaves the live trace where it was', async () => {
     const h = harness();
     const record = theRecord();
     try {
-      h.telmoni.run('live', (run) => {
-        h.telmoni.recordRun(record);
-        run.step('after', () => undefined);
+      h.telmoni.trace('live', (trace) => {
+        h.telmoni.recordTrace(record);
+        trace.step('after', () => undefined);
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
     const spans = h.transport.spans();
-    const recorded = spans.filter((span) => attributesOf(span)['telmoni.run_id'] === record.runId);
-    expect(new Set(recorded.map((span) => span.traceId))).toEqual(new Set([record.runId.replaceAll('-', '')]));
-    expect(recorded.find((span) => span.name === 'invoke_agent claude-code')!.parentSpanId).toBeUndefined();
+    const recorded = spans.filter((span) => span.traceId === record.traceId);
+    expect(recorded.map((span) => span.name)).toContain('invoke_agent claude-code');
+    const root = recorded.find((span) => span.name === 'invoke_agent claude-code')!;
+    expect(root.parentSpanId).toBeUndefined();
+    expect(root.links).toBeUndefined();
     const live = spans.find((span) => span.name === 'invoke_agent live')!;
     const after = spans.find((span) => span.name === 'after')!;
+    expect(live.traceId).not.toBe(record.traceId);
     expect(after.parentSpanId).toBe(live.spanId);
     expect(after.traceId).toBe(live.traceId);
   });
 
-  it('marks a failed run on its own span', async () => {
+  it('sends a trace id given in capitals lowercase, leading zeros kept', async () => {
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...theRecord(), errorType: 'RateLimitError', cancelled: false, inside: [] });
+      h.telmoni.recordTrace({ ...theRecord(), traceId: '0000A3B47C2E7D3F8E4A5B6C7D8E9F01', inside: [] });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
-    expect(run.status).toEqual({ code: 2 });
-    expect(attributesOf(run)['error.type']).toBe('RateLimitError');
-    expect(attributesOf(run)['telmoni.cancelled']).toBeUndefined();
+    const agent = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    expect(agent.traceId).toBe('0000a3b47c2e7d3f8e4a5b6c7d8e9f01');
+  });
+
+  it("marks a failed trace on the agent's span", async () => {
+    const h = harness();
+    try {
+      h.telmoni.recordTrace({ ...theRecord(), errorType: 'RateLimitError', cancelled: false, inside: [] });
+      expect(await h.telmoni.flush()).toBe(true);
+    } finally {
+      await h.telmoni.shutdown();
+    }
+    const agent = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    expect(agent.status).toEqual({ code: 2 });
+    expect(attributesOf(agent)['error.type']).toBe('RateLimitError');
+    expect(attributesOf(agent)['telmoni.cancelled']).toBeUndefined();
   });
 
   it("sends its content only when asked and the project allows, and a call's reasoning effort in every mode", async () => {
@@ -518,9 +529,9 @@ describe('a recorded run', () => {
     const sendWith = async (captureContent: boolean, answers: Answer[]): Promise<Record<string, Record<string, unknown>>> => {
       const h = harness({ captureContent }, {}, answers);
       try {
-        h.telmoni.run('warm', () => {});
+        h.telmoni.trace('warm', () => {});
         expect(await h.telmoni.flush()).toBe(true);
-        h.telmoni.recordRun({
+        h.telmoni.recordTrace({
           ...theRecord(),
           inputMessages: ['asked'],
           outputMessages: { said: 'answered' },
@@ -590,7 +601,7 @@ describe('a recorded run', () => {
     const call = (name: string): ToolCallRecord => ({ type: 'tool_call', name, start: at, end: at });
     const h = harness();
     try {
-      h.telmoni.recordRun({
+      h.telmoni.recordTrace({
         ...record,
         agent: 'bot',
         inside: [
@@ -624,7 +635,7 @@ describe('a recorded run', () => {
       'invoke_agent bot',
     ]);
     const places = ['invoke_agent bot', 'outer', 'execute_tool a', 'middle', 'inner', 'execute_tool b', 'execute_tool c', 'execute_tool d'];
-    const idOf = (name: string): string => spanIdAt(traceOf(record), places.indexOf(name));
+    const idOf = (name: string): string => spanIdAt(record.traceId, places.indexOf(name));
     const parents: Record<string, string> = {
       outer: 'invoke_agent bot',
       'execute_tool a': 'outer',
@@ -647,20 +658,21 @@ describe('a recorded run', () => {
   /** `depth` steps, each inside the one before. */
   const nested = (depth: number): StepRecord =>
     depth === 1 ? step : { ...step, name: `s${depth}`, calls: [nested(depth - 1)] };
-  it.each<[string, Partial<RunRecord> | ((record: RunRecord) => RunRecord), ErrorConstructor, RegExp]>([
+  it.each<[string, Partial<TraceRecord> | ((record: TraceRecord) => TraceRecord), ErrorConstructor, RegExp]>([
     ['a blank agent', { agent: ' ' }, TypeError, /agent's name/],
-    ['a run id that is not a UUID', { runId: 'run-1' }, TypeError, /must be a UUID/],
-    ['a run id with some of its hyphens', { runId: '3d6f8a1c5b2e-4f7a-9c0d-8e1f2a3b4c5d' }, TypeError, /must be a UUID/],
-    ['the nil UUID', { runId: '00000000-0000-0000-0000-000000000000' }, TypeError, /nil UUID/],
+    ['a trace id that is no hex', { traceId: 'trace-1' }, TypeError, /must be 32 hex digits/],
+    ['a trace id spelled as a UUID, with hyphens', { traceId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d' }, TypeError, /must be 32 hex digits/],
+    ['a trace id of 31 digits', { traceId: '3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5' }, TypeError, /must be 32 hex digits/],
+    ['a trace id of zeros', { traceId: '0'.repeat(32) }, TypeError, /not all zeros/],
     ['a time that is not one', { start: Number.NaN }, TypeError, /Date or milliseconds/],
     ['a time before the epoch', { start: -1 }, RangeError, /after the Unix epoch/],
     ['a time at the epoch itself', { start: 0 }, RangeError, /after the Unix epoch/],
     ['a time past 2554', { end: Date.parse('2600-01-01T00:00:00.000Z') }, RangeError, /2\^64 nanoseconds/],
     ['a time a millisecond past 2^64 nanoseconds', { end: 18_446_744_073_710 }, RangeError, /2\^64 nanoseconds/],
-    ["a run's agent past 128 characters", { agent: 'a'.repeat(129) }, RangeError, /run's agent must be up to 128 characters/],
-    ["a run's user past 128 characters", { userId: 'u'.repeat(129) }, RangeError, /run's userId must be up to 128/],
-    ["a run's session past 200 characters", { sessionId: 's'.repeat(201) }, RangeError, /run's sessionId must be up to 200/],
-    ["a run's error type past 128 characters", { errorType: 'E'.repeat(129) }, RangeError, /run's errorType must be up to 128/],
+    ["a trace's agent past 128 characters", { agent: 'a'.repeat(129) }, RangeError, /trace's agent must be up to 128 characters/],
+    ["a trace's user past 128 characters", { userId: 'u'.repeat(129) }, RangeError, /trace's userId must be up to 128/],
+    ["a trace's session past 200 characters", { sessionId: 's'.repeat(201) }, RangeError, /trace's sessionId must be up to 200/],
+    ["a trace's error type past 128 characters", { errorType: 'E'.repeat(129) }, RangeError, /trace's errorType must be up to 128/],
     ["a step's name past 145 characters", { inside: [{ ...step, name: 'n'.repeat(146) }] }, RangeError, /step's name must be up to 145/],
     [
       "a tool call's name past 145 characters, in a step",
@@ -694,7 +706,7 @@ describe('a recorded run', () => {
       TypeError,
       /model call's model cannot be empty/,
     ],
-    ['a run that ends before it starts', { end: start - 1000 }, RangeError, /end before it starts/],
+    ['a trace that ends before it starts', { end: start - 1000 }, RangeError, /end before it starts/],
     [
       'a call that ends before it starts',
       {
@@ -813,10 +825,10 @@ describe('a recorded run', () => {
     };
     const h = harness({ sampler });
     // Made anew for each try, since a getter may count its reads.
-    const make = (): RunRecord => (typeof change === 'function' ? change(theRecord()) : { ...theRecord(), ...change });
+    const make = (): TraceRecord => (typeof change === 'function' ? change(theRecord()) : { ...theRecord(), ...change });
     try {
-      expect(() => h.telmoni.recordRun(make())).toThrow(kind);
-      expect(() => h.telmoni.recordRun(make())).toThrow(message);
+      expect(() => h.telmoni.recordTrace(make())).toThrow(kind);
+      expect(() => h.telmoni.recordTrace(make())).toThrow(message);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -828,7 +840,7 @@ describe('a recorded run', () => {
   it('sends steps nested 16 deep, the deepest it takes', async () => {
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...theRecord(), inside: [nested(16)] });
+      h.telmoni.recordTrace({ ...theRecord(), inside: [nested(16)] });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -853,13 +865,13 @@ describe('a recorded run', () => {
   }
 
   // A getter, since a spread would read it into a plain array.
-  it.each<[string, (record: RunRecord) => RunRecord]>([
+  it.each<[string, (record: TraceRecord) => TraceRecord]>([
     ['inside', (record) => Object.defineProperty({ ...record }, 'inside', { get: rebuilt })],
     ["a step's calls", (record) => ({ ...record, inside: [Object.defineProperty({ ...step }, 'calls', { get: rebuilt })] })],
   ])('is read once, each call with its own tokens, when %s is built on each read', async (_what, build) => {
     const h = harness();
     try {
-      h.telmoni.recordRun(build(theRecord()));
+      h.telmoni.recordTrace(build(theRecord()));
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -885,13 +897,13 @@ describe('a recorded run', () => {
     });
     const h = harness();
     try {
-      h.telmoni.recordRun(record);
+      h.telmoni.recordTrace(record);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
-    const sent = Object.entries(attributesOf(run)).filter(([key]) => key.startsWith('telmoni.tag.'));
+    const agent = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    const sent = Object.entries(attributesOf(agent)).filter(([key]) => key.startsWith('telmoni.tag.'));
     expect(sent).toEqual([['telmoni.tag.team', 'x']]);
   });
 
@@ -904,19 +916,19 @@ describe('a recorded run', () => {
     }
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...theRecord(), tags: new Labels() });
+      h.telmoni.recordTrace({ ...theRecord(), tags: new Labels() });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
-    expect(attributesOf(run)['telmoni.tag.team']).toBe('x');
+    const agent = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    expect(attributesOf(agent)['telmoni.tag.team']).toBe('x');
   });
 
   it('sends a tool call with an empty name, which ingest reads as none', async () => {
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...theRecord(), inside: [{ ...tool, name: '' }] });
+      h.telmoni.recordTrace({ ...theRecord(), inside: [{ ...tool, name: '' }] });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -932,7 +944,7 @@ describe('a recorded run', () => {
     }
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...theRecord(), inside: [{ type: 'model_call', model: 'm', start, end: start, usage: new Counted() }] });
+      h.telmoni.recordTrace({ ...theRecord(), inside: [{ type: 'model_call', model: 'm', start, end: start, usage: new Counted() }] });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -947,7 +959,7 @@ describe('a recorded run', () => {
     const smile = String.fromCodePoint(0x1f600);
     const h = harness();
     try {
-      h.telmoni.recordRun({
+      h.telmoni.recordTrace({
         ...theRecord(),
         agent: smile.repeat(128),
         userId: 'u'.repeat(128),
@@ -984,17 +996,17 @@ describe('a recorded run', () => {
     const tags = Object.fromEntries(Array.from({ length: 130 }, (_, n) => [`t${String(n).padStart(3, '0')}`, 'v']));
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...theRecord(), tags, errorType: 'Boom', cancelled: true });
+      h.telmoni.recordTrace({ ...theRecord(), tags, errorType: 'Boom', cancelled: true });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    const run = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
-    const attributes = attributesOf(run);
+    const agent = h.transport.spans().find((span) => span.name === 'invoke_agent claude-code')!;
+    const attributes = attributesOf(agent);
     const sent = Object.keys(attributes).filter((key) => key.startsWith('telmoni.tag.'));
     expect(sent).toEqual(Array.from({ length: 32 }, (_, n) => `telmoni.tag.t${String(n).padStart(3, '0')}`));
     expect(attributes['error.type']).toBe('Boom');
     expect(attributes['telmoni.cancelled']).toBe(true);
-    expect(h.warnings).toContain('telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent');
+    expect(h.warnings).toContain('telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent');
   });
 });

@@ -98,7 +98,7 @@
       "counted": 0.01407
     }
   ],
-  "runs": [
+  "traces": [
     {
       "name": "a step past the step cap raises before it opens",
       "max_steps": 2,
@@ -143,11 +143,11 @@
     }
   ],
   "refusals": [
-    { "cap": "steps", "limit": 2, "used": 2, "says": "the run reached its step cap of 2" },
-    { "cap": "steps", "limit": 1000000, "used": 1000000, "says": "the run reached its step cap of 1000000" },
-    { "cap": "spend", "limit": 0.25, "used": 0.2500001, "says": "the run reached its spend cap of $0.25, having spent $0.2500001" },
-    { "cap": "spend", "limit": 0.00001, "used": 0.0000125, "says": "the run reached its spend cap of $0.00001, having spent $0.0000125" },
-    { "cap": "spend", "limit": 1e-7, "used": 1.5e-7, "says": "the run reached its spend cap of $0.0000001, having spent $0.00000015" },
-    { "cap": "spend", "limit": 1e21, "used": 1.5e21, "says": "the run reached its spend cap of $1000000000000000000000, having spent $1500000000000000000000" }
+    { "cap": "steps", "limit": 2, "used": 2, "says": "the trace reached its step cap of 2" },
+    { "cap": "steps", "limit": 1000000, "used": 1000000, "says": "the trace reached its step cap of 1000000" },
+    { "cap": "spend", "limit": 0.25, "used": 0.2500001, "says": "the trace reached its spend cap of $0.25, having spent $0.2500001" },
+    { "cap": "spend", "limit": 0.00001, "used": 0.0000125, "says": "the trace reached its spend cap of $0.00001, having spent $0.0000125" },
+    { "cap": "spend", "limit": 1e-7, "used": 1.5e-7, "says": "the trace reached its spend cap of $0.0000001, having spent $0.00000015" },
+    { "cap": "spend", "limit": 1e21, "used": 1.5e21, "says": "the trace reached its spend cap of $1000000000000000000000, having spent $1500000000000000000000" }
   ]
 }

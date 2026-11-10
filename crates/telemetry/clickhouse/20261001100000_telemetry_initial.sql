@@ -23,18 +23,21 @@ CREATE TABLE IF NOT EXISTS telemetry.migrations
 ENGINE = MergeTree
 ORDER BY applied_at;
 
--- One row per finished span — a run, a step, a model or tool call, or any
--- other span under a run — written once, when it arrives, and never updated,
--- so the table is read without FINAL; a row leaves only with its
+-- One row per finished span — an agent's own, a step, a model or tool call,
+-- or any other span of a trace — written once, when it arrives, and never
+-- updated, so the table is read without FINAL; a row leaves only with its
 -- day's retention or its project's deletion. A span carries its project and nothing
 -- above it: a project moves between organizations without a row rewritten.
+-- A trace is one agent's execution, its spans sharing OpenTelemetry's trace
+-- id; `agent` on every span is the agent it sits under, the trace's on all
+-- but a nested agent's of another exporter's.
 --
 -- Partitioned by the day it ARRIVED, by the server's clock, so the nightly
 -- purge counts its retention from then and no client's clock decides when it
 -- goes; ordered by project and start. A window is read by arrival, which
 -- tracks start, so a minmax a granule skips the rest of its day's part; a
--- trace by its run's id, which no key holds and no window bounds, so a bloom
--- filter a granule skips every granule but the run's.
+-- trace by its id, which no key holds and no window bounds, so a bloom
+-- filter a granule skips every granule but the trace's.
 --
 -- Each insert carries a token, its project and its export's digest, which the
 -- table keeps for its last ten thousand inserts: an export written again
@@ -48,7 +51,6 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     units                    UInt32,
     -- The contract's fields, each under its own name. A closed set is its
     -- enum's text, with no CHECK: the one query module is the only writer.
-    run_id                   UUID,
     agent                    LowCardinality(String),
     trace_id                 String,
     span_id                  String,
@@ -77,8 +79,8 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     environment              LowCardinality(String),
     release                  LowCardinality(String),
     tags                     Map(LowCardinality(String), String),
-    -- The share of runs the span's run stands for, where a plan's sampling
-    -- kept it past the grant: NULL on every other span.
+    -- The share of traces the span's trace stands for, where a plan's
+    -- sampling kept it past the grant: NULL on every other span.
     sample_rate              Nullable(Float64),
     -- The attributes the field inventory names, and any other whose value is
     -- a number or a boolean; an array is kept as its JSON.
@@ -86,7 +88,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     -- The field inventory's rows for every attribute the span arrived with,
     -- dropped content among them, each once: names, never values.
     sent                     Array(LowCardinality(String)),
-    INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
+    INDEX trace_id_idx trace_id TYPE bloom_filter GRANULARITY 1,
     -- An end user's erasure and the users filter read by the hash alone,
     -- and the erasure their sessions by the id.
     INDEX user_id_idx user_id TYPE bloom_filter GRANULARITY 1,
@@ -100,7 +102,7 @@ SETTINGS non_replicated_deduplication_window = 10000;
 
 -- Each hour's totals, by project, agent, kind, model, provider, a tool call's
 -- name or a retrieval's source, status, the deployment's environment and
--- release, the run's sample rate (1 where none was set), which a spend read
+-- release, the trace's sample rate (1 where none was set), which a spend read
 -- scales each row by, and whether the spans reported their cost: no user and
 -- no tag, so it outlives the spans, kept thirteen months. `tool` is empty on
 -- every kind but those two, so the names an application gives its steps
@@ -177,7 +179,7 @@ FROM telemetry.spans
 GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release,
     sample_rate, cost_reported;
 
--- One row per score: of a run, one of its spans, or a session, from the
+-- One row per score: of a trace, one of its spans, or a session, from the
 -- application or its exporter, or from a member on a trace's page. Metadata
 -- alone: a score's comment is content, kept as a span's.
 -- A score given again under its id replaces it, and one taken back is marked
@@ -188,10 +190,8 @@ CREATE TABLE IF NOT EXISTS telemetry.scores
     project_id     String,
     received_at    DateTime64(6, 'UTC'),
     score_id       UUID,
-    -- What it scores: `run`, `span` or `session`. A session's names no run;
-    -- another exporter's span its run once its trace is placed.
+    -- What it scores: `trace`, `span` or `session`. A session's names no trace.
     target         LowCardinality(String),
-    run_id         UUID,
     trace_id       String,
     span_id        String,
     session_id     String,
@@ -209,7 +209,7 @@ CREATE TABLE IF NOT EXISTS telemetry.scores
     scorer         String,
     scorer_version String,
     is_deleted     UInt8,
-    INDEX run_id_idx run_id TYPE bloom_filter GRANULARITY 1,
+    INDEX trace_id_idx trace_id TYPE bloom_filter GRANULARITY 1,
     INDEX session_id_idx session_id TYPE bloom_filter GRANULARITY 1
 )
 ENGINE = ReplacingMergeTree(received_at, is_deleted)

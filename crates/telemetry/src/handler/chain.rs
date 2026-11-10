@@ -9,7 +9,6 @@
 
 use serde_json::Value;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 use telmoni_shared::acting::Acting;
 use telmoni_shared::audit::{Actor, AuditEvent, emit_audit, lock_chain_in_time};
@@ -132,7 +131,8 @@ pub(crate) async fn held(
 pub(crate) struct Change {
     pub action: AuditAction,
     pub kind: TelmoniResourceKind,
-    pub id: Uuid,
+    /// What it was to: a row's UUID, or a trace's id.
+    pub id: String,
     pub metadata: Value,
 }
 
@@ -144,7 +144,7 @@ pub(crate) async fn file(
     project_id: &ProjectId,
     change: Change,
 ) -> Result<(), TelmoniError> {
-    let id = change.id.to_string();
+    let id = change.id;
     emit_audit(
         tx,
         AuditEvent::new(

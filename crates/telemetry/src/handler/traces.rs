@@ -1,10 +1,10 @@
 //! The console's trace lanes, under `Resource::Trace`, which every role on a
 //! project holds: `GET /internal/v1/telemetry/traces`, the list — a page of rows,
-//! a row per run in a window of days, filtered and sorted as the URL says,
+//! a row per trace in a window of days, filtered and sorted as the URL says,
 //! and how many rows there are; `/traces/facets`, each filter's values and
-//! how many runs carry each; `/traces/histogram`, the runs by when they
-//! started; `/traces/export`, the rows as a file; and `/traces/{run_id}`, one
-//! trace's spans in the order they started. Each reads the spans of the
+//! how many traces carry each; `/traces/histogram`, the traces by when they
+//! started; `/traces/export`, the rows as a file; and `/traces/{trace_id}`,
+//! one trace's spans in the order they started. Each reads the spans of the
 //! project `x-project-id` names and no other: the store names that project on
 //! every read, twice.
 
@@ -17,7 +17,6 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use serde_json::json;
-use uuid::Uuid;
 
 use telmoni_shared::acting::{Acting, ActingKey};
 use telmoni_shared::audit::Actor;
@@ -95,7 +94,7 @@ pub enum Reading {
 /// other parameter comes once at most, and one the lane does not take is a 400.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TraceQuery {
-    /// The runs' agents.
+    /// The traces' agents.
     pub agent: Vec<String>,
     /// Their end users, as stored.
     pub user: Vec<String>,
@@ -118,7 +117,7 @@ pub struct TraceQuery {
     /// Prompts by name and version any of their spans carry, each
     /// `name:version`.
     pub prompt_version: Vec<String>,
-    /// A score the runs carry, by its name, and the least and most of its value.
+    /// A score the traces carry, by its name, and the least and most of its value.
     pub score: Option<String>,
     pub score_min: Option<String>,
     pub score_max: Option<String>,
@@ -197,7 +196,7 @@ impl TraceQuery {
         }
     }
 
-    /// The score the runs must carry: its name, and its value's bounds.
+    /// The score the traces must carry: its name, and its value's bounds.
     fn score_filter(&self) -> Result<Option<crate::traces::ScoreFilter>, TelmoniError> {
         let bound = |given: &Option<String>, what: &str| -> Result<Option<f64>, TelmoniError> {
             given
@@ -363,7 +362,7 @@ pub(crate) fn values(
 }
 
 /// A parameter's values as [`values`] reads them, `most` of them at most:
-/// the runs a download names are a page's rows, more than a filter admits.
+/// the traces a download names are a page's rows, more than a filter admits.
 fn values_up_to(
     name: &str,
     given: &[String],
@@ -410,7 +409,7 @@ pub(crate) fn tag_values(given: &[String]) -> Result<Vec<String>, TelmoniError> 
     Ok(pairs)
 }
 
-/// A prompt version filter's values, each `name:version` as a run carries a
+/// A prompt version filter's values, each `name:version` as a trace carries a
 /// prompt where one span names both: compared whole, so a version is never
 /// matched under another prompt's name.
 pub(crate) fn prompt_version_values(given: &[String]) -> Result<Vec<String>, TelmoniError> {
@@ -586,7 +585,7 @@ pub struct TraceList {
 
 /// A download's header row: the list's fields, in its order.
 const CSV_HEADER: [&str; 27] = [
-    "run_id",
+    "trace_id",
     "agent",
     "user_id",
     "session_id",
@@ -615,7 +614,7 @@ const CSV_HEADER: [&str; 27] = [
     "tags",
 ];
 
-/// A download's columns: the list's, then the run's content.
+/// A download's columns: the list's, then the trace's content.
 const DOWNLOAD_COLUMNS: usize = CSV_HEADER.len() + 1;
 
 impl TraceRow {
@@ -625,7 +624,7 @@ impl TraceRow {
     fn cells(&self) -> [String; 27] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
-            self.run_id.to_string(),
+            self.trace_id.clone(),
             self.agent.clone(),
             self.user_id.clone(),
             self.session_id.clone(),
@@ -752,8 +751,8 @@ pub struct TraceHistogram {
 /// What a trace's deletion answers: how much of it went.
 #[derive(Debug, Serialize)]
 pub struct TraceDeleted {
-    /// The run deleted.
-    pub run_id: Uuid,
+    /// The trace deleted.
+    pub trace_id: String,
     /// Its spans, marked deleted.
     pub spans: u64,
     /// The content fields its spans kept, deleted.
@@ -763,24 +762,24 @@ pub struct TraceDeleted {
 /// What one trace's lane answers.
 #[derive(Debug, Serialize)]
 pub struct TraceDetail {
-    pub run_id: Uuid,
-    /// Its spans in the order they started, the run's own among them.
+    pub trace_id: String,
+    /// Its spans in the order they started, the agent's own among them.
     pub spans: Vec<TraceSpan>,
-    /// Whether the run holds more spans than the page shows.
+    /// Whether the trace holds more spans than the page shows.
     pub truncated: bool,
-    /// What the run has spent, as an alert on its cost reads it; none where
-    /// that could not be read.
-    pub spend: Option<RunSpend>,
+    /// What the trace has spent, as an alert on its cost reads it; none
+    /// where that could not be read.
+    pub spend: Option<TraceSpend>,
     /// Each span's content, opened for the reader and filed as their read:
-    /// empty where the run kept none, none where it was not asked for or
+    /// empty where the trace kept none, none where it was not asked for or
     /// could not be opened.
     pub content: Option<Vec<SpanFields>>,
 }
 
-/// What a run's model calls cost so far: each call's cost as reported, else
-/// its tokens at Telmoni's price ([`spend::run`]).
+/// What a trace's model calls cost so far: each call's cost as reported,
+/// else its tokens at Telmoni's price ([`spend::trace`]).
 #[derive(Debug, Serialize)]
-pub struct RunSpend {
+pub struct TraceSpend {
     /// In US dollars.
     pub spent: f64,
     /// The models its calls named that neither reported a cost nor have a
@@ -949,7 +948,7 @@ pub async fn get_media(
 /// One span's content as a lane answers it: each field kept, by its name.
 #[derive(Debug, Serialize)]
 pub struct SpanFields {
-    pub run_id: Uuid,
+    pub trace_id: String,
     pub span_id: String,
     pub fields: BTreeMap<String, String>,
 }
@@ -957,17 +956,39 @@ pub struct SpanFields {
 impl From<SpanContent> for SpanFields {
     fn from(span: SpanContent) -> Self {
         Self {
-            run_id: span.run_id,
+            trace_id: span.trace_id,
             span_id: span.span_id,
             fields: span.fields.into_iter().collect(),
         }
     }
 }
 
-/// The runs' content, opened for the reader and filed as their read; none
+/// `given` as a trace's id, 32 hex digits and never all zeros, lowercased;
+/// else the caller's 400.
+///
+/// # Errors
+///
+/// A 400 naming the shape.
+pub(crate) fn trace_id_of(given: &str) -> Result<String, TelmoniError> {
+    let id = given.trim().to_ascii_lowercase();
+    if id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()) && id.bytes().any(|b| b != b'0')
+    {
+        Ok(id)
+    } else {
+        Err(TelmoniError::BadRequest(
+            "a trace is named by its id, 32 hex digits".into(),
+        ))
+    }
+}
+
+/// The traces' content, opened for the reader and filed as their read; none
 /// where it could not be, and the page shows without it.
-async fn content_of(state: &AppState, reader: &Reader, runs: &[Uuid]) -> Option<Vec<SpanFields>> {
-    match content::open(state, reader.actor(), &reader.project_id, runs).await {
+async fn content_of(
+    state: &AppState,
+    reader: &Reader,
+    traces: &[String],
+) -> Option<Vec<SpanFields>> {
+    match content::open(state, reader.actor(), &reader.project_id, traces).await {
         Ok(opened) => Some(opened.into_iter().map(SpanFields::from).collect()),
         Err(error) => {
             tracing::warn!(
@@ -1126,19 +1147,19 @@ pub async fn list_traces(
 ) -> Result<Json<ScoredTraceList>, TelmoniError> {
     let project_id = reading(&state, &headers).await?;
     let list = trace_list(&state, &project_id, pairs).await?;
-    let runs: Vec<Uuid> = list.traces.iter().map(|t| t.run_id).collect();
-    let scores = crate::scores::of_runs(&state.store, &Projects::one(project_id), &runs)
+    let traces: Vec<String> = list.traces.iter().map(|t| t.trace_id.clone()).collect();
+    let scores = crate::scores::of_traces(&state.store, &Projects::one(project_id), &traces)
         .await
         .map_err(read_failed)?;
     Ok(Json(ScoredTraceList { list, scores }))
 }
 
-/// The console's page of traces, and each run's own scores by name.
+/// The console's page of traces, and each trace's own scores by name.
 #[derive(Debug, Serialize)]
 pub struct ScoredTraceList {
     #[serde(flatten)]
     pub list: TraceList,
-    pub scores: std::collections::BTreeMap<Uuid, Vec<crate::scores::Summary>>,
+    pub scores: std::collections::BTreeMap<String, Vec<crate::scores::Summary>>,
 }
 
 /// A page of the project's traces, as the console's lane and `/v1` answer it.
@@ -1223,8 +1244,7 @@ pub async fn get_histogram(
 }
 
 /// `GET /internal/v1/telemetry/traces/export` — the project's traces the filter
-/// admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them, or the
-/// runs `run` names alone.
+/// admits, sorted as asked, as a file: up to [`EXPORT_MAX`] of them.
 pub async fn export_traces(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -1232,17 +1252,19 @@ pub async fn export_traces(
 ) -> Result<Response, TelmoniError> {
     let (rows, format, reader) =
         export_rows::<Traces>(&state, &headers, pairs, Reading::Export).await?;
-    // One read of every run's content, filed once; a download that cannot
+    // One read of every trace's content, filed once; a download that cannot
     // open it fails rather than leaving it out unsaid.
-    let runs: Vec<Uuid> = rows.iter().map(|row| row.run_id).collect();
-    let mut kept: HashMap<Uuid, Vec<SpanFields>> = HashMap::new();
-    for span in content::open(&state, reader.actor(), &reader.project_id, &runs).await? {
-        kept.entry(span.run_id).or_default().push(span.into());
+    let traces: Vec<String> = rows.iter().map(|row| row.trace_id.clone()).collect();
+    let mut kept: HashMap<String, Vec<SpanFields>> = HashMap::new();
+    for span in content::open(&state, reader.actor(), &reader.project_id, &traces).await? {
+        kept.entry(span.trace_id.clone())
+            .or_default()
+            .push(span.into());
     }
     let rows: Vec<TraceDownload> = rows
         .into_iter()
         .map(|row| TraceDownload {
-            content: kept.remove(&row.run_id).unwrap_or_default(),
+            content: kept.remove(&row.trace_id).unwrap_or_default(),
             row,
         })
         .collect();
@@ -1252,7 +1274,7 @@ pub async fn export_traces(
 }
 
 /// A trace as its download writes it: the list's row and each span's content,
-/// empty where the run kept none.
+/// empty where the trace kept none.
 #[derive(Debug, Serialize)]
 pub struct TraceDownload {
     #[serde(flatten)]
@@ -1269,25 +1291,23 @@ impl TraceDownload {
     }
 }
 
-/// `DELETE /internal/v1/telemetry/traces/{run_id}` — one trace deleted by a
+/// `DELETE /internal/v1/telemetry/traces/{trace_id}` — one trace deleted by a
 /// project admin: the request filed in the organization's chain first, then
-/// the run marked deleted in ClickHouse and its content deleted, and the
-/// receipt mailed to whoever asked. `404` for a run the project does not hold.
+/// the trace marked deleted in ClickHouse and its content deleted, and the
+/// receipt mailed to whoever asked. `404` for a trace the project does not hold.
 pub async fn delete_trace(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(run_id): Path<String>,
+    Path(trace_id): Path<String>,
 ) -> Result<Json<TraceDeleted>, TelmoniError> {
     let acting = state.auth.resolve(&headers).await?;
     let project_id = &acting
         .require_project(Verb::Delete, Resource::Trace)?
         .project_id;
-    let run_id: Uuid = run_id
-        .parse()
-        .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
-    let found = erasure::find(&state, project_id, Erase::Trace(run_id)).await?;
-    if found.runs.is_empty() {
-        return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
+    let trace_id = trace_id_of(&trace_id)?;
+    let found = erasure::find(&state, project_id, Erase::Trace(&trace_id)).await?;
+    if found.traces.is_empty() {
+        return Err(AuthError::NotFound("no trace with that id in this project".into()).into());
     }
     let spans = found.spans;
     chain::write(
@@ -1295,14 +1315,14 @@ pub async fn delete_trace(
         &acting,
         project_id,
         "trace deletion",
-        async |tx| file_trace_deletion(&state, &acting, project_id, tx, run_id, spans).await,
+        async |tx| file_trace_deletion(&state, &acting, project_id, tx, &trace_id, spans).await,
     )
     .await?;
-    let erase = Erase::Trace(run_id);
+    let erase = Erase::Trace(&trace_id);
     let fields = erasure::carry_out(&state, project_id, erase, found, &acting.user_id).await?;
-    tracing::info!(project_id = %project_id, run_id = %run_id, spans, fields, "telemetry: a trace deleted");
+    tracing::info!(project_id = %project_id, trace_id = %trace_id, spans, fields, "telemetry: a trace deleted");
     Ok(Json(TraceDeleted {
-        run_id,
+        trace_id,
         spans,
         fields,
     }))
@@ -1315,7 +1335,7 @@ async fn file_trace_deletion(
     acting: &Acting,
     project_id: &ProjectId,
     tx: &mut Scoped<'_, ProjectAndOrganization>,
-    run_id: Uuid,
+    trace_id: &str,
     spans: u64,
 ) -> Result<(), TelmoniError> {
     chain::held(
@@ -1329,25 +1349,26 @@ async fn file_trace_deletion(
     let change = Change {
         action: AuditAction::Deleted,
         kind: TelmoniResourceKind::Trace,
-        id: run_id,
+        id: trace_id.to_owned(),
         metadata: json!({ "spans": spans }),
     };
     chain::file(tx, acting, project_id, change).await?;
     Ok(())
 }
 
-/// `GET /internal/v1/telemetry/traces/{run_id}` — one trace's spans, the run's
-/// own among them, in the order they started, its content opened and filed
-/// only where asked (`content=true`); `404` for a run the project does not hold.
+/// `GET /internal/v1/telemetry/traces/{trace_id}` — one trace's spans, the
+/// agent's own among them, in the order they started, its content opened and
+/// filed only where asked (`content=true`); `404` for a trace the project
+/// does not hold.
 pub async fn get_trace(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(run_id): Path<String>,
+    Path(trace_id): Path<String>,
     Query(asked): Query<super::v1::TraceAsked>,
 ) -> Result<Json<TraceDetail>, TelmoniError> {
     let reader = reader(&state, &headers).await?;
     Ok(Json(
-        trace_detail(&state, &reader, &run_id, asked.content).await?,
+        trace_detail(&state, &reader, &trace_id, asked.content).await?,
     ))
 }
 
@@ -1356,23 +1377,21 @@ pub async fn get_trace(
 pub(crate) async fn trace_detail(
     state: &AppState,
     reader: &Reader,
-    run_id: &str,
+    trace_id: &str,
     with_content: bool,
 ) -> Result<TraceDetail, TelmoniError> {
     let projects = Projects::one(reader.project_id.clone());
-    let run_id: Uuid = run_id
-        .parse()
-        .map_err(|_| TelmoniError::BadRequest("a trace is named by its run's id, a UUID".into()))?;
+    let trace_id = trace_id_of(trace_id)?;
     let rows = traces::spans(
         &state.store,
         &projects,
-        run_id,
+        &trace_id,
         SPANS_MAX + 1,
         TRACE_UNITS_MAX,
     )
     .await
     .map_err(read_failed)?;
-    // A run older than the organization's retention reaches is not there,
+    // A trace older than the organization's retention reaches is not there,
     // as the list would not name it: held, it is hidden until it goes.
     let reach = crate::capacity::visible_days(state, &reader.project_id, u16::MAX).await;
     let past = reach < u16::MAX
@@ -1380,31 +1399,31 @@ pub(crate) async fn trace_detail(
             .iter()
             .all(|row| row.received_at < Utc::now() - chrono::Duration::days(i64::from(reach)));
     if rows.is_empty() || past {
-        return Err(AuthError::NotFound("no trace with that run id in this project".into()).into());
+        return Err(AuthError::NotFound("no trace with that id in this project".into()).into());
     }
     let shown = traces::shown(rows.iter().map(|row| row.units), SPANS_MAX, TRACE_UNITS_MAX);
     let truncated = shown < rows.len();
     let content = if with_content {
-        content_of(state, reader, &[run_id]).await
+        content_of(state, reader, std::slice::from_ref(&trace_id)).await
     } else {
         None
     };
     Ok(TraceDetail {
-        run_id,
         spans: rows.into_iter().take(shown).map(TraceSpan::from).collect(),
         truncated,
-        spend: spend_of(state, &projects, run_id).await,
+        spend: spend_of(state, &projects, &trace_id).await,
         content,
+        trace_id,
     })
 }
 
-/// What the run has spent; none, logged by the error's kind, where a store
+/// What the trace has spent; none, logged by the error's kind, where a store
 /// does not answer, and the trace shows without it.
-async fn spend_of(state: &AppState, projects: &Projects, run_id: Uuid) -> Option<RunSpend> {
-    match spend::run(state, projects, run_id).await {
-        Ok(run) => Some(RunSpend {
-            spent: run.spent,
-            unpriced: run
+async fn spend_of(state: &AppState, projects: &Projects, trace_id: &str) -> Option<TraceSpend> {
+    match spend::trace(state, projects, trace_id).await {
+        Ok(trace) => Some(TraceSpend {
+            spent: trace.spent,
+            unpriced: trace
                 .unpriced
                 .into_iter()
                 .map(|(provider, model)| UnpricedModel { provider, model })
@@ -1412,17 +1431,17 @@ async fn spend_of(state: &AppState, projects: &Projects, run_id: Uuid) -> Option
         }),
         Err(Unread::Store(error)) => {
             tracing::warn!(
-                run_id = %run_id,
+                trace_id = %trace_id,
                 kind = store::Fault::of(&error).as_str(),
-                "traces: what a run spent could not be read; its trace goes without"
+                "traces: what a trace spent could not be read; it shows without"
             );
             None
         }
         Err(Unread::Db(error)) => {
             tracing::warn!(
-                run_id = %run_id,
+                trace_id = %trace_id,
                 error = %error,
-                "traces: the prices of what a run spent could not be read; its trace goes without"
+                "traces: the prices of what a trace spent could not be read; it shows without"
             );
             None
         }
@@ -1551,11 +1570,11 @@ mod tests {
             (Reading::Histogram, "format"),
             (Reading::List, "utc_offset"),
             (Reading::List, "format"),
-            (Reading::List, "run"),
+            (Reading::List, "trace"),
             (Reading::Export, "page"),
             (Reading::Export, "limit"),
             (Reading::Export, "utc_offset"),
-            (Reading::Export, "run"),
+            (Reading::Export, "trace"),
         ] {
             let refused = read(reading, &[(name, "1")]).expect_err(name);
             assert_eq!(
@@ -1688,7 +1707,7 @@ mod tests {
     #[test]
     fn a_downloads_row_is_the_lists_fields_under_the_headers_names() {
         let trace = TraceRow {
-            run_id: Uuid::nil(),
+            trace_id: "ab".repeat(16),
             agent: "=cmd".into(),
             user_id: String::new(),
             session_id: "thread, 42".into(),
@@ -1720,7 +1739,7 @@ mod tests {
         csv::row(&mut out, &trace.cells());
         let line = String::from_utf8(out).expect("UTF-8");
         assert!(line.starts_with(
-            "00000000-0000-0000-0000-000000000000,\"'=cmd\",,\"thread, 42\",true,error,RuntimeError,"
+            "abababababababababababababababab,\"'=cmd\",,\"thread, 42\",true,error,RuntimeError,"
         ));
         assert!(
             line.contains(

@@ -13,7 +13,7 @@
           "environment": "production",
           "kind": "prompt",
           "prompt": "support-reply",
-          "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+          "trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
           "value": "3"
         },
         {
@@ -22,7 +22,7 @@
           "changed_at": "2027-01-15T07:59:00Z",
           "environment": "production",
           "kind": "model",
-          "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+          "trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
           "value": "gpt-4o-mini-2024-07-18"
         },
         {
@@ -31,7 +31,7 @@
           "changed_at": "2027-01-15T07:58:00Z",
           "environment": "production",
           "kind": "release",
-          "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+          "trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
           "value": "1.4.2"
         }
       ],
@@ -43,14 +43,14 @@
       "resolved_at": null,
       "resolved_by": null,
       "rule_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b18",
-      "rule_name": "Slow support runs",
-      "runs": [
-        "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17"
-      ],
+      "rule_name": "Slow support traces",
       "severity": "alert",
       "status": "acknowledged",
       "told_to": [
         "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b1a"
+      ],
+      "traces": [
+        "0192f3a17c2e7b4d9a613c5e8f0d2b17"
       ],
       "value": 31250.0
     },
@@ -69,12 +69,12 @@
       "resolved_by": null,
       "rule_id": null,
       "rule_name": null,
-      "runs": [],
       "severity": "warning",
       "status": "open",
       "told_to": [
         "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b1a"
       ],
+      "traces": [],
       "value": null
     }
   ]

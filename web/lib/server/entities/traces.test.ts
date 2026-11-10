@@ -24,10 +24,10 @@ import {
 } from "./traces";
 
 const PROJECT = "project_1";
-const RUN = "5d4f5c68-0000-4000-8000-000000000001";
+const TRACE_ID = "5d4f5c68000040008000000000000001";
 
 const TRACE = {
-  run_id: RUN,
+  trace_id: TRACE_ID,
   agent: "nightly-report",
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
   session_id: "conv-1",
@@ -65,7 +65,7 @@ const LIST = {
   sort: "started",
   dir: "desc",
 };
-// What the console makes of it: each run's own scores put on its trace.
+// What the console makes of it: each trace's own scores put on it.
 const LISTED = { ...LIST, traces: [{ ...TRACE, scores: [] }] };
 
 const FACET = { values: [{ value: "nightly-report", count: 1 }], more: false };
@@ -124,7 +124,7 @@ const SPAN = {
   parent_span_id: "",
   trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
   agent: "nightly-report",
-  kind: "run",
+  kind: "agent",
   name: "nightly-report",
   started_at: "2026-10-11T03:00:00Z",
   ended_at: "2026-10-11T03:00:02Z",
@@ -149,7 +149,7 @@ const SPAN = {
   received_at: "2026-10-11T03:00:02Z",
 };
 const DETAIL = {
-  run_id: RUN,
+  trace_id: TRACE_ID,
   spans: [SPAN],
   truncated: false,
   spend: { spent: 0.0028, unpriced: [] },
@@ -166,9 +166,9 @@ beforeEach(() => {
 });
 
 describe("fetchTraces", () => {
-  it("puts each run's own scores on its trace", async () => {
+  it("puts each trace's own scores on it", async () => {
     const helpful = { name: "helpful", data_type: "number", mean: 0.8, count: 1, categories: [] };
-    answer(200, { ...LIST, scores: { [TRACE.run_id]: [helpful] } });
+    answer(200, { ...LIST, scores: { [TRACE.trace_id]: [helpful] } });
     const read = await fetchTraces(PROJECT, {});
     expect(read.kind === "ok" && read.list.traces[0]?.scores).toEqual([helpful]);
   });
@@ -256,7 +256,7 @@ describe("the reads beside the list", () => {
       prompt: "triage",
       value: "3",
       changed_at: "2026-10-11T03:00:00Z",
-      run_id: RUN,
+      trace_id: TRACE_ID,
       capped: false,
     };
     const changes = { days: 30, more: false, changes: [prompt] };
@@ -280,7 +280,7 @@ describe("traceDownload", () => {
       ok: status < 400,
       status,
       headers: new Headers({ "content-type": contentType }),
-      arrayBuffer: async () => new TextEncoder().encode("run_id\r\n").buffer,
+      arrayBuffer: async () => new TextEncoder().encode("trace_id\r\n").buffer,
     });
   }
 
@@ -310,32 +310,32 @@ describe("traceDownload", () => {
 });
 
 describe("fetchTrace", () => {
-  it("reads one trace's spans by the run's id, its content only where asked", async () => {
+  it("reads one trace's spans by its id, its content only where asked", async () => {
     answer(200, DETAIL);
-    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "ok", trace: DETAIL });
-    expect(fetchWithTimeout.mock.calls[0]![0]).toBe(`http://server/internal/v1/telemetry/traces/${RUN}`);
+    expect(await fetchTrace(PROJECT, TRACE_ID, false)).toEqual({ kind: "ok", trace: DETAIL });
+    expect(fetchWithTimeout.mock.calls[0]![0]).toBe(`http://server/internal/v1/telemetry/traces/${TRACE_ID}`);
     answer(200, DETAIL);
-    await fetchTrace(PROJECT, RUN, true);
+    await fetchTrace(PROJECT, TRACE_ID, true);
     expect(fetchWithTimeout.mock.calls.at(-1)![0]).toBe(
-      `http://server/internal/v1/telemetry/traces/${RUN}?content=true`,
+      `http://server/internal/v1/telemetry/traces/${TRACE_ID}?content=true`,
     );
   });
 
-  // A run the project does not hold and an id that is no run id read the
+  // A trace the project does not hold and an id that is no trace id read the
   // same: the page says there is no such trace here.
   it("reads a 404 and a 400 as missing", async () => {
     answer(404, {});
-    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "missing" });
+    expect(await fetchTrace(PROJECT, TRACE_ID, false)).toEqual({ kind: "missing" });
     answer(400, {});
-    expect(await fetchTrace(PROJECT, "not-a-run", false)).toEqual({ kind: "missing" });
+    expect(await fetchTrace(PROJECT, "not-a-trace", false)).toEqual({ kind: "missing" });
   });
 
   it("reads a refusal as forbidden, and anything else as unavailable", async () => {
     answer(403, {});
-    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "forbidden" });
-    answer(200, { run_id: RUN, spans: [{ kind: "run" }], truncated: false });
-    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "unavailable" });
+    expect(await fetchTrace(PROJECT, TRACE_ID, false)).toEqual({ kind: "forbidden" });
+    answer(200, { trace_id: TRACE_ID, spans: [{ kind: "agent" }], truncated: false });
+    expect(await fetchTrace(PROJECT, TRACE_ID, false)).toEqual({ kind: "unavailable" });
     fetchWithTimeout.mockRejectedValue(new Error("timed out"));
-    expect(await fetchTrace(PROJECT, RUN, false)).toEqual({ kind: "unavailable" });
+    expect(await fetchTrace(PROJECT, TRACE_ID, false)).toEqual({ kind: "unavailable" });
   });
 });

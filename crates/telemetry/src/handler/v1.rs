@@ -111,12 +111,12 @@ pub const V1_LANES: &[V1Lane] = &[
             method: Method::Post,
             bearer: true,
             path: "/v1/scores",
-            summary: "Score runs, spans and sessions",
-            description: "Up to 100 scores, as `{\"scores\": [...]}`, of runs, \
+            summary: "Score traces, spans and sessions",
+            description: "Up to 100 scores, as `{\"scores\": [...]}`, of traces, \
                           spans or sessions that already ended; a score on a span \
                           still open rides on it as OpenTelemetry's \
                           `gen_ai.evaluation.result` event instead. Each names a \
-                          `run_id`, a `run_id` and a `span_id`, or a `session_id`; a \
+                          `trace_id`, a `trace_id` and a `span_id`, or a `session_id`; a \
                           `name` of 1 to 64 characters; a `data_type` of \
                           `number`, with a finite `value` and an optional \
                           `range_min` and `range_max`, `boolean`, with a `value` of \
@@ -124,7 +124,7 @@ pub const V1_LANES: &[V1Lane] = &[
                           optionally a `version` of what scored, up to 64 \
                           characters, and an `id`, a UUID of the caller's, under \
                           which a score sent again replaces itself. What it scores \
-                          is not looked up, since a run's spans may land after its \
+                          is not looked up, since a trace's spans may land after its \
                           score. A score is metadata, kept in every content mode, \
                           and a request is metered as an export is.",
             params: &[],
@@ -210,19 +210,19 @@ pub const V1_LANES: &[V1Lane] = &[
         route: Route {
             method: Method::Get,
             bearer: true,
-            path: "/v1/traces/{run_id}",
+            path: "/v1/traces/{trace_id}",
             summary: "One trace's spans",
-            description: "One trace's spans, the run's own among them, in the \
-                          order they started, and what the run spent. With \
+            description: "One trace's spans, the agent's own among them, in the \
+                          order they started, and what the trace spent. With \
                           `content=true`, each span's content too, where the \
                           project keeps it: every such read is filed in the \
                           organization's audit log as the key's.",
             params: &[
                 Param {
-                    name: "run_id",
+                    name: "trace_id",
                     in_query: false,
                     required: true,
-                    description: "The run's id, a UUID.",
+                    description: "The trace's id, 32 hex digits.",
                 },
                 Param {
                     name: "content",
@@ -238,12 +238,12 @@ pub const V1_LANES: &[V1Lane] = &[
                 },
                 Answer {
                     status: 400,
-                    description: "A run id that is not a UUID.",
+                    description: "A trace id that is not 32 hex digits.",
                 },
                 NO_READ_SCOPE,
                 Answer {
                     status: 404,
-                    description: "No such run in the project, or one older than the plan keeps.",
+                    description: "No such trace in the project, or one older than the plan keeps.",
                 },
             ],
         },
@@ -256,7 +256,7 @@ pub const V1_LANES: &[V1Lane] = &[
             bearer: true,
             path: "/v1/metrics",
             summary: "The project's totals by the hour or the day",
-            description: "The project's spans, runs, failures, tokens, spend and durations \
+            description: "The project's spans, traces, failures, tokens, spend and durations \
                           over the window, by the hour or the day, from the \
                           totals kept an hour at a time, and grouped, if asked, \
                           by one of agent, model, provider, tool, status, \
@@ -312,15 +312,15 @@ pub const V1_LANES: &[V1Lane] = &[
             path: "/v1/incidents",
             summary: "The project's incidents",
             description: "The project's incidents, those not resolved first, \
-                          then the newest, 200 at most; with `run`, those whose \
-                          notices showed that run. Each names the `changes` its \
+                          then the newest, 200 at most; with `trace`, those whose \
+                          notices showed that trace. Each names the `changes` its \
                           alert's or monitor's agents made in the 24 hours before \
                           it opened, 20 at most.",
             params: &[Param {
-                name: "run",
+                name: "trace",
                 in_query: true,
                 required: false,
-                description: "A run's id, a UUID.",
+                description: "A trace's id, 32 hex characters.",
             }],
             answers: &[
                 Answer {
@@ -329,7 +329,7 @@ pub const V1_LANES: &[V1Lane] = &[
                 },
                 Answer {
                     status: 400,
-                    description: "A run that is not a UUID.",
+                    description: "A trace that is not 32 hex digits.",
                 },
                 NO_READ_SCOPE,
             ],
@@ -373,8 +373,8 @@ pub const V1_LANES: &[V1Lane] = &[
             bearer: true,
             path: "/v1/changes",
             summary: "The project's agents' changes",
-            description: "Each first run of an agent, in one environment, to carry \
-                          a release, a model or a prompt's version its runs there had \
+            description: "Each first trace of an agent, in one environment, to carry \
+                          a release, a model or a prompt's version its traces there had \
                           not carried in the 30 days before, the newest first, 500 at \
                           most, `more` saying the window held more. An agent past 24 \
                           changes of one kind in a UTC day is marked no further that \
@@ -485,20 +485,20 @@ pub struct TraceAsked {
     pub content: bool,
 }
 
-/// `GET /v1/traces/{run_id}` — one trace of the key's project, its content
+/// `GET /v1/traces/{trace_id}` — one trace of the key's project, its content
 /// opened and filed as the key's read where a `GET` asks: a `HEAD` sends no
 /// body, so it opens none.
 pub async fn get_trace(
     State(state): State<Arc<AppState>>,
     key: ActingKey,
     method: axum::http::Method,
-    Path(run_id): Path<String>,
+    Path(trace_id): Path<String>,
     Query(asked): Query<TraceAsked>,
 ) -> Result<Json<TraceDetail>, TelmoniError> {
     let reader = Reader::key(&key);
     let with_content = asked.content && method != axum::http::Method::HEAD;
     Ok(Json(
-        traces::trace_detail(&state, &reader, &run_id, with_content).await?,
+        traces::trace_detail(&state, &reader, &trace_id, with_content).await?,
     ))
 }
 

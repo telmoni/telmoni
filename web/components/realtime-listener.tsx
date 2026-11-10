@@ -29,7 +29,7 @@ const RETRY_MS = 30_000;
 const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
 // A page reading a project's spans: its traces, the list or one of them. A
-// trace's page names its run, which a nudge is compared with.
+// trace's page names its trace, which a nudge is compared with.
 const SPAN_PAGES = /^\/[^/]+\/[^/]+\/traces(?:\/([^/]+))?$/;
 
 function payload<K extends RealtimeEventType>(
@@ -228,7 +228,7 @@ export function RealtimeListener({
       // nudges coalesced (`liveRefresher`) — but the Traces list, whose rows
       // landed spans would move under the reader's hand, counts those in a bar
       // above itself instead (`NewTraces`), unless it is empty and has nothing
-      // to move; and a trace's page is drawn for its own run alone.
+      // to move; and a trace's page is drawn for its own trace alone.
       es.addEventListener("spans:ingested", (e: MessageEvent) => {
         const data = payload(e, "spans:ingested");
         if (!data || data.projectId !== standing().projectId) return;
@@ -238,13 +238,13 @@ export function RealtimeListener({
         // A download's route, not a page.
         if (one === "export") return;
         const peeked = one ? null : new URLSearchParams(window.location.search).get(PEEK_PARAM);
-        // A trace's peek for its own run.
-        if (peeked && (data.more || data.runs.includes(peeked))) peekLive.nudge();
+        // A trace's peek for its own trace.
+        if (peeked && (data.more || data.traces.includes(peeked))) peekLive.nudge();
         if (!one && !listIsEmpty(data.projectId)) {
-          tracesArrived(data.projectId, data.runs, data.more);
+          tracesArrived(data.projectId, data.traces, data.more);
           return;
         }
-        if (one && !data.more && !data.runs.includes(one)) return;
+        if (one && !data.more && !data.traces.includes(one)) return;
         live.nudge();
       });
 

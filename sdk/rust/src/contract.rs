@@ -9,12 +9,11 @@
 
 /// The instrumentation scope every span the SDK opens is under.
 pub(crate) const SCOPE: &str = "telmoni";
-/// The span of no length a run sends as it opens, exported at once, so the
-/// run is seen before it ends.
-pub(crate) const RUN_START: &str = "telmoni.run.start";
+/// The span of no length a trace sends as it opens, exported at once, so the
+/// trace is seen before it ends.
+pub(crate) const TRACE_START: &str = "telmoni.trace.start";
 pub(crate) const DISTRO_NAME: &str = "telemetry.distro.name";
 pub(crate) const DISTRO: &str = "telmoni";
-pub(crate) const RUN_ID: &str = "telmoni.run_id";
 pub(crate) const AGENT: &str = "telmoni.agent";
 pub(crate) const USER_ID: &str = "user.id";
 pub(crate) const TAG_PREFIX: &str = "telmoni.tag.";
@@ -38,8 +37,8 @@ pub(crate) const RELEASE: &str = "service.version";
 /// reads a resource naming a longer one as naming none, without a word.
 pub(crate) const ENVIRONMENT_MAX: usize = 128;
 pub(crate) const RELEASE_MAX: usize = 128;
-/// The W3C headers a run crosses services in: the span's context, and the
-/// run's id and agent as baggage members.
+/// The W3C headers a trace crosses services in: the span's context, and the
+/// agent as a baggage member.
 pub(crate) const TRACEPARENT: &str = "traceparent";
 pub(crate) const BAGGAGE: &str = "baggage";
 
@@ -158,7 +157,7 @@ pub(crate) fn is_content(key: &str) -> bool {
     CONTENT.contains(&key)
 }
 
-pub(crate) const RUN_OPERATION: &str = "invoke_agent";
+pub(crate) const AGENT_OPERATION: &str = "invoke_agent";
 pub(crate) const DEFAULT_MODEL_OPERATION: &str = "chat";
 /// The operations ingest reads as a model call; any other files one elsewhere.
 pub(crate) const MODEL_OPERATIONS: [&str; 4] =

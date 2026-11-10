@@ -215,7 +215,12 @@ async fn the_purges_and_the_move_reach_only_what_they_name(pool: PgPool) {
     seed(&pool, &staying, &untouched, ContentMode::Off).await;
     for project in [&moved, &left, &deleted, &untouched] {
         ch.store
-            .insert_spans(&[common::span(project, SpanKind::Run, "nightly-report", 100)])
+            .insert_spans(&[common::span(
+                project,
+                SpanKind::Agent,
+                "nightly-report",
+                100,
+            )])
             .await
             .expect("insert a project's span");
     }

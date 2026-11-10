@@ -11,15 +11,14 @@
 
 /** The instrumentation scope every span the SDK opens is under. */
 export const SCOPE = 'telmoni';
-/** The span of no length a run sends as it opens, exported at once, so the run is seen before it ends. */
-export const RUN_START = 'telmoni.run.start';
+/** The span of no length a trace sends as it opens, exported at once, so the trace is seen before it ends. */
+export const TRACE_START = 'telmoni.trace.start';
 export const DISTRO_NAME = 'telemetry.distro.name';
 export const DISTRO = 'telmoni';
-export const RUN_ID = 'telmoni.run_id';
 export const AGENT = 'telmoni.agent';
 export const USER_ID = 'user.id';
 export const TAG_PREFIX = 'telmoni.tag.';
-/** The most tags a run carries: ingest keeps no more (its `TAGS_MAX`). */
+/** The most tags a trace carries: ingest keeps no more (its `TAGS_MAX`). */
 export const TAGS_MAX = 32;
 /** A tag's longest key and value, in characters: ingest drops a tag past either. */
 export const TAG_KEY_MAX = 64;
@@ -51,7 +50,7 @@ export const RELEASE = 'service.version';
 /** The deployment's longest environment and release, in characters: ingest reads a resource naming a longer one as naming none, without a word. */
 export const ENVIRONMENT_MAX = 128;
 export const RELEASE_MAX = 128;
-/** The W3C headers a run crosses services in: the span's context, and the run's id and agent as baggage members. */
+/** The W3C headers a trace crosses services in: the span's context, and the agent as a baggage member. */
 export const TRACEPARENT = 'traceparent';
 export const BAGGAGE = 'baggage';
 
@@ -139,7 +138,7 @@ export const MODEL_OPERATIONS: ReadonlySet<string> = new Set([
 /** A model call's operation when it names none. */
 export const DEFAULT_MODEL_OPERATION = 'chat';
 export const TOOL_OPERATION = 'execute_tool';
-export const RUN_OPERATION = 'invoke_agent';
+export const AGENT_OPERATION = 'invoke_agent';
 /** A search of a vector store or an index, and of a memory: ingest reads both as a retrieval. */
 export const RETRIEVAL_OPERATION = 'retrieval';
 export const SEARCH_MEMORY = 'search_memory';
@@ -191,6 +190,6 @@ export const SCRUB_PII_ENV = 'TELMONI_SCRUB_PII';
 export const CONTENT_MODE_HEADER = 'Telmoni-Content-Mode';
 /**
  * The request's header naming this clock as the export leaves, in nanoseconds
- * since the epoch, by which ingest moves a run from a clock a zone or a date out.
+ * since the epoch, by which ingest moves a trace from a clock a zone or a date out.
  */
 export const SENT_AT_HEADER = 'Telmoni-Sent-At';

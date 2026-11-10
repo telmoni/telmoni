@@ -44,28 +44,28 @@ const FEATURES: readonly {
   link: { label: string; href: string };
 }[] = [
   {
-    title: "Failing runs and calls",
-    body: "See when errors climb on a model, tool or provider, and which run failed.",
+    title: "Failing traces and calls",
+    body: "See when errors climb on a model, tool or provider, and which trace failed.",
     link: { label: "Alerts", href: docs("/monitoring/alerts") },
   },
   {
     title: "Loops and stalls",
-    body: "Catch a run that repeats the same tool call or stops making progress before it burns through a session.",
+    body: "Catch an agent that repeats the same tool call or stops making progress before it burns through a session.",
     link: { label: "Loops and stalls", href: docs("/monitoring/alerts#loops-and-stalls") },
   },
   {
     title: "Spend and token spikes",
-    body: "Set daily or monthly budgets per project or agent, and catch a run that costs far more than usual.",
+    body: "Set daily or monthly budgets per project or agent, and catch a trace that costs far more than usual.",
     link: { label: "Budgets", href: docs("/monitoring/alerts#a-budget") },
   },
   {
     title: "Silent agents",
-    body: "Know when a scheduled or background agent stops sending runs at all.",
+    body: "Know when a scheduled or background agent stops sending traces at all.",
     link: { label: "No data", href: docs("/monitoring/alerts#making-an-alert") },
   },
   {
     title: "Hard caps in your process",
-    body: "Stop a run in the SDK when it reaches the step or spend ceiling you set.",
+    body: "Stop an agent in the SDK when it reaches the step or spend ceiling you set.",
     link: { label: "The guard", href: docs("/api/sdks#the-guard") },
   },
   {
@@ -110,7 +110,7 @@ export default async function SplashPage() {
           <SurfaceGrid>
             <SurfaceCard
               title="Console"
-              description="Runs and the steps inside them, live alerts to Slack and webhooks, spend and budgets, and audit logs."
+              description="Traces and the steps inside them, live alerts to Slack and webhooks, spend and budgets, and audit logs."
               action={
                 signedIn ? (
                   <Button asChild size="sm" variant="filled">
@@ -149,7 +149,7 @@ export default async function SplashPage() {
           className="[&_[data-component=features]]:gap-gutter"
         >
           <p className={LEAD}>
-            Telmoni is a privacy-first, open-source monitoring platform for AI agents. Follow runs,
+            Telmoni is a privacy-first, open-source monitoring platform for AI agents. Follow traces,
             catch failures and control spend, with prompts kept in your process by default.{" "}
             <PaperLink href={DOCS_URL} className="text-foreground underline underline-offset-4 hover:no-underline">
               Read the docs.

@@ -21,12 +21,12 @@ const span = testSpan;
 
 const at = (second: number) => `2026-10-11T03:00:${String(second).padStart(2, "0")}.000Z`;
 
-// A run with two steps, the second started first in the export's order, and
+// A trace with two steps, the second started first in the export's order, and
 // a model call and a tool call inside the first step.
 const SPANS = [
-  span({ span_id: "run", kind: SpanKind.Run, name: "nightly-report", started_at: at(0), ended_at: at(9) }),
-  span({ span_id: "step-2", parent_span_id: "run", kind: SpanKind.Step, name: "write", started_at: at(5) }),
-  span({ span_id: "step-1", parent_span_id: "run", kind: SpanKind.Step, name: "plan", started_at: at(1) }),
+  span({ span_id: "agent", kind: SpanKind.Agent, name: "nightly-report", started_at: at(0), ended_at: at(9) }),
+  span({ span_id: "step-2", parent_span_id: "agent", kind: SpanKind.Step, name: "write", started_at: at(5) }),
+  span({ span_id: "step-1", parent_span_id: "agent", kind: SpanKind.Step, name: "plan", started_at: at(1) }),
   span({
     span_id: "tool",
     parent_span_id: "step-1",
@@ -52,22 +52,22 @@ describe("a trace's spans as a tree", () => {
   it("nests each span under its parent, siblings in the order they started", () => {
     const tree = spanTree(SPANS);
     expect(tree).toHaveLength(1);
-    expect(ids(treeRows(tree, new Set()))).toEqual(["run", "step-1", "model", "tool", "step-2"]);
+    expect(ids(treeRows(tree, new Set()))).toEqual(["agent", "step-1", "model", "tool", "step-2"]);
     expect(treeRows(tree, new Set()).map((r) => r.depth)).toEqual([0, 1, 2, 2, 1]);
   });
 
-  it("draws a run's opening until the run's own span lands, then never", () => {
+  it("draws a trace's opening until the agent's own span lands, then never", () => {
     const opening = span({
       span_id: "opening",
-      parent_span_id: "run",
-      kind: SpanKind.RunStart,
-      name: "telmoni.run.start",
+      parent_span_id: "agent",
+      kind: SpanKind.TraceStart,
+      name: "telmoni.trace.start",
       started_at: at(0),
       ended_at: at(0),
     });
     expect(ids(spanTree([opening]))).toEqual(["opening"]);
     expect(ids(treeRows(spanTree([...SPANS, opening]), new Set()))).toEqual([
-      "run",
+      "agent",
       "step-1",
       "model",
       "tool",
@@ -75,9 +75,9 @@ describe("a trace's spans as a tree", () => {
     ]);
   });
 
-  it("stands a span whose parent never arrived at the top, beside the run", () => {
+  it("stands a span whose parent never arrived at the top, beside the agent", () => {
     const orphan = span({ span_id: "late", parent_span_id: "sampled-out", started_at: at(8) });
-    expect(ids(spanTree([...SPANS, orphan]))).toEqual(["run", "late"]);
+    expect(ids(spanTree([...SPANS, orphan]))).toEqual(["agent", "late"]);
   });
 
   it("draws spans caught in a cycle once each, rather than nowhere", () => {
@@ -88,23 +88,23 @@ describe("a trace's spans as a tree", () => {
   });
 
   it("leaves out what stands under a shut span, and nothing else", () => {
-    expect(ids(treeRows(spanTree(SPANS), new Set(["step-1"])))).toEqual(["run", "step-1", "step-2"]);
-    expect(ids(treeRows(spanTree(SPANS), new Set(["run"])))).toEqual(["run"]);
+    expect(ids(treeRows(spanTree(SPANS), new Set(["step-1"])))).toEqual(["agent", "step-1", "step-2"]);
+    expect(ids(treeRows(spanTree(SPANS), new Set(["agent"])))).toEqual(["agent"]);
   });
 
   it("finds spans by name, kind or model, each with the spans above it", () => {
     const tree = spanTree(SPANS);
-    expect(ids(matchingRows(tree, "search"))).toEqual(["run", "step-1", "tool"]);
-    expect(ids(matchingRows(tree, "  GEMINI "))).toEqual(["run", "step-1", "model"]);
-    expect(ids(matchingRows(tree, "model call"))).toEqual(["run", "step-1", "model"]);
-    expect(ids(matchingRows(tree, "write"))).toEqual(["run", "step-2"]);
+    expect(ids(matchingRows(tree, "search"))).toEqual(["agent", "step-1", "tool"]);
+    expect(ids(matchingRows(tree, "  GEMINI "))).toEqual(["agent", "step-1", "model"]);
+    expect(ids(matchingRows(tree, "model call"))).toEqual(["agent", "step-1", "model"]);
+    expect(ids(matchingRows(tree, "write"))).toEqual(["agent", "step-2"]);
     expect(matchingRows(tree, "nothing like it")).toEqual([]);
   });
 
   it("says where each span stands among those under the same parent", () => {
     const rows = treeRows(spanTree(SPANS), new Set());
     expect(rows.map((r) => `${r.span.span_id}:${r.position}/${r.siblings}`)).toEqual([
-      "run:1/1",
+      "agent:1/1",
       "step-1:1/2",
       "model:1/2",
       "tool:2/2",
@@ -115,15 +115,15 @@ describe("a trace's spans as a tree", () => {
   it("names the branches from a depth down, what a large trace opens with shut", () => {
     const tree = spanTree(SPANS);
     expect([...branchesFrom(tree, 1)]).toEqual(["step-1"]);
-    expect([...branchesFrom(tree, 0)].sort()).toEqual(["run", "step-1"]);
+    expect([...branchesFrom(tree, 0)].sort()).toEqual(["agent", "step-1"]);
   });
 
   it("knows a span under another by the parents the spans name, a cycle ending the walk", () => {
     const parentOf = new Map(SPANS.map((s) => [s.span_id, s.parent_span_id]));
     expect(isUnder(parentOf, "tool", "step-1")).toBe(true);
-    expect(isUnder(parentOf, "tool", "run")).toBe(true);
+    expect(isUnder(parentOf, "tool", "agent")).toBe(true);
     expect(isUnder(parentOf, "step-2", "step-1")).toBe(false);
-    expect(isUnder(parentOf, "run", "run")).toBe(false);
+    expect(isUnder(parentOf, "agent", "agent")).toBe(false);
     expect(isUnder(new Map([["a", "b"], ["b", "a"]]), "a", "c")).toBe(false);
   });
 
@@ -131,19 +131,19 @@ describe("a trace's spans as a tree", () => {
     const rows = treeRows(spanTree(SPANS), new Set());
     const row = (id: string) => rows.find((r) => r.span.span_id === id)!;
     expect(parentRow(rows, row("tool"))?.span.span_id).toBe("step-1");
-    expect(parentRow(rows, row("step-2"))?.span.span_id).toBe("run");
-    expect(parentRow(rows, row("run"))).toBeNull();
+    expect(parentRow(rows, row("step-2"))?.span.span_id).toBe("agent");
+    expect(parentRow(rows, row("agent"))).toBeNull();
   });
 });
 
 describe("a trace summed", () => {
-  it("names it by the run, spans it end to end, and counts the model calls' tokens alone", () => {
+  it("names it by the agent, spans it end to end, and counts the model calls' tokens alone", () => {
     const summary = summarizeTrace([
       ...SPANS,
       // A step that repeats its call's usage is not counted twice.
       span({ span_id: "echo", kind: SpanKind.Step, input_tokens: 1200, started_at: at(4) }),
     ]);
-    expect(summary.root.span_id).toBe("run");
+    expect(summary.root.span_id).toBe("agent");
     expect(summary.durationMs).toBe(9_000);
     expect(summary).toMatchObject({
       steps: 3,
@@ -154,7 +154,7 @@ describe("a trace summed", () => {
     });
   });
 
-  it("counts the run's retrievals beside its tool calls, and none where it made none", () => {
+  it("counts the trace's retrievals beside its tool calls, and none where it made none", () => {
     const found = span({
       span_id: "found",
       parent_span_id: "step-1",
@@ -166,7 +166,7 @@ describe("a trace summed", () => {
     expect(summarizeTrace(SPANS).retrievals).toBe(0);
   });
 
-  it("spans the run by its times, not by how many digits the server wrote", () => {
+  it("spans the trace by its times, not by how many digits the server wrote", () => {
     const summary = summarizeTrace([
       span({ span_id: "a", started_at: "2026-10-11T03:00:00.250Z", ended_at: "2026-10-11T03:00:01Z" }),
       span({ span_id: "b", started_at: "2026-10-11T03:00:00Z", ended_at: "2026-10-11T03:00:01.5Z" }),
@@ -176,9 +176,9 @@ describe("a trace summed", () => {
     expect(summary.durationMs).toBe(1_500);
   });
 
-  it("names a run still going by its first span", () => {
+  it("names a trace still going by its first span", () => {
     const summary = summarizeTrace(SPANS.slice(1));
-    expect(summary.run).toBeNull();
+    expect(summary.agent).toBeNull();
     expect(summary.root.span_id).toBe("step-2");
   });
 });
@@ -202,7 +202,7 @@ describe("the tree's one transition", () => {
     expect(treeReducer(open, { type: "toggle", id: "step-2" }).chosen).toBe("tool");
   });
 
-  it("reads the parents of the spans drawn now, as a run still going is read again", () => {
+  it("reads the parents of the spans drawn now, as a trace still going is read again", () => {
     const late = { ...open, chosen: "late" };
     expect(treeReducer(late, { type: "toggle", id: "step-2" }).chosen).toBe("late");
     const grown = treeReducer(late, {

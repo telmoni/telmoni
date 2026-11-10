@@ -1,8 +1,8 @@
 /**
  * Trace and span ids: random, as OpenTelemetry's own generator makes them,
- * except for the spans of a recorded run, whose ids are derived from the run's
- * id, so that a record sent twice is the same bytes and ingest's claim on the
- * body answers it once.
+ * except for the spans of a recorded trace, whose ids are derived from the
+ * trace's id, so that a record sent twice is the same bytes and ingest's claim
+ * on the body answers it once.
  */
 
 import { createHash } from 'node:crypto';
@@ -37,13 +37,13 @@ export class Ids implements IdGenerator {
 }
 
 /**
- * The id of a recorded run's span at `place`: the first eight bytes of the
- * version 5 UUID (RFC 9562) named by the place, in decimal, under the run's
- * id, given as its 32 hex digits. Its version's bits are among those eight,
- * so it is never zero.
+ * The id of a recorded trace's span at `place`: the first eight bytes of the
+ * version 5 UUID (RFC 9562) named by the place, in decimal, under the trace's
+ * 16 bytes, given as its 32 hex digits. Its version's bits are among those
+ * eight, so it is never zero.
  */
-export function spanIdAt(runHex: string, place: number): string {
-  const digest = createHash('sha1').update(Buffer.from(runHex, 'hex')).update(String(place)).digest();
+export function spanIdAt(traceHex: string, place: number): string {
+  const digest = createHash('sha1').update(Buffer.from(traceHex, 'hex')).update(String(place)).digest();
   digest[6] = ((digest[6] ?? 0) & 0x0f) | 0x50;
   return digest.subarray(0, 8).toString('hex');
 }

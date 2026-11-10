@@ -103,7 +103,7 @@ pub enum Ending {
     Cancelled,
 }
 
-/// Why an answer ends early, as the person was told in a note and the run's
+/// Why an answer ends early, as the person was told in a note and the trace's
 /// record tags it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoppedShort {
@@ -134,7 +134,7 @@ impl StoppedShort {
     }
 }
 
-// The word the run's tag gives it.
+// The word the trace's tag gives it.
 telmoni_shared::wire_enum!(StoppedShort {
     Capped => "capped",
     Truncated => "truncated",

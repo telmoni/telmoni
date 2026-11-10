@@ -7,7 +7,7 @@ import { accountHeaders } from "./identity-context";
 import { readJson } from "./read";
 
 // A sign-in of the person's own, as Account › Privacy lists it — not a
-// session of a project's runs, which `sessions.ts` reads.
+// session of a project's traces, which `sessions.ts` reads.
 const ActiveSessionSchema = z.object({
   id: z.string(),
   userAgent: z.string().nullable(),

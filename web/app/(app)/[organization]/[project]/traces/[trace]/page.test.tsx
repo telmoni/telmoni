@@ -25,7 +25,7 @@ vi.mock("@/components/service-unavailable", () => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-  usePathname: () => "/acme/web/traces/5d4f5c68-0000-4000-8000-000000000001",
+  usePathname: () => "/acme/web/traces/5d4f5c68000040008000000000000001",
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -39,17 +39,17 @@ let mockProject: unknown;
 let mockTrace: unknown;
 let mockIncidents: unknown[];
 const fetchProjectBySlug = vi.fn<(slug: string) => Promise<unknown>>(async () => mockProject);
-const fetchTrace = vi.fn<(projectId: string, runId: string, content: boolean) => Promise<unknown>>(
+const fetchTrace = vi.fn<(projectId: string, traceId: string, content: boolean) => Promise<unknown>>(
   async () => mockTrace,
 );
-const fetchRunIncidents = vi.fn<(projectId: string, runId: string) => Promise<unknown[]>>(
+const fetchTraceIncidents = vi.fn<(projectId: string, traceId: string) => Promise<unknown[]>>(
   async () => mockIncidents,
 );
 
 const SCORES = vi.hoisted(() => [
   {
     score_id: "5d4f5c68-0000-4000-8000-0000000000a1",
-    target: "run",
+    target: "trace",
     name: "helpful",
     data_type: "number",
     value: 0.8,
@@ -60,7 +60,7 @@ const SCORES = vi.hoisted(() => [
   },
   {
     score_id: "5d4f5c68-0000-4000-8000-0000000000a2",
-    target: "run",
+    target: "trace",
     name: "grounded",
     data_type: "boolean",
     value: 1,
@@ -79,18 +79,19 @@ vi.mock("@/lib/server/data", () => ({
   activeOrganization: () => null,
   getServerContext: async () => mockContext,
   fetchProjectBySlug: (slug: string) => fetchProjectBySlug(slug),
-  fetchTrace: (projectId: string, runId: string, content: boolean) => fetchTrace(projectId, runId, content),
-  fetchRunIncidents: (projectId: string, runId: string) => fetchRunIncidents(projectId, runId),
+  fetchTrace: (projectId: string, traceId: string, content: boolean) => fetchTrace(projectId, traceId, content),
+  fetchTraceIncidents: (projectId: string, traceId: string) => fetchTraceIncidents(projectId, traceId),
 }));
 
 import TracePage from "./page";
 
-const RUN = "5d4f5c68-0000-4000-8000-000000000001";
-const PARAMS = Promise.resolve({ organization: "acme", project: "web", trace: RUN });
+const TRACE_ID = "5d4f5c68000040008000000000000001";
+const PARAMS = Promise.resolve({ organization: "acme", project: "web", trace: TRACE_ID });
 const span = (over: Record<string, unknown>) =>
   testSpan({
+    trace_id: TRACE_ID,
     span_id: "0000000000000001",
-    kind: SpanKind.Run,
+    kind: SpanKind.Agent,
     name: "nightly-report",
     ended_at: "2026-10-11T03:00:02.000Z",
     ...over,
@@ -150,7 +151,7 @@ beforeEach(() => {
   mockTrace = {
     kind: "ok",
     trace: {
-      run_id: RUN,
+      trace_id: TRACE_ID,
       spans: SPANS,
       truncated: false,
       spend: { spent: 0.84, unpriced: [{ provider: "openai", model: "ft:gpt-4o:acme" }] },
@@ -161,7 +162,7 @@ beforeEach(() => {
 });
 
 describe("TracePage", () => {
-  // Four days after the run, inside the week the user's and the session's
+  // Four days after the trace, inside the week the user's and the session's
   // pages open on, so their links need no window of their own.
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -183,9 +184,9 @@ describe("TracePage", () => {
 
   const chosen = () => screen.getByRole("region", { name: "The span chosen" });
 
-  it("names the run, sums it on one line, and opens on the run's own span", async () => {
+  it("names the trace, sums it on one line, and opens on the agent's own span", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(fetchTrace).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN, true);
+    expect(fetchTrace).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", TRACE_ID, true);
     const header = screen.getByTestId("page-header");
     expect(header).toHaveTextContent("nightly-report");
     expect(header).toHaveAttribute("data-back", "/acme/web/traces");
@@ -196,7 +197,7 @@ describe("TracePage", () => {
     expect(
       screen.getAllByText("1,500 tokens").some((el) => el.getAttribute("title") === "1,200 in, 300 out"),
     ).toBe(true);
-    // ⚠ What the run spent, as its cost alert's notice gives it, and the models left out.
+    // ⚠ What the trace spent, as its cost alert's notice gives it, and the models left out.
     expect(
       screen
         .getAllByText("$0.84, 1 model unpriced")
@@ -211,23 +212,23 @@ describe("TracePage", () => {
       "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015",
     );
 
-    // The spans as they ran: the run, its step, and the step's two calls.
+    // The spans as they ran: the agent, its step, and the step's two calls.
     const tree = screen.getByRole("tree", { name: "Spans" });
     const rows = within(tree).getAllByRole("treeitem");
     expect(rows.map((row) => row.getAttribute("aria-level"))).toEqual(["1", "2", "3", "3"]);
     expect(rows[0]).toHaveAttribute("aria-selected", "true");
     expect(within(tree).getByText("TimeoutError")).toBeInTheDocument();
 
-    // The run's own span, read with the whole trace's sums.
-    const run = chosen();
-    expect(within(run).getByRole("heading", { name: "nightly-report" })).toBeInTheDocument();
-    expect(within(run).getByText(/1 step, 2 calls/)).toBeInTheDocument();
-    expect(within(run).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
-    expect(within(run).getAllByText("team=search").length).toBeGreaterThan(0);
-    expect(within(run).getByText(RUN)).toBeInTheDocument();
+    // The agent's own span, read with the whole trace's sums.
+    const agent = chosen();
+    expect(within(agent).getByRole("heading", { name: "nightly-report" })).toBeInTheDocument();
+    expect(within(agent).getByText(/1 step, 2 calls/)).toBeInTheDocument();
+    expect(within(agent).getByText("(1,200 in, 300 out)")).toBeInTheDocument();
+    expect(within(agent).getAllByText("team=search").length).toBeGreaterThan(0);
+    expect(within(agent).getAllByText(TRACE_ID).length).toBeGreaterThan(0);
   });
 
-  it("shows the run's scores on its line, the person's own theirs to take back", async () => {
+  it("shows the trace's scores on its line, the person's own theirs to take back", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const scores = within(screen.getByRole("group", { name: "Scores" }));
     expect(scores.getByTitle("helpful, by a member")).toHaveTextContent("helpful 0.80");
@@ -237,22 +238,22 @@ describe("TracePage", () => {
     expect(scores.getByRole("button", { name: "Score" })).toBeInTheDocument();
   });
 
-  it("says on the run's line whether the project keeps content", async () => {
+  it("says on the trace's line whether the project keeps content", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByTitle(/This project keeps prompts, replies and tool payloads/)).toHaveTextContent("Content on");
   });
 
-  it("links each of the run's tags to the traces that carry it", async () => {
+  it("links each of the trace's tags to the traces that carry it", async () => {
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tag = screen.getByRole("link", { name: "team:search" });
     expect(tag.getAttribute("href")).toContain("tag=team%3Asearch");
   });
 
-  it("links the incidents whose notices showed the run, each at its row of the alerts page", async () => {
+  it("links the incidents whose notices showed the trace, each at its row of the alerts page", async () => {
     const INCIDENT = "7a1c0e52-0000-4000-8000-000000000002";
     mockIncidents = [{ id: INCIDENT, rule_name: "Failing trips" }];
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(fetchRunIncidents).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", RUN);
+    expect(fetchTraceIncidents).toHaveBeenCalledWith("project_7bQx2mNv9BcK4dLp", TRACE_ID);
     expect(screen.getByRole("link", { name: "incident: Failing trips" })).toHaveAttribute(
       "href",
       `/acme/web/alerts?incident=${INCIDENT}#incident-${INCIDENT}`,
@@ -281,7 +282,7 @@ describe("TracePage", () => {
     expect(within(chosen()).getByText("Time to first token").nextSibling).toHaveTextContent("420 ms");
   });
 
-  it("draws a retrieval by its source with its count, beside the run's other calls", async () => {
+  it("draws a retrieval by its source with its count, beside the trace's other calls", async () => {
     const found = span({
       span_id: "0000000000000005",
       parent_span_id: "0000000000000002",
@@ -307,7 +308,7 @@ describe("TracePage", () => {
     });
     mockTrace = {
       kind: "ok",
-      trace: { run_id: RUN, spans: [...SPANS, found, recalled], truncated: false, spend: null, content: [] },
+      trace: { trace_id: TRACE_ID, spans: [...SPANS, found, recalled], truncated: false, spend: null, content: [] },
     };
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     const tree = screen.getByRole("tree", { name: "Spans" });
@@ -392,7 +393,7 @@ describe("TracePage", () => {
     expect(tree.querySelectorAll('[role="treeitem"] span[style*="width"]')).toHaveLength(4);
   });
 
-  it("shows the run's turn at its head and each span's content in full, the content tab first", async () => {
+  it("shows the trace's turn at its head and each span's content in full, the content tab first", async () => {
     const turn = {
       "gen_ai.input.messages": JSON.stringify([
         { role: "user", parts: [{ type: "text", content: "Summarize the report" }] },
@@ -418,13 +419,13 @@ describe("TracePage", () => {
     mockTrace = {
       kind: "ok",
       trace: {
-        run_id: RUN,
+        trace_id: TRACE_ID,
         spans: SPANS,
         truncated: false,
         spend: null,
         content: [
-          { run_id: RUN, span_id: "0000000000000001", fields: turn },
-          { run_id: RUN, span_id: "0000000000000003", fields: call },
+          { trace_id: TRACE_ID, span_id: "0000000000000001", fields: turn },
+          { trace_id: TRACE_ID, span_id: "0000000000000003", fields: call },
         ],
       },
     };
@@ -456,13 +457,13 @@ describe("TracePage", () => {
     mockTrace = {
       kind: "ok",
       trace: {
-        run_id: RUN,
+        trace_id: TRACE_ID,
         spans: scrubbed,
         truncated: false,
         spend: null,
         content: [
           {
-            run_id: RUN,
+            trace_id: TRACE_ID,
             span_id: "0000000000000003",
             fields: {
               "gen_ai.output.messages": JSON.stringify([
@@ -488,15 +489,15 @@ describe("TracePage", () => {
     const { unmount } = render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("This trace kept no content.")).toBeInTheDocument();
     unmount();
-    mockTrace = { kind: "ok", trace: { run_id: RUN, spans: SPANS, truncated: false, spend: null, content: null } };
+    mockTrace = { kind: "ok", trace: { trace_id: TRACE_ID, spans: SPANS, truncated: false, spend: null, content: null } };
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("This trace's content could not be read. Reload to try again.")).toBeInTheDocument();
   });
 
-  it("calls a run whose own span has not arrived running", async () => {
+  it("calls a trace whose agent's span has not arrived running", async () => {
     mockTrace = {
       kind: "ok",
-      trace: { run_id: RUN, spans: SPANS.slice(2, 3), truncated: true, spend: null, content: [] },
+      trace: { trace_id: TRACE_ID, spans: SPANS.slice(2, 3), truncated: true, spend: null, content: [] },
     };
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(screen.getByText("Running")).toBeInTheDocument();
@@ -507,7 +508,7 @@ describe("TracePage", () => {
   it("says when there is no such trace here, and leads back to the list", async () => {
     mockTrace = { kind: "missing" };
     render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByText("No run with this id in this project.")).toBeInTheDocument();
+    expect(screen.getByText("No trace with this id in this project.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to the traces" })).toHaveAttribute(
       "href",
       "/acme/web/traces",

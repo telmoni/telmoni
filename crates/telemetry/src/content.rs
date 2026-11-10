@@ -112,20 +112,19 @@ pub async fn keep(
     }
     let (wrapped, key) = opened_key(state, project_id).await?;
     let mut sealed = SealedFields::default();
-    let mut named: (Vec<String>, Vec<Uuid>) = (Vec::new(), Vec::new());
+    let mut named: (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     for span in content {
         // A comment names no file: a hash in it would hold one from its sweep.
         let names_files = !span.span_id.starts_with(crate::scores::COMMENT_SPAN_PREFIX);
         for (field, text) in span.fields {
             for hash in files_named(&text).into_iter().filter(|_| names_files) {
                 named.0.push(hash);
-                named.1.push(span.run_id);
+                named.1.push(span.trace_id.clone());
             }
             let aad = field_aad(&span.span_id, &field);
             let Sealed { ciphertext, nonce } =
                 seal_field(&state.vault, &key, &Redacted::from(text), &aad)?;
             let bytes = i32::try_from(ciphertext.len()).unwrap_or(i32::MAX);
-            sealed.run_ids.push(span.run_id);
             sealed.trace_ids.push(span.trace_id.clone());
             sealed.span_ids.push(span.span_id.clone());
             sealed.fields.push(field);
@@ -155,10 +154,10 @@ pub async fn keep(
 }
 
 /// A score's comment kept in place of the one it had, sealed as a span's
-/// field is under the score's run ([`crate::scores::comment_span`]), so a
+/// field is under the score's trace ([`crate::scores::comment_span`]), so a
 /// trace's deletion, an end user's erasure and retention take it as they take
-/// the run's content, and opened only with the run's, as its read; none kept
-/// for `None`, the last one taken back.
+/// the trace's content, and opened only with the trace's, as its read; none
+/// kept for `None`, the last one taken back.
 ///
 /// # Errors
 ///
@@ -166,16 +165,16 @@ pub async fn keep(
 pub async fn keep_comment(
     state: &AppState,
     project_id: &ProjectId,
-    (run_id, trace_id): (Uuid, &str),
+    trace_id: &str,
     score_id: Uuid,
     comment: Option<&str>,
 ) -> Result<(), TelmoniError> {
-    forget_comments(state, project_id, run_id, &[score_id]).await?;
-    // A run deleted as it was scored keeps nothing it said after.
+    forget_comments(state, project_id, trace_id, &[score_id]).await?;
+    // A trace deleted as it was scored keeps nothing it said after.
     let Some(comment) = comment else {
         return Ok(());
     };
-    if crate::erasure::was_deleted(state, project_id, run_id).await {
+    if crate::erasure::was_deleted(state, project_id, trace_id).await {
         return Ok(());
     }
     keep(
@@ -183,7 +182,6 @@ pub async fn keep_comment(
         project_id,
         Utc::now(),
         vec![SpanContent {
-            run_id,
             trace_id: trace_id.to_owned(),
             span_id: crate::scores::comment_span(score_id),
             fields: vec![(crate::scores::COMMENT_FIELD.to_owned(), comment.to_owned())],
@@ -192,7 +190,7 @@ pub async fn keep_comment(
     .await
 }
 
-/// The project's fields under the spans `spans` names of `run_id` deleted,
+/// The project's fields under the spans `spans` names of `trace_id` deleted,
 /// their bytes given back.
 ///
 /// # Errors
@@ -201,13 +199,13 @@ pub async fn keep_comment(
 pub async fn forget_named(
     state: &AppState,
     project_id: &ProjectId,
-    run_id: Uuid,
+    trace_id: &str,
     spans: &[String],
 ) -> Result<(), TelmoniError> {
     let mut tx =
         telmoni_shared::db::tenant_session::maintenance_scope(&state.db, crate::db::TelemetryLane)
             .await?;
-    db::forget_fields(tx.conn(), project_id, run_id, spans).await?;
+    db::forget_fields(tx.conn(), project_id, trace_id, spans).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -220,7 +218,7 @@ pub async fn forget_named(
 pub async fn forget_comments(
     state: &AppState,
     project_id: &ProjectId,
-    run_id: Uuid,
+    trace_id: &str,
     score_ids: &[Uuid],
 ) -> Result<(), TelmoniError> {
     let spans: Vec<String> = score_ids
@@ -228,7 +226,7 @@ pub async fn forget_comments(
         .copied()
         .map(crate::scores::comment_span)
         .collect();
-    forget_named(state, project_id, run_id, &spans).await
+    forget_named(state, project_id, trace_id, &spans).await
 }
 
 /// Refuses what was sealed under `wrapped` once the project's content key is
@@ -259,7 +257,7 @@ async fn still_under(
     Ok(())
 }
 
-/// The runs' content, opened for `actor`, whom the caller has let read the
+/// The traces' content, opened for `actor`, whom the caller has let read the
 /// project: the one way content is
 /// read, so every read is a `Viewed` row in the organization's chain,
 /// committed before a field is opened. The row names the traces read, never
@@ -272,14 +270,14 @@ pub async fn open(
     state: &AppState,
     actor: Actor<'_>,
     project_id: &ProjectId,
-    runs: &[Uuid],
+    traces: &[String],
 ) -> Result<Vec<SpanContent>, TelmoniError> {
     // No settings row, no content: a project that never kept any.
     let Some((tx, organization_id)) = held_if_kept(state, project_id).await? else {
         return Ok(Vec::new());
     };
     let kept = chain::settle(tx, project_id, WHAT, async |tx| {
-        file_the_read(tx, &organization_id, actor, project_id, runs).await
+        file_the_read(tx, &organization_id, actor, project_id, traces).await
     })
     .await?;
     if kept.is_empty() {
@@ -297,7 +295,7 @@ async fn opened(
 ) -> Result<Vec<SpanContent>, TelmoniError> {
     let key = key_for(state, project_id).await?;
     let mut opened: Vec<SpanContent> = Vec::new();
-    for (run_id, trace_id, span_id, field, ciphertext, nonce) in kept {
+    for (trace_id, span_id, field, ciphertext, nonce) in kept {
         let text = open_field(
             &state.vault,
             &key,
@@ -312,7 +310,6 @@ async fn opened(
                 span.fields.push((field, text));
             }
             _ => opened.push(SpanContent {
-                run_id,
                 trace_id,
                 span_id,
                 fields: vec![(field, text)],
@@ -322,23 +319,23 @@ async fn opened(
     Ok(opened)
 }
 
-/// The runs' sealed fields, and where there are any, the `Viewed` row that
+/// The traces' sealed fields, and where there are any, the `Viewed` row that
 /// files their read, its chain lock waited on no longer than a lane's.
 async fn file_the_read(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     organization_id: &OrganizationId,
     actor: Actor<'_>,
     project_id: &ProjectId,
-    runs: &[Uuid],
+    traces: &[String],
 ) -> Result<Vec<db::KeptField>, TelmoniError> {
-    let kept = db::read_content(tx, project_id, runs).await?;
+    let kept = db::read_content(tx, project_id, traces).await?;
     if kept.is_empty() {
         return Ok(kept);
     }
     // The traces read, not those asked for: kept is ordered by trace.
     let mut read: Vec<&str> = kept
         .iter()
-        .map(|(_, trace_id, ..)| trace_id.as_str())
+        .map(|(trace_id, ..)| trace_id.as_str())
         .collect();
     read.dedup();
     let read = json!({ "trace_ids": read, "fields": kept.len() });

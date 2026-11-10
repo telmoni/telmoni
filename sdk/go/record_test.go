@@ -1,12 +1,11 @@
 package telmoni_test
 
-// A run recorded after it ended: RecordRun, and the export every SDK must send
-// for sdk/fixtures/recorded.json.
+// A trace recorded after it ended: RecordTrace, and the export every SDK must
+// send for sdk/fixtures/recorded.json.
 
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +34,7 @@ type recordedFixture struct {
 }
 
 type recordSpec struct {
-	RunID     string            `json:"run_id"`
+	TraceID   string            `json:"trace_id"`
 	Agent     string            `json:"agent"`
 	UserID    string            `json:"user_id"`
 	SessionID string            `json:"session_id"`
@@ -47,8 +46,8 @@ type recordSpec struct {
 	Inside    []recordItemSpec  `json:"inside"`
 }
 
-// recordItemSpec is what a run or a step holds: a step, holding its own, or a
-// call.
+// recordItemSpec is what a trace or a step holds: a step, holding its own, or
+// a call.
 type recordItemSpec struct {
 	Step *struct {
 		Name      string           `json:"name"`
@@ -142,13 +141,13 @@ func itemFrom(spec recordItemSpec) telmoni.RecordItem {
 	}
 }
 
-func recordFrom(spec recordSpec) telmoni.RunRecord {
+func recordFrom(spec recordSpec) telmoni.TraceRecord {
 	inside := make([]telmoni.RecordItem, 0, len(spec.Inside))
 	for _, item := range spec.Inside {
 		inside = append(inside, itemFrom(item))
 	}
-	return telmoni.RunRecord{
-		RunID:     spec.RunID,
+	return telmoni.TraceRecord{
+		TraceID:   spec.TraceID,
 		Agent:     spec.Agent,
 		UserID:    spec.UserID,
 		SessionID: spec.SessionID,
@@ -161,7 +160,7 @@ func recordFrom(spec recordSpec) telmoni.RunRecord {
 	}
 }
 
-func theRecord(t *testing.T) telmoni.RunRecord {
+func theRecord(t *testing.T) telmoni.TraceRecord {
 	t.Helper()
 	return recordFrom(loadRecorded(t).Scenario.Record)
 }
@@ -211,10 +210,10 @@ func normalizeRecorded(t *testing.T, body map[string]any) map[string]any {
 	return body
 }
 
-func recordRun(t *testing.T, h *harness, record telmoni.RunRecord) {
+func recordTrace(t *testing.T, h *harness, record telmoni.TraceRecord) {
 	t.Helper()
-	if err := h.client.RecordRun(context.Background(), record); err != nil {
-		t.Fatalf("RecordRun: %v", err)
+	if err := h.client.RecordTrace(context.Background(), record); err != nil {
+		t.Fatalf("RecordTrace: %v", err)
 	}
 	h.flush()
 }
@@ -238,7 +237,7 @@ const operationWarning = "telmoni: a model call's operation must be chat, genera
 func TestTheRecordMatchesTheGoldenExport(t *testing.T) {
 	fixture := loadRecorded(t)
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), CaptureContent: fixture.Scenario.CaptureContent}, nil)
-	recordRun(t, h, recordFrom(fixture.Scenario.Record))
+	recordTrace(t, h, recordFrom(fixture.Scenario.Record))
 	bodies := h.transport.bodies(t)
 	if len(bodies) != 1 {
 		t.Fatalf("a record travels in one export; got %d", len(bodies))
@@ -275,7 +274,7 @@ func TestTheSameRecordSentAgainIsTheSameBytes(t *testing.T) {
 	// took a batch mid-record would split it only now and then.
 	for range 20 {
 		h := newHarness(t, testConfig(), nil)
-		recordRun(t, h, record)
+		recordTrace(t, h, record)
 		h.shutdown()
 		if first == nil {
 			first = h
@@ -284,64 +283,62 @@ func TestTheSameRecordSentAgainIsTheSameBytes(t *testing.T) {
 	}
 }
 
-func TestARecordInsideALiveRunTakesATraceOfItsOwn(t *testing.T) {
+func TestARecordInsideALiveTraceTakesATraceOfItsOwn(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	record := theRecord(t)
-	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
-	if err := h.client.RecordRun(ctx, record); err != nil {
-		t.Fatalf("RecordRun: %v", err)
+	ctx, live := h.client.Trace(context.Background(), "live", telmoni.TraceOptions{})
+	if err := h.client.RecordTrace(ctx, record); err != nil {
+		t.Fatalf("RecordTrace: %v", err)
 	}
-	if telmoni.RunFromContext(ctx) != live {
-		t.Error("the live run is no longer found from its context")
+	if telmoni.TraceFromContext(ctx) != live {
+		t.Error("the live trace is no longer found from its context")
 	}
-	// A step opened after the record is the live run's, ids and all.
+	// A step opened after the record is the live trace's, ids and all.
 	_, step := live.Step(ctx, "after")
 	step.End()
 	live.End()
 	h.flush()
 	var recorded []map[string]any
 	for _, span := range h.transport.spans(t) {
-		if attributesOf(t, span)["telmoni.run_id"] == record.RunID {
+		if span["traceId"] == record.TraceID {
 			recorded = append(recorded, span)
 		}
 	}
 	if len(recorded) != 10 {
-		t.Fatalf("sent %d spans of the record, want its 10", len(recorded))
+		t.Fatalf("sent %d spans in the record's trace, want its 10", len(recorded))
 	}
-	want := strings.ReplaceAll(record.RunID, "-", "")
-	for _, span := range recorded {
-		if span["traceId"] != want {
-			t.Errorf("%s is in trace %v, want the run's id %s", span["name"], span["traceId"], want)
-		}
+	agent := byName(recorded)["invoke_agent claude-code"]
+	if _, has := agent["parentSpanId"]; agent == nil || has {
+		t.Error("the recorded agent's span is missing or has a parent")
 	}
-	if _, has := byName(recorded)["invoke_agent claude-code"]["parentSpanId"]; has {
-		t.Error("the recorded run has a parent")
+	if _, has := agent["links"]; has {
+		t.Error("the recorded agent's span is linked to the live trace")
 	}
 	liveSpan := trace.SpanContextFromContext(ctx)
 	after := byName(h.transport.spans(t))["after"]
 	if after["traceId"] != liveSpan.TraceID().String() || after["parentSpanId"] != liveSpan.SpanID().String() {
-		t.Error("the step opened after the record is not the live run's child")
+		t.Error("the step opened after the record is not the live agent's child")
 	}
 }
 
-func TestAFailedRecordIsMarkedOnItsRunsSpan(t *testing.T) {
+func TestAFailedRecordIsMarkedOnItsAgentsSpan(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	record := theRecord(t)
 	record.ErrorType, record.Cancelled, record.Inside = "RateLimitError", false, nil
-	recordRun(t, h, record)
-	run := byName(h.transport.spans(t))["invoke_agent claude-code"]
-	if run == nil {
+	recordTrace(t, h, record)
+	agent := byName(h.transport.spans(t))["invoke_agent claude-code"]
+	if agent == nil {
 		t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
 	}
-	if !reflect.DeepEqual(run["status"], map[string]any{"code": float64(2)}) {
-		t.Errorf("status = %v, want {code: 2}", run["status"])
+	if !reflect.DeepEqual(agent["status"], map[string]any{"code": float64(2)}) {
+		t.Errorf("status = %v, want {code: 2}", agent["status"])
 	}
-	attributes := attributesOf(t, run)
+	attributes := attributesOf(t, agent)
 	if attributes["error.type"] != "RateLimitError" {
 		t.Errorf("error.type = %v, want RateLimitError", attributes["error.type"])
 	}
 	if _, has := attributes["telmoni.cancelled"]; has {
-		t.Error("a run that failed is marked cancelled")
+		t.Error("a trace that failed is marked cancelled")
 	}
 }
 
@@ -361,7 +358,7 @@ func TestARecordsContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 		t.Run(fmt.Sprintf("capture=%v mode=%s", tc.capture, tc.mode), func(t *testing.T) {
 			answer := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": tc.mode}, body: []byte(`{}`)}
 			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: tc.capture}, newFakeTransport(t, answer, answer))
-			_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+			_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 			warm.End()
 			h.flush()
 			record := theRecord(t)
@@ -382,7 +379,7 @@ func TestARecordsContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 				},
 				telmoni.ToolCallRecord{Name: "t", Start: at, End: at, Arguments: map[string]int{"q": 1}, Result: "found"},
 			}
-			recordRun(t, h, record)
+			recordTrace(t, h, record)
 			spans := byName(h.transport.spans(t))
 			sends := tc.capture && tc.mode == "on"
 			for name, fields := range content {
@@ -415,78 +412,80 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name   string
-		change func(*telmoni.RunRecord)
+		change func(*telmoni.TraceRecord)
 		want   string
 	}{
-		{"a blank agent", func(r *telmoni.RunRecord) { r.Agent = " " }, "agent's name"},
-		{"a run id that is no UUID", func(r *telmoni.RunRecord) { r.RunID = "run-1" }, "must be a UUID"},
-		{"a run id that is not hex", func(r *telmoni.RunRecord) { r.RunID = "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5g" }, "must be a UUID"},
-		{"the nil UUID", func(r *telmoni.RunRecord) { r.RunID = "00000000-0000-0000-0000-000000000000" }, "nil UUID"},
-		{"a zero start", func(r *telmoni.RunRecord) { r.Start = time.Time{} }, "cannot be zero"},
-		{"a call with no end", func(r *telmoni.RunRecord) {
+		{"a blank agent", func(r *telmoni.TraceRecord) { r.Agent = " " }, "agent's name"},
+		{"a trace id that is no hex", func(r *telmoni.TraceRecord) { r.TraceID = "trace-1" }, "32 hex digits"},
+		{"a trace id with a digit that is no hex", func(r *telmoni.TraceRecord) { r.TraceID = "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5g" }, "32 hex digits"},
+		{"a trace id of 31 digits", func(r *telmoni.TraceRecord) { r.TraceID = "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5" }, "32 hex digits"},
+		{"a trace id spelled as a UUID, with hyphens", func(r *telmoni.TraceRecord) { r.TraceID = "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" }, "32 hex digits"},
+		{"a trace id of zeros", func(r *telmoni.TraceRecord) { r.TraceID = "00000000000000000000000000000000" }, "not all zeros"},
+		{"a zero start", func(r *telmoni.TraceRecord) { r.Start = time.Time{} }, "cannot be zero"},
+		{"a call with no end", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", Start: start})
 		}, "cannot be zero"},
-		{"a run that ends before it starts", func(r *telmoni.RunRecord) { r.End = r.Start.Add(-time.Second) }, "end before it starts"},
-		{"a call that ends before it starts, last in the record", func(r *telmoni.RunRecord) {
+		{"a trace that ends before it starts", func(r *telmoni.TraceRecord) { r.End = r.Start.Add(-time.Second) }, "end before it starts"},
+		{"a call that ends before it starts, last in the record", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, backwards)
 		}, "end before it starts"},
-		{"a start at the Unix epoch", func(r *telmoni.RunRecord) { r.Start = time.Unix(0, 0) }, outOfRange},
-		{"a step that starts before 1970", func(r *telmoni.RunRecord) {
+		{"a start at the Unix epoch", func(r *telmoni.TraceRecord) { r.Start = time.Unix(0, 0) }, outOfRange},
+		{"a step that starts before 1970", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC), End: start})
 		}, outOfRange},
-		{"a call that ends 2^64 nanoseconds past the epoch", func(r *telmoni.RunRecord) {
+		{"a call that ends 2^64 nanoseconds past the epoch", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: "t", Start: start, End: time.Date(2554, 7, 21, 23, 34, 33, 709551616, time.UTC)})
 		}, outOfRange},
-		{"a run that ends in 3000", func(r *telmoni.RunRecord) { r.End = time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC) }, outOfRange},
-		{"a step with no name", func(r *telmoni.RunRecord) {
+		{"a trace that ends in 3000", func(r *telmoni.TraceRecord) { r.End = time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC) }, outOfRange},
+		{"a step with no name", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Start: start, End: start})
 		}, "cannot be empty"},
-		{"a model call with no model, in a step", func(r *telmoni.RunRecord) {
+		{"a model call with no model, in a step", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
 				telmoni.ModelCallRecord{Start: start, End: start},
 			}})
 		}, "cannot be empty"},
-		{"a model call with no model", func(r *telmoni.RunRecord) {
+		{"a model call with no model", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Start: start, End: start})
 		}, "cannot be empty"},
-		{"an agent of 129 characters", func(r *telmoni.RunRecord) { r.Agent = strings.Repeat("a", 129) },
-			"telmoni: a recorded run's Agent must be up to 128 characters"},
-		{"a user of 129 characters", func(r *telmoni.RunRecord) { r.UserID = strings.Repeat("u", 129) },
-			"telmoni: a recorded run's UserID must be up to 128 characters"},
-		{"a session of 201 characters", func(r *telmoni.RunRecord) { r.SessionID = strings.Repeat("s", 201) },
-			"telmoni: a recorded run's SessionID must be up to 200 characters"},
-		{"a run's error type of 129 characters", func(r *telmoni.RunRecord) { r.ErrorType = strings.Repeat("e", 129) },
-			"telmoni: a recorded run's ErrorType must be up to 128 characters"},
-		{"a step's name of 146 characters", func(r *telmoni.RunRecord) {
+		{"an agent of 129 characters", func(r *telmoni.TraceRecord) { r.Agent = strings.Repeat("a", 129) },
+			"telmoni: a recorded trace's Agent must be up to 128 characters"},
+		{"a user of 129 characters", func(r *telmoni.TraceRecord) { r.UserID = strings.Repeat("u", 129) },
+			"telmoni: a recorded trace's UserID must be up to 128 characters"},
+		{"a session of 201 characters", func(r *telmoni.TraceRecord) { r.SessionID = strings.Repeat("s", 201) },
+			"telmoni: a recorded trace's SessionID must be up to 200 characters"},
+		{"a trace's error type of 129 characters", func(r *telmoni.TraceRecord) { r.ErrorType = strings.Repeat("e", 129) },
+			"telmoni: a recorded trace's ErrorType must be up to 128 characters"},
+		{"a step's name of 146 characters", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: strings.Repeat("s", 146), Start: start, End: start})
 		}, "telmoni: a recorded step's Name must be up to 145 characters"},
-		{"a step's error type of 129 characters", func(r *telmoni.RunRecord) {
+		{"a step's error type of 129 characters", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
 		}, "telmoni: a recorded step's ErrorType must be up to 128 characters"},
-		{"a model of 129 characters", func(r *telmoni.RunRecord) {
+		{"a model of 129 characters", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: strings.Repeat("m", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's Model must be up to 128 characters"},
-		{"a provider of 129 characters", func(r *telmoni.RunRecord) {
+		{"a provider of 129 characters", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", Provider: strings.Repeat("p", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's Provider must be up to 128 characters"},
-		{"a reasoning effort of 1025 characters, in a step", func(r *telmoni.RunRecord) {
+		{"a reasoning effort of 1025 characters, in a step", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
 				telmoni.ModelCallRecord{Model: "m", ReasoningEffort: strings.Repeat("r", 1025), Start: start, End: start},
 			}})
 		}, "telmoni: a recorded model call's ReasoningEffort must be up to 1024 characters"},
-		{"a model call's error type of 129 characters", func(r *telmoni.RunRecord) {
+		{"a model call's error type of 129 characters", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ModelCallRecord{Model: "m", ErrorType: strings.Repeat("e", 129), Start: start, End: start})
 		}, "telmoni: a recorded model call's ErrorType must be up to 128 characters"},
-		{"a tool's name of 146 characters", func(r *telmoni.RunRecord) {
+		{"a tool's name of 146 characters", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.ToolCallRecord{Name: strings.Repeat("t", 146), Start: start, End: start})
 		}, "telmoni: a recorded tool call's Name must be up to 145 characters"},
-		{"a tool call's error type of 129 characters, in a step", func(r *telmoni.RunRecord) {
+		{"a tool call's error type of 129 characters, in a step", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{
 				telmoni.ToolCallRecord{Name: "t", ErrorType: strings.Repeat("e", 129), Start: start, End: start},
 			}})
 		}, "telmoni: a recorded tool call's ErrorType must be up to 128 characters"},
-		{"a nil item", func(r *telmoni.RunRecord) { r.Inside = append(r.Inside, nil) }, "a recorded item must be"},
-		{"a nil pointer to a call", func(r *telmoni.RunRecord) {
+		{"a nil item", func(r *telmoni.TraceRecord) { r.Inside = append(r.Inside, nil) }, "a recorded item must be"},
+		{"a nil pointer to a call", func(r *telmoni.TraceRecord) {
 			r.Inside = append(r.Inside, telmoni.StepRecord{
 				Name:  "s",
 				Start: start,
@@ -494,13 +493,13 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 				Calls: []telmoni.RecordItem{(*telmoni.ToolCallRecord)(nil)},
 			})
 		}, "a recorded item must be"},
-		{"a nil item in a step inside a step", func(r *telmoni.RunRecord) {
+		{"a nil item in a step inside a step", func(r *telmoni.TraceRecord) {
 			inner := telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{nil}}
 			r.Inside = append(r.Inside, telmoni.StepRecord{Name: "s", Start: start, End: start, Calls: []telmoni.RecordItem{inner}})
 		}, "a recorded item must be"},
-		{"steps nested 17 deep", func(r *telmoni.RunRecord) { r.Inside = append(r.Inside, nested(17, start)) },
+		{"steps nested 17 deep", func(r *telmoni.TraceRecord) { r.Inside = append(r.Inside, nested(17, start)) },
 			"telmoni: a recorded step must be nested at most 16 deep"},
-		{"a step that holds itself", func(r *telmoni.RunRecord) {
+		{"a step that holds itself", func(r *telmoni.TraceRecord) {
 			looped := &telmoni.StepRecord{Name: "s", Start: start, End: start}
 			looped.Calls = []telmoni.RecordItem{looped}
 			r.Inside = append(r.Inside, looped)
@@ -510,9 +509,9 @@ func TestARecordRefusedReturnsAnErrorAndSendsNothing(t *testing.T) {
 			h := newHarness(t, testConfig(), nil)
 			record := theRecord(t)
 			tc.change(&record)
-			err := h.client.RecordRun(context.Background(), record)
+			err := h.client.RecordTrace(context.Background(), record)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("RecordRun = %v, want an error naming %q", err, tc.want)
+				t.Errorf("RecordTrace = %v, want an error naming %q", err, tc.want)
 			}
 			h.flush()
 			if sent := len(h.transport.all()); sent != 0 {
@@ -537,18 +536,18 @@ func TestAStepInsideAStepGoesUnderItsSpan(t *testing.T) {
 		step("outer", call("a"), step("middle", step("inner", call("b"))), call("c")),
 		call("d"),
 	}
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	spans := h.transport.spans(t)
 	sent := []string{"execute_tool a", "execute_tool b", "inner", "middle", "execute_tool c", "outer", "execute_tool d", "invoke_agent bot"}
 	if got := names(spans); !reflect.DeepEqual(got, sent) {
 		t.Fatalf("sent %q, want %q", got, sent)
 	}
-	var runID [16]byte
-	if _, err := hex.Decode(runID[:], []byte(strings.ReplaceAll(record.RunID, "-", ""))); err != nil {
+	traceID, err := trace.TraceIDFromHex(record.TraceID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	places := []string{"invoke_agent bot", "outer", "execute_tool a", "middle", "inner", "execute_tool b", "execute_tool c", "execute_tool d"}
-	idOf := func(name string) string { return telmoni.RecordedSpanID(runID, slices.Index(places, name)).String() }
+	idOf := func(name string) string { return telmoni.RecordedSpanID(traceID, slices.Index(places, name)).String() }
 	parents := map[string]string{
 		"outer": "invoke_agent bot", "execute_tool a": "outer", "middle": "outer", "inner": "middle",
 		"execute_tool b": "inner", "execute_tool c": "outer", "execute_tool d": "invoke_agent bot",
@@ -571,10 +570,10 @@ func TestStepsNested16DeepAreSent(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	record := theRecord(t)
 	record.Inside = []telmoni.RecordItem{nested(16, record.Start)}
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	spans := h.transport.spans(t)
 	if len(spans) != 17 {
-		t.Fatalf("sent %d spans, want the run and its 16 steps", len(spans))
+		t.Fatalf("sent %d spans, want the agent's and its 16 steps", len(spans))
 	}
 	for n, inner := range spans[:16] {
 		if inner["parentSpanId"] != spans[n+1]["spanId"] {
@@ -595,7 +594,7 @@ func TestARecordAtTheEdgesOfWhatIngestReadsIsSentAsGiven(t *testing.T) {
 		telmoni.ToolCallRecord{Start: first, End: last},
 		telmoni.ModelCallRecord{Model: " ", Start: first, End: last},
 	}}}
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	spans := h.transport.spans(t)
 	want := []string{" ", "chat  ", "execute_tool ", "execute_tool  ", "invoke_agent claude-code"}
 	if got := sortedNames(spans); !reflect.DeepEqual(got, want) {
@@ -623,7 +622,7 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 		telmoni.ModelCallRecord{Model: wide(128), Provider: wide(128), ReasoningEffort: wide(1024), ErrorType: wide(128), Start: start, End: start},
 		telmoni.ModelCallRecord{Operation: "generate_content", Model: wide(128), Start: start, End: start},
 	}
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	spans := h.transport.spans(t)
 	if len(spans) != 5 {
 		t.Fatalf("sent %d spans, want the record's 5", len(spans))
@@ -651,22 +650,22 @@ func TestARecordAtIngestsCapsIsSentAsGiven(t *testing.T) {
 	}
 }
 
-// A run id is read in either case and sent in lowercase: in capitals it is
-// the same run, and the same bytes.
-func TestARunIDInCapitalsIsTheSameRun(t *testing.T) {
+// A trace id is read in either case and sent in lowercase: in capitals it is
+// the same trace, and the same bytes.
+func TestATraceIDInCapitalsIsTheSameTrace(t *testing.T) {
 	record := theRecord(t)
 	lower := newHarness(t, testConfig(), nil)
-	recordRun(t, lower, record)
-	record.RunID = strings.ToUpper(record.RunID)
+	recordTrace(t, lower, record)
+	record.TraceID = strings.ToUpper(record.TraceID)
 	upper := newHarness(t, testConfig(), nil)
-	recordRun(t, upper, record)
+	recordTrace(t, upper, record)
 	sameBody(t, upper, lower)
 }
 
 func TestItemsGivenByPointerAreReadThroughThem(t *testing.T) {
 	record := theRecord(t)
 	byValue := newHarness(t, testConfig(), nil)
-	recordRun(t, byValue, record)
+	recordTrace(t, byValue, record)
 	var pointers func(items []telmoni.RecordItem) []telmoni.RecordItem
 	pointers = func(items []telmoni.RecordItem) []telmoni.RecordItem {
 		out := make([]telmoni.RecordItem, 0, len(items))
@@ -685,12 +684,12 @@ func TestItemsGivenByPointerAreReadThroughThem(t *testing.T) {
 	}
 	record.Inside = pointers(record.Inside)
 	byPointer := newHarness(t, testConfig(), nil)
-	recordRun(t, byPointer, record)
+	recordTrace(t, byPointer, record)
 	sameBody(t, byPointer, byValue)
 }
 
-// A record as large as a batch, its run and 511 calls, travels in one export,
-// its first call first and its run last.
+// A record as large as a batch, its agent's span and 511 calls, travels in one
+// export, its first call first and the agent's span last.
 func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	record := theRecord(t)
@@ -699,7 +698,7 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 		at := record.Start.Add(time.Duration(n) * time.Millisecond)
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: at, End: at})
 	}
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	bodies := h.transport.bodies(t)
 	if len(bodies) != 1 {
 		t.Fatalf("sent %d exports, want a record of a batch's size in one", len(bodies))
@@ -709,7 +708,7 @@ func TestARecordAsLargeAsABatchTravelsInOneExport(t *testing.T) {
 		t.Fatalf("the export holds %d spans, want 512", len(spans))
 	}
 	if spans[0] != "execute_tool t" || spans[511] != "invoke_agent claude-code" {
-		t.Errorf("the export runs from %s to %s, want from the first call to the run", spans[0], spans[511])
+		t.Errorf("the export runs from %s to %s, want from the first call to the agent's span", spans[0], spans[511])
 	}
 }
 
@@ -721,17 +720,17 @@ func TestARecordPastTheDefaultQueueGoesOnceTheQueueIsRaised(t *testing.T) {
 	for range 2_500 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
-	err := newHarness(t, testConfig(), nil).client.RecordRun(context.Background(), record)
+	err := newHarness(t, testConfig(), nil).client.RecordTrace(context.Background(), record)
 	if !errors.Is(err, telmoni.ErrQueueFull) {
-		t.Fatalf("RecordRun past the default queue = %v, want ErrQueueFull", err)
+		t.Fatalf("RecordTrace past the default queue = %v, want ErrQueueFull", err)
 	}
 	// No flush makes room for it, so the refusal names the bound to raise.
 	if want := "telmoni: the export queue has no room for the record's 2501 spans; " +
 		"the queue holds 2048, so raise its size to record it"; err.Error() != want {
-		t.Errorf("RecordRun past the default queue = %q, want %q", err, want)
+		t.Errorf("RecordTrace past the default queue = %q, want %q", err, want)
 	}
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(3_000, 512, 5*time.Second))
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	if got := len(h.transport.spans(t)); got != 2_501 {
 		t.Errorf("sent %d spans, want the record's 2,501", got)
 	}
@@ -744,8 +743,8 @@ func TestARecordAfterShutdownIsRefused(t *testing.T) {
 	if err := h.client.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutting down: %v", err)
 	}
-	if err := h.client.RecordRun(context.Background(), theRecord(t)); !errors.Is(err, telmoni.ErrShutdown) {
-		t.Fatalf("RecordRun after Shutdown = %v, want ErrShutdown", err)
+	if err := h.client.RecordTrace(context.Background(), theRecord(t)); !errors.Is(err, telmoni.ErrShutdown) {
+		t.Fatalf("RecordTrace after Shutdown = %v, want ErrShutdown", err)
 	}
 	if got := len(h.transport.all()); got != 0 {
 		t.Errorf("%d exports after a shutdown, want none", got)
@@ -753,7 +752,7 @@ func TestARecordAfterShutdownIsRefused(t *testing.T) {
 }
 
 // A record the queue has no room for is refused whole, before anything is
-// queued, since its tail — the run's own span first — would otherwise be
+// queued, since its tail — the agent's own span first — would otherwise be
 // dropped; drained, the queue takes it whole.
 func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 	// Room for four spans, and a worker that will not wake until flushed.
@@ -763,23 +762,23 @@ func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 	for range 2 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// The run's opening leaves the queue at once; two steps hold two of the
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	// The trace's opening leaves the queue at once; two steps hold two of the
 	// four slots.
 	if !h.transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	for n := range 2 {
-		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		_, step := tr.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
-	if err := h.client.RecordRun(context.Background(), record); err != telmoni.ErrQueueFull {
-		t.Fatalf("RecordRun with room for two of the record's three spans = %v, want ErrQueueFull itself", err)
+	if err := h.client.RecordTrace(context.Background(), record); err != telmoni.ErrQueueFull {
+		t.Fatalf("RecordTrace with room for two of the record's three spans = %v, want ErrQueueFull itself", err)
 	}
-	run.End()
+	tr.End()
 	h.flush()
-	if err := h.client.RecordRun(context.Background(), record); err != nil {
-		t.Fatalf("RecordRun with the queue drained = %v", err)
+	if err := h.client.RecordTrace(context.Background(), record); err != nil {
+		t.Fatalf("RecordTrace with the queue drained = %v", err)
 	}
 	h.flush()
 	got := names(h.transport.spans(t))
@@ -790,7 +789,7 @@ func TestARecordTheQueueHasNoRoomForIsRefusedWhole(t *testing.T) {
 		}
 	}
 	if calls != 2 || len(got) != 6 {
-		t.Errorf("spans sent: %v, want the live run's three and the record's three", got)
+		t.Errorf("spans sent: %v, want the live trace's three and the record's three", got)
 	}
 	if warnings := h.logs.warnings(); len(warnings) != 0 {
 		t.Errorf("warnings: %q, want none, since nothing was dropped", warnings)
@@ -817,19 +816,19 @@ func TestARecordTravelsInExportsOfItsOwn(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	record := theRecord(t)
 	beside := record
-	beside.RunID = "0191a3b4-2222-4aaa-8bbb-000000000002"
-	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+	beside.TraceID = "0191a3b422224aaa8bbb000000000002"
+	ctx, live := h.client.Trace(context.Background(), "live", telmoni.TraceOptions{})
 	_, step := live.Step(ctx, "live step")
 	step.End()
-	for _, r := range []telmoni.RunRecord{record, beside} {
-		if err := h.client.RecordRun(context.Background(), r); err != nil {
-			t.Fatalf("RecordRun: %v", err)
+	for _, r := range []telmoni.TraceRecord{record, beside} {
+		if err := h.client.RecordTrace(context.Background(), r); err != nil {
+			t.Fatalf("RecordTrace: %v", err)
 		}
 	}
 	live.End()
 	h.flush()
 	sent := len(h.transport.all())
-	recordRun(t, h, record)
+	recordTrace(t, h, record)
 	requests := h.transport.all()
 	var first, other [][]byte
 	for i, request := range requests {
@@ -837,15 +836,15 @@ func TestARecordTravelsInExportsOfItsOwn(t *testing.T) {
 		if len(traces) != 1 {
 			t.Errorf("export %d is in traces %v, want one", i, traces)
 		}
-		if i < sent && traces[strings.ReplaceAll(record.RunID, "-", "")] {
+		if i < sent && traces[record.TraceID] {
 			first = append(first, request.body)
 		}
-		if traces[strings.ReplaceAll(beside.RunID, "-", "")] {
+		if traces[beside.TraceID] {
 			other = append(other, request.body)
 		}
 	}
 	if len(requests) != sent+1 || len(first) != 1 || !bytes.Equal(first[0], requests[sent].body) {
-		t.Errorf("the record sent beside the live run is not the bytes it is sent again as")
+		t.Errorf("the record sent beside the live trace is not the bytes it is sent again as")
 	}
 	if len(other) != 1 {
 		t.Errorf("the record beside it went in %d exports, want one of its own", len(other))
@@ -861,19 +860,19 @@ func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
 	for range 3 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// The run's opening goes alone, before the steps.
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	// The trace's opening goes alone, before the steps.
 	if !h.transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	for n := range 2 {
-		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		_, step := tr.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
-	if err := h.client.RecordRun(context.Background(), record); err != nil {
-		t.Fatalf("RecordRun: %v", err)
+	if err := h.client.RecordTrace(context.Background(), record); err != nil {
+		t.Fatalf("RecordTrace: %v", err)
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	var got [][]string
 	for _, body := range h.transport.bodies(t) {
@@ -891,18 +890,18 @@ func TestARecordLargerThanABatchIsCutFromItsOwnStart(t *testing.T) {
 }
 
 // Nothing a caller passes can fail a build part-way, so the guard is held
-// here, below RecordRun, to queue only a record built whole.
+// here, below RecordTrace, to queue only a record built whole.
 func TestARecordNotBuiltQueuesNothing(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	runID := [16]byte{1}
-	if !telmoni.HoldOne(h.client, runID, false) {
+	traceID := trace.TraceID{1}
+	if !telmoni.HoldOne(h.client, traceID, false) {
 		t.Fatal("the hold was refused")
 	}
 	h.flush()
 	if sent := len(h.transport.all()); sent != 0 {
 		t.Fatalf("%d exports of a record not built, want none", sent)
 	}
-	if !telmoni.HoldOne(h.client, runID, true) {
+	if !telmoni.HoldOne(h.client, traceID, true) {
 		t.Fatal("the hold was refused")
 	}
 	h.flush()
@@ -940,11 +939,11 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 	for range 2 {
 		record.Inside = append(record.Inside, telmoni.ToolCallRecord{Name: "t", Start: record.Start, End: record.Start})
 	}
-	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
-	// The run's opening out of the queue: room for one step beside the
+	ctx, live := h.client.Trace(context.Background(), "live", telmoni.TraceOptions{})
+	// The trace's opening out of the queue: room for one step beside the
 	// record's three spans.
 	if !h.transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	sampler.hook = func() {
 		for n := range 2 {
@@ -952,8 +951,8 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 			step.End()
 		}
 	}
-	if err := h.client.RecordRun(context.Background(), record); err != nil {
-		t.Fatalf("RecordRun: %v", err)
+	if err := h.client.RecordTrace(context.Background(), record); err != nil {
+		t.Fatalf("RecordTrace: %v", err)
 	}
 	h.flush()
 	live.End()
@@ -971,11 +970,11 @@ func TestARecordsRoomIsKeptWhileItIsBuilt(t *testing.T) {
 // no flush.
 func TestARecordGoesAtOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2048, 512, time.Minute))
-	ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+	ctx, live := h.client.Trace(context.Background(), "live", telmoni.TraceOptions{})
 	_, step := live.Step(ctx, "live step")
 	step.End()
-	if err := h.client.RecordRun(context.Background(), theRecord(t)); err != nil {
-		t.Fatalf("RecordRun: %v", err)
+	if err := h.client.RecordTrace(context.Background(), theRecord(t)); err != nil {
+		t.Fatalf("RecordTrace: %v", err)
 	}
 	if !h.transport.waitFor(2, waitTimeout) {
 		t.Error("the record waited for the delay")
@@ -988,7 +987,7 @@ func TestARecordGoesAtOnce(t *testing.T) {
 func TestASpanEndingWhileARecordIsBuiltTravelsApart(t *testing.T) {
 	for range 20 {
 		h := newHarness(t, testConfig(), nil, telmoni.WithBatching(1<<16, 512, 5*time.Second))
-		ctx, live := h.client.Run(context.Background(), "live", telmoni.RunOptions{})
+		ctx, live := h.client.Trace(context.Background(), "live", telmoni.TraceOptions{})
 		var stop atomic.Bool
 		done := make(chan struct{})
 		go func() {
@@ -998,11 +997,11 @@ func TestASpanEndingWhileARecordIsBuiltTravelsApart(t *testing.T) {
 				step.End()
 			}
 		}()
-		err := h.client.RecordRun(context.Background(), theRecord(t))
+		err := h.client.RecordTrace(context.Background(), theRecord(t))
 		stop.Store(true)
 		<-done
 		if err != nil {
-			t.Fatalf("RecordRun: %v", err)
+			t.Fatalf("RecordTrace: %v", err)
 		}
 		live.End()
 		h.flush()
@@ -1014,7 +1013,7 @@ func TestASpanEndingWhileARecordIsBuiltTravelsApart(t *testing.T) {
 	}
 }
 
-// recordingLogger keeps each warning, recording a run of its own as it logs
+// recordingLogger keeps each warning, recording a trace of its own as it logs
 // the first, as a handler sending the application's logs to Telmoni might.
 type recordingLogger struct {
 	logSink
@@ -1026,7 +1025,7 @@ type recordingLogger struct {
 func (l *recordingLogger) Handle(ctx context.Context, r slog.Record) error {
 	l.once.Do(func() {
 		at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
-		l.err = l.client.RecordRun(ctx, telmoni.RunRecord{RunID: "0191a3b4-3333-4aaa-8bbb-000000000003", Agent: "logged", Start: at, End: at})
+		l.err = l.client.RecordTrace(ctx, telmoni.TraceRecord{TraceID: "0191a3b433334aaa8bbb000000000003", Agent: "logged", Start: at, End: at})
 	})
 	return l.logSink.Handle(ctx, r)
 }
@@ -1034,22 +1033,22 @@ func (l *recordingLogger) Handle(ctx context.Context, r slog.Record) error {
 func (l *recordingLogger) WithAttrs([]slog.Attr) slog.Handler { return l }
 func (l *recordingLogger) WithGroup(string) slog.Handler      { return l }
 
-// recordWarnedOf records record through a client whose logger records a run
+// recordWarnedOf records record through a client whose logger records a trace
 // as it warns, failing the test should a warning wait on the record's hold.
-func recordWarnedOf(t *testing.T, record telmoni.RunRecord) (*harness, *recordingLogger) {
+func recordWarnedOf(t *testing.T, record telmoni.TraceRecord) (*harness, *recordingLogger) {
 	t.Helper()
 	logs := &recordingLogger{}
 	h := newHarness(t, testConfig(), nil, telmoni.WithLogger(slog.New(logs)))
 	logs.client = h.client
 	done := make(chan error, 1)
-	go func() { done <- h.client.RecordRun(context.Background(), record) }()
+	go func() { done <- h.client.RecordTrace(context.Background(), record) }()
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("RecordRun: %v", err)
+			t.Fatalf("RecordTrace: %v", err)
 		}
 	case <-time.After(waitTimeout):
-		t.Fatal("RecordRun waits on its own hold: a warning was logged under it")
+		t.Fatal("RecordTrace waits on its own hold: a warning was logged under it")
 	}
 	h.flush()
 	if spans := h.transport.spans(t); logs.err != nil || byName(spans)["invoke_agent logged"] == nil {
@@ -1063,18 +1062,18 @@ func TestARecordSendsItsFirst32TagsByKeyWarnedOfBeforeItsHold(t *testing.T) {
 	record := theRecord(t)
 	record.Tags = numberedTags(130)
 	h, logs := recordWarnedOf(t, record)
-	run := byName(h.transport.spans(t))["invoke_agent claude-code"]
-	if run == nil {
+	agent := byName(h.transport.spans(t))["invoke_agent claude-code"]
+	if agent == nil {
 		t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
 	}
-	attributes := attributesOf(t, run)
+	attributes := attributesOf(t, agent)
 	if got, want := tagsOf(attributes), slices.Sorted(maps.Keys(numberedTags(32))); !reflect.DeepEqual(got, want) {
 		t.Errorf("tags sent: %v\nwant the first 32 by key: %v", got, want)
 	}
 	if attributes["telmoni.cancelled"] != true {
-		t.Errorf("telmoni.cancelled = %v, want the mark the run ended with", attributes["telmoni.cancelled"])
+		t.Errorf("telmoni.cancelled = %v, want the mark the trace ended with", attributes["telmoni.cancelled"])
 	}
-	want := []string{"telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent", operationWarning}
+	want := []string{"telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent", operationWarning}
 	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {
 		t.Errorf("warnings = %q, want %q", warnings, want)
 	}
@@ -1086,11 +1085,11 @@ func TestATagIngestDropsTakesNoneOfARecords32WarnedOfBeforeItsHold(t *testing.T)
 	record.Tags = numberedTags(32)
 	maps.Copy(record.Tags, droppedTags())
 	h, logs := recordWarnedOf(t, record)
-	run := byName(h.transport.spans(t))["invoke_agent claude-code"]
-	if run == nil {
+	agent := byName(h.transport.spans(t))["invoke_agent claude-code"]
+	if agent == nil {
 		t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
 	}
-	if got, want := tagsOf(attributesOf(t, run)), slices.Sorted(maps.Keys(numberedTags(32))); !reflect.DeepEqual(got, want) {
+	if got, want := tagsOf(attributesOf(t, agent)), slices.Sorted(maps.Keys(numberedTags(32))); !reflect.DeepEqual(got, want) {
 		t.Errorf("tags sent: %q\nwant all 32 ingest keeps: %q", got, want)
 	}
 	want := []string{"telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent", operationWarning}

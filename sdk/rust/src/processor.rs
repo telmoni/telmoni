@@ -1,10 +1,10 @@
 //! The SDK's own batch processor: OpenTelemetry's batching and bounded queue,
 //! without the check that skips a span whose trace is not sampled.
 //!
-//! A run inside a trace the application does not sample is still sent. The
-//! queue is bounded, so a slow Telmoni never slows an agent: past its size,
-//! spans are dropped and counted. A recorded run goes at once, in exports of
-//! its own.
+//! A trace the configured sampler does not sample is still sent. The queue
+//! is bounded, so a slow Telmoni never slows an agent: past its size, spans
+//! are dropped and counted. A recorded trace goes at once, in exports of its
+//! own.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -74,7 +74,7 @@ struct State {
     stage: Option<Stage>,
     dropped: usize,
     flushing: usize,
-    /// A run's opening queued, which goes without waiting for the delay.
+    /// A trace's opening queued, which goes without waiting for the delay.
     opening: bool,
     exporting: bool,
     life: Life,
@@ -202,7 +202,7 @@ impl SpanProcessor for Processor {
             state.dropped += 1;
             return;
         }
-        let opening = span.name == contract::RUN_START && span.parent_span_id != SpanId::INVALID;
+        let opening = span.name == contract::TRACE_START && span.parent_span_id != SpanId::INVALID;
         state.queue.push_back(span);
         state.opening |= opening;
         // The first span wakes the idle worker, a full batch or an opening a
@@ -315,7 +315,7 @@ fn work(shared: &Shared, exporter: &Exporter, warner: &Warner) {
 }
 
 /// Under the lock: whether the worker should export without waiting; a
-/// record queued, or a run's opening, goes at once.
+/// record queued, or a trace's opening, goes at once.
 fn due(state: &State, batching: &Batching) -> bool {
     state.life != Life::Running
         || state.flushing > 0

@@ -34,7 +34,7 @@ const plural = (n: number, one: string, many: string) => `${formatCount(n)} ${n 
 const KINDS = Object.values(ChangeKind);
 
 // A project opens on its agents over the days read: each one's newest
-// changes, its last run and how that ended, its cost against its usual, the
+// changes, its last trace and how that ended, its cost against its usual, the
 // alerts that watch it, and its versions side by side in a panel. Anybody on
 // the project reads it.
 export default async function AgentsPage({ params }: PageProps<"/[organization]/[project]">) {
@@ -54,7 +54,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
       <PageHeader
         title="Agents"
         action={<ConnectAgentAction />}
-        info={`Every agent that ran in the last ${days} days: its last run, what that cost against what its runs usually cost, the alerts that watch it, and their open incidents. Under its name, the newest release, model and prompt version it changed to in those days, each opening the run that first carried it. Versions sets its releases, models and prompt versions side by side.`}
+        info={`Every agent that ran in the last ${days} days: its last trace, what that cost against what its traces usually cost, the alerts that watch it, and their open incidents. Under its name, the newest release, model and prompt version it changed to in those days, each opening the trace that first carried it. Versions sets its releases, models and prompt versions side by side.`}
       />
       <div className="grid gap-page">
         <section className="grid gap-gutter">
@@ -77,7 +77,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                 <Link href={`${base}/api-keys`} className="underline underline-offset-4">
                   API keys
                 </Link>{" "}
-                and send a run from an{" "}
+                and send a trace from an{" "}
                 <Link href={`${DOCS_URL}/api/sdks`} className="underline underline-offset-4">
                   SDK
                 </Link>{" "}
@@ -85,7 +85,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                 <Link href={`${DOCS_URL}/api/coding-agents`} className="underline underline-offset-4">
                   coding-agent plugin
                 </Link>
-                : each agent then stands here with its last run, what it cost and the alerts that watch it.
+                : each agent then stands here with its last trace, what it cost and the alerts that watch it.
               </>
             }
           />
@@ -94,9 +94,9 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
             <DataTable>
               <THead>
                 <Th>Agent</Th>
-                <Th>Last run</Th>
-                <Th className="text-right">Runs</Th>
-                <Th className="text-right">Last run&rsquo;s cost</Th>
+                <Th>Last trace</Th>
+                <Th className="text-right">Traces</Th>
+                <Th className="text-right">Last trace&rsquo;s cost</Th>
                 <Th>Watched by</Th>
                 <Th />
               </THead>
@@ -119,7 +119,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                         {changed.map((change) => (
                           <Link
                             key={change.kind}
-                            href={peekHref(tracesHref(organization, project.slug, { agent: [agent.agent] }), change.run_id)}
+                            href={peekHref(tracesHref(organization, project.slug, { agent: [agent.agent] }), change.trace_id)}
                             title={changeWords(change)}
                             className="block max-w-64 truncate text-xs text-muted-foreground underline-offset-4 hover:underline"
                           >
@@ -131,7 +131,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                         <span className="flex items-center gap-gutter">
                           <StatusMark status={agent.last_ended ? agent.last_status : null} />
                           <Link
-                            href={peekHref(tracesHref(organization, project.slug, { agent: [agent.agent] }), agent.last_run_id)}
+                            href={peekHref(tracesHref(organization, project.slug, { agent: [agent.agent] }), agent.last_trace_id)}
                             className="text-muted-foreground underline-offset-4 hover:underline"
                           >
                             <LocalTime iso={agent.last_started_at} />
@@ -139,15 +139,15 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
                         </span>
                       </Td>
                       <Td className="text-right whitespace-nowrap tabular-nums">
-                        {formatCount(agent.runs)}
-                        {agent.failed_runs > 0 && (
-                          <span className="block text-xs text-destructive">{formatCount(agent.failed_runs)} failed</span>
+                        {formatCount(agent.traces)}
+                        {agent.failed_traces > 0 && (
+                          <span className="block text-xs text-destructive">{formatCount(agent.failed_traces)} failed</span>
                         )}
                       </Td>
                       <Td className="text-right whitespace-nowrap tabular-nums">
                         {formatCost(agent.last_spend)}
                         <span className="block text-xs text-muted-foreground">
-                          {agent.usual_spend === null ? "No run ended yet" : `Usually ${formatCost(agent.usual_spend)}`}
+                          {agent.usual_spend === null ? "No trace ended yet" : `Usually ${formatCost(agent.usual_spend)}`}
                         </span>
                       </Td>
                       <Td className="whitespace-nowrap">

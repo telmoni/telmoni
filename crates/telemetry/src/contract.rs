@@ -6,7 +6,7 @@
 //!
 //! Every cap is a constant named after its field. A span that breaks a
 //! field's rule is refused whole; an attribute past its cap is dropped and
-//! the span kept, since a span lost for one attribute loses its run.
+//! the span kept, since a span lost for one attribute loses its trace.
 
 use std::fmt;
 
@@ -49,10 +49,10 @@ pub const UTC_OFFSET_RANGE: std::ops::RangeInclusive<i16> = -720..=840;
 
 // ── Caps, each named after its field ─────────────────────────────────────────
 
-/// A span's `name`, a run's and a tool's among them: room for a model call's
-/// `<operation> <model>`, the longest operation and a model at its cap.
+/// A span's `name`, an agent's and a tool's among them: room for a model
+/// call's `<operation> <model>`, the longest operation and a model at its cap.
 pub const NAME_MAX: usize = longest(&MODEL_OPERATIONS) + 1 + MODEL_MAX;
-/// `agent`, the agent a run is of.
+/// `agent`, the agent a trace is of.
 pub const AGENT_MAX: usize = 128;
 /// `error_type`: the exception's class.
 pub const ERROR_TYPE_MAX: usize = 128;
@@ -100,9 +100,9 @@ pub const SPAN_FIXED_BYTES: u32 = 64;
 
 // ── Ours, on the wire ────────────────────────────────────────────────────────
 
-/// The run a span belongs to: a UUID, the same on every span of the run.
-pub const RUN_ID: &str = "telmoni.run_id";
-/// The run's agent.
+/// The agent a span is of, on every span our SDKs send: a trace is one
+/// agent's execution, named by it. A span without it is another exporter's,
+/// placed under its agent by its trace's tree ([`crate::foreign`]).
 pub const AGENT: &str = "telmoni.agent";
 /// The end user a span was for, as the application's own id for them:
 /// OpenTelemetry's own name, so an application instrumented without our SDK
@@ -136,9 +136,9 @@ pub const EVENTS: &str = "telmoni.events";
 pub const EXCEPTION_EVENT: &str = "exception";
 /// Our SDKs' instrumentation scope.
 pub const SCOPE: &str = "telmoni";
-/// The span our SDKs send as a run opens, under [`SCOPE`] with no operation,
-/// so the run is seen before its own span ends it.
-pub const RUN_START: &str = "telmoni.run.start";
+/// The span our SDKs send as a trace opens, under [`SCOPE`] with no
+/// operation, so the trace is seen before the agent's own span ends it.
+pub const TRACE_START: &str = "telmoni.trace.start";
 /// The resource attribute our SDKs name themselves by.
 pub const DISTRO_NAME: &str = "telemetry.distro.name";
 /// Its value.
@@ -148,9 +148,9 @@ pub const DISTRO: &str = "telmoni";
 
 /// What the span does: decides its kind ([`kind_of_operation`]).
 pub const OPERATION: &str = "gen_ai.operation.name";
-/// A run's name, on a run of one agent.
+/// The agent's span's name, on one agent's.
 pub const AGENT_NAME: &str = "gen_ai.agent.name";
-/// A run's name, on a run of several agents.
+/// The agent's span's name, on a workflow of several agents.
 pub const WORKFLOW_NAME: &str = "gen_ai.workflow.name";
 /// A tool call's name.
 pub const TOOL_NAME: &str = "gen_ai.tool.name";
@@ -223,7 +223,7 @@ pub const MODEL_OPERATIONS: [&str; 4] =
 #[must_use]
 pub fn kind_of_operation(operation: &str) -> Option<SpanKind> {
     match operation {
-        "invoke_agent" | "invoke_workflow" => Some(SpanKind::Run),
+        "invoke_agent" | "invoke_workflow" => Some(SpanKind::Agent),
         "execute_tool" => Some(SpanKind::ToolCall),
         "retrieval" | SEARCH_MEMORY => Some(SpanKind::Retrieval),
         "plan" => Some(SpanKind::Step),
@@ -340,7 +340,6 @@ pub fn is_inventory_resource(key: &str) -> bool {
 /// Every attribute a column is read from: consumed, so none of them is
 /// also an attribute kept or dropped.
 pub const FIELDS: &[&str] = &[
-    RUN_ID,
     AGENT,
     USER_ID,
     CANCELLED,
@@ -380,10 +379,10 @@ pub fn is_field(key: &str) -> bool {
 /// tokens on a step among them, and keeps it as its row says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadOn {
-    /// Every span of a run, the run among them.
+    /// Every span of a trace, the agent's among them.
     EverySpan,
-    /// The run's own span.
-    Run,
+    /// The agent's own span.
+    Agent,
     /// A model call.
     ModelCall,
     /// A tool call.
@@ -402,7 +401,7 @@ impl ReadOn {
     pub const fn all() -> [Self; 7] {
         [
             Self::EverySpan,
-            Self::Run,
+            Self::Agent,
             Self::ModelCall,
             Self::ToolCall,
             Self::Retrieval,
@@ -416,7 +415,7 @@ impl ReadOn {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::EverySpan => "every span",
-            Self::Run => "the run",
+            Self::Agent => "the agent's span",
             Self::ModelCall => "a model call",
             Self::ToolCall => "a tool call",
             Self::Retrieval => "a retrieval",
@@ -624,19 +623,13 @@ const fn row(
 pub const INVENTORY: &[InventoryRow] = &[
     // Ours.
     row(
-        RUN_ID,
-        ReadOn::EverySpan,
-        "the column run_id",
-        Needs::AnyMode,
-        "a UUID, the same on every span of a run; a span without it is refused",
-    ),
-    row(
         AGENT,
         ReadOn::EverySpan,
-        "the column agent, and a run's name where gen_ai.agent.name and gen_ai.workflow.name are \
-         unset",
+        "the column agent, and the agent's span's name where gen_ai.agent.name and \
+         gen_ai.workflow.name are unset",
         Needs::AnyMode,
-        "1 to 128 characters; a span without it is refused",
+        "1 to 128 characters, the same on every span of a trace; a span without it is another \
+         exporter's, held until its trace's tree names its agent",
     ),
     row(
         USER_ID,
@@ -667,21 +660,21 @@ pub const INVENTORY: &[InventoryRow] = &[
         ReadOn::EverySpan,
         "the column kind",
         Needs::AnyMode,
-        "invoke_agent or invoke_workflow is the run; chat, generate_content, text_completion or \
-         embeddings a model call; execute_tool a tool call; retrieval or search_memory a \
-         retrieval; plan a step; any other span a step under the telmoni scope, a plain span \
-         elsewhere",
+        "invoke_agent or invoke_workflow is the agent's span, one a trace; chat, \
+         generate_content, text_completion or embeddings a model call; execute_tool a tool \
+         call; retrieval or search_memory a retrieval; plan a step; any other span a step under \
+         the telmoni scope, a plain span elsewhere",
     ),
     row(
         AGENT_NAME,
-        ReadOn::Run,
+        ReadOn::Agent,
         "the column name",
         Needs::AnyMode,
         RULE_NAME,
     ),
     row(
         WORKFLOW_NAME,
-        ReadOn::Run,
+        ReadOn::Agent,
         "the column name, where gen_ai.agent.name is unset",
         Needs::AnyMode,
         RULE_NAME,
@@ -847,7 +840,7 @@ pub const INVENTORY: &[InventoryRow] = &[
     ),
     row(
         "gen_ai.agent.version",
-        ReadOn::Run,
+        ReadOn::Agent,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
         RULE_ATTRIBUTE,
@@ -1288,8 +1281,8 @@ mod tests {
     #[test]
     fn every_operation_the_conventions_name_has_a_kind() {
         for (operation, kind) in [
-            ("invoke_agent", SpanKind::Run),
-            ("invoke_workflow", SpanKind::Run),
+            ("invoke_agent", SpanKind::Agent),
+            ("invoke_workflow", SpanKind::Agent),
             ("chat", SpanKind::ModelCall),
             ("generate_content", SpanKind::ModelCall),
             ("text_completion", SpanKind::ModelCall),
@@ -1393,7 +1386,7 @@ mod tests {
     #[test]
     fn a_row_serializes_its_closed_sets_as_their_words() {
         let json = serde_json::to_value(INVENTORY[0]).expect("a row serializes");
-        assert_eq!(json["attribute"], RUN_ID);
+        assert_eq!(json["attribute"], AGENT);
         assert_eq!(json["on"], "every span");
         assert_eq!(json["needs"], "any");
     }

@@ -2,24 +2,24 @@
   "agents": [
     {
       "agent": "support",
-      "failed_runs": 1,
+      "failed_traces": 1,
       "last_ended": true,
-      "last_run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
       "last_spend": 0.042,
       "last_started_at": "2027-01-15T08:00:00Z",
       "last_status": "ok",
-      "runs": 12,
+      "last_trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
+      "traces": 12,
       "usual_spend": 0.031
     },
     {
       "agent": "nightly-report",
-      "failed_runs": 0,
+      "failed_traces": 0,
       "last_ended": false,
-      "last_run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b2c",
       "last_spend": 0.0,
       "last_started_at": "2027-01-15T08:01:00Z",
       "last_status": "ok",
-      "runs": 1,
+      "last_trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b2c",
+      "traces": 1,
       "usual_spend": null
     }
   ],
@@ -31,7 +31,7 @@
       "environment": "production",
       "kind": "prompt",
       "prompt": "support-reply",
-      "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+      "trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
       "value": "3"
     },
     {
@@ -40,7 +40,7 @@
       "changed_at": "2027-01-15T08:01:00Z",
       "environment": "production",
       "kind": "model",
-      "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+      "trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
       "value": "gpt-4o-mini-2024-07-18"
     },
     {
@@ -49,7 +49,7 @@
       "changed_at": "2027-01-15T08:00:00Z",
       "environment": "production",
       "kind": "release",
-      "run_id": "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+      "trace_id": "0192f3a17c2e7b4d9a613c5e8f0d2b17",
       "value": "1.4.2"
     }
   ],

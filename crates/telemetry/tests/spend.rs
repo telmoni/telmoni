@@ -27,7 +27,7 @@ fn call(
     at: DateTime<Utc>,
 ) -> SpanRow {
     SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         provider: provider.into(),
         model: model.into(),
         input_tokens: usage.input_tokens,
@@ -155,9 +155,13 @@ async fn a_run_is_priced_as_the_price_book_prices_it(pool: PgPool) {
                     .cost(*usage)
             })
             .sum::<f64>();
-    let spent = spend::run(&state, &Projects::one(project.clone()), run)
-        .await
-        .expect("the run's spend");
+    let spent = spend::trace(
+        &state,
+        &Projects::one(project.clone()),
+        &run.simple().to_string(),
+    )
+    .await
+    .expect("the trace's spend");
     assert!(
         (spent.spent - expected).abs() < 1e-12,
         "{} against {expected}",
@@ -222,9 +226,13 @@ async fn a_projects_own_price_comes_before_the_tables(pool: PgPool) {
         .collect();
     ch.store.insert_spans(&rows).await.expect("the calls");
 
-    let mine = spend::run(&state, &Projects::one(ours.clone()), our_run)
-        .await
-        .expect("our run's spend");
+    let mine = spend::trace(
+        &state,
+        &Projects::one(ours.clone()),
+        &our_run.simple().to_string(),
+    )
+    .await
+    .expect("our trace's spend");
     let expected = (1_000.0 + 500.0) * 1e-6 + (100.0 + 50.0) * 2e-6;
     assert!(
         (mine.spent - expected).abs() < 1e-12,
@@ -238,9 +246,13 @@ async fn a_projects_own_price_comes_before_the_tables(pool: PgPool) {
         .price("openai", "gpt-4o", at)
         .expect("the table's")
         .cost(usage(1_000, 100, 0, 0));
-    let yours = spend::run(&state, &Projects::one(theirs.clone()), their_run)
-        .await
-        .expect("their run's spend");
+    let yours = spend::trace(
+        &state,
+        &Projects::one(theirs.clone()),
+        &their_run.simple().to_string(),
+    )
+    .await
+    .expect("their trace's spend");
     assert!(
         (yours.spent - table).abs() < 1e-12,
         "{} against {table}",
@@ -266,9 +278,9 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
     let (team, other) = (Uuid::new_v4(), Uuid::new_v4());
     let gpt = ("openai", "gpt-4o");
     let tagged = |run: Uuid, team_tag: &str| SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         tags: vec![("team".into(), team_tag.into())],
-        ..common::received(&project, SpanKind::Run, "nightly-report", 100, at)
+        ..common::received(&project, SpanKind::Agent, "nightly-report", 100, at)
     };
     ch.store
         .insert_spans(&[
@@ -295,12 +307,12 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
         tag: vec!["team:search".into()],
         ..RuleFilters::default()
     };
-    let read = spend::runs(&state, &Projects::one(project.clone()), month, &filters)
+    let read = spend::traces(&state, &Projects::one(project.clone()), month, &filters)
         .await
         .expect("the month's spend");
-    assert_eq!(read.runs, 1, "{read:?}");
+    assert_eq!(read.traces, 1, "{read:?}");
     assert!((read.total - 3.5).abs() < 1e-12, "{read:?}");
-    let all = spend::runs(
+    let all = spend::traces(
         &state,
         &Projects::one(project.clone()),
         month,
@@ -373,9 +385,9 @@ async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) 
         .expect("the window's sum")
         .expect("calls landed");
     assert!((summed - expected).abs() < 1e-12, "{summed}");
-    let runs = spend::runs(&state, &projects, window, &filters)
+    let runs = spend::traces(&state, &projects, window, &filters)
         .await
-        .expect("each run's spend");
+        .expect("each trace's spend");
     assert!(
         (runs.total - expected).abs() < 1e-12,
         "both reads agree: {runs:?}"
@@ -401,9 +413,9 @@ async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) 
         .expect("the window's sum")
         .expect("calls landed");
     assert!((after - expected).abs() < 1e-12, "{after}");
-    let runs = spend::runs(&state, &projects, window, &filters)
+    let runs = spend::traces(&state, &projects, window, &filters)
         .await
-        .expect("each run's spend");
+        .expect("each trace's spend");
     assert!(
         (runs.total - (1.0 * 4.0 + 0.5)).abs() < 1e-12,
         "the spans hold what is left: {runs:?}"
@@ -459,21 +471,24 @@ async fn the_runs_of_a_window_are_folded_by_what_each_spent(pool: PgPool) {
         agent: vec!["nightly-report".into()],
         ..RuleFilters::default()
     };
-    let read = spend::runs(&state, &Projects::one(project.clone()), window, &filters)
+    let read = spend::traces(&state, &Projects::one(project.clone()), window, &filters)
         .await
         .expect("the window's spend");
     // 100,000 in at their day's $2 a million and 20,000 out at $8 a million.
     let dear_spent = 3.0 + 0.2 + 0.16;
-    assert_eq!(read.runs, 2, "the run older than the window is not read");
+    assert_eq!(
+        read.traces, 2,
+        "the trace older than the window is not read"
+    );
     assert!((read.most - dear_spent).abs() < 1e-12, "{read:?}");
     assert!((read.total - (dear_spent + 0.5)).abs() < 1e-12, "{read:?}");
     assert!(
         (read.mean - (dear_spent + 0.5) / 2.0).abs() < 1e-12,
         "{read:?}"
     );
-    assert_eq!(read.costliest, dear);
+    assert_eq!(read.costliest, dear.simple().to_string());
 
-    let nothing = spend::runs(
+    let nothing = spend::traces(
         &state,
         &Projects::one(ProjectId::new()),
         window,
@@ -481,5 +496,5 @@ async fn the_runs_of_a_window_are_folded_by_what_each_spent(pool: PgPool) {
     )
     .await
     .expect("an empty window");
-    assert_eq!(nothing.runs, 0);
+    assert_eq!(nothing.traces, 0);
 }

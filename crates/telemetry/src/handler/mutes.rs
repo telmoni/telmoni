@@ -255,7 +255,7 @@ async fn made(
     let change = Change {
         action: AuditAction::Created,
         kind: TelmoniResourceKind::MaintenanceWindow,
-        id: row.id,
+        id: row.id.to_string(),
         metadata: json!({
             "rule_id": row.rule_id,
             "monitor_id": row.monitor_id,
@@ -317,7 +317,7 @@ async fn ended(
         let change = Change {
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::MaintenanceWindow,
-            id,
+            id: id.to_string(),
             metadata: json!({
                 "rule_id": row.rule_id,
                 "monitor_id": row.monitor_id,

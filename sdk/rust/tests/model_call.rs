@@ -13,21 +13,21 @@ use common::{
 use serde_json::{Map, Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
-    Config, Content, ContentMode, ModelCallOptions, ModelCallRecord, Reply, RunOptions, RunRecord,
-    Usage,
+    Config, Content, ContentMode, ModelCallOptions, ModelCallRecord, Reply, TraceOptions,
+    TraceRecord, Usage,
 };
 
 #[test]
 fn a_model_call_carries_the_conventions_names() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         "bot",
-        RunOptions {
+        TraceOptions {
             session_id: Some("conv".to_owned()),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let call = run.model_call(
+    let call = trace.model_call(
         "gpt-4o-mini",
         ModelCallOptions {
             provider: Some("openai".to_owned()),
@@ -47,18 +47,18 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
         time_to_first_token: None,
     });
     call.end();
-    let run_id = run.run_id().to_owned();
-    run.end();
+    let trace_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
     let span = only(&spans, "chat ")?;
     assert_eq!(span.get("name"), Some(&json!("chat gpt-4o-mini")));
     assert_eq!(span.get("kind"), Some(&json!(3)));
+    assert_eq!(span.get("traceId"), Some(&json!(trace_id)));
     assert_eq!(
         attributes_of(span)?,
         json!({
-            "telmoni.run_id": run_id,
             "telmoni.agent": "bot",
             "gen_ai.conversation.id": "conv",
             "gen_ai.operation.name": "chat",
@@ -77,7 +77,7 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
 #[test]
 fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for usage in [
         Usage {
             input_tokens: Some(-1),
@@ -94,14 +94,14 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
             cost: None,
         },
     ] {
-        let call = run.model_call("m", ModelCallOptions::default())?;
+        let call = trace.model_call("m", ModelCallOptions::default())?;
         call.answered(Reply {
             usage: Some(usage),
             ..Reply::default()
         });
         call.end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -145,9 +145,9 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
 #[test]
 fn a_blank_operation_is_chat() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for blank in ["", "  "] {
-        let call = run.model_call(
+        let call = trace.model_call(
             "m",
             ModelCallOptions {
                 operation: Some(blank.to_owned()),
@@ -156,7 +156,7 @@ fn a_blank_operation_is_chat() -> Outcome {
         )?;
         call.end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -175,8 +175,8 @@ fn a_blank_operation_is_chat() -> Outcome {
 #[test]
 fn an_empty_response_model_or_provider_is_left_off() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "m",
         ModelCallOptions {
             provider: Some(String::new()),
@@ -188,7 +188,7 @@ fn an_empty_response_model_or_provider_is_left_off() -> Outcome {
         ..Reply::default()
     });
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -204,15 +204,15 @@ fn an_empty_response_model_or_provider_is_left_off() -> Outcome {
 #[test]
 fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     let m = |n: usize| "m".repeat(n);
     let generate = || ModelCallOptions {
         operation: Some("generate_content".to_owned()),
         ..ModelCallOptions::default()
     };
     for _ in 0..2 {
-        run.model_call("", ModelCallOptions::default())?.end();
-        let call = run.model_call(
+        trace.model_call("", ModelCallOptions::default())?.end();
+        let call = trace.model_call(
             &m(129),
             ModelCallOptions {
                 provider: Some("p".repeat(129)),
@@ -228,17 +228,17 @@ fn a_model_calls_text_past_ingests_caps_keeps_its_call() -> Outcome {
             operation: Some("o".repeat(20)),
             ..ModelCallOptions::default()
         };
-        run.model_call(&m(128), custom)?.end();
+        trace.model_call(&m(128), custom)?.end();
     }
     // At their caps: the longest operation and a model at its cap fit.
     let smiles = "😀".repeat(128);
-    let call = run.model_call(&smiles, generate())?;
+    let call = trace.model_call(&smiles, generate())?;
     call.answered(Reply {
         response_model: Some(smiles.clone()),
         ..Reply::default()
     });
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -317,16 +317,16 @@ fn prompted(prompt: Option<&str>, version: Option<&str>) -> ModelCallOptions {
 #[test]
 fn a_prompt_goes_on_its_call_alone_and_a_recorded_call_names_none() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let step = run.step("plan")?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let step = trace.step("plan")?;
     step.model_call("m", prompted(Some("support-reply"), Some("3")))?
         .end();
     step.end();
-    run.end();
+    trace.end();
     let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
-    harness.telmoni.record_run(RunRecord {
+    harness.telmoni.record_trace(TraceRecord {
         inside: vec![ModelCallRecord::new("r", at, at).into()],
-        ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "recorder", at, at)
+        ..TraceRecord::new("3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d", "recorder", at, at)
     })?;
     harness.flush()?;
 
@@ -353,7 +353,7 @@ fn a_prompt_goes_on_its_call_alone_and_a_recorded_call_names_none() -> Outcome {
 #[test]
 fn a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for (prompt, version) in [
         (Some(""), Some("")),
         (Some(" "), Some("\u{3000}")),
@@ -362,9 +362,9 @@ fn a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off() -> Outcom
         (None, Some("3")),
         (Some("\u{2003}"), Some("3")),
     ] {
-        run.model_call("m", prompted(prompt, version))?.end();
+        trace.model_call("m", prompted(prompt, version))?.end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let none = json!({});
@@ -391,18 +391,21 @@ fn a_blank_prompt_is_none_and_a_version_without_its_name_is_left_off() -> Outcom
 #[test]
 fn a_prompt_past_ingests_cap_is_left_off_never_cut() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     let widest = "😀".repeat(1024);
     let version = "v".repeat(1024);
     for _ in 0..2 {
-        run.model_call("m", prompted(Some(&widest), Some(&version)))?
+        trace
+            .model_call("m", prompted(Some(&widest), Some(&version)))?
             .end();
-        run.model_call("m", prompted(Some(&"p".repeat(1025)), Some("3")))?
+        trace
+            .model_call("m", prompted(Some(&"p".repeat(1025)), Some("3")))?
             .end();
-        run.model_call("m", prompted(Some("p"), Some(&"😀".repeat(1025))))?
+        trace
+            .model_call("m", prompted(Some("p"), Some(&"😀".repeat(1025))))?
             .end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let once = [
@@ -440,15 +443,18 @@ fn a_prompt_leaves_as_given_where_content_does_never_masked_or_scrubbed() -> Out
         ..keyed()
     };
     let harness = Harness::answering(config, std::iter::repeat_n(Ok(mode_on()), 6))?;
-    harness.telmoni.run("warm", RunOptions::default())?.end();
+    harness
+        .telmoni
+        .trace("warm", TraceOptions::default())?
+        .end();
     harness.flush()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     let options = ModelCallOptions {
         input_messages: Some("write to ada@example.com".into()),
         ..prompted(Some("reply-to-ada@example.com"), Some("3"))
     };
-    run.model_call("m", options)?.end();
-    run.end();
+    trace.model_call("m", options)?.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -469,8 +475,8 @@ fn a_prompt_leaves_as_given_where_content_does_never_masked_or_scrubbed() -> Out
 #[test]
 fn content_is_taken_off_before_it_leaves() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "m",
         ModelCallOptions {
             input_messages: Some(json!([{ "role": "user", "content": "my secret prompt" }]).into()),
@@ -483,7 +489,7 @@ fn content_is_taken_off_before_it_leaves() -> Outcome {
         ..Reply::default()
     });
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -515,8 +521,8 @@ fn content_stays_home_until_an_answer_has_said_the_mode() -> Outcome {
         },
         std::iter::repeat_n(Ok(mode_unknown()), 4),
     )?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "m",
         ModelCallOptions {
             input_messages: Some("first prompt".into()),
@@ -524,7 +530,7 @@ fn content_stays_home_until_an_answer_has_said_the_mode() -> Outcome {
         },
     )?;
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
     assert_eq!(harness.telmoni.content_mode(), None);
     let spans = harness.spans()?;
@@ -537,9 +543,9 @@ fn content_stays_home_until_an_answer_has_said_the_mode() -> Outcome {
     Ok(())
 }
 
-/// Every answer says `on`. The first run's flush is what reads it for
-/// certain; a run opened after that is encoded knowing the mode, so its
-/// content is kept, whatever became of the first run's.
+/// Every answer says `on`. The first trace's flush is what reads it for
+/// certain; a trace opened after that is encoded knowing the mode, so its
+/// content is kept, whatever became of the first trace's.
 #[test]
 fn content_leaves_once_the_server_has_said_on() -> Outcome {
     let harness = Harness::answering(
@@ -549,13 +555,13 @@ fn content_leaves_once_the_server_has_said_on() -> Outcome {
         },
         std::iter::repeat_n(Ok(mode_on()), 6),
     )?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    run.end();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    trace.end();
     harness.flush()?;
     assert_eq!(harness.telmoni.content_mode(), Some(ContentMode::On));
 
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "m",
         ModelCallOptions {
             input_messages: Some("second".into()),
@@ -563,7 +569,7 @@ fn content_leaves_once_the_server_has_said_on() -> Outcome {
         },
     )?;
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
     assert_eq!(
@@ -586,16 +592,16 @@ fn a_mode_ingest_does_not_send_keeps_content_home() -> Outcome {
             capture_content: true,
             ..keyed()
         },
-        // Sealed to each export after the first, a run's opening its own among them.
+        // Sealed to each export after the first, a trace's opening its own among them.
         std::iter::once(Ok(mode_on())).chain(std::iter::repeat_n(Ok(sealed), 5)),
     )?;
     for _ in 0..2 {
-        harness.telmoni.run("bot", RunOptions::default())?.end();
+        harness.telmoni.trace("bot", TraceOptions::default())?.end();
         harness.flush()?;
     }
     assert_eq!(harness.telmoni.content_mode(), None);
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "m",
         ModelCallOptions {
             input_messages: Some("kept home".into()),
@@ -603,7 +609,7 @@ fn a_mode_ingest_does_not_send_keeps_content_home() -> Outcome {
         },
     )?;
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
     assert!(!harness.transport.text().contains("kept home"));
     Ok(())
@@ -612,13 +618,13 @@ fn a_mode_ingest_does_not_send_keeps_content_home() -> Outcome {
 #[test]
 fn content_stays_home_without_capture_content_even_when_allowed() -> Outcome {
     let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(mode_on()), 4))?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    run.end();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    trace.end();
     harness.flush()?;
     assert_eq!(harness.telmoni.content_mode(), Some(ContentMode::On));
 
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "m",
         ModelCallOptions {
             input_messages: Some("never".into()),
@@ -626,7 +632,7 @@ fn content_stays_home_without_capture_content_even_when_allowed() -> Outcome {
         },
     )?;
     call.end();
-    run.end();
+    trace.end();
     harness.flush()?;
     assert!(!harness.transport.text().contains("never"));
     Ok(())
@@ -650,8 +656,8 @@ fn a_failed_call_records_the_error_type() -> Outcome {
     }
 
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let result: Result<(), ProviderDown> = run.try_model_call_with(
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let result: Result<(), ProviderDown> = trace.try_model_call_with(
         "m",
         ModelCallOptions {
             operation: Some("generate_content".to_owned()),
@@ -660,7 +666,7 @@ fn a_failed_call_records_the_error_type() -> Outcome {
         |_call| Err(ProviderDown),
     );
     assert!(result.is_err());
-    let answered = run.model_call_with("m", ModelCallOptions::default(), |call| {
+    let answered = trace.model_call_with("m", ModelCallOptions::default(), |call| {
         call.answered(Reply {
             response_model: Some("m-2".to_owned()),
             ..Reply::default()
@@ -668,7 +674,7 @@ fn a_failed_call_records_the_error_type() -> Outcome {
         "done"
     })?;
     assert_eq!(answered, "done");
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -702,17 +708,17 @@ fn content_is_a_string_as_given_or_json() -> Outcome {
 #[test]
 fn a_call_carries_its_first_token() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let timed = run.model_call("timed", ModelCallOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let timed = trace.model_call("timed", ModelCallOptions::default())?;
     timed.answered(Reply {
         time_to_first_token: Some(Duration::from_millis(350)),
         ..Reply::default()
     });
     timed.end();
-    let plain = run.model_call("plain", ModelCallOptions::default())?;
+    let plain = trace.model_call("plain", ModelCallOptions::default())?;
     plain.answered(Reply::default());
     plain.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -767,33 +773,37 @@ fn media_harness() -> Result<Harness, Failure> {
             api_key: Some("k".to_owned()),
             ..keyed()
         },
-        // On to each export, a run's opening its own among them.
+        // On to each export, a trace's opening its own among them.
         std::iter::repeat_n(Ok(mode_on()), 6),
     )?;
-    harness.telmoni.run("warm", RunOptions::default())?.end();
+    harness
+        .telmoni
+        .trace("warm", TraceOptions::default())?
+        .end();
     harness.flush()?;
     Ok(harness)
 }
 
-fn call_with(run: &telmoni::Run, content: &str) -> Outcome {
-    run.model_call(
-        "m",
-        ModelCallOptions {
-            input_messages: Some(blob(content)),
-            ..ModelCallOptions::default()
-        },
-    )?
-    .end();
+fn call_with(trace: &telmoni::Trace, content: &str) -> Outcome {
+    trace
+        .model_call(
+            "m",
+            ModelCallOptions {
+                input_messages: Some(blob(content)),
+                ..ModelCallOptions::default()
+            },
+        )?
+        .end();
     Ok(())
 }
 
 #[test]
 fn an_image_is_put_once_with_its_type_and_key() -> Outcome {
     let harness = media_harness()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    call_with(&run, "iVBORw0KGgo=")?;
-    call_with(&run, "iVBORw0KGgo=")?;
-    run.end();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    call_with(&trace, "iVBORw0KGgo=")?;
+    call_with(&trace, "iVBORw0KGgo=")?;
+    trace.end();
     harness.flush()?;
     let uploads = harness.transport.uploads();
     assert_eq!(uploads.len(), 1);
@@ -825,9 +835,9 @@ fn a_failed_upload_still_names_the_file_and_warns_once() -> Outcome {
             .transport
             .answer_uploads([failure.clone(), failure.clone()]);
         for _ in 0..2 {
-            let run = harness.telmoni.run("bot", RunOptions::default())?;
-            call_with(&run, "iVBORw0KGgo=")?;
-            run.end();
+            let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+            call_with(&trace, "iVBORw0KGgo=")?;
+            trace.end();
             harness.flush()?;
         }
         assert_eq!(
@@ -859,9 +869,9 @@ fn a_file_past_the_cap_is_named_but_never_put() -> Outcome {
     // 5 MiB and one byte of 0x89, three at a time.
     let content = "iYmJ".repeat(5 * 1024 * 1024 / 3 + 1);
     let harness = media_harness()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    call_with(&run, &content)?;
-    run.end();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    call_with(&trace, &content)?;
+    trace.end();
     harness.flush()?;
     assert!(harness.transport.uploads().is_empty());
     let spans = harness.spans()?;

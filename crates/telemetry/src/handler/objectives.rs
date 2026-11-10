@@ -33,8 +33,8 @@ pub struct Standing {
     /// The days its budget is read over: its own, or fewer where the plan
     /// keeps fewer of the spans.
     pub days: u16,
-    pub runs: u64,
-    /// Its runs that missed it: failed, or ran past its latency.
+    pub traces: u64,
+    /// Its traces that missed it: failed, or ran past its latency.
     pub missed: u64,
     /// The share of its budget left, below 0 once spent past it.
     pub budget_left: f64,
@@ -81,7 +81,7 @@ pub async fn list_objectives(
             .first()
             .map_or("", String::as_str);
         let period = Window::ending(now, Duration::from_secs(u64::from(days) * 86_400));
-        let Missed { runs, missed } =
+        let Missed { traces, missed } =
             evaluate::missed(&state, project_id, agent, &objective, period)
                 .await
                 .map_err(read_failed)?;
@@ -90,10 +90,10 @@ pub async fn list_objectives(
             hour_burn,
             six_hour_burn,
             days,
-            runs,
+            traces,
             missed,
             // A burn of 1 over the whole period spends exactly its budget.
-            budget_left: 1.0 - objective.burn(runs, missed),
+            budget_left: 1.0 - objective.burn(traces, missed),
         });
     }
     Ok(Json(Objectives { objectives }))

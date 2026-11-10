@@ -21,7 +21,7 @@ import {
 } from "@/lib/peek";
 import type { RouteRead } from "@/lib/route-read";
 import { PEEK_NUDGED } from "@/lib/traces";
-import { PeekRunSchema } from "@/lib/types/traces";
+import { PeekTraceSchema } from "@/lib/types/traces";
 
 // The trace peek's parts: the read of a lane, its entry in the history, the
 // rows beside the one open, the header's actions, and what a panel says when
@@ -41,9 +41,9 @@ async function readHolding<T>(
   return read.kind === "ok" && !holds(read.value) ? { kind: "missing", error: null } : read;
 }
 
-/** A run's spans, through the trace list's own route: none is a run missing. */
+/** A trace's spans, through the list's own route: none is a trace missing. */
 export const readTrace = (url: string, signal: AbortSignal) =>
-  readHolding(url, PeekRunSchema, signal, (trace) => trace.spans.length > 0);
+  readHolding(url, PeekTraceSchema, signal, (trace) => trace.spans.length > 0);
 
 /** `read` of `url` started, and the cleanup that ends it, after which `settle`
  *  is not called. One controller, aborted by its timer or the cleanup: joining
@@ -68,7 +68,7 @@ export function startRead<T>(
 }
 
 /** `url` read when it changes, at each nudge (`PEEK_NUDGED`: the project's
- *  runs landing) and at `again`, a retry; kept and shown as `lib/peek.ts`
+ *  traces landing) and at `again`, a retry; kept and shown as `lib/peek.ts`
  *  keeps a read. */
 export function usePeekRead<T>(
   url: string,
@@ -150,7 +150,7 @@ export function ReadFailure({
   retry,
 }: {
   read: Exclude<RouteRead<unknown>, { kind: "ok" }>;
-  noun: "run";
+  noun: "trace";
   missing: { title: string; body: ReactNode };
   retry: () => void;
 }) {

@@ -296,7 +296,7 @@ pub(crate) async fn write(
 
 /// A batch's spans written and its content kept, as an export lands them
 /// and as [`crate::foreign`] lands another exporter's once placed: deleted
-/// runs dropped, the plan's month and content held, the month counted once
+/// traces dropped, the plan's month and content held, the month counted once
 /// the whole batch is kept, and the organization's consoles told.
 pub(crate) async fn land(
     state: &Arc<AppState>,
@@ -307,10 +307,10 @@ pub(crate) async fn land(
     batch: &mut Batch,
     token: &str,
 ) -> Result<crate::capacity::Held, TelmoniError> {
-    // A run deleted as it still runs sends on: what it sends is not kept.
-    let runs = erasure::drop_deleted(state, project_id, batch).await;
-    if runs > 0 {
-        tracing::debug!(project_id = %project_id, runs, "ingest: spans of deleted runs dropped");
+    // A trace deleted as its agent still runs sends on: what it sends is not kept.
+    let traces = erasure::drop_deleted(state, project_id, batch).await;
+    if traces > 0 {
+        tracing::debug!(project_id = %project_id, traces, "ingest: spans of deleted traces dropped");
     }
     // Past the plan's month, what is not kept is counted in the answer, and
     // past its content, the spans keep their metadata alone.
@@ -336,7 +336,7 @@ pub(crate) async fn land(
         }
         return Err(store_failed(error));
     }
-    // Before the late runs are marked again, so their scores go with them;
+    // Before the late traces are marked again, so their scores go with them;
     // a score whose span was not kept, refused, sampled out or held, is not.
     let kept: std::collections::HashSet<(&str, &str)> = batch
         .rows
@@ -384,9 +384,9 @@ pub(crate) async fn land(
             Arc::clone(state),
             organization_id.as_str(),
             project_id.as_str(),
-            batch.rows.iter().map(|row| row.run_id),
+            batch.rows.iter().map(|row| row.trace_id.clone()),
         );
-        if batch.rows.iter().any(|row| row.kind == SpanKind::Run) {
+        if batch.rows.iter().any(|row| row.kind == SpanKind::Agent) {
             crate::starters::make_once(
                 Arc::clone(state),
                 organization_id.clone(),

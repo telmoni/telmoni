@@ -190,7 +190,7 @@ export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
   return (
     // The room the title leaves, its controls at its end; too narrow for them,
     // it scrolls from the first (a safe end, so none is pushed out of reach),
-    // its padding keeping the focus rings from being clipped. No scrollbar: a
+    // its padding keeping the focus outlines from being clipped. No scrollbar: a
     // bar under one row of controls reads as a frame around them, so the edge
     // with more beyond it fades instead (`useOverflow`).
     <div
@@ -274,7 +274,7 @@ function ListControls({ list, organization, slug, query, total }: ListControlsPr
   );
 }
 
-/** A refresh now. The list counts the runs that land in a bar above itself
+/** A refresh now. The list counts the traces that land in a bar above itself
  *  (`NewTraces`) and draws them when asked, so it needs no timer. */
 function RefreshControl() {
   const router = useRouter();

@@ -17,7 +17,7 @@ import pytest
 from opentelemetry import trace
 
 from conftest import FakeTransport, attributes_of, load_fixture
-from telmoni import Config, RunRecord, Telmoni, ToolCallRecord, contract
+from telmoni import Config, Telmoni, ToolCallRecord, TraceRecord, contract
 from telmoni.exporter import Answer
 from telmoni.scrub import scrub
 
@@ -33,8 +33,8 @@ def content_on(
     scrub_pii: bool | None = None,
     mask: Callable[[str, str], str | None] | None = None,
 ) -> Telmoni:
-    """A client sending content, its project's mode heard as on from an empty run."""
-    # On to each export: a run's spans may leave in more than one.
+    """A client sending content, its project's mode heard as on from an empty trace."""
+    # On to each export: a trace's spans may leave in more than one.
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 4
     client = Telmoni(
         Config(
@@ -46,7 +46,7 @@ def content_on(
         ),
         transport=transport,
     )
-    with client.run("bot"):
+    with client.trace("bot"):
         pass
     assert client.flush()
     return client
@@ -85,7 +85,7 @@ def test_a_client_sends_a_message_scrubbed_and_counts_what_it_took_out(
     ]
     try:
         with (
-            client.run("support-bot"),
+            client.trace("support-bot"),
             client.model_call("gpt-4o", input_messages=messages),
         ):
             pass
@@ -110,11 +110,11 @@ def test_a_failure_and_an_event_are_scrubbed_where_the_mask_reads_them(
     transport: FakeTransport,
 ) -> None:
     """The exception's message and stack trace, the status's message and an
-    application's event, counted together on the run's span."""
+    application's event, counted together on the agent's span."""
     client = content_on(transport)
     message = f"declined for key {KEY}"
     try:
-        with pytest.raises(Declined), client.run("support-bot"):
+        with pytest.raises(Declined), client.trace("support-bot"):
             trace.get_current_span().add_event(
                 "retrying", {"reason": f"key {KEY}", "attempt": 2}
             )
@@ -122,18 +122,18 @@ def test_a_failure_and_an_event_are_scrubbed_where_the_mask_reads_them(
         assert client.flush()
     finally:
         client.shutdown()
-    run = transport.spans()[-1]
-    events = {event["name"]: attributes_of(event) for event in run["events"]}
+    agent = transport.spans()[-1]
+    events = {event["name"]: attributes_of(event) for event in agent["events"]}
     assert events["retrying"] == {"reason": "key [secret: aws_key]", "attempt": 2}
     failure = events["exception"]
     assert failure["exception.message"] == "declined for key [secret: aws_key]"
     assert "declined for key [secret: aws_key]" in failure["exception.stacktrace"]
-    assert run["status"]["message"] == "declined for key [secret: aws_key]"
-    assert json.loads(attributes_of(run)[contract.SCRUBBED]) == {"secret:aws_key": 4}
+    assert agent["status"]["message"] == "declined for key [secret: aws_key]"
+    assert json.loads(attributes_of(agent)[contract.SCRUBBED]) == {"secret:aws_key": 4}
     assert KEY not in str(transport.requests)
 
 
-def test_a_recorded_runs_content_is_scrubbed_as_a_live_runs_is(
+def test_a_recorded_traces_content_is_scrubbed_as_a_live_traces_is(
     transport: FakeTransport,
 ) -> None:
     client = content_on(transport)
@@ -146,9 +146,9 @@ def test_a_recorded_runs_content_is_scrubbed_as_a_live_runs_is(
         result=f"connected to {PLANTED['connection_string']}",
     )
     try:
-        client.record_run(
-            RunRecord(
-                run_id=str(uuid.uuid4()),
+        client.record_trace(
+            TraceRecord(
+                trace_id=uuid.uuid4().hex,
                 agent="claude-code",
                 start=at,
                 end=at,
@@ -188,7 +188,7 @@ def test_an_image_is_lifted_out_before_its_message_is_scrubbed(
         }
     ]
     try:
-        with client.run("bot"), client.model_call("gpt-4o", input_messages=messages):
+        with client.trace("bot"), client.model_call("gpt-4o", input_messages=messages):
             pass
         assert client.flush()
     finally:
@@ -221,7 +221,7 @@ def test_the_scrubbers_read_what_the_mask_answered_and_never_what_it_dropped(
     client = content_on(transport, mask=mask)
     try:
         with (
-            client.run("bot"),
+            client.trace("bot"),
             client.model_call("gpt-4o", input_messages="show the card") as call,
         ):
             call.answered(output_messages=f"here is {KEY}")
@@ -248,7 +248,7 @@ def test_a_field_the_scrubber_fails_on_is_dropped_and_named(
     client.exporter._scrubber = failing
     try:
         with (
-            client.run("bot"),
+            client.trace("bot"),
             client.model_call("gpt-4o", input_messages=f"boom {KEY}") as call,
         ):
             call.answered(output_messages=f"here is {KEY}")
@@ -338,7 +338,7 @@ def test_the_environments_switches_reach_what_is_sent(
     client = content_on(transport)
     try:
         with (
-            client.run("bot"),
+            client.trace("bot"),
             client.model_call("gpt-4o", input_messages=f"{KEY} {PLANTED['email']}"),
         ):
             pass

@@ -14,15 +14,15 @@ import { COMMENT_MAX, SCORE_SOURCE, scoreSaid } from "@/lib/scores";
 import { ScoreSource, ScoreTarget, ScoreType } from "@/lib/types/enums";
 import { useToastAction } from "@/lib/use-action";
 
-// A trace's scores on its line: the run's own, then each span's by the span's
-// name, each saying who gave it; a member's own taken back at its ×, an owner
-// or admin any member's; one with a comment opens to it, read with the trace's
-// content. Score adds one of the run, as any member of the project may; the
+// A trace's scores on its line: its own, then each span's by the span's name,
+// each saying who gave it; a member's own taken back at its ×, an owner or
+// admin any member's; one with a comment opens to it, read with the trace's
+// content. Score adds one of the trace, as any member of the project may; the
 // server holds every rule a score keeps, its refusal the toast.
 
 export function TraceScores({
   projectId,
-  runId,
+  traceId,
   scores,
   comments,
   spanNames,
@@ -32,9 +32,9 @@ export function TraceScores({
   onChanged,
 }: {
   projectId: string;
-  runId: string;
-  /** After a score is given or taken back: the peek reads its run again, as
-   *  the run's page is drawn again by the action's refresh. */
+  traceId: string;
+  /** After a score is given or taken back: the peek reads its trace again,
+   *  as the trace's page is drawn again by the action's refresh. */
   onChanged?: () => void;
   /** Whether the project keeps content, so a comment may be given. */
   keepsContent: boolean;
@@ -79,7 +79,7 @@ export function TraceScores({
             pending={pending}
             keepsContent={keepsContent}
             onScore={(score) =>
-              run(() => putScoreAction(projectId, { run_id: runId, ...score }), () => {
+              run(() => putScoreAction(projectId, { trace_id: traceId, ...score }), () => {
                 setOpen(false);
                 onChanged?.();
               })
@@ -289,7 +289,7 @@ function ScoreForm({
             className="rounded-md border border-input bg-transparent px-gutter py-2 text-sm"
           />
           <p id={`${id}comment-hint`} className="text-xs text-muted-foreground">
-            Optional. Content, kept as this run&rsquo;s is, and read with it.
+            Optional. Content, kept as this trace&rsquo;s is, and read with it.
           </p>
         </div>
       )}

@@ -1,6 +1,6 @@
-"""The guard: a run's opt-in caps on its steps and its spend, counted in this
+"""The guard: a trace's opt-in caps on its steps and its spend, counted in this
 process with no call to Telmoni, raised at the step, model call, tool call or
-retrieval the run would open past one.
+retrieval the trace would open past one.
 
 A call's cost is counted as the server counts it: as reported, else its tokens
 at its price in the table this release carries (``model_prices.json``,
@@ -22,9 +22,9 @@ from .models import Price, _from_zero
 
 
 class CapExceededError(RuntimeError):
-    """A run reached a cap it was opened with, raised at what it would open next:
-    ``cap`` is ``steps`` or ``spend``, ``limit`` the cap and ``used`` what the
-    run had used of it, its steps opened or the US dollars it spent."""
+    """A trace reached a cap it was opened with, raised at what it would open
+    next: ``cap`` is ``steps`` or ``spend``, ``limit`` the cap and ``used`` what
+    the trace had used of it, its steps opened or the US dollars it spent."""
 
     def __init__(self, cap: str, limit: float, used: float) -> None:
         # Its three arguments, so a pickle builds it again.
@@ -35,9 +35,9 @@ class CapExceededError(RuntimeError):
 
     def __str__(self) -> str:
         if self.cap == "steps":
-            return f"the run reached its step cap of {_amount(self.limit)}"
+            return f"the trace reached its step cap of {_amount(self.limit)}"
         return (
-            f"the run reached its spend cap of ${_amount(self.limit)}, "
+            f"the trace reached its spend cap of ${_amount(self.limit)}, "
             f"having spent ${_amount(self.used)}"
         )
 
@@ -137,7 +137,7 @@ def priced(
 
 
 class Guard:
-    """One run's caps, and what it has used of them."""
+    """One trace's caps, and what it has used of them."""
 
     def __init__(self, max_steps: int | None, max_spend: float | None) -> None:
         self._lock = threading.Lock()
@@ -153,12 +153,12 @@ class Guard:
 
     @property
     def capped(self) -> bool:
-        """Whether the run has a spend cap, which a call priced at nothing
+        """Whether the trace has a spend cap, which a call priced at nothing
         never reaches."""
         return self._max_spend is not None
 
     def opens(self, *, step: bool) -> None:
-        """Count a step opening, or raise where the run reached a cap: its
+        """Count a step opening, or raise where the trace reached a cap: its
         spend for whatever opens, its steps for a step."""
         with self._lock:
             if self._max_spend is not None and self._spent >= self._max_spend:
@@ -175,7 +175,7 @@ class Guard:
 
 
 def caps(max_steps: object, max_spend: object) -> tuple[int | None, float | None]:
-    """A run's caps, or why they are none: whole steps above 0, and a spend of
+    """A trace's caps, or why they are none: whole steps above 0, and a spend of
     US dollars above 0, read as a cost is."""
     if max_steps is not None and (
         isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1

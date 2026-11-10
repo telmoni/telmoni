@@ -3,7 +3,7 @@
 //! threshold set from its project's history first once it is due: its value
 //! read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
-//! at either end; a run's cost ([`crate::spend`]), steps, repeats and stalls
+//! at either end; a trace's cost ([`crate::spend`]), steps, repeats and stalls
 //! from `spans` run by run, and an objective's burn from its agent's runs —
 //! and settled in a transaction of its own with the severity it sets and the
 //! incident that moves with it ([`incidents`]), told once that commits.
@@ -105,7 +105,7 @@ const TOTALS_SQL: &str = concat!(
     "))"
 );
 
-/// The filters a run's calls take, each alert's by its place `i` in the
+/// The filters a trace's calls take, each alert's by its place `i` in the
 /// `Array(Array(String))` parameters `bind_together` binds: what
 /// [`crate::rules::calls_admitted!`] says of one alert, `has` for `IN`.
 macro_rules! calls_together {
@@ -191,17 +191,17 @@ const SCORES_SQL: &str = concat!(
     "WHERE gone = 0"
 );
 
-/// The runs any of whose spans landed in the window, as the alert's filters
-/// admit them: agent, environment and release, which all of a run's spans
-/// carry; given `""`, every run of the window, as a group read together
-/// admits each alert's itself.
-macro_rules! window_runs {
+/// The traces any of whose spans landed in the window, as the alert's
+/// filters admit them: agent, environment and release, which all of a
+/// trace's spans carry; given `""`, every trace of the window, as a group
+/// read together admits each alert's itself.
+macro_rules! window_traces {
     () => {
-        $crate::rules::evaluate::window_runs!($crate::rules::calls_admitted!())
+        $crate::rules::evaluate::window_traces!($crate::rules::calls_admitted!())
     };
     ($($admitted:tt)+) => {
         concat!(
-            "run_id IN (SELECT run_id FROM telemetry.spans ",
+            "trace_id IN (SELECT trace_id FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} ",
             "AND received_at < {to:DateTime64(6, 'UTC')} ",
@@ -211,80 +211,80 @@ macro_rules! window_runs {
     };
 }
 
-/// The spans of the window's runs, from a day before it, so a run that
+/// The spans of the window's traces, from a day before it, so a trace that
 /// began before the window is read whole.
-macro_rules! runs_whole {
+macro_rules! traces_whole {
     () => {
-        $crate::rules::evaluate::runs_whole!($crate::rules::calls_admitted!())
+        $crate::rules::evaluate::traces_whole!($crate::rules::calls_admitted!())
     };
     ($($admitted:tt)+) => {
         concat!(
             "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
             "AND received_at < {to:DateTime64(6, 'UTC')} AND ",
-            $crate::rules::evaluate::window_runs!($($admitted)+),
-            "GROUP BY run_id"
+            $crate::rules::evaluate::window_traces!($($admitted)+),
+            "GROUP BY trace_id"
         )
     };
 }
 
-/// Each run of the window, `n` its steps.
-macro_rules! run_steps {
+/// Each trace of the window, `n` its steps.
+macro_rules! trace_steps {
     () => {
-        $crate::rules::evaluate::run_steps!($crate::rules::calls_admitted!())
+        $crate::rules::evaluate::trace_steps!($crate::rules::calls_admitted!())
     };
     ($($admitted:tt)+) => {
         concat!(
-            "SELECT run_id, countIf(kind = 'step') AS n, max(received_at) AS last ",
-            $crate::rules::evaluate::runs_whole!($($admitted)+)
+            "SELECT trace_id, countIf(kind = 'step') AS n, max(received_at) AS last ",
+            $crate::rules::evaluate::traces_whole!($($admitted)+)
         )
     };
 }
 
-/// Each run of the window, `n` the most times in a row it called one tool,
-/// `tool`: its tool calls in the order they started, what lies between them
-/// breaking no stretch.
-macro_rules! run_repeats {
+/// Each trace of the window, `n` the most times in a row it called one
+/// tool, `tool`: its tool calls in the order they started, what lies between
+/// them breaking no stretch.
+macro_rules! trace_repeats {
     () => {
-        $crate::rules::evaluate::run_repeats!($crate::rules::calls_admitted!())
+        $crate::rules::evaluate::trace_repeats!($crate::rules::calls_admitted!())
     };
     ($($admitted:tt)+) => {
         concat!(
-            "SELECT run_id, any(agent) AS agent, max(received_at) AS last, ",
+            "SELECT trace_id, any(agent) AS agent, max(received_at) AS last, ",
             "arrayMap(c -> c.3, arraySort(groupArrayIf((started_at, span_id, name), ",
             "kind = 'tool_call'))) AS calls, ",
             "arraySplit((c, p) -> c != p, calls, arrayPopBack(arrayPushFront(calls, ''))) ",
             "AS stretches, arrayMap(s -> length(s), stretches) AS lengths, ",
             "arrayMax(lengths) AS n, stretches[indexOf(lengths, n)][1] AS tool ",
-            $crate::rules::evaluate::runs_whole!($($admitted)+)
+            $crate::rules::evaluate::traces_whole!($($admitted)+)
         )
     };
 }
 
-/// Each run with spans in the window and no span of its own by `{now}`, quiet
-/// since the window ended: `n` how long, in seconds.
-macro_rules! stalled_runs {
+/// Each trace with spans in the window and no agent's span of its own by
+/// `{now}`, quiet since the window ended: `n` how long, in seconds.
+macro_rules! stalled_traces {
     () => {
-        $crate::rules::evaluate::stalled_runs!($crate::rules::calls_admitted!())
+        $crate::rules::evaluate::stalled_traces!($crate::rules::calls_admitted!())
     };
     ($($admitted:tt)+) => {
         concat!(
-            "SELECT run_id, max(received_at) AS last, ",
+            "SELECT trace_id, max(received_at) AS last, ",
             "toUInt64(greatest(dateDiff('second', last, {now:DateTime64(6, 'UTC')}), 0)) AS n ",
             "FROM telemetry.spans WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
             "AND received_at < {now:DateTime64(6, 'UTC')} AND ",
-            $crate::rules::evaluate::window_runs!($($admitted)+),
-            "GROUP BY run_id ",
-            "HAVING countIf(kind = 'run') = 0 AND last < {to:DateTime64(6, 'UTC')}"
+            $crate::rules::evaluate::window_traces!($($admitted)+),
+            "GROUP BY trace_id ",
+            "HAVING countIf(kind = 'agent') = 0 AND last < {to:DateTime64(6, 'UTC')}"
         )
     };
 }
 
-pub(crate) use {run_repeats, run_steps, runs_whole, stalled_runs, window_runs};
+pub(crate) use {stalled_traces, trace_repeats, trace_steps, traces_whole, window_traces};
 
-/// A read run by run folded over its runs, `n` each one's measure.
-macro_rules! folded_runs {
+/// A read trace by trace folded over its traces, `n` each one's measure.
+macro_rules! folded_traces {
     () => {
         concat!(
             "SELECT count() AS count, avg(n) AS mean, toFloat64(max(n)) AS top, ",
@@ -293,54 +293,54 @@ macro_rules! folded_runs {
     };
 }
 
-const STEPS_SQL: &str = concat!(folded_runs!(), run_steps!(), ")");
-const REPEATS_SQL: &str = concat!(folded_runs!(), run_repeats!(), ")");
-const STALLED_SQL: &str = concat!(folded_runs!(), stalled_runs!(), ")");
+const STEPS_SQL: &str = concat!(folded_traces!(), trace_steps!(), ")");
+const REPEATS_SQL: &str = concat!(folded_traces!(), trace_repeats!(), ")");
+const STALLED_SQL: &str = concat!(folded_traces!(), stalled_traces!(), ")");
 
-/// A read run by run for every alert of a group at once, one project,
-/// measure and window: each run of the window read once, then counted for
+/// A read trace by trace for every alert of a group at once, one project,
+/// measure and window: each trace of the window read once, then counted for
 /// each alert one of its spans in the window passes, `i` the alert's place.
 macro_rules! folded_together {
-    ($runs:expr) => {
+    ($traces:expr) => {
         concat!(
             "SELECT i, count() AS count, avg(n) AS mean, toFloat64(max(n)) AS top, ",
             "CAST(quantiles(0.5, 0.9, 0.95, 0.99)(n) AS Array(Float64)) AS quantiles ",
-            "FROM (SELECT runs.n AS n, admitted.alerts AS alerts FROM (",
-            $runs,
-            ") AS runs INNER JOIN (SELECT run_id, groupUniqArrayArray(arrayFilter(i -> ",
+            "FROM (SELECT traces.n AS n, admitted.alerts AS alerts FROM (",
+            $traces,
+            ") AS traces INNER JOIN (SELECT trace_id, groupUniqArrayArray(arrayFilter(i -> ",
             calls_together!(),
             ", ", places!(), ")) AS alerts FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
-            "GROUP BY run_id) AS admitted ON runs.run_id = admitted.run_id) ",
+            "GROUP BY trace_id) AS admitted ON traces.trace_id = admitted.trace_id) ",
             "ARRAY JOIN alerts AS i GROUP BY i"
         )
     };
 }
 
-const STEPS_TOGETHER_SQL: &str = folded_together!(run_steps!(""));
-const REPEATS_TOGETHER_SQL: &str = folded_together!(run_repeats!(""));
-const STALLED_TOGETHER_SQL: &str = folded_together!(stalled_runs!(""));
+const STEPS_TOGETHER_SQL: &str = folded_together!(trace_steps!(""));
+const REPEATS_TOGETHER_SQL: &str = folded_together!(trace_repeats!(""));
+const STALLED_TOGETHER_SQL: &str = folded_together!(stalled_traces!(""));
 
-/// One agent's runs over a window, and those that missed its objective:
+/// One agent's traces over a window, and those that missed its objective:
 /// failed, or for a latency objective, ran past it.
 const MISSED_SQL: &str = concat!(
-    "SELECT count() AS runs, countIf(if({latency_ms:UInt32} = 0, status = 'error', ",
+    "SELECT count() AS traces, countIf(if({latency_ms:UInt32} = 0, status = 'error', ",
     "dateDiff('microsecond', started_at, ended_at) > toInt64({latency_ms:UInt32}) * 1000)) ",
     "AS missed FROM telemetry.spans ",
     "WHERE project_id IN {projects:Array(String)} ",
     "AND received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')} ",
-    "AND kind = 'run' AND agent = {agent:String}"
+    "AND kind = 'agent' AND agent = {agent:String}"
 );
 
-/// An objective's runs over a window, and those that missed it.
+/// An objective's traces over a window, and those that missed it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Row, Deserialize)]
 pub struct Missed {
-    pub runs: u64,
+    pub traces: u64,
     pub missed: u64,
 }
 
-/// `agent`'s runs over `window` that missed `objective`.
+/// `agent`'s traces over `window` that missed `objective`.
 ///
 /// # Errors
 ///
@@ -385,7 +385,7 @@ pub async fn burns(
         .iter_mut()
         .zip([RuleWindow::Hour.duration(), SLOW_WINDOW])
     {
-        let Missed { runs, missed } = missed(
+        let Missed { traces, missed } = missed(
             state,
             &rule.project_id,
             agent,
@@ -393,7 +393,7 @@ pub async fn burns(
             Window::ending(now, length),
         )
         .await?;
-        *burn = objective.burn(runs, missed);
+        *burn = objective.burn(traces, missed);
     }
     Ok((burned[0], burned[1]))
 }
@@ -412,8 +412,8 @@ pub fn burned(definition: &Definition, fast: f64, slow: f64) -> (Option<f64>, Se
     }
 }
 
-/// What a window holds of a score alert's scores, or of its runs read run by
-/// run: how many, their mean, the largest, and their 50th, 90th, 95th and
+/// What a window holds of a score alert's scores, or of its traces read trace
+/// by trace: how many, their mean, the largest, and their 50th, 90th, 95th and
 /// 99th percentiles.
 #[derive(Debug, Clone, Default, PartialEq, Row, Deserialize)]
 pub struct Folded {
@@ -560,16 +560,16 @@ impl Window {
     }
 }
 
-/// `sql`, a read run by run, bound for `rule` at `now`: over its window, or
-/// for a stall the window before it, whose runs have been quiet since.
-pub(crate) fn by_run(
+/// `sql`, a read trace by trace, bound for `rule` at `now`: over its window,
+/// or for a stall the window before it, whose traces have been quiet since.
+pub(crate) fn by_trace(
     state: &AppState,
     rule: &RuleRow,
     now: DateTime<Utc>,
     sql: &'static str,
 ) -> Read {
     let window = Window::of(now, rule.definition.window);
-    let runs = if rule.definition.measure == RuleMeasure::Stalled {
+    let traces = if rule.definition.measure == RuleMeasure::Stalled {
         Window::ending(window.from, rule.definition.window.duration())
     } else {
         window
@@ -577,8 +577,8 @@ pub(crate) fn by_run(
     let read = state
         .store
         .read(&Projects::one(rule.project_id.clone()), sql)
-        .param("from", micros(runs.from))
-        .param("to", micros(runs.to))
+        .param("from", micros(traces.from))
+        .param("to", micros(traces.to))
         .param("now", micros(window.to));
     rule.definition.filters.bind_calls(read)
 }
@@ -720,7 +720,7 @@ fn bind_together(read: Read, members: &[&RuleRow]) -> Read {
 }
 
 /// Each of `members`' values over `group`'s window, in their order: as
-/// [`totals`] and [`by_run`] read one alone, each alert's own filters and
+/// [`totals`] and [`by_trace`] read one alone, each alert's own filters and
 /// aggregation.
 async fn group_values(
     state: &AppState,
@@ -1046,7 +1046,7 @@ async fn defer(state: &AppState, rule: &RuleRow, lease_id: Uuid) -> Result<(), T
 ///
 /// # Errors
 ///
-/// ClickHouse, or Postgres for a run's cost, did not answer.
+/// ClickHouse, or Postgres for a trace's cost, did not answer.
 pub async fn value_of(
     state: &AppState,
     rule: &RuleRow,
@@ -1102,10 +1102,10 @@ fn change(value: f64, previous: Option<f64>) -> Option<f64> {
         .map(|previous| (value - previous) / previous.abs() * 100.0)
 }
 
-/// The alert's value over its window ending at `now`: a run's cost summed
+/// The alert's value over its window ending at `now`: a trace's cost summed
 /// with no tag as the totals are read, the full hours from the hourly totals;
-/// folded any other way, or narrowed by a tag, from what each run spent; a
-/// score's from the scores; a run's steps, repeats and stalls run by run;
+/// folded any other way, or narrowed by a tag, from what each trace spent; a
+/// score's from the scores; a trace's steps, repeats and stalls trace by trace;
 /// every other measure from the totals.
 async fn value_at(
     state: &AppState,
@@ -1116,15 +1116,15 @@ async fn value_at(
     if let Some(value) = together.of(rule, now) {
         return Ok(value);
     }
-    let by_runs = match rule.definition.measure {
+    let by_traces = match rule.definition.measure {
         RuleMeasure::Steps => Some(STEPS_SQL),
         RuleMeasure::Repeats => Some(REPEATS_SQL),
         RuleMeasure::Stalled => Some(STALLED_SQL),
         _ => None,
     };
-    if let Some(sql) = by_runs {
-        let runs: Folded = by_run(state, rule, now, sql).fetch_one().await?;
-        return Ok(runs.value(rule.definition.aggregation));
+    if let Some(sql) = by_traces {
+        let traces: Folded = by_trace(state, rule, now, sql).fetch_one().await?;
+        return Ok(traces.value(rule.definition.aggregation));
     }
     if rule.definition.measure == RuleMeasure::Score {
         let window = Window::of(now, rule.definition.window);
@@ -1145,11 +1145,11 @@ async fn value_at(
         let window = Window::of(now, rule.definition.window);
         let projects = Projects::one(rule.project_id.clone());
         let filters = &rule.definition.filters;
-        // The totals keep no tag, nor a run's own spend to fold another way.
+        // The totals keep no tag, nor a trace's own spend to fold another way.
         if rule.definition.aggregation == RuleAggregation::Sum && filters.tag.is_empty() {
             return spend::summed(state, &projects, window, filters).await;
         }
-        let spent = spend::runs(state, &projects, window, filters).await?;
+        let spent = spend::traces(state, &projects, window, filters).await?;
         return Ok(spent.value(rule.definition.aggregation));
     }
     Ok(totals(state, rule, now)
@@ -1312,7 +1312,7 @@ mod tests {
     fn an_objectives_hour_pages_and_its_six_hours_warn() {
         let definition = crate::rules::RuleInput {
             name: "Support succeeds".into(),
-            kind: telmoni_shared::SpanKind::Run,
+            kind: telmoni_shared::SpanKind::Agent,
             measure: RuleMeasure::Burn,
             aggregation: RuleAggregation::Avg,
             filters: crate::rules::RuleFilters {
@@ -1398,7 +1398,7 @@ mod tests {
         assert_eq!(
             value(RuleMeasure::Cost, RuleAggregation::Max),
             None,
-            "a run's cost is read run by run, never from the totals"
+            "a trace's cost is read trace by trace, never from the totals"
         );
         assert_eq!(
             Totals::default().value(RuleMeasure::Count, RuleAggregation::Count),

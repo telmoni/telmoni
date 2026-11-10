@@ -1,5 +1,5 @@
 //! An agent's changes: the first run of an agent, in one environment, to
-//! carry a release, a model or a prompt's version its runs there had not
+//! carry a release, a model or a prompt's version its traces there had not
 //! carried in the [`NEW_FOR`] before, each a row of `telemetry.changes`. Each
 //! minute the replica that wins the lock reads the spans landed since the
 //! last pass, which `telemetry.reads` keeps: those received since, and the
@@ -36,7 +36,7 @@ pub const HEARTBEAT: &str = "changes";
 /// How often the loop reads.
 pub const EVERY: Duration = Duration::from_secs(60);
 
-/// How long a value its runs carried is remembered as theirs.
+/// How long a value its traces carried is remembered as theirs.
 pub const NEW_FOR: TimeDelta = TimeDelta::days(30);
 
 /// The changes of one kind an agent's UTC day shows.
@@ -102,16 +102,16 @@ pub struct Change {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     pub value: String,
-    /// When the run that first carried it started, held to five minutes
+    /// When the trace that first carried it started, held to five minutes
     /// past its receipt.
     pub changed_at: DateTime<Utc>,
-    /// The run that first carried it.
-    pub run_id: Uuid,
+    /// The trace that first carried it.
+    pub trace_id: String,
     /// Its agent's later changes of its kind that UTC day were not marked.
     pub capped: bool,
 }
 
-const CHANGE_COLUMNS: &str = "agent, environment, kind, prompt, value, changed_at, run_id, \
+const CHANGE_COLUMNS: &str = "agent, environment, kind, prompt, value, changed_at, trace_id, \
      mark = 'capped' AS capped";
 
 /// How long before an incident opened a change is named on it.
@@ -466,26 +466,26 @@ fn span_of(read_to: Option<DateTime<Utc>>, now: DateTime<Utc>) -> (DateTime<Utc>
     (from, (from + STEP).min(now))
 }
 
-/// The runs another exporter's held spans landed in within the window, by
+/// The traces another exporter's held spans landed in within the window, by
 /// project.
 async fn landed(
     state: &AppState,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
-) -> Result<HashMap<ProjectId, Vec<Uuid>>, TelmoniError> {
+) -> Result<HashMap<ProjectId, Vec<String>>, TelmoniError> {
     let mut tx = maintenance_scope(&state.db, TelemetryLane).await?;
-    let rows: Vec<(ProjectId, Uuid)> = sqlx::query_as(
-        "SELECT DISTINCT project_id, run_id FROM telemetry.held_spans
-          WHERE landed_at >= $1 AND landed_at < $2 AND run_id IS NOT NULL",
+    let rows: Vec<(ProjectId, String)> = sqlx::query_as(
+        "SELECT DISTINCT project_id, trace_id FROM telemetry.held_spans
+          WHERE landed_at >= $1 AND landed_at < $2",
     )
     .bind(from)
     .bind(to)
     .fetch_all(tx.conn())
     .await?;
     tx.commit().await?;
-    let mut by_project: HashMap<ProjectId, Vec<Uuid>> = HashMap::new();
-    for (project, run) in rows {
-        by_project.entry(project).or_default().push(run);
+    let mut by_project: HashMap<ProjectId, Vec<String>> = HashMap::new();
+    for (project, trace) in rows {
+        by_project.entry(project).or_default().push(trace);
     }
     Ok(by_project)
 }
@@ -501,8 +501,7 @@ struct SeenRow {
     carried: String,
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     first_at: DateTime<Utc>,
-    #[serde(deserialize_with = "clickhouse::serde::uuid::deserialize")]
-    first_run: Uuid,
+    first_trace: String,
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     first_received: DateTime<Utc>,
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
@@ -511,16 +510,16 @@ struct SeenRow {
 
 /// Each release, model call's model and prompt version with its name the
 /// window's spans carried, by agent and environment: when it first started,
-/// believed no further than [`SKEW_MAX_SECS`] past its receipt, and the run
-/// that did, taken together so the time is that run's; and when it first and
-/// last arrived. Aliased apart from the columns, which ClickHouse resolves
-/// after an alias of the same name.
+/// believed no further than [`SKEW_MAX_SECS`] past its receipt, and the
+/// trace that did, taken together so the time is that trace's; and when it
+/// first and last arrived. Aliased apart from the columns, which ClickHouse
+/// resolves after an alias of the same name.
 const SEEN_SQL: &str = concat!(
     "SELECT project_id, agent, environment, ",
     "tupleElement(c, 1) AS what, tupleElement(c, 2) AS named, tupleElement(c, 3) AS carried, ",
     "min(least(started_at, received_at + toIntervalSecond({skew:UInt32}))) AS first_at, ",
-    "argMin(run_id, tuple(least(started_at, received_at + toIntervalSecond({skew:UInt32})), ",
-    "run_id)) AS first_run, ",
+    "argMin(trace_id, tuple(least(started_at, received_at + toIntervalSecond({skew:UInt32})), ",
+    "trace_id)) AS first_trace, ",
     "min(received_at) AS first_received, max(received_at) AS last_received ",
     "FROM telemetry.spans ",
     "ARRAY JOIN arrayFilter(x -> tupleElement(x, 3) != '', [",
@@ -531,7 +530,7 @@ const SEEN_SQL: &str = concat!(
     "]) AS c ",
     "WHERE project_id IN {projects:Array(String)} AND agent != '' AND (",
     "(received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')}) ",
-    "OR (has({runs:Array(UUID)}, run_id) AND received_at >= {held_from:DateTime64(6, 'UTC')})) ",
+    "OR (has({traces:Array(String)}, trace_id) AND received_at >= {held_from:DateTime64(6, 'UTC')})) ",
     "GROUP BY project_id, agent, environment, what, named, carried"
 );
 
@@ -539,18 +538,18 @@ const SEEN_SQL: &str = concat!(
 async fn seen(
     state: &AppState,
     projects: &[ProjectId],
-    landed: &HashMap<ProjectId, Vec<Uuid>>,
+    landed: &HashMap<ProjectId, Vec<String>>,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<Vec<(ProjectId, Candidate)>, TelmoniError> {
     let Some(read) = Projects::of(projects.iter().cloned()) else {
         return Ok(Vec::new());
     };
-    let runs: Vec<Uuid> = projects
+    let traces: Vec<&str> = projects
         .iter()
         .filter_map(|project| landed.get(project))
         .flatten()
-        .copied()
+        .map(String::as_str)
         .collect();
     let rows: Vec<SeenRow> = state
         .store
@@ -558,7 +557,7 @@ async fn seen(
         .param("skew", SKEW_MAX_SECS)
         .param("from", micros(from))
         .param("to", micros(to))
-        .param("runs", runs)
+        .param("traces", traces)
         .param("held_from", micros(from - CATCH_UP))
         .fetch_all()
         .await
@@ -572,7 +571,7 @@ async fn seen(
 async fn seen_of(
     state: &AppState,
     project: &ProjectId,
-    landed: &HashMap<ProjectId, Vec<Uuid>>,
+    landed: &HashMap<ProjectId, Vec<String>>,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<Vec<(ProjectId, Candidate)>, TelmoniError> {
@@ -592,7 +591,7 @@ impl SeenRow {
                 prompt,
                 value: self.carried,
                 first_at: self.first_at,
-                first_run: self.first_run,
+                first_trace: self.first_trace,
                 first_received: self.first_received,
                 last_received: self.last_received,
             },
@@ -741,7 +740,7 @@ pub(crate) struct Candidate {
     pub(crate) prompt: Option<String>,
     pub(crate) value: String,
     pub(crate) first_at: DateTime<Utc>,
-    pub(crate) first_run: Uuid,
+    pub(crate) first_trace: String,
     pub(crate) first_received: DateTime<Utc>,
     pub(crate) last_received: DateTime<Utc>,
 }
@@ -867,20 +866,23 @@ async fn apply(
         let prompts: Vec<Option<&str>> =
             new.iter().map(|n| n.candidate.prompt.as_deref()).collect();
         let changed: Vec<DateTime<Utc>> = new.iter().map(|n| n.changed_at).collect();
-        let runs: Vec<Uuid> = new.iter().map(|n| n.candidate.first_run).collect();
+        let traces: Vec<&str> = new
+            .iter()
+            .map(|n| n.candidate.first_trace.as_str())
+            .collect();
         let seen: Vec<DateTime<Utc>> = new.iter().map(|n| n.candidate.last_received).collect();
         sqlx::query(
             "INSERT INTO telemetry.changes
                  (id, project_id, agent, environment, kind, prompt, value, identity, changed_at,
-                  run_id, seen_at, mark)
+                  trace_id, seen_at, mark)
              SELECT u.id, $1, u.agent, u.environment, u.kind, u.prompt, u.value, u.identity,
-                    u.changed_at, u.run_id, u.seen_at, u.mark
+                    u.changed_at, u.trace_id, u.seen_at, u.mark
                FROM UNNEST($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[],
-                           $8::text[], $9::timestamptz[], $10::uuid[], $11::timestamptz[],
+                           $8::text[], $9::timestamptz[], $10::text[], $11::timestamptz[],
                            $12::text[])
-                 AS u(id, agent, environment, kind, prompt, value, identity, changed_at, run_id,
+                 AS u(id, agent, environment, kind, prompt, value, identity, changed_at, trace_id,
                       seen_at, mark)
-             ON CONFLICT (project_id, identity, run_id) DO NOTHING",
+             ON CONFLICT (project_id, identity, trace_id) DO NOTHING",
         )
         .bind(project_id)
         .bind(&ids)
@@ -891,7 +893,7 @@ async fn apply(
         .bind(column(|n| &n.candidate.value))
         .bind(column(|n| &n.identity))
         .bind(&changed)
-        .bind(&runs)
+        .bind(&traces)
         .bind(&seen)
         .bind(column(|n| n.mark.as_str()))
         .execute(tx.conn())
@@ -943,7 +945,7 @@ mod tests {
             prompt: None,
             value: value.into(),
             first_at: at(when),
-            first_run: Uuid::from_u128(1),
+            first_trace: "1".repeat(32),
             first_received: at(when),
             last_received: at(when),
         }

@@ -719,6 +719,14 @@ impl Exporter {
             end_time_unix_nano: nanos(span.end_time),
             attributes,
             events,
+            links: span
+                .links
+                .iter()
+                .map(|link| OtlpLink {
+                    trace_id: link.span_context.trace_id().to_string(),
+                    span_id: link.span_context.span_id().to_string(),
+                })
+                .collect(),
             status,
         }
     }
@@ -1128,6 +1136,8 @@ struct OtlpSpan<'a> {
     attributes: Vec<OtlpAttribute<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     events: Vec<OtlpEvent<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    links: Vec<OtlpLink>,
     #[serde(skip_serializing_if = "Option::is_none")]
     status: Option<ErrorStatus<'a>>,
 }
@@ -1138,6 +1148,14 @@ struct OtlpEvent<'a> {
     time_unix_nano: String,
     name: &'a str,
     attributes: Vec<OtlpAttribute<'a>>,
+}
+
+/// The application's span a trace was opened beside: its ids alone.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OtlpLink {
+    trace_id: String,
+    span_id: String,
 }
 
 #[derive(Serialize)]
@@ -1427,7 +1445,7 @@ mod tests {
         assert_eq!(sent(&kept), want);
     }
 
-    /// Rather than lost, since a run's own span carries the run's end.
+    /// Rather than lost, since the agent's own span carries the trace's end.
     #[test]
     fn a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length() {
         let (kept, warnings) = (Kept::default(), Arc::default());

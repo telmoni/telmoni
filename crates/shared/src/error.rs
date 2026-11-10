@@ -417,7 +417,7 @@ impl AuthzError {
     }
 }
 
-/// Ingest's refusals of an export to `/otlp/v1/traces`, and of a run's tags
+/// Ingest's refusals of an export to `/otlp/v1/traces`, and of a trace's tags
 /// changed in the console. On that lane the body is OTLP's `Status` rather
 /// than a problem document, its message opening with the type, so an
 /// exporter and a person read the same name.

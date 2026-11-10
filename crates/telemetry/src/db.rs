@@ -669,7 +669,6 @@ pub async fn delete_content_key(
 /// One content field, sealed, as `plain_content` keeps it.
 #[derive(Debug, Default)]
 pub struct SealedFields {
-    pub run_ids: Vec<Uuid>,
     pub trace_ids: Vec<String>,
     pub span_ids: Vec<String>,
     pub fields: Vec<String>,
@@ -759,12 +758,12 @@ pub async fn keep_content(
     sqlx::query(
         "WITH kept AS (
              INSERT INTO telemetry.plain_content
-                 (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
+                 (project_id, trace_id, span_id, field, received_at, ciphertext, nonce,
                   bytes, key_id)
-             SELECT $1, r, t, s, f, $3, c, n, b, $11
-               FROM UNNEST($10::uuid[], $4::text[], $5::text[], $6::text[], $7::bytea[],
+             SELECT $1, t, s, f, $3, c, n, b, $10
+               FROM UNNEST($4::text[], $5::text[], $6::text[], $7::bytea[],
                            $8::bytea[], $9::int[])
-                 AS u(r, t, s, f, c, n, b)
+                 AS u(t, s, f, c, n, b)
              ON CONFLICT DO NOTHING
              RETURNING bytes)
          INSERT INTO telemetry.content_held (organization_id, bytes)
@@ -781,21 +780,20 @@ pub async fn keep_content(
     .bind(&sealed.ciphertexts)
     .bind(&sealed.nonces)
     .bind(&sealed.bytes)
-    .bind(&sealed.run_ids)
     .bind(key_id)
     .execute(tx.conn())
     .await?;
     Ok(())
 }
 
-/// The project's fields kept under the spans `spans` names of `run_id`
+/// The project's fields kept under the spans `spans` names of `trace_id`
 /// deleted on the maintenance lane, which alone deletes content, their bytes
 /// given back to the organization holding the project, its settings row
 /// locked first, as [`delete_content`] locks it.
 pub async fn forget_fields(
     conn: &mut sqlx::PgConnection,
     project_id: &ProjectId,
-    run_id: Uuid,
+    trace_id: &str,
     spans: &[String],
 ) -> sqlx::Result<()> {
     sqlx::query("SELECT 1 FROM telemetry.project_settings WHERE project_id = $1 FOR UPDATE")
@@ -805,7 +803,7 @@ pub async fn forget_fields(
     sqlx::query(
         "WITH gone AS (
              DELETE FROM telemetry.plain_content
-              WHERE project_id = $1 AND run_id = $2 AND span_id = ANY($3)
+              WHERE project_id = $1 AND trace_id = $2 AND span_id = ANY($3)
              RETURNING bytes),
          sums AS (
              SELECT s.organization_id, sum(g.bytes) AS bytes
@@ -816,17 +814,17 @@ pub async fn forget_fields(
            FROM sums WHERE h.organization_id = sums.organization_id",
     )
     .bind(project_id)
-    .bind(run_id)
+    .bind(trace_id)
     .bind(spans)
     .execute(&mut *conn)
     .await?;
     Ok(())
 }
 
-/// One content field as kept: its run, trace, span and name, sealed.
-pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
+/// One content field as kept: its trace, span and name, sealed.
+pub(crate) type KeptField = (String, String, String, Vec<u8>, Vec<u8>);
 
-/// Every field the project keeps for the runs, sealed, in trace, span and
+/// Every field the project keeps for the traces, sealed, in trace, span and
 /// name order: the crate's own,
 /// read only by [`crate::content::open`], which files each read. Only fields
 /// under the project's key now: none once it is deleted
@@ -835,18 +833,18 @@ pub(crate) type KeptField = (Uuid, String, String, String, Vec<u8>, Vec<u8>);
 pub(crate) async fn read_content(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
-    runs: &[Uuid],
+    traces: &[String],
 ) -> sqlx::Result<Vec<KeptField>> {
     sqlx::query_as(
-        "SELECT run_id, trace_id, span_id, field, ciphertext, nonce
+        "SELECT trace_id, span_id, field, ciphertext, nonce
            FROM telemetry.plain_content
-          WHERE project_id = $1 AND run_id = ANY($2)
+          WHERE project_id = $1 AND trace_id = ANY($2)
             AND key_id = (SELECT content_key_id FROM telemetry.project_settings
                            WHERE project_id = $1)
           ORDER BY trace_id, span_id, field",
     )
     .bind(project_id)
-    .bind(runs)
+    .bind(traces)
     .fetch_all(tx.conn())
     .await
 }
@@ -866,20 +864,20 @@ pub async fn delete_content(
     delete_content_of(conn, project_ids, before, limit, None, None).await
 }
 
-/// The project's content rows of these runs, whenever their spans landed,
+/// The project's content rows of these traces, whenever their spans landed,
 /// deleted and counted off as [`delete_content`] does them: a trace's
 /// deletion's, or an end user's erasure's.
-pub async fn delete_runs_content(
+pub async fn delete_traces_content(
     conn: &mut sqlx::PgConnection,
     project_id: &ProjectId,
-    runs: &[Uuid],
+    traces: &[String],
 ) -> sqlx::Result<u64> {
     delete_content_of(
         conn,
         std::slice::from_ref(project_id),
         None,
         i64::MAX,
-        Some(runs),
+        Some(traces),
         None,
     )
     .await
@@ -912,7 +910,7 @@ async fn delete_content_of(
     project_ids: &[ProjectId],
     before: Option<DateTime<Utc>>,
     limit: i64,
-    runs: Option<&[Uuid]>,
+    traces: Option<&[String]>,
     key: Option<Uuid>,
 ) -> sqlx::Result<u64> {
     sqlx::query(
@@ -928,7 +926,7 @@ async fn delete_content_of(
               WHERE ctid IN (SELECT ctid FROM telemetry.plain_content
                               WHERE project_id = ANY($1)
                                 AND ($2::timestamptz IS NULL OR received_at < $2)
-                                AND ($4::uuid[] IS NULL OR run_id = ANY($4))
+                                AND ($4::text[] IS NULL OR trace_id = ANY($4))
                                 AND ($5::uuid IS NULL OR key_id = $5)
                               LIMIT $3)
              RETURNING project_id, bytes),
@@ -945,11 +943,11 @@ async fn delete_content_of(
     .bind(project_ids)
     .bind(before)
     .bind(limit)
-    .bind(runs)
+    .bind(traces)
     .bind(key)
     .fetch_one(&mut *conn)
     .await?;
-    delete_media_of(conn, project_ids, before, runs, key).await?;
+    delete_media_of(conn, project_ids, before, traces, key).await?;
     Ok(gone.unsigned_abs())
 }
 
@@ -982,19 +980,19 @@ async fn delete_media_of(
     conn: &mut sqlx::PgConnection,
     project_ids: &[ProjectId],
     before: Option<DateTime<Utc>>,
-    runs: Option<&[Uuid]>,
+    traces: Option<&[String]>,
     key: Option<Uuid>,
 ) -> sqlx::Result<()> {
     let unnamed: Vec<String> = sqlx::query_scalar(
         "DELETE FROM telemetry.media_names
           WHERE project_id = ANY($1)
             AND ($2::timestamptz IS NULL OR received_at < $2)
-            AND ($3::uuid[] IS NULL OR run_id = ANY($3))
+            AND ($3::text[] IS NULL OR trace_id = ANY($3))
       RETURNING project_id || '/' || sha256",
     )
     .bind(project_ids)
     .bind(before)
-    .bind(runs)
+    .bind(traces)
     .fetch_all(&mut *conn)
     .await?;
     // A file sealed under a deleted key goes whatever names it: nothing opens it.
@@ -1016,7 +1014,7 @@ async fn delete_media_of(
            FROM sums WHERE h.organization_id = sums.organization_id",
     )
     .bind(project_ids)
-    .bind(before.is_none() && runs.is_none())
+    .bind(before.is_none() && traces.is_none())
     .bind(&unnamed)
     .bind(UNNAMED_MEDIA_KEPT)
     .bind(key)
@@ -1064,22 +1062,22 @@ pub async fn keep_media(
     Ok(kept > 0)
 }
 
-/// The files each run's kept content names, by hash: what keeps each one.
+/// The files each trace's kept content names, by hash: what keeps each one.
 pub async fn name_media(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,
     received_at: DateTime<Utc>,
-    (hashes, runs): (&[String], &[Uuid]),
+    (hashes, traces): (&[String], &[String]),
 ) -> sqlx::Result<()> {
     sqlx::query(
-        "INSERT INTO telemetry.media_names (project_id, sha256, run_id, received_at)
-         SELECT $1, h, r, $2 FROM UNNEST($3::text[], $4::uuid[]) AS u(h, r)
+        "INSERT INTO telemetry.media_names (project_id, sha256, trace_id, received_at)
+         SELECT $1, h, t, $2 FROM UNNEST($3::text[], $4::text[]) AS u(h, t)
          ON CONFLICT DO NOTHING",
     )
     .bind(project_id)
     .bind(received_at)
     .bind(hashes)
-    .bind(runs)
+    .bind(traces)
     .execute(tx.conn())
     .await?;
     Ok(())

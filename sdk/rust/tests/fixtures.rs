@@ -1,5 +1,5 @@
 //! The golden fixtures in `sdk/fixtures`: the export every SDK must send for
-//! the same run, and what each must do with the server's answers.
+//! the same trace, and what each must do with the server's answers.
 
 mod common;
 
@@ -12,16 +12,16 @@ use std::time::{Duration, Instant};
 
 use common::{
     Collected, Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, answer, answer_names,
-    attributes_of, field, fields_of, float, hooks, int, is_hex, is_uuid_v4, keyed, load_fixture,
-    name_of, spans_of, text, warning_of,
+    attributes_of, field, fields_of, float, hooks, int, is_hex, keyed, load_fixture, name_of,
+    spans_of, text, warning_of,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{
-    Batching, Config, ContentMode, Hooks, ModelCallOptions, Reply, RetrievalOptions, RunOptions,
-    RunRecord, Telmoni, ToolCallOptions, ToolCallRecord, Usage,
+    Batching, Config, ContentMode, Hooks, ModelCallOptions, Reply, RetrievalOptions, Telmoni,
+    ToolCallOptions, ToolCallRecord, TraceOptions, TraceRecord, Usage,
 };
 
 /// The fixture's normalization, as its README sets it out.
@@ -57,7 +57,6 @@ fn normalize(export: &Value) -> Result<Value, Failure> {
         .collect::<Result<_, Failure>>()?;
     assert!(names.keys().all(|id| is_hex(id, 16)), "{names:?}");
 
-    let mut run_ids = HashSet::new();
     for span in spans.iter_mut() {
         let name = name_of(span).to_owned();
         let span_id = text(span, "spanId")?.to_owned();
@@ -88,22 +87,7 @@ fn normalize(export: &Value) -> Result<Value, Failure> {
             .and_then(Value::as_array_mut)
             .ok_or("attributes")?;
         attributes.sort_by(|a, b| key_of(a).cmp(key_of(b)));
-        for attribute in attributes.iter_mut() {
-            if key_of(attribute) != "telmoni.run_id" {
-                continue;
-            }
-            let value = attribute
-                .get_mut("value")
-                .and_then(Value::as_object_mut)
-                .ok_or("a value")?;
-            if let Some(Value::String(id)) = value.get("stringValue") {
-                run_ids.insert(id.clone());
-            }
-            value.insert("stringValue".to_owned(), json!("<uuid>"));
-        }
     }
-    assert_eq!(run_ids.len(), 1, "one run: {run_ids:?}");
-    assert!(run_ids.iter().all(|id| is_uuid_v4(id)), "{run_ids:?}");
 
     scope_span
         .get_mut("scope")
@@ -137,26 +121,26 @@ fn key_of(attribute: &Value) -> &str {
 
 /// The scenario, through the API, as the README describes it.
 fn perform(harness: &Harness, scenario: &Value) -> Outcome {
-    let run_spec = field(scenario, "run")?;
-    let tags = field(run_spec, "tags")?
+    let trace_spec = field(scenario, "trace")?;
+    let tags = field(trace_spec, "tags")?
         .as_object()
         .ok_or("tags")?
         .iter()
         .map(|(key, value)| Ok((key.clone(), value.as_str().ok_or("a tag")?.to_owned())))
         .collect::<Result<BTreeMap<_, _>, Failure>>()?;
-    let run = harness.telmoni.run(
-        text(run_spec, "agent")?,
-        RunOptions {
-            user_id: Some(text(run_spec, "user_id")?.to_owned()),
-            session_id: Some(text(run_spec, "session_id")?.to_owned()),
+    let trace = harness.telmoni.trace(
+        text(trace_spec, "agent")?,
+        TraceOptions {
+            user_id: Some(text(trace_spec, "user_id")?.to_owned()),
+            session_id: Some(text(trace_spec, "session_id")?.to_owned()),
             tags,
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
 
-    let inside = field(run_spec, "inside")?.as_array().ok_or("inside")?;
+    let inside = field(trace_spec, "inside")?.as_array().ok_or("inside")?;
     let step_spec = inside.first().ok_or("a step")?;
-    let step = run.step(text(step_spec, "step")?)?;
+    let step = trace.step(text(step_spec, "step")?)?;
     let call_spec = field(
         field(step_spec, "inside")?
             .as_array()
@@ -194,16 +178,16 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
     step.end();
 
     let tool_spec = field(inside.get(1).ok_or("a tool call")?, "tool_call")?;
-    let tool = run.tool_call(text(tool_spec, "name")?, ToolCallOptions::default())?;
+    let tool = trace.tool_call(text(tool_spec, "name")?, ToolCallOptions::default())?;
     tool.fail(text(tool_spec, "fails_with")?);
     tool.end();
-    run.end();
+    trace.end();
     harness.flush()
 }
 
 #[test]
-fn the_run_matches_the_golden_export() -> Outcome {
-    let fixture = load_fixture("run.json")?;
+fn the_trace_matches_the_golden_export() -> Outcome {
+    let fixture = load_fixture("trace.json")?;
     let scenario = field(&fixture, "scenario")?;
     let harness = Harness::with(Config {
         capture_content: field(scenario, "capture_content")?
@@ -216,7 +200,7 @@ fn the_run_matches_the_golden_export() -> Outcome {
     perform(&harness, scenario)?;
 
     let bodies = harness.transport.bodies()?;
-    let mut gathered = bodies.first().ok_or("the run was not sent")?.clone();
+    let mut gathered = bodies.first().ok_or("the trace was not sent")?.clone();
     let every_span: Vec<Value> = bodies.iter().flat_map(spans_of).collect();
     *gathered
         .get_mut("resourceSpans")
@@ -261,8 +245,8 @@ fn the_run_matches_the_golden_export() -> Outcome {
 fn the_retrievals_match_the_golden_export() -> Outcome {
     let fixture = load_fixture("retrieval.json")?;
     let spec = fixture
-        .pointer("/scenario/run")
-        .ok_or("the scenario's run")?;
+        .pointer("/scenario/trace")
+        .ok_or("the scenario's trace")?;
     for case in field(&fixture, "cases")?.as_array().ok_or("cases")? {
         let mode = Answer::new(
             200,
@@ -281,17 +265,17 @@ fn the_retrievals_match_the_golden_export() -> Outcome {
             },
             std::iter::repeat_n(Ok(mode), 4),
         )?;
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             text(spec, "agent")?,
-            RunOptions {
+            TraceOptions {
                 user_id: Some(text(spec, "user_id")?.to_owned()),
                 session_id: Some(text(spec, "session_id")?.to_owned()),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
         for item in field(spec, "inside")?.as_array().ok_or("inside")? {
             let given = field(item, "retrieval")?;
-            let found = run.retrieval(
+            let found = trace.retrieval(
                 text(given, "source")?,
                 RetrievalOptions {
                     query: Some(text(given, "query")?.into()),
@@ -305,7 +289,7 @@ fn the_retrievals_match_the_golden_export() -> Outcome {
             }
             found.end();
         }
-        run.end();
+        trace.end();
         harness.flush()?;
 
         // The ask before the first content holds no spans.
@@ -315,7 +299,7 @@ fn the_retrievals_match_the_golden_export() -> Outcome {
             .into_iter()
             .filter(|body| !spans_of(body).is_empty())
             .collect();
-        let mut gathered = bodies.first().ok_or("the run was not sent")?.clone();
+        let mut gathered = bodies.first().ok_or("the trace was not sent")?.clone();
         let every_span: Vec<Value> = bodies.iter().flat_map(spans_of).collect();
         *gathered
             .get_mut("resourceSpans")
@@ -339,10 +323,10 @@ fn the_retrievals_match_the_golden_export() -> Outcome {
 }
 
 #[test]
-fn a_run_is_sent_from_its_start() -> Outcome {
-    let fixture = load_fixture("run-start.json")?;
+fn a_trace_is_sent_from_its_start() -> Outcome {
+    let fixture = load_fixture("trace-start.json")?;
     let scenario = field(&fixture, "scenario")?;
-    let spec = field(scenario, "run")?;
+    let spec = field(scenario, "trace")?;
     let agent = text(spec, "agent")?;
     let transport = FakeTransport::new([])?;
     let mut hooks = hooks(&transport, &Warnings::default(), &Sleeps::default());
@@ -368,13 +352,13 @@ fn a_run_is_sent_from_its_start() -> Outcome {
         .iter()
         .map(|(key, value)| Ok((key.clone(), value.as_str().ok_or("a tag")?.to_owned())))
         .collect::<Result<BTreeMap<_, _>, Failure>>()?;
-    let run = telmoni.run(
+    let trace = telmoni.trace(
         agent,
-        RunOptions {
+        TraceOptions {
             user_id: Some(text(spec, "user_id")?.to_owned()),
             session_id: Some(text(spec, "session_id")?.to_owned()),
             tags,
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
     let within = Duration::from_millis(
@@ -407,7 +391,7 @@ fn a_run_is_sent_from_its_start() -> Outcome {
         .pointer_mut(spans)
         .and_then(Value::as_object_mut)
         .ok_or("the one span")?
-        .insert("parentSpanId".to_owned(), json!("<span:run>"));
+        .insert("parentSpanId".to_owned(), json!("<span:agent>"));
     let expected = field(&fixture, "first_export")?;
     assert!(
         normalized == *expected,
@@ -416,24 +400,21 @@ fn a_run_is_sent_from_its_start() -> Outcome {
         serde_json::to_string_pretty(expected)?
     );
 
-    run.end();
+    trace.end();
     assert!(telmoni.flush(), "the flush timed out");
     let name = format!("invoke_agent {agent}");
-    let runs: Vec<Value> = transport
+    let agents: Vec<Value> = transport
         .spans()?
         .into_iter()
         .filter(|span| name_of(span) == name)
         .collect();
-    let [own] = runs.try_into().map_err(|_| "one run span")?;
+    let [own] = agents.try_into().map_err(|_| "one agent span")?;
     assert_eq!(text(&own, "spanId")?, parent);
     assert_eq!(
         text(&own, "startTimeUnixNano")?,
         text(&start, "startTimeUnixNano")?
     );
-    let run_id = |span: &Value| -> Result<Value, Failure> {
-        Ok(field(&attributes_of(span)?, "telmoni.run_id")?.clone())
-    };
-    assert_eq!(run_id(&own)?, run_id(&start)?);
+    assert_eq!(text(&own, "traceId")?, text(&start, "traceId")?);
     telmoni.shutdown();
     Ok(())
 }
@@ -523,7 +504,7 @@ fn a_failure_leaves_in_full_only_under_both_locks() -> Outcome {
                     .ok_or("capture_content")?,
                 ..keyed()
             },
-            // The mode to each export, a run's opening its own among them.
+            // The mode to each export, a trace's opening its own among them.
             std::iter::repeat_n(
                 Ok(Answer::new(
                     200,
@@ -533,13 +514,14 @@ fn a_failure_leaves_in_full_only_under_both_locks() -> Outcome {
                 4,
             ),
         )?;
-        harness.telmoni.run(agent, RunOptions::default())?.end();
+        harness.telmoni.trace(agent, TraceOptions::default())?.end();
         harness.flush()?;
         let result: Result<(), RateLimited> =
             harness
                 .telmoni
-                .try_run_with(agent, RunOptions::default(), |run| {
-                    run.context()
+                .try_trace_with(agent, TraceOptions::default(), |trace| {
+                    trace
+                        .context()
                         .span()
                         .add_event(event_name.clone(), event_attributes.clone());
                     Err(RateLimited(message.to_owned()))
@@ -547,7 +529,7 @@ fn a_failure_leaves_in_full_only_under_both_locks() -> Outcome {
         assert!(result.is_err());
         harness.flush()?;
         let spans = harness.spans()?;
-        let failed = spans.last().ok_or("the failed run")?;
+        let failed = spans.last().ok_or("the failed trace")?;
         let sends = text(case, "sends")?;
         assert_eq!(
             &normalize_failure(failed)?,
@@ -612,8 +594,8 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
                 }
             })
             .collect::<Result<Vec<_>, Failure>>()?;
-        // Each run's opening, waited for so it goes alone, is answered naming
-        // no mode; the case's answers are the first run's other exports.
+        // Each trace's opening, waited for so it goes alone, is answered naming
+        // no mode; the case's answers are the first trace's other exports.
         let neutral = || Ok(Answer::new(200, Vec::new(), b"{}".to_vec()));
         let answers = std::iter::once(neutral())
             .chain(answers)
@@ -628,10 +610,10 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
         )?;
         for _ in 0..2 {
             let sent = harness.transport.count();
-            let run = harness
+            let trace = harness
                 .telmoni
-                .run(text(&fixture, "agent")?, RunOptions::default())?;
-            assert!(harness.transport.wait_for(sent + 1), "the run's opening");
+                .trace(text(&fixture, "agent")?, TraceOptions::default())?;
+            assert!(harness.transport.wait_for(sent + 1), "the trace's opening");
             let options = if flag("content")? {
                 ModelCallOptions {
                     input_messages: Some(field(&fixture, "input_messages")?.clone().into()),
@@ -640,8 +622,8 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
             } else {
                 ModelCallOptions::default()
             };
-            run.model_call(text(&fixture, "model")?, options)?.end();
-            run.end();
+            trace.model_call(text(&fixture, "model")?, options)?.end();
+            trace.end();
             harness.flush()?;
         }
         let opening = |body: &Value| {
@@ -649,7 +631,7 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
             !spans.is_empty()
                 && spans
                     .iter()
-                    .all(|span| name_of(span) == "telmoni.run.start")
+                    .all(|span| name_of(span) == "telmoni.trace.start")
         };
         let (openings, bodies): (Vec<Value>, Vec<Value>) =
             harness.transport.bodies()?.into_iter().partition(opening);
@@ -675,7 +657,7 @@ fn the_mode_is_asked_before_the_first_content_it_would_send() -> Outcome {
         } else {
             assert!(asks.is_empty(), "{case}");
         }
-        let first = exports.first().ok_or("the first run's export")?;
+        let first = exports.first().ok_or("the first trace's export")?;
         let spans = spans_of(first);
         let call = spans
             .iter()
@@ -709,17 +691,17 @@ fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
                 api_key: Some("k".to_owned()),
                 ..keyed()
             },
-            // The mode to each export, a run's opening its own among them.
+            // The mode to each export, a trace's opening its own among them.
             std::iter::repeat_n(Ok(mode), 6),
         )?;
-        harness.telmoni.run("bot", RunOptions::default())?.end();
+        harness.telmoni.trace("bot", TraceOptions::default())?.end();
         harness.flush()?;
         // Twice, in two exports: each file is put once.
         for _ in 0..2 {
-            let run = harness
+            let trace = harness
                 .telmoni
-                .run(text(scenario, "agent")?, RunOptions::default())?;
-            let call = run.model_call(
+                .trace(text(scenario, "agent")?, TraceOptions::default())?;
+            let call = trace.model_call(
                 text(scenario, "model")?,
                 ModelCallOptions {
                     provider: Some(text(scenario, "provider")?.to_owned()),
@@ -735,7 +717,7 @@ fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
                 ..Reply::default()
             });
             call.end();
-            run.end();
+            trace.end();
             harness.flush()?;
         }
         let spans = harness.spans()?;
@@ -860,12 +842,12 @@ fn the_mask_answers_each_content_field_only_under_both_locks() -> Outcome {
             },
             std::iter::repeat_n(Ok(mode), 2),
         )?;
-        a_run(&harness)?;
-        let options = RunOptions {
+        a_trace(&harness)?;
+        let options = TraceOptions {
             user_id: Some(text(scenario, "user")?.to_owned()),
             session_id: Some(text(scenario, "session")?.to_owned()),
             tags: serde_json::from_value(field(scenario, "tags")?.clone())?,
-            ..RunOptions::default()
+            ..TraceOptions::default()
         };
         let model = text(scenario, "model")?;
         let call_options = ModelCallOptions {
@@ -879,15 +861,17 @@ fn the_mask_answers_each_content_field_only_under_both_locks() -> Outcome {
             ..Reply::default()
         };
         let message = text(scenario, "message")?;
-        let result: Result<(), Declined> = harness.telmoni.try_run_with(agent, options, |run| {
-            let call = run.model_call(model, call_options)?;
-            call.answered(reply);
-            call.end();
-            run.context()
-                .span()
-                .add_event(event_name.clone(), event_attributes.clone());
-            Err(Declined(message.to_owned()))
-        });
+        let result: Result<(), Declined> =
+            harness.telmoni.try_trace_with(agent, options, |trace| {
+                let call = trace.model_call(model, call_options)?;
+                call.answered(reply);
+                call.end();
+                trace
+                    .context()
+                    .span()
+                    .add_event(event_name.clone(), event_attributes.clone());
+                Err(Declined(message.to_owned()))
+            });
         assert!(result.is_err(), "{case}");
         harness.flush()?;
         let spans = harness.spans()?;
@@ -909,7 +893,7 @@ fn the_mask_answers_each_content_field_only_under_both_locks() -> Outcome {
                 sent.insert(key.to_owned(), serde_json::from_str(given)?);
             }
         }
-        let failed = spans.last().ok_or("the failed run")?;
+        let failed = spans.last().ok_or("the failed trace")?;
         let handed: BTreeMap<String, String> = handed.all().into_iter().collect();
         if field(case, "masks")? == &json!(false) {
             assert!(handed.is_empty(), "{case}: handed {handed:?}");
@@ -976,13 +960,15 @@ fn a_mask_that_panics_is_warned_of_once_and_asked_each_export() -> Outcome {
             })),
             ..keyed()
         },
-        // On to each export, a run's opening its own among them.
+        // On to each export, a trace's opening its own among them.
         std::iter::repeat_n(Ok(on), 5),
     )?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
     for _ in 0..2 {
-        let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-        let call = run.model_call(
+        let trace = harness
+            .telmoni
+            .trace("support-bot", TraceOptions::default())?;
+        let call = trace.model_call(
             "gpt-4o",
             ModelCallOptions {
                 input_messages: Some(json!("a secret").into()),
@@ -990,7 +976,7 @@ fn a_mask_that_panics_is_warned_of_once_and_asked_each_export() -> Outcome {
             },
         )?;
         call.end();
-        run.end();
+        trace.end();
         harness.flush()?;
     }
     assert_eq!(asked.all(), vec!["gen_ai.input.messages"; 2]);
@@ -1019,13 +1005,15 @@ fn a_mask_answering_a_value_unchanged_keeps_its_type() -> Outcome {
         },
         std::iter::repeat_n(Ok(on), 2),
     )?;
-    a_run(&harness)?;
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-    run.context().span().add_event(
+    a_trace(&harness)?;
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
+    trace.context().span().add_event(
         "checked",
         vec![KeyValue::new("count", 3_i64), KeyValue::new("found", true)],
     );
-    run.end();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
     let mut attributes = spans
@@ -1080,8 +1068,10 @@ fn content_leaves_with_the_canary_values_scrubbed_and_counted() -> Outcome {
     )?;
     let message =
         json!([{ "role": "user", "parts": [{ "type": "text", "content": text(prose, "text")? }] }]);
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-    let call = run.model_call(
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
+    let call = trace.model_call(
         "gpt-4o",
         ModelCallOptions {
             input_messages: Some(message.into()),
@@ -1089,9 +1079,9 @@ fn content_leaves_with_the_canary_values_scrubbed_and_counted() -> Outcome {
         },
     )?;
     call.end();
-    run.end();
+    trace.end();
     let at = std::time::SystemTime::now();
-    harness.telmoni.record_run(RunRecord {
+    harness.telmoni.record_trace(TraceRecord {
         inside: vec![
             ToolCallRecord {
                 arguments: Some(text(arguments, "text")?.into()),
@@ -1099,12 +1089,7 @@ fn content_leaves_with_the_canary_values_scrubbed_and_counted() -> Outcome {
             }
             .into(),
         ],
-        ..RunRecord::new(
-            "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
-            "support-bot",
-            at,
-            at,
-        )
+        ..TraceRecord::new("3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d", "support-bot", at, at)
     })?;
     harness.flush()?;
 
@@ -1129,8 +1114,8 @@ fn content_leaves_with_the_canary_values_scrubbed_and_counted() -> Outcome {
         Some(&want)
     );
     assert_eq!(scrubbed(tool)?, counts);
-    for run in common::starting_with(&spans, "invoke_agent ") {
-        assert!(attributes_of(run)?.get("telmoni.scrubbed").is_none());
+    for agent in common::starting_with(&spans, "invoke_agent ") {
+        assert!(attributes_of(agent)?.get("telmoni.scrubbed").is_none());
     }
     let sent = harness.transport.text();
     for (name, planted) in field(&fixture, "planted")?.as_object().ok_or("planted")? {
@@ -1142,7 +1127,7 @@ fn content_leaves_with_the_canary_values_scrubbed_and_counted() -> Outcome {
     Ok(())
 }
 
-/// In nanoseconds, a retry its own: ingest moves a run by it.
+/// In nanoseconds, a retry its own: ingest moves a trace by it.
 #[test]
 fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
     let now = || {
@@ -1161,7 +1146,7 @@ fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
         },
     );
     let before = now();
-    telmoni.run("bot", RunOptions::default())?.end();
+    telmoni.trace("bot", TraceOptions::default())?.end();
     telmoni.shutdown();
     let after = now();
     let requests = transport.requests();
@@ -1189,13 +1174,12 @@ fn each_attempt_carries_this_clock_as_it_leaves() -> Outcome {
     Ok(())
 }
 
-/// One empty run, sent in an export of its own.
-/// One run, recorded, so it goes in exactly one export: a live run's opening
-/// may go in one of its own.
-fn a_run(harness: &Harness) -> Outcome {
+/// One empty trace, recorded, so it goes in exactly one export: a live
+/// trace's opening may go in one of its own.
+fn a_trace(harness: &Harness) -> Outcome {
     let at = std::time::SystemTime::now();
-    harness.telmoni.record_run(RunRecord::new(
-        "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+    harness.telmoni.record_trace(TraceRecord::new(
+        "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
         "bot",
         at,
         at,
@@ -1207,7 +1191,7 @@ fn a_run(harness: &Harness) -> Outcome {
 fn kept_logs_nothing_and_sets_the_mode() -> Outcome {
     let harness = Harness::answering(keyed(), [Ok(answer("kept")?)])?;
     assert_eq!(harness.telmoni.content_mode(), None);
-    a_run(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), Vec::<String>::new());
     assert_eq!(harness.telmoni.content_mode(), Some(ContentMode::Off));
@@ -1218,8 +1202,8 @@ fn kept_logs_nothing_and_sets_the_mode() -> Outcome {
 #[test]
 fn dropped_is_warned_once() -> Outcome {
     let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("dropped")?), 2))?;
-    a_run(&harness)?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("dropped")?);
     assert_eq!(harness.warnings.fields(), fields_of("dropped")?);
@@ -1229,7 +1213,7 @@ fn dropped_is_warned_once() -> Outcome {
 #[test]
 fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
     let harness = Harness::answering(keyed(), [Ok(answer("unlisted")?)])?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("unlisted")?);
     assert_eq!(harness.warnings.fields(), fields_of("unlisted")?);
@@ -1239,7 +1223,7 @@ fn unlisted_names_the_tag_that_would_keep_it() -> Outcome {
 #[test]
 fn a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it() -> Outcome {
     let harness = Harness::answering(keyed(), [Ok(answer("cardinality")?)])?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("cardinality")?);
     assert_eq!(harness.warnings.fields(), fields_of("cardinality")?);
@@ -1249,15 +1233,15 @@ fn a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it() -> Outcome {
 #[test]
 fn refused_is_warned_once_and_never_retried() -> Outcome {
     let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer("refused")?), 2))?;
-    a_run(&harness)?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("refused")?);
     assert_eq!(harness.warnings.fields(), fields_of("refused")?);
     assert_eq!(
         harness.transport.count(),
         2,
-        "one export each run, neither sent again"
+        "one export each trace, neither sent again"
     );
     Ok(())
 }
@@ -1265,7 +1249,7 @@ fn refused_is_warned_once_and_never_retried() -> Outcome {
 #[test]
 fn rate_limited_waits_retry_after_and_sends_the_same_bytes() -> Outcome {
     let harness = Harness::answering(keyed(), [Ok(answer("rate-limited")?), Ok(answer("kept")?)])?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.sleeps.all(), [Duration::from_secs(2)]);
     let requests = harness.transport.requests();
@@ -1284,7 +1268,7 @@ fn a_retry_after_past_the_cap_waits_the_cap() -> Outcome {
         keyed(),
         [Ok(answer("rate-limited-long")?), Ok(answer("kept")?)],
     )?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.sleeps.all(), [Duration::from_secs(60)]);
     let requests = harness.transport.requests();
@@ -1321,7 +1305,7 @@ fn retry_after_is_read_as_text() -> Outcome {
         ],
     )?;
     for _ in 0..3 {
-        a_run(&harness)?;
+        a_trace(&harness)?;
     }
     harness.telmoni.shutdown();
     let seconds = Duration::from_secs;
@@ -1346,8 +1330,8 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
             Ok(answer("kept")?),
         ],
     )?;
-    a_run(&harness)?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(
         harness.sleeps.all(),
@@ -1358,7 +1342,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
     assert_eq!(
         harness.transport.count(),
         4,
-        "three for the first run, then the next run's own export"
+        "three for the first run, then the next trace's own export"
     );
     Ok(())
 }
@@ -1367,8 +1351,8 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
 fn forbidden_is_not_retried_and_the_next_batch_is_still_sent() -> Outcome {
     let forbidden = answer("forbidden")?;
     let harness = Harness::answering(keyed(), [Ok(forbidden.clone()), Ok(forbidden)])?;
-    a_run(&harness)?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(harness.warnings.all(), warning_of("forbidden")?);
     assert_eq!(harness.warnings.fields(), fields_of("forbidden")?);
@@ -1383,7 +1367,7 @@ fn each_answer_is_warned_word_for_word() -> Outcome {
     assert!(!names.is_empty(), "no answers");
     for name in names {
         let harness = Harness::answering(keyed(), std::iter::repeat_n(Ok(answer(&name)?), 3))?;
-        a_run(&harness)?;
+        a_trace(&harness)?;
         harness.telmoni.shutdown();
         assert_eq!(harness.warnings.all(), warning_of(&name)?, "{name}");
         assert_eq!(harness.warnings.fields(), fields_of(&name)?, "{name}");
@@ -1401,7 +1385,7 @@ fn a_network_failure_is_retried_with_backoff() -> Outcome {
             Ok(answer("kept")?),
         ],
     )?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     assert_eq!(
         harness.sleeps.all(),
@@ -1417,8 +1401,8 @@ fn a_platform_never_reached_is_warned_once_with_the_errors_name() -> Outcome {
         keyed(),
         std::iter::repeat_n(Err(TransportError::new("ConnectionRefused")), 6),
     )?;
-    a_run(&harness)?;
-    a_run(&harness)?;
+    a_trace(&harness)?;
+    a_trace(&harness)?;
     harness.telmoni.shutdown();
     let warnings = harness.warnings.all();
     assert_eq!(warnings.len(), 1, "{warnings:?}");
@@ -1484,7 +1468,7 @@ fn an_answer_whose_body_breaks_is_decided_by_its_status() -> Outcome {
                 ..Hooks::default()
             },
         );
-        telmoni.run("bot", RunOptions::default())?.end();
+        telmoni.trace("bot", TraceOptions::default())?.end();
         telmoni.shutdown();
         let sent = bodies.all();
         assert!(!sent.is_empty(), "{status}: nothing was sent");

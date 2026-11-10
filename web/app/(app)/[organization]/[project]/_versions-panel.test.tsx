@@ -40,8 +40,8 @@ import { VersionsHost, VersionsOpener } from "./_versions-panel";
 const version = (value: string, patch: Record<string, unknown> = {}) => ({
   value,
   first_at: "2026-11-05T09:00:00Z",
-  runs: 10,
-  failed_runs: 2,
+  traces: 10,
+  failed_traces: 2,
   p50_ms: 2_100,
   p95_ms: 6_000,
   median_spend: 0.031,
@@ -53,20 +53,20 @@ const answer = (patch: Record<string, unknown> = {}) => ({
   days: 14,
   by: "release",
   environment: "production",
-  environments: [{ value: "production", runs: 21 }],
+  environments: [{ value: "production", traces: 21 }],
   prompt: null,
   prompts: [],
   versions: [
-    version("1.4.3", { runs: 1, failed_runs: 0, p50_ms: null, p95_ms: null, median_spend: null, scores: [] }),
+    version("1.4.3", { traces: 1, failed_traces: 0, p50_ms: null, p95_ms: null, median_spend: null, scores: [] }),
     version("1.4.2", {
-      failed_runs: 4,
+      failed_traces: 4,
       p50_ms: 2_400,
       p95_ms: 9_100,
       median_spend: 0.042,
       scores: [{ name: "helpful", mean: 0.6, count: 5 }],
     }),
     version("1.4.1"),
-    version("", { runs: 2, failed_runs: 0, scores: [] }),
+    version("", { traces: 2, failed_traces: 0, scores: [] }),
   ],
   scores: ["helpful"],
   more: false,
@@ -162,7 +162,7 @@ describe("an agent's versions panel", () => {
     expect(asks()).toEqual([{ agent: "support-bot", by: "release", project: "project_1" }]);
     expect(within(panel).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
       "Release",
-      "Runs",
+      "Traces",
       "Failed",
       "Median",
       "p95",
@@ -178,8 +178,8 @@ describe("an agent's versions panel", () => {
     expect(within(newer).getByText("−0.20")).toHaveClass("text-muted-foreground");
     expect(within(newer).getByText(/First seen/)).toBeInTheDocument();
 
-    // No ended run: no duration or cost, and no change drawn from none, its
-    // share of failures among them: one run still running has not fallen 40 points.
+    // No ended trace: no duration or cost, and no change drawn from none, its
+    // share of failures among them: one trace still running has not fallen 40 points.
     const newest = within(panel).getByText("1.4.3").closest("tr")!;
     expect(within(newest).getAllByText("—")).toHaveLength(4);
     expect(within(newest).getByText("0%")).toBeInTheDocument();
@@ -189,7 +189,7 @@ describe("an agent's versions panel", () => {
     const oldest = within(panel).getByText("1.4.1").closest("tr")!;
     expect(within(oldest).queryByText(/pts|No change/)).toBeNull();
     const none = within(panel).getByText("(none)").closest("tr")!;
-    expect(within(none).getByText("Runs that carried no release")).toBeInTheDocument();
+    expect(within(none).getByText("Traces that carried no release")).toBeInTheDocument();
     expect(within(none).queryByText(/pts|No change/)).toBeNull();
     expect(within(panel).getAllByRole("row").at(-1)).toBe(none);
 
@@ -210,8 +210,8 @@ describe("an agent's versions panel", () => {
         answer({
           versions: [
             // 12.34% against 12.30%, and a mean off by the arithmetic's last digit.
-            version("b", { runs: 10_000, failed_runs: 1_234, scores: [{ name: "helpful", mean: 0.1 + 0.2, count: 5 }] }),
-            version("a", { runs: 10_000, failed_runs: 1_230, scores: [{ name: "helpful", mean: 0.3, count: 5 }] }),
+            version("b", { traces: 10_000, failed_traces: 1_234, scores: [{ name: "helpful", mean: 0.1 + 0.2, count: 5 }] }),
+            version("a", { traces: 10_000, failed_traces: 1_230, scores: [{ name: "helpful", mean: 0.3, count: 5 }] }),
           ],
         }),
       );
@@ -231,7 +231,7 @@ describe("an agent's versions panel", () => {
     expect(asks()[0]).toEqual({ agent: "..", by: "release", project: "project_1" });
   });
 
-  it("reads its models, and says a run counts under each it called", async () => {
+  it("reads its models, and says a trace counts under each it called", async () => {
     answered = (asked) =>
       Response.json(
         asked.get("by") === "model"
@@ -244,13 +244,13 @@ describe("an agent's versions panel", () => {
     expect(await within(panel).findByText("gpt-4o-mini")).toBeInTheDocument();
     expect(asks().at(-1)).toEqual({ agent: "support-bot", by: "model", project: "project_1" });
     expect(within(panel).getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
-    expect(within(panel).getByText(/A run counts under every model it called\./)).toBeInTheDocument();
+    expect(within(panel).getByText(/A trace counts under every model it called\./)).toBeInTheDocument();
   });
 
   it("offers the environments where there are two, the one with no name among them, and reads the one picked", async () => {
     const environments = [
-      { value: "production", runs: 21 },
-      { value: "", runs: 2 },
+      { value: "production", traces: 21 },
+      { value: "", traces: 2 },
     ];
     answered = (asked) =>
       Response.json(answer({ environments, environment: asked.get("environment") ?? "production" }));
@@ -273,8 +273,8 @@ describe("an agent's versions panel", () => {
 
   it("shows the environment picked before its read lands, and keeps the pickers where that read fails", async () => {
     const environments = [
-      { value: "production", runs: 21 },
-      { value: "staging", runs: 4 },
+      { value: "production", traces: 21 },
+      { value: "staging", traces: 4 },
     ];
     const read = held();
     answered = () => Response.json(answer({ environments, days: 3 }));
@@ -297,8 +297,8 @@ describe("an agent's versions panel", () => {
 
   it("reads a prompt's versions: the one most named, then the one picked", async () => {
     const prompts = [
-      { value: "triage", runs: 9 },
-      { value: "triage:blue", runs: 3 },
+      { value: "triage", traces: 9 },
+      { value: "triage:blue", traces: 3 },
     ];
     answered = (asked) =>
       Response.json(
@@ -327,7 +327,7 @@ describe("an agent's versions panel", () => {
     expect(within(panel).getByRole("combobox")).toHaveValue("triage:blue");
   });
 
-  it("says so where its runs named no prompt, or the window held more than it shows", async () => {
+  it("says so where its traces named no prompt, or the window held more than it shows", async () => {
     answered = (asked) =>
       Response.json(
         asked.get("by") === "prompt" ? answer({ by: "prompt", versions: [], scores: [] }) : answer({ more: true, days: 1 }),
@@ -336,7 +336,7 @@ describe("an agent's versions panel", () => {
     expect(await within(panel).findByText(/More were seen than are shown/)).toBeInTheDocument();
     expect(within(panel).getByText(/side by side over the last day\./)).toBeInTheDocument();
     fireEvent.mouseDown(within(panel).getByRole("tab", { name: "Prompts" }), { button: 0 });
-    expect(await within(panel).findByText("None of its runs in production named a prompt.")).toBeInTheDocument();
+    expect(await within(panel).findByText("None of its traces in production named a prompt.")).toBeInTheDocument();
     expect(within(panel).queryByRole("table")).toBeNull();
   });
 
@@ -355,7 +355,7 @@ describe("an agent's versions panel", () => {
   it("says whose it is to read, and when the session has ended", async () => {
     answered = () => new Response("{}", { status: 403 });
     const panel = opened();
-    expect(await within(panel).findByText("This project's runs are not yours to read.")).toBeInTheDocument();
+    expect(await within(panel).findByText("This project's traces are not yours to read.")).toBeInTheDocument();
     fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
@@ -377,19 +377,19 @@ describe("an agent's versions panel", () => {
       Response.json(
         answer({
           environments: [
-            { value: "production", runs: 21 },
-            { value: "staging", runs: 4 },
+            { value: "production", traces: 21 },
+            { value: "staging", traces: 4 },
           ],
         }),
       );
     const panel = opened();
     await within(panel).findByText("1.4.2");
     expect(panel).toHaveAccessibleName("support-bot");
-    expect(within(panel).getByRole("tablist", { name: "What its runs are split by" })).toBeInTheDocument();
+    expect(within(panel).getByRole("tablist", { name: "What its traces are split by" })).toBeInTheDocument();
     expect(within(panel).getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["Releases", "Models", "Prompts"]);
     const table = within(panel).getByRole("table");
     expect(within(table).getAllByRole("columnheader")).toHaveLength(7);
-    // A header and a row for each version, the runs that carried none among them.
+    // A header and a row for each version, the traces that carried none among them.
     expect(within(table).getAllByRole("row")).toHaveLength(5);
     expect(within(panel).getByRole("button", { name: "Close" })).toBeInTheDocument();
   });

@@ -302,7 +302,7 @@ async fn save(
     let change = Change {
         action: AuditAction::Created,
         kind: TelmoniResourceKind::Alert,
-        id: row.id,
+        id: row.id.to_string(),
         metadata: json!({ "name": row.definition.name }),
     };
     chain::file(tx, acting, project_id, change).await?;
@@ -381,7 +381,7 @@ pub async fn update_rule(
         let change = Change {
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Alert,
-            id,
+            id: id.to_string(),
             metadata: json!({ "name": row.definition.name, "changed": changed(&before.definition, &linked, &rule) }),
         };
         chain::file(tx, &acting, project_id, change).await?;
@@ -478,7 +478,7 @@ pub async fn delete_rule(
             let change = Change {
                 action: AuditAction::Deleted,
                 kind: TelmoniResourceKind::Alert,
-                id,
+                id: id.to_string(),
                 metadata: json!({ "name": row.definition.name }),
             };
             chain::file(tx, &acting, project_id, change).await?;
@@ -550,7 +550,7 @@ pub async fn unmute_link(
             let change = Change {
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Alert,
-                id,
+                id: id.to_string(),
                 metadata: json!({ "name": row.definition.name, "unmuted": connection_id }),
             };
             chain::file(tx, &acting, project_id, change).await?;
@@ -592,7 +592,7 @@ pub async fn pause_rule(
             let change = Change {
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Alert,
-                id,
+                id: id.to_string(),
                 metadata: json!({
                     "name": row.definition.name,
                     "paused": { "from": before.paused, "to": row.paused },
@@ -643,7 +643,7 @@ pub async fn resume_rule(
             let change = Change {
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Alert,
-                id,
+                id: id.to_string(),
                 metadata: json!({
                     "name": row.definition.name,
                     "paused": { "from": before.paused, "to": row.paused },

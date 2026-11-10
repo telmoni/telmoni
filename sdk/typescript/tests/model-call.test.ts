@@ -25,21 +25,21 @@ function promptsOf(span: JsonSpan): Record<string, unknown> {
 
 describe('a model call', () => {
   it("carries the conventions' names", async () => {
-    const run = h.telmoni.run('bot', { sessionId: 'conv' }, (run) => {
-      run.modelCall('gpt-4o-mini', { provider: 'openai' }, (call) => {
+    const opened = h.telmoni.trace('bot', { sessionId: 'conv' }, (trace) => {
+      trace.modelCall('gpt-4o-mini', { provider: 'openai' }, (call) => {
         call.answered({
           responseModel: 'gpt-4o-mini-2024-07-18',
           usage: { inputTokens: 12, outputTokens: 7, cacheReadInputTokens: 3 },
         });
       });
-      return run;
+      return trace;
     });
     expect(await h.telmoni.flush()).toBe(true);
     const span = one(calls(h.transport));
     expect(span.name).toBe('chat gpt-4o-mini');
     expect(span.kind).toBe(3);
+    expect(span.traceId).toBe(opened.traceId);
     expect(attributesOf(span)).toEqual({
-      'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
       'gen_ai.conversation.id': 'conv',
       'gen_ai.operation.name': 'chat',
@@ -55,9 +55,9 @@ describe('a model call', () => {
   });
 
   it('sends its time to first token as a double, absent where not given', async () => {
-    h.telmoni.run('bot', (run) => {
-      run.modelCall('m', (call) => call.answered({ timeToFirstToken: 0.35 }));
-      run.modelCall('n', () => undefined);
+    h.telmoni.trace('bot', (trace) => {
+      trace.modelCall('m', (call) => call.answered({ timeToFirstToken: 0.35 }));
+      trace.modelCall('n', () => undefined);
     });
     expect(await h.telmoni.flush()).toBe(true);
     const typed = (name: string) => {
@@ -70,9 +70,9 @@ describe('a model call', () => {
   });
 
   it('leaves off a time to first token below 0 or no number, warned once', async () => {
-    h.telmoni.run('bot', (run) => {
-      run.modelCall('m', (call) => call.answered({ responseModel: 'm-1', timeToFirstToken: -0.1 }));
-      run.modelCall('m', (call) => call.answered({ timeToFirstToken: Number.NaN }));
+    h.telmoni.trace('bot', (trace) => {
+      trace.modelCall('m', (call) => call.answered({ responseModel: 'm-1', timeToFirstToken: -0.1 }));
+      trace.modelCall('m', (call) => call.answered({ timeToFirstToken: Number.NaN }));
     });
     expect(await h.telmoni.flush()).toBe(true);
     const [first, second] = h.transport.spans().filter((span) => span.name === 'chat m').map(attributesOf);
@@ -89,14 +89,14 @@ describe('a model call', () => {
     const usage = { inputTokens: Number.NaN, outputTokens: 12.7, cacheReadInputTokens: Infinity, cacheWriteInputTokens: 2 ** 63 };
     // Ingest refuses the call over a count below zero, or one no number.
     const refused = { inputTokens: -1, outputTokens: 12, cacheReadInputTokens: true as unknown as number, cacheWriteInputTokens: -5 };
-    h.telmoni.run('bot', (run) => {
-      run.modelCall('m', (call) => call.answered({ usage }));
-      run.modelCall('m', (call) => call.answered({ usage: refused }));
-      run.modelCall('m', (call) => call.answered({ usage: null as unknown as undefined }));
+    h.telmoni.trace('bot', (trace) => {
+      trace.modelCall('m', (call) => call.answered({ usage }));
+      trace.modelCall('m', (call) => call.answered({ usage: refused }));
+      trace.modelCall('m', (call) => call.answered({ usage: null as unknown as undefined }));
     });
     const at = Date.parse('2026-10-18T09:00:00.000Z');
-    h.telmoni.recordRun({
-      runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d',
+    h.telmoni.recordTrace({
+      traceId: '3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d',
       agent: 'bot',
       start: at,
       end: at,
@@ -125,9 +125,9 @@ describe('a model call', () => {
       cacheReadInputTokens: '' as unknown as number,
       cacheWriteInputTokens: 5n as unknown as number,
     };
-    h.telmoni.run('bot', (run) => {
-      run.modelCall('m', {}, (call) => call.answered({ usage }));
-      run.modelCall('n', {}, (call) => call.answered({ usage: { inputTokens: Object(7) as number } }));
+    h.telmoni.trace('bot', (trace) => {
+      trace.modelCall('m', {}, (call) => call.answered({ usage }));
+      trace.modelCall('n', {}, (call) => call.answered({ usage: { inputTokens: Object(7) as number } }));
     });
     expect(await h.telmoni.flush()).toBe(true);
     const span = one(h.transport.spans().filter((each) => each.name === 'chat m'));
@@ -145,15 +145,15 @@ describe('a model call', () => {
     // A provider's own usage, handed as it came: OpenAI's, then Anthropic's.
     const openai = { prompt_tokens: 12, completion_tokens: 7, total_tokens: 19 };
     const anthropic = { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 3 };
-    const spent = h.telmoni.run('bot', { maxSpend: 1 }, (run) => {
+    const spent = h.telmoni.trace('bot', { maxSpend: 1 }, (trace) => {
       // Its own, its count unset, warns of nothing: checked first, the warning being once.
-      run.modelCall('n', (call) => call.answered({ usage: { inputTokens: undefined } }));
+      trace.modelCall('n', (call) => call.answered({ usage: { inputTokens: undefined } }));
       expect(h.warnings).toEqual([]);
-      run.modelCall('m', { provider: 'openai' }, (call) => {
+      trace.modelCall('m', { provider: 'openai' }, (call) => {
         call.answered({ responseModel: 'm-1', usage: openai as unknown as Usage });
       });
-      run.modelCall('m', { provider: 'anthropic' }, (call) => call.answered({ usage: anthropic as unknown as Usage }));
-      return run.spent;
+      trace.modelCall('m', { provider: 'anthropic' }, (call) => call.answered({ usage: anthropic as unknown as Usage }));
+      return trace.spent;
     });
     expect(await h.telmoni.flush()).toBe(true);
     const [own, first, second] = calls(h.transport).map(attributesOf);
@@ -169,9 +169,9 @@ describe('a model call', () => {
 
   it('sends a provider or response model as its text, and an empty one not at all', async () => {
     // Ingest refuses the call over an empty one, or over an array.
-    h.telmoni.run('bot', (run) => {
-      run.modelCall('m', { provider: ['open', 'ai'] as unknown as string }, (call) => call.answered({ responseModel: '' }));
-      run.modelCall('m', { provider: '' }, (call) => call.answered({ responseModel: 5 as unknown as string }));
+    h.telmoni.trace('bot', (trace) => {
+      trace.modelCall('m', { provider: ['open', 'ai'] as unknown as string }, (call) => call.answered({ responseModel: '' }));
+      trace.modelCall('m', { provider: '' }, (call) => call.answered({ responseModel: 5 as unknown as string }));
     });
     expect(await h.telmoni.flush()).toBe(true);
     const [first, second] = calls(h.transport).map(attributesOf);
@@ -188,8 +188,8 @@ describe('a model call', () => {
   it('takes a blank operation as chat', async () => {
     // As one left out is: sent blank, the span would be named ' m' and
     // ingest would read it as a step. One that is no string is none either.
-    h.telmoni.run('bot', (run) => {
-      for (const operation of ['', '  ', 5 as unknown as string]) run.modelCall('m', { operation }, () => {});
+    h.telmoni.trace('bot', (trace) => {
+      for (const operation of ['', '  ', 5 as unknown as string]) trace.modelCall('m', { operation }, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = h.transport.spans().filter((span) => span.name === 'chat m');
@@ -198,16 +198,16 @@ describe('a model call', () => {
   });
 
   it("keeps its call where its model is empty or its text past ingest's caps, warned once", async () => {
-    h.telmoni.run('bot', (run) => {
+    h.telmoni.trace('bot', (trace) => {
       for (let i = 0; i < 2; i++) {
-        run.modelCall('', () => {});
-        run.modelCall('m'.repeat(129), { provider: 'p'.repeat(129), operation: 'generate_content' }, (call) => {
+        trace.modelCall('', () => {});
+        trace.modelCall('m'.repeat(129), { provider: 'p'.repeat(129), operation: 'generate_content' }, (call) => {
           call.answered({ responseModel: 'r'.repeat(129) });
         });
-        run.modelCall('m'.repeat(128), { operation: 'o'.repeat(20) }, () => {});
+        trace.modelCall('m'.repeat(128), { operation: 'o'.repeat(20) }, () => {});
       }
       // At their caps: the longest operation and a model at its cap fit.
-      run.modelCall('😀'.repeat(128), { operation: 'generate_content' }, (call) => {
+      trace.modelCall('😀'.repeat(128), { operation: 'generate_content' }, (call) => {
         call.answered({ responseModel: '😀'.repeat(128) });
       });
     });
@@ -245,13 +245,13 @@ describe('a model call', () => {
   });
 
   it('names its prompt on its own span alone, and a recorded call names none', async () => {
-    h.telmoni.run('bot', (run) =>
-      run.step('plan', (step) => step.modelCall('m', { prompt: 'support-reply', promptVersion: '3' }, () => {})),
+    h.telmoni.trace('bot', (trace) =>
+      trace.step('plan', (step) => step.modelCall('m', { prompt: 'support-reply', promptVersion: '3' }, () => {})),
     );
     const at = Date.parse('2026-10-18T09:00:00.000Z');
     // A record's call reads no prompt, whatever keys a caller's object carries.
     const recorded = { type: 'model_call', model: 'r', start: at, end: at, prompt: 'support-reply', promptVersion: '3' } as const;
-    h.telmoni.recordRun({ runId: '3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d', agent: 'recorder', start: at, end: at, inside: [recorded] });
+    h.telmoni.recordTrace({ traceId: '3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d', agent: 'recorder', start: at, end: at, inside: [recorded] });
     expect(await h.telmoni.flush()).toBe(true);
     expect(Object.fromEntries(h.transport.spans().map((span) => [span.name, promptsOf(span)]))).toEqual({
       'invoke_agent bot': {},
@@ -263,7 +263,7 @@ describe('a model call', () => {
   });
 
   it('takes a blank prompt as none, and leaves off a version without its name, warned once', async () => {
-    h.telmoni.run('bot', (run) => {
+    h.telmoni.trace('bot', (trace) => {
       for (const [prompt, promptVersion] of [
         ['', ''],
         [' ', '\u{3000}'],
@@ -272,7 +272,7 @@ describe('a model call', () => {
         [undefined, '3'],
         ['\u{2003}', '3'],
       ] as const) {
-        run.modelCall('m', { prompt, promptVersion }, () => {});
+        trace.modelCall('m', { prompt, promptVersion }, () => {});
       }
     });
     expect(await h.telmoni.flush()).toBe(true);
@@ -284,11 +284,11 @@ describe('a model call', () => {
   it("leaves off a prompt or version past ingest's cap, counted in characters, never cut", async () => {
     // Cut, either would name another, as a cut user would.
     const widest = '😀'.repeat(1024);
-    h.telmoni.run('bot', (run) => {
+    h.telmoni.trace('bot', (trace) => {
       for (let i = 0; i < 2; i++) {
-        run.modelCall('m', { prompt: widest, promptVersion: 'v'.repeat(1024) }, () => {});
-        run.modelCall('m', { prompt: 'p'.repeat(1025), promptVersion: '3' }, () => {});
-        run.modelCall('m', { prompt: 'p', promptVersion: '😀'.repeat(1025) }, () => {});
+        trace.modelCall('m', { prompt: widest, promptVersion: 'v'.repeat(1024) }, () => {});
+        trace.modelCall('m', { prompt: 'p'.repeat(1025), promptVersion: '3' }, () => {});
+        trace.modelCall('m', { prompt: 'p', promptVersion: '😀'.repeat(1025) }, () => {});
       }
     });
     expect(await h.telmoni.flush()).toBe(true);
@@ -303,9 +303,9 @@ describe('a model call', () => {
   });
 
   it('sends a prompt or version that is no string as its text, warned once', async () => {
-    h.telmoni.run('bot', (run) => {
+    h.telmoni.trace('bot', (trace) => {
       const options = { prompt: new String('support-reply') as unknown as string, promptVersion: 3 as unknown as string };
-      run.modelCall('m', options, () => {});
+      trace.modelCall('m', options, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     expect(promptsOf(one(calls(h.transport)))).toEqual({ 'gen_ai.prompt.name': 'support-reply', 'gen_ai.prompt.version': '3' });
@@ -325,11 +325,11 @@ describe('a model call', () => {
     };
     const kept = harness({ captureContent: true, mask, scrubPii: true }, {}, Array.from({ length: 6 }, () => on));
     try {
-      kept.telmoni.run('warm', () => {});
+      kept.telmoni.trace('warm', () => {});
       expect(await kept.telmoni.flush()).toBe(true);
-      kept.telmoni.run('bot', (run) => {
+      kept.telmoni.trace('bot', (trace) => {
         const options = { prompt: 'reply-to-ada@example.com', promptVersion: '3', inputMessages: 'write to ada@example.com' };
-        run.modelCall('m', options, () => {});
+        trace.modelCall('m', options, () => {});
       });
       expect(await kept.telmoni.flush()).toBe(true);
     } finally {
@@ -342,8 +342,8 @@ describe('a model call', () => {
   });
 
   it('has content taken off before it leaves', async () => {
-    h.telmoni.run('bot', (run) => {
-      run.modelCall('m', { inputMessages: [{ role: 'user', content: 'my secret prompt' }] }, (call) => {
+    h.telmoni.trace('bot', (trace) => {
+      trace.modelCall('m', { inputMessages: [{ role: 'user', content: 'my secret prompt' }] }, (call) => {
         call.answered({ outputMessages: [{ role: 'assistant', content: 'the answer' }] });
       });
     });
@@ -357,7 +357,7 @@ describe('a model call', () => {
 
   it('reads a content mode with blanks about it trimmed, as every SDK does', async () => {
     const trimmed = harness({}, {}, [answer(200, { 'Telmoni-Content-Mode': ' on\t' }, '{}')]);
-    trimmed.telmoni.run('bot', () => {});
+    trimmed.telmoni.trace('bot', () => {});
     expect(await trimmed.telmoni.flush()).toBe(true);
     expect(trimmed.telmoni.contentMode).toBe('on');
     await trimmed.telmoni.shutdown();
@@ -369,11 +369,11 @@ describe('a model call', () => {
     const h = harness({ captureContent: true }, {}, [on, sealed, sealed]);
     try {
       for (let i = 0; i < 2; i++) {
-        h.telmoni.run('bot', () => {});
+        h.telmoni.trace('bot', () => {});
         expect(await h.telmoni.flush()).toBe(true);
       }
       expect(h.telmoni.contentMode).toBeUndefined();
-      h.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: 'kept home' }, () => {}));
+      h.telmoni.trace('bot', (trace) => trace.modelCall('m', { inputMessages: 'kept home' }, () => {}));
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -386,11 +386,11 @@ describe('a model call', () => {
     const asked = harness({ captureContent: true }, {}, Array.from({ length: 6 }, () => on));
     try {
       // The mode unheard, the client asks it before the first content leaves.
-      asked.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: 'first' }, () => {}));
+      asked.telmoni.trace('bot', (trace) => trace.modelCall('m', { inputMessages: 'first' }, () => {}));
       expect(await asked.telmoni.flush()).toBe(true);
       expect(asked.telmoni.contentMode).toBe('on');
-      asked.telmoni.run('bot', (run) =>
-        run.modelCall('m', { inputMessages: 'second', systemInstructions: ['be brief'] }, (call) => {
+      asked.telmoni.trace('bot', (trace) =>
+        trace.modelCall('m', { inputMessages: 'second', systemInstructions: ['be brief'] }, (call) => {
           call.answered({ outputMessages: [{ role: 'assistant', content: 'ok' }] });
         }),
       );
@@ -410,10 +410,10 @@ describe('a model call', () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
     const quiet = harness({}, {}, Array.from({ length: 4 }, () => on));
     try {
-      quiet.telmoni.run('bot', () => {});
+      quiet.telmoni.trace('bot', () => {});
       expect(await quiet.telmoni.flush()).toBe(true);
       expect(quiet.telmoni.contentMode).toBe('on');
-      quiet.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: 'never' }, () => {}));
+      quiet.telmoni.trace('bot', (trace) => trace.modelCall('m', { inputMessages: 'never' }, () => {}));
       expect(await quiet.telmoni.flush()).toBe(true);
     } finally {
       await quiet.telmoni.shutdown();
@@ -423,9 +423,9 @@ describe('a model call', () => {
 
   it('records the error class of a failure', async () => {
     class ConnectionError extends Error {}
-    await h.telmoni.run('bot', async (run) => {
+    await h.telmoni.trace('bot', async (trace) => {
       await expect(
-        run.modelCall('m', { operation: 'generate_content' }, async () => {
+        trace.modelCall('m', { operation: 'generate_content' }, async () => {
           throw new ConnectionError('provider down');
         }),
       ).rejects.toBeInstanceOf(ConnectionError);
@@ -438,8 +438,8 @@ describe('a model call', () => {
   });
 
   it('returns what its callback returns', async () => {
-    const reply = await h.telmoni.run('bot', (run) =>
-      run.modelCall('m', async (call) => {
+    const reply = await h.telmoni.trace('bot', (trace) =>
+      trace.modelCall('m', async (call) => {
         call.answered({ responseModel: 'm-2' });
         return 'the reply';
       }),
@@ -473,7 +473,7 @@ describe('an image in a message', () => {
   async function mediaHarness(): Promise<Harness> {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
     const media = harness({ apiKey: 'k', captureContent: true }, {}, [on, on, on, on]);
-    media.telmoni.run('warm', () => {});
+    media.telmoni.trace('warm', () => {});
     expect(await media.telmoni.flush()).toBe(true);
     return media;
   }
@@ -481,8 +481,8 @@ describe('an image in a message', () => {
   it('is put once with its type and key', async () => {
     const media = await mediaHarness();
     try {
-      media.telmoni.run('bot', (run) => {
-        for (let i = 0; i < 2; i++) run.modelCall('m', { inputMessages: blob(png) }, () => {});
+      media.telmoni.trace('bot', (trace) => {
+        for (let i = 0; i < 2; i++) trace.modelCall('m', { inputMessages: blob(png) }, () => {});
       });
       expect(await media.telmoni.flush()).toBe(true);
     } finally {
@@ -506,7 +506,7 @@ describe('an image in a message', () => {
     media.transport.uploadAnswers = [failure, failure];
     try {
       for (let i = 0; i < 2; i++) {
-        media.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: blob(png) }, () => {}));
+        media.telmoni.trace('bot', (trace) => trace.modelCall('m', { inputMessages: blob(png) }, () => {}));
         expect(await media.telmoni.flush()).toBe(true);
       }
     } finally {
@@ -522,7 +522,7 @@ describe('an image in a message', () => {
     const big = Buffer.alloc(5 * 1024 * 1024 + 1, 0x89);
     const media = await mediaHarness();
     try {
-      media.telmoni.run('bot', (run) => run.modelCall('m', { inputMessages: blob(big) }, () => {}));
+      media.telmoni.trace('bot', (trace) => trace.modelCall('m', { inputMessages: blob(big) }, () => {}));
       expect(await media.telmoni.flush()).toBe(true);
     } finally {
       await media.telmoni.shutdown();

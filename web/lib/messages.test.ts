@@ -121,7 +121,7 @@ describe("scrubbedFrom", () => {
 
 describe("fieldsOf", () => {
   it("tells a span that kept fields from one that kept none and content unread", () => {
-    const content = [{ run_id: "r", span_id: "s1", fields: { "gen_ai.input.messages": "[]" } }];
+    const content = [{ trace_id: "t", span_id: "s1", fields: { "gen_ai.input.messages": "[]" } }];
     expect(fieldsOf(content, "s1")).toEqual({ "gen_ai.input.messages": "[]" });
     expect(fieldsOf(content, "s2")).toBeUndefined();
     expect(fieldsOf(null, "s1")).toBeNull();

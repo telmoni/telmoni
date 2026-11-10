@@ -26,7 +26,7 @@ const DEFAULT_PORT: &str = "8082";
 
 /// The SDK's configuration for the agent's own runs, read as the SDK reads
 /// it — `TELMONI_ENDPOINT`, `TELMONI_API_KEY`, `TELMONI_ORG` — with one
-/// difference from a customer's: with no endpoint set, the runs go to this
+/// difference from a customer's: with no endpoint set, the traces go to this
 /// server's own address, `http://127.0.0.1:$PORT`, never to the SDK's default
 /// of the hosted service, so a server never calls another on its own.
 /// `endpoint` and `port` are the raw variables; `sdk` is what the SDK read.
@@ -134,8 +134,8 @@ pub struct Config {
     pub docs_corpus_url: Option<String>,
     /// `AGENT_MESSAGES_PER_HOUR`: the questions one person may ask in an hour.
     pub messages_per_hour: i64,
-    /// The SDK, reporting each question as a run of the operator's own
-    /// project the way any agent reports its runs (`report.rs`): on while
+    /// The SDK, reporting each question as a trace of the operator's own
+    /// project the way any agent reports its traces (`report.rs`): on while
     /// `TELMONI_API_KEY` holds an ingest key of that project; unset, nothing
     /// records them.
     pub telmoni: Option<telmoni::Config>,

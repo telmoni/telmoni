@@ -1,10 +1,12 @@
-//! Runs, steps, model calls, tool calls and retrievals, as guards and closures.
+//! Traces, steps, model calls, tool calls and retrievals, as guards and
+//! closures.
 //!
-//! A run is a span of its own in whatever trace is current; every span inside
-//! it carries the run's id, agent, user and session, so ingest knows each
-//! span's run without waiting for the trace's tree. A step, a model call, a
-//! tool call or a retrieval is opened from the handle it belongs under, so
-//! nothing can be opened outside a run, and opens unless the run reached a cap
+//! A trace is the agent's span at the root of a trace of its own, linked to
+//! whatever span the application had current; every span inside it carries
+//! the agent, user and session, so ingest knows each span's agent without
+//! waiting for the trace's tree. A step, a model call, a tool call or a
+//! retrieval is opened from the handle it belongs under, so nothing can be
+//! opened outside a trace, and opens unless the trace reached a cap
 //! ([`crate::guard`]).
 
 use std::collections::BTreeMap;
@@ -14,11 +16,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use opentelemetry::trace::{
-    Span as _, SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _,
+    Link, Span as _, SpanKind, SpanRef, Status, TraceContextExt as _, Tracer as _,
 };
 use opentelemetry::{Context, ContextGuard, KeyValue, Value};
 use serde::Serialize;
-use uuid::Uuid;
 
 use crate::client::Inner;
 use crate::contract;
@@ -29,11 +30,10 @@ use crate::propagation::Continued;
 use crate::scores::{self, Score};
 use crate::warnings::{Warner, WarningKind};
 
-/// The run a context is inside, carried by every span opened under it: what
-/// `inject` reads off the current context.
+/// The trace a context is inside, carried by every span opened under it:
+/// what `inject` reads off the current context.
 #[derive(Clone, Debug)]
-pub(crate) struct RunInfo {
-    pub(crate) run_id: String,
+pub(crate) struct TraceInfo {
     pub(crate) agent: String,
 }
 
@@ -77,35 +77,35 @@ impl Usage {
     }
 }
 
-/// What a run is opened with, each part optional: `RunOptions::default()` is
-/// a run of the agent alone.
+/// What a trace is opened with, each part optional: `TraceOptions::default()`
+/// is a trace of the agent alone.
 #[derive(Debug, Clone, Default)]
-pub struct RunOptions {
-    /// The end user the run is for, as the application's own id for them;
+pub struct TraceOptions {
+    /// The end user the trace is for, as the application's own id for them;
     /// ingest hashes it. Blank reads as none.
     pub user_id: Option<String>,
-    /// The session the run belongs to. Blank reads as none.
+    /// The session the trace belongs to. Blank reads as none.
     pub session_id: Option<String>,
     /// Tags, sent as `telmoni.tag.<key>`.
     pub tags: BTreeMap<String, String>,
-    /// The guard's cap on the run's steps: its next step past it is
+    /// The guard's cap on the trace's steps: its next step past it is
     /// [`Error::CapExceeded`].
     pub max_steps: Option<u64>,
-    /// The guard's cap on the run's spend, in US dollars: reached, what it
+    /// The guard's cap on the trace's spend, in US dollars: reached, what it
     /// opens next is [`Error::CapExceeded`].
     pub max_spend: Option<f64>,
-    /// The messages the run was asked with: content, which leaves the process
-    /// only when [`Config::capture_content`](crate::Config::capture_content)
+    /// The messages the agent was asked with: content, which leaves the
+    /// process only when [`Config::capture_content`](crate::Config::capture_content)
     /// is on and the project's mode allows.
     pub input_messages: Option<Content>,
 }
 
-/// What the run answered, for [`Run::answered`].
+/// What the agent answered, for [`Trace::answered`].
 #[derive(Debug, Clone, Default)]
-pub struct RunReply {
-    /// The messages the run produced: content, which leaves the process only
-    /// when [`Config::capture_content`](crate::Config::capture_content) is on
-    /// and the project's mode allows.
+pub struct TraceReply {
+    /// The messages the agent produced: content, which leaves the process
+    /// only when [`Config::capture_content`](crate::Config::capture_content)
+    /// is on and the project's mode allows.
     pub output_messages: Option<Content>,
 }
 
@@ -121,7 +121,7 @@ pub struct ModelCallOptions {
     /// other, with one warning.
     pub operation: Option<String>,
     /// The prompt it used, by name: sent in every content mode, so a prompt,
-    /// never a person, who goes in [`RunOptions::user_id`]. Blank reads as none.
+    /// never a person, who goes in [`TraceOptions::user_id`]. Blank reads as none.
     pub prompt: Option<String>,
     /// The prompt's version, sent only beside its name. Blank reads as none.
     pub prompt_version: Option<String>,
@@ -221,11 +221,11 @@ impl From<serde_json::Value> for Content {
 struct Handle {
     client: Arc<Inner>,
     /// The parent's context with this span set: what children are opened
-    /// under, and what [`context`](Run::context) hands out.
+    /// under, and what [`context`](Trace::context) hands out.
     cx: Context,
-    /// What every span inside the run carries, shared by every span's handle.
+    /// What every span inside the trace carries, shared by every span's handle.
     inherited: Arc<[KeyValue]>,
-    /// The run's caps, and what it has used of them.
+    /// The trace's caps, and what it has used of them.
     guard: Arc<Guard>,
     failed: AtomicBool,
     /// How many scores the span holds, held to [`contract::SCORES_PER_SPAN_MAX`].
@@ -442,7 +442,7 @@ impl Handle {
     fn score(&self, score: &Score) {
         let span = self.cx.span();
         let warner = &self.client.warner;
-        // Another service's run, continued here, sends nothing from this side.
+        // Another service's trace, continued here, sends nothing from this side.
         if !span.is_recording() {
             return;
         }
@@ -478,28 +478,28 @@ fn error_type<E>() -> String {
     name.rsplit("::").next().unwrap_or(name).to_owned()
 }
 
-/// A run: the span `invoke_agent <agent>`, ended when the guard drops or on
-/// [`Run::end`]. Opened by [`Telmoni::run`](crate::Telmoni::run).
-pub struct Run {
+/// A trace: the agent's span `invoke_agent <agent>`, ended when the guard
+/// drops or on [`Trace::end`]. Opened by [`Telmoni::trace`](crate::Telmoni::trace).
+pub struct Trace {
     handle: Handle,
-    run_id: String,
+    trace_id: String,
     agent: String,
 }
 
-/// A step inside a run: a span named as the step is.
+/// A step inside a trace: a span named as the step is.
 pub struct Step {
     handle: Handle,
 }
 
-/// A model call inside a run: the span `<operation> <model>`, kind `CLIENT`;
-/// [`ModelCall::answered`] records the reply.
+/// A model call inside a trace: the span `<operation> <model>`, kind
+/// `CLIENT`; [`ModelCall::answered`] records the reply.
 pub struct ModelCall {
     handle: Handle,
     priced: Mutex<Priced>,
 }
 
 /// What a model call is priced by, as sent, its usage as its span holds it,
-/// and what it last counted to its run's spend.
+/// and what it last counted to its trace's spend.
 struct Priced {
     provider: String,
     model: String,
@@ -507,14 +507,15 @@ struct Priced {
     counted: f64,
 }
 
-/// A tool call inside a run: the span `execute_tool <name>`;
+/// A tool call inside a trace: the span `execute_tool <name>`;
 /// [`ToolCall::returned`] records its result.
 pub struct ToolCall {
     handle: Handle,
 }
 
-/// A retrieval inside a run: the span `retrieval <source>`, or `search_memory`
-/// for a memory, kind `CLIENT`; [`Retrieval::returned`] records what it found.
+/// A retrieval inside a trace: the span `retrieval <source>`, or
+/// `search_memory` for a memory, kind `CLIENT`; [`Retrieval::returned`]
+/// records what it found.
 pub struct Retrieval {
     handle: Handle,
     /// Whether it searched a memory, whose names its finds go under.
@@ -589,7 +590,7 @@ macro_rules! handle_methods {
     };
 }
 
-handle_methods!(Run, "Run");
+handle_methods!(Trace, "Trace");
 handle_methods!(Step, "Step");
 handle_methods!(ModelCall, "ModelCall");
 handle_methods!(ToolCall, "ToolCall");
@@ -605,7 +606,7 @@ macro_rules! opens_children {
             ///
             /// # Errors
             ///
-            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// [`Error::CapExceeded`], opening nothing, once the trace reached
             /// its step cap or its spend cap.
             pub fn step(&self, name: &str) -> Result<Step, Error> {
                 self.handle.step(name)
@@ -617,7 +618,7 @@ macro_rules! opens_children {
             ///
             /// # Errors
             ///
-            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// [`Error::CapExceeded`], opening nothing, once the trace reached
             /// its spend cap.
             pub fn model_call(
                 &self,
@@ -632,7 +633,7 @@ macro_rules! opens_children {
             ///
             /// # Errors
             ///
-            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// [`Error::CapExceeded`], opening nothing, once the trace reached
             /// its spend cap.
             pub fn tool_call(
                 &self,
@@ -763,7 +764,7 @@ macro_rules! opens_children {
             ///
             /// # Errors
             ///
-            /// [`Error::CapExceeded`], opening nothing, once the run reached
+            /// [`Error::CapExceeded`], opening nothing, once the trace reached
             /// its spend cap.
             pub fn retrieval(
                 &self,
@@ -816,45 +817,45 @@ macro_rules! opens_children {
     };
 }
 
-opens_children!(Run);
+opens_children!(Trace);
 opens_children!(Step);
 opens_children!(ToolCall);
 opens_children!(Retrieval);
 
-impl Run {
-    /// The run's id: a fresh UUID v4, on every span inside the run.
+impl Trace {
+    /// The trace's id, OpenTelemetry's: 32 lowercase hex digits, on every
+    /// span inside the trace.
     #[must_use]
-    pub fn run_id(&self) -> &str {
-        &self.run_id
+    pub fn trace_id(&self) -> &str {
+        &self.trace_id
     }
 
-    /// The agent's name as the run sends it, cut to 128 characters.
+    /// The agent's name as the trace sends it, cut to 128 characters.
     #[must_use]
     pub fn agent(&self) -> &str {
         &self.agent
     }
 
-    /// What the run's model calls have cost so far in US dollars, counted as
-    /// its spend cap counts them, in this process.
+    /// What the trace's model calls have cost so far in US dollars, counted
+    /// as its spend cap counts them, in this process.
     #[must_use]
     pub fn spent(&self) -> f64 {
         self.handle.guard.spent()
     }
 
-    /// What the run answered: its messages. Ending the run takes the handle,
-    /// so no answer can come after.
-    pub fn answered(&self, reply: RunReply) {
+    /// What the agent answered: its messages. Ending the trace takes the
+    /// handle, so no answer can come after.
+    pub fn answered(&self, reply: TraceReply) {
         if let Some(messages) = reply.output_messages {
             self.handle
                 .set_last([KeyValue::new(contract::OUTPUT_MESSAGES, messages.0)]);
         }
     }
 
-    /// Marks the run failed with `E`'s type name and its message when `result`
-    /// is an `Err`,
-    /// and gives `result` back unchanged: what
-    /// [`Telmoni::try_run_with`](crate::Telmoni::try_run_with) does for a
-    /// closure, for a run held as a guard.
+    /// Marks the trace failed with `E`'s type name and its message when
+    /// `result` is an `Err`, and gives `result` back unchanged: what
+    /// [`Telmoni::try_trace_with`](crate::Telmoni::try_trace_with) does for a
+    /// closure, for a trace held as a guard.
     pub fn on_result<T, E: fmt::Display>(&self, result: Result<T, E>) -> Result<T, E> {
         if let Err(error) = &result {
             self.handle.fail_by(error);
@@ -883,8 +884,9 @@ impl ModelCall {
         self.count(answered_as, usage, reply.output_messages);
     }
 
-    /// The answer on its span, and its cost to its run's spend in place of what
-    /// it counted before: reported, else priced by its name as sent, else nothing.
+    /// The answer on its span, and its cost to its trace's spend in place of
+    /// what it counted before: reported, else priced by its name as sent,
+    /// else nothing.
     fn count(&self, answered_as: Option<String>, usage: Option<Usage>, messages: Option<Content>) {
         // Given once the lock is released: the sink is the application's.
         if let Some((key, text)) = self.hold(answered_as, usage, messages) {
@@ -955,7 +957,7 @@ impl ModelCall {
             (
                 format!("unpriced:{}:{}", priced.provider, priced.model),
                 format!(
-                    "telmoni: no price for {model} ({provider}), which reported no cost; it counts nothing toward the run's spend cap"
+                    "telmoni: no price for {model} ({provider}), which reported no cost; it counts nothing toward the trace's spend cap"
                 ),
             )
         });
@@ -989,12 +991,13 @@ impl Retrieval {
     }
 }
 
-/// Opens a run for the client: its span.
-pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Result<Run, Error> {
+/// Opens a trace for the client: the agent's span, at the root of a trace of
+/// its own, linked to the span the application had current.
+pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: TraceOptions) -> Result<Trace, Error> {
     if agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
     }
-    let agent = cut(agent, contract::AGENT_MAX, "run's agent", &inner.warner);
+    let agent = cut(agent, contract::AGENT_MAX, "trace's agent", &inner.warner);
     if options.max_steps == Some(0) {
         return Err(Error::MaxSteps);
     }
@@ -1004,48 +1007,53 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
         return Err(Error::MaxSpend(spend));
     }
 
-    let run_id = Uuid::new_v4().to_string();
     let user_id = (options.user_id)
-        .filter(|id| fits(id, contract::USER_ID_MAX, "user id", "run", &inner.warner));
+        .filter(|id| fits(id, contract::USER_ID_MAX, "user id", "trace", &inner.warner));
     let session_id = (options.session_id).filter(|id| {
         fits(
             id,
             contract::SESSION_ID_MAX,
             "session id",
-            "run",
+            "trace",
             &inner.warner,
         )
     });
-    let inherited = inherited(&run_id, &agent, user_id, session_id);
-    let mut attributes = run_attributes(&agent, &inherited, options.tags, &inner.warner);
+    let inherited = inherited(&agent, user_id, session_id);
+    let mut attributes = agent_attributes(&agent, &inherited, options.tags, &inner.warner);
     if let Some(messages) = options.input_messages {
         attributes.push(KeyValue::new(contract::INPUT_MESSAGES, messages.0));
     }
 
-    let parent = Context::current();
+    let application = Context::current();
     let tracer = &inner.tracer;
     let opened_at = SystemTime::now();
-    let span = tracer
-        .span_builder(format!("{} {agent}", contract::RUN_OPERATION))
+    let mut builder = tracer
+        .span_builder(format!("{} {agent}", contract::AGENT_OPERATION))
         .with_kind(SpanKind::Internal)
         .with_attributes(attributes)
-        .with_start_time(opened_at)
-        .start_with_context(tracer, &parent);
-    let cx = parent.with_span(span).with_value(RunInfo {
-        run_id: run_id.clone(),
+        .with_start_time(opened_at);
+    // Linked to the application's span rather than opened under it, so a job
+    // looping over executions is a trace each, never one.
+    let linked = application.span().span_context().clone();
+    if linked.is_valid() {
+        builder = builder.with_links(vec![Link::new(linked, Vec::new(), 0)]);
+    }
+    let span = builder.start_with_context(tracer, &Context::new());
+    let trace_id = span.span_context().trace_id().to_string();
+    let cx = application.with_span(span).with_value(TraceInfo {
         agent: agent.clone(),
     });
-    // The run's opening, under it and at its start: the processor sends it at
-    // once, so the run is seen open before it ends.
+    // The trace's opening, under the agent's span and at its start: the
+    // processor sends it at once, so the trace is seen open before it ends.
     let mut start = tracer
-        .span_builder(contract::RUN_START)
+        .span_builder(contract::TRACE_START)
         .with_kind(SpanKind::Internal)
         .with_attributes(inherited.clone())
         .with_start_time(opened_at)
         .start_with_context(tracer, &cx);
     start.end_with_timestamp(opened_at);
 
-    Ok(Run {
+    Ok(Trace {
         handle: Handle {
             client: Arc::clone(inner),
             cx,
@@ -1056,30 +1064,30 @@ pub(crate) fn open(inner: &Arc<Inner>, agent: &str, options: RunOptions) -> Resu
             ended: false,
             last: Mutex::new(Vec::new()),
         },
-        run_id,
+        trace_id,
         agent,
     })
 }
 
-/// A run another service opened, continued here under the span the headers
-/// named: a run whose own span is the caller's, remote and non-recording
-/// here, so its steps and calls nest under it and carry the run, and nothing
-/// of it is sent or ended from this side.
-pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
+/// A trace another service opened, continued here under the span the
+/// headers named: a trace whose agent's span is the caller's, remote and
+/// non-recording here, so its steps and calls nest under it and carry the
+/// agent, and nothing of it is sent or ended from this side.
+pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Trace {
     let agent = cut(
         &read.agent,
         contract::AGENT_MAX,
-        "run's agent",
+        "trace's agent",
         &inner.warner,
     );
-    let inherited = inherited(&read.run_id, &agent, None, None);
+    let inherited = inherited(&agent, None, None);
+    let trace_id = read.span_context.trace_id().to_string();
     let cx = Context::current()
         .with_remote_span_context(read.span_context)
-        .with_value(RunInfo {
-            run_id: read.run_id.clone(),
+        .with_value(TraceInfo {
             agent: agent.clone(),
         });
-    Run {
+    Trace {
         handle: Handle {
             client: Arc::clone(inner),
             cx,
@@ -1090,25 +1098,21 @@ pub(crate) fn continued(inner: &Arc<Inner>, read: Continued) -> Run {
             ended: false,
             last: Mutex::new(Vec::new()),
         },
-        run_id: read.run_id,
+        trace_id,
         agent,
     }
 }
 
-/// What every span inside a run carries: its id and agent, and its user and
+/// What every span inside a trace carries: its agent, and its user and
 /// session when it has them.
 pub(crate) fn inherited(
-    run_id: &str,
     agent: &str,
     user_id: Option<String>,
     session_id: Option<String>,
 ) -> Vec<KeyValue> {
     // Shared, so each span's copy of them is a count rather than a string.
     let shared = |text: &str| Value::from(Arc::<str>::from(text));
-    let mut inherited = vec![
-        KeyValue::new(contract::RUN_ID, shared(run_id)),
-        KeyValue::new(contract::AGENT, shared(agent)),
-    ];
+    let mut inherited = vec![KeyValue::new(contract::AGENT, shared(agent))];
     if let Some(user) = user_id.filter(|id| !id.is_empty()) {
         inherited.push(KeyValue::new(contract::USER_ID, shared(&user)));
     }
@@ -1118,16 +1122,16 @@ pub(crate) fn inherited(
     inherited
 }
 
-/// The run span's own attributes: the operation and the agent, what every
+/// The agent span's own attributes: the operation and the agent, what every
 /// span inside carries and the tags.
-pub(crate) fn run_attributes(
+pub(crate) fn agent_attributes(
     agent: &str,
     inherited: &[KeyValue],
     mut tags: BTreeMap<String, String>,
     warner: &Warner,
 ) -> Vec<KeyValue> {
     let mut attributes = vec![
-        KeyValue::new(contract::OPERATION, contract::RUN_OPERATION),
+        KeyValue::new(contract::OPERATION, contract::AGENT_OPERATION),
         KeyValue::new(contract::AGENT_NAME, agent.to_owned()),
     ];
     attributes.extend_from_slice(inherited);
@@ -1139,7 +1143,7 @@ pub(crate) fn run_attributes(
     });
     if tags.len() < given {
         warner.once(
-            "run:tag".to_owned(),
+            "trace:tag".to_owned(),
             &format!(
                 "telmoni: a tag's key must be 1 to {} characters and its value up to {}; the tag is not sent",
                 contract::TAG_KEY_MAX,
@@ -1148,12 +1152,12 @@ pub(crate) fn run_attributes(
             WarningKind::Input.into(),
         );
     }
-    // Ingest keeps no more, and more could crowd out what the run's end sets.
+    // Ingest keeps no more, and more could crowd out what the trace's end sets.
     if tags.len() > contract::TAGS_MAX {
         warner.once(
-            "run:tags".to_owned(),
+            "trace:tags".to_owned(),
             &format!(
-                "telmoni: a run carries up to {} tags, the most ingest keeps; the rest are not sent",
+                "telmoni: a trace carries up to {} tags, the most ingest keeps; the rest are not sent",
                 contract::TAGS_MAX
             ),
             WarningKind::Input.into(),
@@ -1169,7 +1173,7 @@ pub(crate) fn run_attributes(
 }
 
 /// A model call's operation as ingest reads one: `chat` for a blank one, and,
-/// with one warning, for one ingest would file as a step, a run or a tool call.
+/// with one warning, for one ingest would file as a step, an agent or a tool call.
 pub(crate) fn model_operation(given: Option<&str>, warner: &Warner) -> String {
     match given.filter(|operation| !operation.trim().is_empty()) {
         Some(operation) if contract::MODEL_OPERATIONS.contains(&operation) => operation.to_owned(),
@@ -1186,7 +1190,7 @@ pub(crate) fn model_operation(given: Option<&str>, warner: &Warner) -> String {
 }
 
 /// A model call's span name, `<operation> <model>`, and what it opens with
-/// besides what the run carries and any content.
+/// besides what the trace carries and any content.
 pub(crate) fn model_call_opening(
     model: &str,
     operation: String,
@@ -1243,7 +1247,7 @@ fn prompt_of(
 }
 
 /// A tool call's span name, `execute_tool <name>`, and what it opens with
-/// besides what the run carries and any content.
+/// besides what the trace carries and any content.
 pub(crate) fn tool_call_opening(name: &str) -> (String, Vec<KeyValue>) {
     (
         format!("{} {name}", contract::TOOL_OPERATION),
@@ -1335,7 +1339,7 @@ fn cut(text: &str, most: usize, what: &str, warner: &Warner) -> String {
     text.chars().take(most).collect()
 }
 
-/// Whether an id is within ingest's cap; one past it is left off its run or
+/// Whether an id is within ingest's cap; one past it is left off its trace or
 /// call with one warning, since cut it would name another.
 fn fits(id: &str, most: usize, what: &str, span: &str, warner: &Warner) -> bool {
     if id.chars().nth(most).is_none() {

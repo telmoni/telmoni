@@ -90,7 +90,7 @@ describe("TraceCharts", () => {
     expect(screen.getByRole("heading", { name: /^The mean relevance score/ })).toBeTruthy();
   });
 
-  it("draws the cost beside the tokens, each bar what its runs spent", () => {
+  it("draws the cost beside the tokens, each bar what its traces spent", () => {
     render(<TraceCharts histogram={HISTOGRAM} marks={[]} />);
     const cost = within(screen.getByRole("region", { name: "Cost" }));
     expect(JSON.parse(cost.getByTestId("bars").dataset.rows ?? "null")).toEqual([
@@ -102,7 +102,7 @@ describe("TraceCharts", () => {
   it("marks each change's bar on every chart, its bars and its lines, and names the bar's changes in its tooltip", () => {
     const changes = ["support: release 1.4.2 in production", "triage: model gpt-4o-mini"];
     render(<TraceCharts histogram={HISTOGRAM} marks={[{ at: BAR_AT, changes }]} />);
-    for (const name of ["Runs", "Tokens", "Cost", "Duration", "Time to first token"]) {
+    for (const name of ["Traces", "Tokens", "Cost", "Duration", "Time to first token"]) {
       const chart = within(screen.getByRole("region", { name }));
       expect(chart.getAllByTestId("mark").map((mark) => mark.dataset.x), name).toEqual([BAR_AT]);
       for (const line of changes) expect(chart.getByTestId("tooltip"), name).toHaveTextContent(line);

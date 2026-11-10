@@ -31,7 +31,7 @@ export function errorName(error: unknown): string {
 }
 
 /**
- * `recordRun` refused a record the export queue has no room for, queuing
+ * `recordTrace` refused a record the export queue has no room for, queuing
  * nothing of it: flush, or wait for the queue to drain, and record it again;
  * one of more spans than the queue holds, once the `processor` hook's
  * `maxQueueSize` raises its size.
@@ -46,7 +46,7 @@ export class QueueFullError extends Error {
   }
 }
 
-/** `recordRun` refused a record once the client was shut down, queuing nothing of it. */
+/** `recordTrace` refused a record once the client was shut down, queuing nothing of it. */
 export class ShutdownError extends Error {
   constructor() {
     super('the client is shut down; the record was not sent');
@@ -55,8 +55,8 @@ export class ShutdownError extends Error {
 }
 
 /**
- * A run reached a cap it was opened with, thrown at what it would open next:
- * `cap` is `steps` or `spend`, `limit` the cap and `used` what the run had
+ * A trace reached a cap it was opened with, thrown at what it would open next:
+ * `cap` is `steps` or `spend`, `limit` the cap and `used` what the trace had
  * used of it, its steps opened or the US dollars it spent.
  */
 export class CapExceededError extends Error {
@@ -67,8 +67,8 @@ export class CapExceededError extends Error {
   constructor(cap: 'steps' | 'spend', limit: number, used: number) {
     super(
       cap === 'steps'
-        ? `the run reached its step cap of ${plain(limit)}`
-        : `the run reached its spend cap of $${plain(limit)}, having spent $${plain(used)}`,
+        ? `the trace reached its step cap of ${plain(limit)}`
+        : `the trace reached its spend cap of $${plain(limit)}, having spent $${plain(used)}`,
     );
     this.name = 'CapExceededError';
     this.cap = cap;

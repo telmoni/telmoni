@@ -47,7 +47,7 @@ const HISTORY_SQL: &str = concat!(
     "ARRAY JOIN [(toString(h.agent), toUInt8(0)), ('', toUInt8(1))] AS who ",
     "WHERE h.project_id IN {projects:Array(String)} ",
     "AND h.hour >= {from:DateTime('UTC')} AND h.hour < {to:DateTime('UTC')} ",
-    "AND h.kind IN ('run', 'step', 'model_call', 'tool_call', 'retrieval') ",
+    "AND h.kind IN ('agent', 'step', 'model_call', 'tool_call', 'retrieval') ",
     "GROUP BY agent, every, kind, at) ",
     "WHERE every = 1 OR agent != '' ",
     "GROUP BY agent, every, kind ORDER BY every DESC, agent, kind LIMIT {max:UInt32}"

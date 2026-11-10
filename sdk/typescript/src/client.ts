@@ -10,7 +10,7 @@ import { checkedPrice } from './guard.js';
 import { Ids } from './ids.js';
 import { Processor } from './processor.js';
 import { readHeaders, writeHeaders } from './propagation.js';
-import { type Handle, Opener, Run, currentRun, split, within } from './runs.js';
+import { type Handle, Opener, Trace, currentTrace, split, within } from './traces.js';
 import { WHITE_SPACE, trimEnds } from './whitespace.js';
 import { RecordingSampler } from './sampler.js';
 import type {
@@ -18,11 +18,11 @@ import type {
   HeaderCarrier,
   Hooks,
   ResolvedConfig,
-  RunOptions,
-  RunRecord,
   ScoreOptions,
   ScoreTarget,
   ScoreValue,
+  TraceOptions,
+  TraceRecord,
 } from './types.js';
 import { VERSION } from './version.js';
 
@@ -196,7 +196,7 @@ function resolve(config: Config | undefined): ResolvedConfig {
 }
 
 /**
- * The client: a tracer provider of its own, and the runs it records.
+ * The client: a tracer provider of its own, and the traces it records.
  *
  * The provider is built part by part — resource, sampler, limits, ids,
  * processor — so nothing an `OTEL_*` variable says reaches it, and an
@@ -232,7 +232,8 @@ export class Telmoni {
         attributeCountLimit: 128,
         attributeValueLengthLimit: Infinity,
         eventCountLimit: 32,
-        linkCountLimit: 0,
+        // One: the application's span a trace opened beside.
+        linkCountLimit: 1,
         attributePerEventCountLimit: 32,
         attributePerLinkCountLimit: 0,
       },
@@ -284,78 +285,79 @@ export class Telmoni {
   }
 
   /**
-   * A run of `agent`: `fn` runs with the run's span current and gets the
-   * run's handle, which opens its steps and calls; the span ends when `fn`
-   * settles, and `fn`'s result is returned.
+   * A trace of one execution of `agent`, a trace of its own linked to the
+   * application's current span: `fn` runs with the agent's span current and
+   * gets the trace's handle, which opens its steps and calls; the span ends
+   * when `fn` settles, and `fn`'s result is returned.
    */
-  run<R>(agent: string, fn: (run: Run) => R): R;
-  run<R>(agent: string, options: RunOptions, fn: (run: Run) => R): R;
-  run<R>(agent: string, a: RunOptions | ((run: Run) => R), b?: (run: Run) => R): R {
-    const [options, fn] = split<RunOptions, (run: Run) => R>(a, b);
-    return within(this.#opener.run(agent, options ?? {}), fn);
+  trace<R>(agent: string, fn: (trace: Trace) => R): R;
+  trace<R>(agent: string, options: TraceOptions, fn: (trace: Trace) => R): R;
+  trace<R>(agent: string, a: TraceOptions | ((trace: Trace) => R), b?: (trace: Trace) => R): R {
+    const [options, fn] = split<TraceOptions, (trace: Trace) => R>(a, b);
+    return within(this.#opener.trace(agent, options ?? {}), fn);
   }
 
-  /** `fn`, opening a run of `agent` per call; the run's handle is `fn`'s last argument. */
-  wrap<A extends unknown[], R>(agent: string, fn: (...args: [...A, Run]) => R): (...args: A) => R;
+  /** `fn`, opening a trace of `agent` per call; the trace's handle is `fn`'s last argument. */
+  wrap<A extends unknown[], R>(agent: string, fn: (...args: [...A, Trace]) => R): (...args: A) => R;
   wrap<A extends unknown[], R>(
     agent: string,
-    options: RunOptions,
-    fn: (...args: [...A, Run]) => R,
+    options: TraceOptions,
+    fn: (...args: [...A, Trace]) => R,
   ): (...args: A) => R;
   wrap<A extends unknown[], R>(
     agent: string,
-    a: RunOptions | ((...args: [...A, Run]) => R),
-    b?: (...args: [...A, Run]) => R,
+    a: TraceOptions | ((...args: [...A, Trace]) => R),
+    b?: (...args: [...A, Trace]) => R,
   ): (...args: A) => R {
-    const [options, fn] = split<RunOptions, (...args: [...A, Run]) => R>(a, b);
-    const wrapped = (...args: A): R => this.run(agent, options ?? {}, (run) => fn(...args, run));
+    const [options, fn] = split<TraceOptions, (...args: [...A, Trace]) => R>(a, b);
+    const wrapped = (...args: A): R => this.trace(agent, options ?? {}, (opened) => fn(...args, opened));
     // Logs and stack traces still name the callee, as under Python's functools.wraps.
     Object.defineProperty(wrapped, 'name', { value: fn.name, configurable: true });
     return wrapped;
   }
 
   /**
-   * Send a run that has already ended, as the live calls would have; a record
+   * Send a trace that has already ended, as the live calls would have; a record
    * ingest would refuse, or the queue has no room for, throws, sending nothing.
    */
-  recordRun(record: RunRecord): void {
+  recordTrace(record: TraceRecord): void {
     this.#opener.record(record);
   }
 
   /**
-   * Score what has ended — a run, by `runId`; one of its spans, by `runId` and
-   * the handle's `spanId`; or a session, by `sessionId` — sent to `/v1/scores`
-   * with the next export. One refused is not sent, with one warning.
+   * Score what has ended — a trace, by `traceId`; one of its spans, by
+   * `traceId` and the handle's `spanId`; or a session, by `sessionId` — sent
+   * to `/v1/scores` with the next export. One refused is not sent, with one warning.
    */
   score(name: string, value: ScoreValue, options: ScoreTarget & ScoreOptions): void {
     this.#opener.score(name, value, options ?? {});
   }
 
   /**
-   * Writes what the next service continues the run from: the W3C `traceparent`
-   * of `from`'s span, or the active context's, and the run's id and agent as
-   * `baggage` members beside the headers' own. Outside a run it writes nothing.
+   * Writes what the next service continues the trace from: the W3C `traceparent`
+   * of `from`'s span, or the active context's, and the agent as a `baggage`
+   * member beside the headers' own. Outside a trace it writes nothing.
    */
   inject(headers: HeaderCarrier, from?: Handle): void {
     const ctx = from?.context ?? context.active();
-    const run = currentRun(ctx);
-    if (run === undefined) return;
+    const current = currentTrace(ctx);
+    if (current === undefined) return;
     const span = trace.getSpanContext(ctx);
     if (span === undefined || !isSpanContextValid(span)) return;
-    writeHeaders(headers, span, run.runId, run.agent);
+    writeHeaders(headers, span, current.agent);
   }
 
   /**
-   * The run `headers` name, continued here: its steps and calls take the
-   * caller's span as their parent and carry the caller's run, so the trace
-   * shows the work where it was asked for. Nothing ends a continued run
+   * The trace `headers` name, continued here: its steps and calls take the
+   * caller's span as their parent and carry the caller's agent, so the trace
+   * shows the work where it was asked for. Nothing ends a continued trace
    * here; the caller's own span does. Undefined for headers that name no
-   * run.
+   * trace.
    */
-  extract(headers: HeaderCarrier): Run | undefined {
+  extract(headers: HeaderCarrier): Trace | undefined {
     const read = readHeaders(headers);
     if (read === undefined) return undefined;
-    return this.#opener.continued(read.spanContext, read.runId, read.agent);
+    return this.#opener.continued(read.spanContext, read.agent);
   }
 
   /**

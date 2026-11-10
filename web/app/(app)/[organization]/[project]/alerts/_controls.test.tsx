@@ -112,8 +112,8 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     expect(panel).toHaveAttribute("data-mode", "full");
     expect(within(panel).getByRole("heading", { name: "New alert" })).toBeInTheDocument();
     expect(document.activeElement).toBe(within(panel).getByLabelText("Name"));
-    // The share of runs that failed over the last hour, its thresholds to type.
-    expect(within(panel).getByRole("combobox", { name: "Reads" })).toHaveTextContent("Runs");
+    // The share of traces that failed over the last hour, its thresholds to type.
+    expect(within(panel).getByRole("combobox", { name: "Reads" })).toHaveTextContent("Traces");
     expect(within(panel).getByRole("combobox", { name: "Measure" })).toHaveTextContent("Failures");
     expect(within(panel).getByRole("combobox", { name: "Folded as" })).toHaveTextContent("Share failed");
     // Both thresholds are typed as percentages.
@@ -138,7 +138,7 @@ describe("the alert's form", { timeout: 15_000 }, () => {
     await waitFor(() => expect(saveAlertAction).toHaveBeenCalledOnce());
     expect(saveAlertAction).toHaveBeenCalledWith(PROJECT, null, {
       name: "Failing trips",
-      kind: "run",
+      kind: "agent",
       measure: "failures",
       aggregation: "avg",
       filters: { agent: ["trip", "triage"], status: ["error"] },

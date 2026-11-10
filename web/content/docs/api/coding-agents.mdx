@@ -1,10 +1,10 @@
 ---
 title: "Coding agents"
-description: "Telmoni's plugins for Claude Code, Codex and Antigravity: each turn of the coding agent you already run, recorded as a run with no code, metadata alone unless you turn its conversation on."
+description: "Telmoni's plugins for Claude Code, Codex and Antigravity: each turn of the coding agent you already run, recorded as a trace with no code, metadata alone unless you turn its conversation on."
 ---
 
 Telmoni's three plugins record each turn of Claude Code, Codex or Antigravity
-as a [run](/docs/api/sdks#a-run) in Telmoni, with no code: the models it called
+as a [trace](/docs/api/sdks#a-trace) in Telmoni, with no code: the models it called
 and their tokens, the tools it used, and Claude Code's subagents, each with its
 times and whether it failed. Unless you turn [content](#a-turns-conversation)
 on, a plugin never sends a prompt, a reply, a thought, a tool's input or
@@ -35,9 +35,9 @@ marketplace.
 ## What a turn records
 
 A turn — from your prompt to the agent's last reply, or to your interruption —
-is one run of the agent, and your session is the run's session
+is one trace of the agent, and your session is the trace's session
 (`gen_ai.conversation.id`), so the console groups a session's traces
-together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Inside the run:
+together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Inside the trace:
 
 - **the model's work**, a model call per reply with its model, its provider,
   named as the GenAI conventions and the console's prices name it
@@ -51,7 +51,7 @@ together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Ins
 - in Claude Code, **each subagent**, a step named by its kind
   (`subagent Explore`), holding its own model and tool calls and its own
   subagents' steps, and **the skills the turn ran**, by name, as the tag
-  `skills`; the run's release is the version of Claude Code that ran the turn;
+  `skills`; the trace's release is the version of Claude Code that ran the turn;
 - in Antigravity, **each API error**, as a failed model call named by its
   kind. A model call names the conversation's model with its effort apart:
   `gemini-3.8-flash-low` goes as `gemini-3.8-flash` at the reasoning level
@@ -61,11 +61,11 @@ together ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). Ins
   as `mcp__<server>__<tool>`, an edit you refused cancelled; a model call names
   the turn's model and its reasoning effort, under the provider Codex names
   (`openai`, `ollama`), its `azure` as `azure.ai.openai`. A subagent Codex starts works
-  in a thread of its own: the run holds the tool calls that started it and
-  waited on it, not its model calls. The run's release is the version of Codex
+  in a thread of its own: the trace holds the tool calls that started it and
+  waited on it, not its model calls. The trace's release is the version of Codex
   that ran the turn.
 
-An interrupted turn is a cancelled run, and a turn an error ended a failed one,
+An interrupted turn is a cancelled trace, and a turn an error ended a failed one,
 named by the error's kind (`rate_limit`), never its message; in Antigravity, so
 is a turn that hit its limits (`max_invocations`), and in Codex one that ran out
 of its budget (`budget_limited`). A turn is sent once it has ended. If Telmoni
@@ -77,8 +77,8 @@ session's next turn ends. One Telmoni took in part, or refused for good — for
 what it holds (`400`, `413`), for a paused organization (`402`) or for any
 other fault of its own (`500`) — is logged and not sent again. Where Telmoni
 reaches its Redis, a copy that arrives within the hour of the first is stored
-once: its run's id is derived from the session and the turn, and every span's
-from the run's.
+once: its trace's id is derived from the session and the turn, and every
+span's from the trace's.
 
 **What is read with content off.** With content off, of what Claude Code writes down, its
 plugin reads only names, ids, times, counts and flags: each entry's kind, id,
@@ -144,7 +144,7 @@ takes `TELMONI_SCRUB_SECRETS=0` or `TELMONI_SCRUB_PII=0` there. No pattern
 finds a name or a street address.
 
 On, a Claude Code turn carries its conversation as Claude Code recorded it: your prompt,
-with its images, as the run's input, and the last reply as its output; each
+with its images, as the trace's input, and the last reply as its output; each
 model call's reply, with the reasoning the agent wrote in plain text, never an
 encrypted or redacted thought; each tool call's input and output; and a
 subagent's task and answer on its step. Each model call carries what it was
@@ -171,7 +171,7 @@ agent up: its hook hands its work to a process of its own and returns at once.
 
 ### Tags
 
-Tags label a session's turns, so one session's runs say which repository or
+Tags label a session's turns, so one session's traces say which repository or
 branch each was about as the work moves between them. They are set two ways,
 and never derived from a path:
 

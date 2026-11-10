@@ -1,4 +1,4 @@
-//! The guard: a run's caps on its steps and spend, counted in this process as
+//! The guard: a trace's caps on its steps and spend, counted in this process as
 //! the server counts a call's cost, replayed from `sdk/fixtures/guard.json`.
 
 mod common;
@@ -16,8 +16,8 @@ use common::{
 use serde_json::{Value, json};
 use telmoni::transport::TransportError;
 use telmoni::{
-    Cap, Config, Error, Hooks, ModelCall, ModelCallOptions, Price, Reply, RetrievalOptions, Run,
-    RunOptions, Telmoni, ToolCallOptions, Usage,
+    Cap, Config, Error, Hooks, ModelCall, ModelCallOptions, Price, Reply, RetrievalOptions,
+    Telmoni, ToolCallOptions, Trace, TraceOptions, Usage,
 };
 
 fn near(a: f64, b: f64) -> bool {
@@ -55,9 +55,9 @@ fn reply(answer: &Value) -> Reply {
     }
 }
 
-/// Opens `spec`'s model call under `run` and answers it as the fixture does.
-fn call(run: &Run, spec: &Value) -> Result<(), Error> {
-    let model_call = run.model_call(
+/// Opens `spec`'s model call under `trace` and answers it as the fixture does.
+fn call(trace: &Trace, spec: &Value) -> Result<(), Error> {
+    let model_call = trace.model_call(
         spec.get("model")
             .and_then(Value::as_str)
             .unwrap_or_default(),
@@ -79,14 +79,14 @@ fn call(run: &Run, spec: &Value) -> Result<(), Error> {
     Ok(())
 }
 
-/// Does `op` under `run`.
-fn perform(run: &Run, op: &Value, calls: &[Value]) -> Result<(), Error> {
+/// Does `op` under `trace`.
+fn perform(trace: &Trace, op: &Value, calls: &[Value]) -> Result<(), Error> {
     match op.as_str() {
-        Some("step") => run.step("step").map(telmoni::Step::end),
-        Some("tool_call") => run
+        Some("step") => trace.step("step").map(telmoni::Step::end),
+        Some("tool_call") => trace
             .tool_call("lookup", ToolCallOptions::default())
             .map(telmoni::ToolCall::end),
-        Some("retrieval") => run
+        Some("retrieval") => trace
             .retrieval("kb", RetrievalOptions::default())
             .map(telmoni::Retrieval::end),
         _ => {
@@ -95,7 +95,7 @@ fn perform(run: &Run, op: &Value, calls: &[Value]) -> Result<(), Error> {
                 .and_then(Value::as_u64)
                 .and_then(|n| usize::try_from(n).ok());
             let spec = n.and_then(|n| calls.get(n)).cloned().unwrap_or(Value::Null);
-            call(run, &spec)
+            call(trace, &spec)
         }
     }
 }
@@ -108,18 +108,18 @@ fn each_call_is_counted_as_the_server_counts_it() -> Outcome {
         ..keyed()
     })?;
     for spec in field(&fixture, "calls")?.as_array().ok_or("calls")? {
-        let run = harness.telmoni.run("guarded", RunOptions::default())?;
-        call(&run, spec)?;
+        let trace = harness.telmoni.trace("guarded", TraceOptions::default())?;
+        call(&trace, spec)?;
         let counted = field(spec, "counted")?.as_f64().ok_or("counted")?;
         // Exactly, as the server rounds each product and each sum.
-        assert_eq!(run.spent(), counted, "{}", text(spec, "name")?);
-        run.end();
+        assert_eq!(trace.spent(), counted, "{}", text(spec, "name")?);
+        trace.end();
     }
     Ok(())
 }
 
 /// The cap is the process's own count: with every export failing, the third
-/// step of a run capped at two is refused all the same.
+/// step of a trace capped at two is refused all the same.
 #[test]
 fn a_cap_stops_a_run_with_the_network_cut() -> Outcome {
     let fixture = load_fixture("guard.json")?;
@@ -131,20 +131,20 @@ fn a_cap_stops_a_run_with_the_network_cut() -> Outcome {
         },
         cut,
     )?;
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         "guarded",
-        RunOptions {
+        TraceOptions {
             max_steps: Some(2),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    run.step("step")?.end();
-    run.step("step")?.end();
-    let Err(Error::CapExceeded { cap, used, .. }) = run.step("step") else {
+    trace.step("step")?.end();
+    trace.step("step")?.end();
+    let Err(Error::CapExceeded { cap, used, .. }) = trace.step("step") else {
         return Err("the third step opened past its cap".into());
     };
     assert_eq!((cap, used), (Cap::Steps, 2.0));
-    run.end();
+    trace.end();
     harness.telmoni.flush();
     assert!(
         !harness.transport.requests().is_empty(),
@@ -157,18 +157,18 @@ fn a_cap_stops_a_run_with_the_network_cut() -> Outcome {
 fn a_run_past_a_cap_is_refused_what_it_opens_next() -> Outcome {
     let fixture = load_fixture("guard.json")?;
     let calls = field(&fixture, "calls")?.as_array().ok_or("calls")?;
-    for spec in field(&fixture, "runs")?.as_array().ok_or("runs")? {
+    for spec in field(&fixture, "traces")?.as_array().ok_or("traces")? {
         let name = text(spec, "name")?;
         let harness = Harness::with(Config {
             prices: prices(&fixture)?,
             ..keyed()
         })?;
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             "guarded",
-            RunOptions {
+            TraceOptions {
                 max_steps: spec.get("max_steps").and_then(Value::as_u64),
                 max_spend: spec.get("max_spend").and_then(Value::as_f64),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
         let refused = spec.get("refused").filter(|refused| !refused.is_null());
@@ -179,7 +179,7 @@ fn a_run_past_a_cap_is_refused_what_it_opens_next() -> Outcome {
         let ops = field(spec, "ops")?.as_array().ok_or("ops")?;
         let mut performed = ops.len();
         for (n, op) in ops.iter().enumerate() {
-            let result = perform(&run, op, calls);
+            let result = perform(&trace, op, calls);
             if Some(n) != at {
                 result.map_err(|e| format!("{name}: op {n} was refused: {e}"))?;
                 continue;
@@ -205,8 +205,12 @@ fn a_run_past_a_cap_is_refused_what_it_opens_next() -> Outcome {
             break;
         }
         let spent = field(spec, "spent")?.as_f64().ok_or("spent")?;
-        assert!(near(run.spent(), spent), "{name}: spent {}", run.spent());
-        run.end();
+        assert!(
+            near(trace.spent(), spent),
+            "{name}: spent {}",
+            trace.spent()
+        );
+        trace.end();
         harness.flush()?;
         let opened = harness
             .spans()?
@@ -256,16 +260,16 @@ fn a_refusal_carried_out_by_a_try_closure_is_the_callers_error() -> Outcome {
     }
 
     let harness = Harness::new()?;
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         "guarded",
-        RunOptions {
+        TraceOptions {
             max_steps: Some(1),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let first: Result<u8, Stopped> = run.try_step_with("first", |_step| Ok(1));
+    let first: Result<u8, Stopped> = trace.try_step_with("first", |_step| Ok(1));
     assert!(matches!(first, Ok(1)));
-    let second: Result<u8, Stopped> = run.try_step_with("second", |_step| Ok(2));
+    let second: Result<u8, Stopped> = trace.try_step_with("second", |_step| Ok(2));
     assert!(
         matches!(
             second,
@@ -276,23 +280,23 @@ fn a_refusal_carried_out_by_a_try_closure_is_the_callers_error() -> Outcome {
         ),
         "{second:?}"
     );
-    run.end();
+    trace.end();
     Ok(())
 }
 
-/// A refusal escaping a run fails it with its error's type, `telmoni::Error`.
+/// A refusal escaping a trace fails it with its error's type, `telmoni::Error`.
 #[test]
 fn a_refusal_escaping_the_run_fails_it_with_its_type() -> Outcome {
     let harness = Harness::new()?;
-    let escaped = harness.telmoni.try_run_with(
+    let escaped = harness.telmoni.try_trace_with(
         "guarded",
-        RunOptions {
+        TraceOptions {
             max_steps: Some(1),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
-        |run| {
-            run.step("first")?.end();
-            run.step("second")?.end();
+        |trace| {
+            trace.step("first")?.end();
+            trace.step("second")?.end();
             Ok::<(), Error>(())
         },
     );
@@ -308,9 +312,12 @@ fn a_refusal_escaping_the_run_fails_it_with_its_type() -> Outcome {
     );
     harness.flush()?;
     let spans = harness.spans()?;
-    let run = named(&spans, "invoke_agent guarded")?;
-    assert_eq!(attributes_of(run)?.get("error.type"), Some(&json!("Error")));
-    assert_eq!(run.get("status"), Some(&json!({ "code": 2 })));
+    let trace = named(&spans, "invoke_agent guarded")?;
+    assert_eq!(
+        attributes_of(trace)?.get("error.type"),
+        Some(&json!("Error"))
+    );
+    assert_eq!(trace.get("status"), Some(&json!({ "code": 2 })));
     Ok(())
 }
 
@@ -325,8 +332,8 @@ fn a_table_name_is_priced_by_the_table_the_release_carries() -> Outcome {
     let mut spent = Vec::new();
     for prices in [Vec::new(), vec![row]] {
         let harness = Harness::with(Config { prices, ..keyed() })?;
-        let run = harness.telmoni.run("priced", RunOptions::default())?;
-        let model_call = run.model_call(
+        let trace = harness.telmoni.trace("priced", TraceOptions::default())?;
+        let model_call = trace.model_call(
             "gpt-4o-mini",
             ModelCallOptions {
                 provider: Some("openai".to_owned()),
@@ -343,8 +350,8 @@ fn a_table_name_is_priced_by_the_table_the_release_carries() -> Outcome {
             ..Reply::default()
         });
         model_call.end();
-        spent.push(run.spent());
-        run.end();
+        spent.push(trace.spent());
+        trace.end();
     }
     assert!(spent.first().is_some_and(|spent| *spent > 0.0), "{spent:?}");
     assert_eq!(
@@ -367,8 +374,8 @@ fn a_call_answered_again_counts_what_its_span_holds() -> Outcome {
         }],
         ..keyed()
     })?;
-    let run = harness.telmoni.run("guarded", RunOptions::default())?;
-    let model_call = run.model_call(
+    let trace = harness.telmoni.trace("guarded", TraceOptions::default())?;
+    let model_call = trace.model_call(
         "m",
         ModelCallOptions {
             provider: Some("p".to_owned()),
@@ -400,8 +407,8 @@ fn a_call_answered_again_counts_what_its_span_holds() -> Outcome {
         ..Usage::default()
     }));
     model_call.end();
-    let spent = run.spent();
-    run.end();
+    let spent = trace.spent();
+    trace.end();
     harness.flush()?;
     let held = attributes_of(named(&harness.spans()?, "chat m")?)?;
     let count = |key: &str| held.get(key).and_then(Value::as_f64).unwrap_or(f64::NAN);
@@ -430,8 +437,8 @@ fn a_call_answered_past_the_spans_attribute_limit_sends_its_last_answer() -> Out
         }],
         ..keyed()
     })?;
-    let run = harness.telmoni.run("streamed", RunOptions::default())?;
-    let model_call = run.model_call(
+    let trace = harness.telmoni.trace("streamed", TraceOptions::default())?;
+    let model_call = trace.model_call(
         "m",
         ModelCallOptions {
             provider: Some("p".to_owned()),
@@ -453,8 +460,8 @@ fn a_call_answered_past_the_spans_attribute_limit_sends_its_last_answer() -> Out
     }
     model_call.fail("Timeout");
     model_call.end();
-    let spent = run.spent();
-    run.end();
+    let spent = trace.spent();
+    trace.end();
     harness.flush()?;
     let held = attributes_of(named(&harness.spans()?, "chat m")?)?;
     assert_eq!(held.get("gen_ai.usage.output_tokens"), Some(&json!(40)));
@@ -478,8 +485,8 @@ fn answers_raced_from_two_threads_count_what_the_span_holds() -> Outcome {
     })?;
     let mut spent = HashMap::new();
     for round in 0..ROUNDS {
-        let run = harness.telmoni.run("raced", RunOptions::default())?;
-        let model_call = run.model_call(
+        let trace = harness.telmoni.trace("raced", TraceOptions::default())?;
+        let model_call = trace.model_call(
             "m",
             ModelCallOptions {
                 provider: Some("p".to_owned()),
@@ -504,8 +511,8 @@ fn answers_raced_from_two_threads_count_what_the_span_holds() -> Outcome {
             }
         });
         model_call.end();
-        spent.insert(run.run_id().to_owned(), run.spent());
-        run.end();
+        spent.insert(trace.trace_id().to_owned(), trace.spent());
+        trace.end();
         // Within the queue's 2,048 spans.
         if round % 256 == 255 {
             harness.flush()?;
@@ -525,11 +532,11 @@ fn answers_raced_from_two_threads_count_what_the_span_holds() -> Outcome {
             .get("gen_ai.usage.input_tokens")
             .and_then(Value::as_f64)
             .ok_or("an input count")?;
-        let run_id = held
-            .get("telmoni.run_id")
+        let trace_id = span
+            .get("traceId")
             .and_then(Value::as_str)
-            .ok_or("a run id")?;
-        let counted = spent.get(run_id).copied().ok_or("its run")?;
+            .ok_or("a trace id")?;
+        let counted = spent.get(trace_id).copied().ok_or("its trace")?;
         if !near(counted, input * 1e-6) {
             astray += 1;
         }
@@ -557,15 +564,15 @@ fn the_release_carries_the_price_file_whole() -> Outcome {
 #[test]
 fn a_call_with_neither_under_a_spend_cap_is_warned_of_once() -> Outcome {
     let harness = Harness::new()?;
-    let capped = harness.telmoni.run(
+    let capped = harness.telmoni.trace(
         "guarded",
-        RunOptions {
+        TraceOptions {
             max_spend: Some(1.0),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let unpriced = |run: &Run, model: &str| -> Outcome {
-        let model_call = run.model_call(
+    let unpriced = |trace: &Trace, model: &str| -> Outcome {
+        let model_call = trace.model_call(
             model,
             ModelCallOptions {
                 provider: Some("vllm".to_owned()),
@@ -586,7 +593,9 @@ fn a_call_with_neither_under_a_spend_cap_is_warned_of_once() -> Outcome {
         unpriced(&capped, "my-model")?;
     }
     capped.end();
-    let free = harness.telmoni.run("unguarded", RunOptions::default())?;
+    let free = harness
+        .telmoni
+        .trace("unguarded", TraceOptions::default())?;
     unpriced(&free, "other-model")?;
     free.end();
     let warned: Vec<String> = harness
@@ -598,7 +607,7 @@ fn a_call_with_neither_under_a_spend_cap_is_warned_of_once() -> Outcome {
     assert_eq!(
         warned,
         [
-            "telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the run's spend cap"
+            "telmoni: no price for my-model (vllm), which reported no cost; it counts nothing toward the trace's spend cap"
         ]
     );
     Ok(())
@@ -634,14 +643,14 @@ fn a_sink_answering_the_call_it_warns_of_is_never_held_up() -> Outcome {
             ..Hooks::default()
         },
     );
-    let run = telmoni.run(
+    let trace = telmoni.trace(
         "guarded",
-        RunOptions {
+        TraceOptions {
             max_spend: Some(1.0),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let call = Arc::new(run.model_call(
+    let call = Arc::new(trace.model_call(
         "my-model",
         ModelCallOptions {
             provider: Some("vllm".to_owned()),
@@ -667,27 +676,27 @@ fn a_sink_answering_the_call_it_warns_of_is_never_held_up() -> Outcome {
 #[test]
 fn a_cap_is_above_0() -> Outcome {
     let harness = Harness::new()?;
-    let refused = |options: RunOptions| harness.telmoni.run("guarded", options).err();
+    let refused = |options: TraceOptions| harness.telmoni.trace("guarded", options).err();
     assert_eq!(
-        refused(RunOptions {
+        refused(TraceOptions {
             max_steps: Some(0),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         }),
         Some(Error::MaxSteps)
     );
     for spend in [0.0, -1.0, f64::INFINITY] {
         assert_eq!(
-            refused(RunOptions {
+            refused(TraceOptions {
                 max_spend: Some(spend),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             }),
             Some(Error::MaxSpend(spend))
         );
     }
     assert!(matches!(
-        refused(RunOptions {
+        refused(TraceOptions {
             max_spend: Some(f64::NAN),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         }),
         Some(Error::MaxSpend(spend)) if spend.is_nan()
     ));
@@ -715,9 +724,9 @@ fn a_price_handed_that_is_no_price_is_left_out_with_one_warning() -> Outcome {
     })?;
     let warnings = harness.warnings.all();
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let run = harness.telmoni.run("priced", RunOptions::default())?;
+    let trace = harness.telmoni.trace("priced", TraceOptions::default())?;
     for model in ["negative", "kept"] {
-        let model_call = run.model_call(
+        let model_call = trace.model_call(
             model,
             ModelCallOptions {
                 provider: Some("p".to_owned()),
@@ -734,20 +743,20 @@ fn a_price_handed_that_is_no_price_is_left_out_with_one_warning() -> Outcome {
         model_call.end();
     }
     assert!(
-        near(run.spent(), 0.001),
+        near(trace.spent(), 0.001),
         "the kept price alone: {}",
-        run.spent()
+        trace.spent()
     );
-    run.end();
+    trace.end();
     Ok(())
 }
 
 #[test]
 fn a_cost_goes_as_a_double_and_one_that_is_no_cost_is_left_off() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for cost in [3.0, 0.0123, -0.5, f64::NAN, f64::INFINITY] {
-        let model_call = run.model_call("m", ModelCallOptions::default())?;
+        let model_call = trace.model_call("m", ModelCallOptions::default())?;
         model_call.answered(Reply {
             usage: Some(Usage {
                 input_tokens: Some(1),
@@ -758,7 +767,7 @@ fn a_cost_goes_as_a_double_and_one_that_is_no_cost_is_left_off() -> Outcome {
         });
         model_call.end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
     let sent: Vec<Option<Value>> = harness
         .spans()?

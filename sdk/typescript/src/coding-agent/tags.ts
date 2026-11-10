@@ -6,7 +6,7 @@
 import { type Stats, closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import type { RunRecord } from '../types.js';
+import type { TraceRecord } from '../types.js';
 
 /** A folder's tags, and a line for each problem met reading them, naming its kind alone: no key, no value, no path. */
 export interface FolderTags {
@@ -16,7 +16,7 @@ export interface FolderTags {
 
 export const TAGS_FILE = '.telmoni-tags.json';
 const MAX_BYTES = 64 * 1024;
-/** Ingest's caps: the tags a run carries, and a value's characters. */
+/** Ingest's caps: the tags a trace carries, and a value's characters. */
 export const TAGS_MAX = 32;
 const VALUE_MAX = 256;
 /** Never a `:`, which the console's `key:value` filter splits on. */
@@ -114,7 +114,7 @@ export function checkedTags(value: unknown): Record<string, string> | undefined 
 }
 
 /** Puts on `record` the tags of `folder`, where its turn started, logging each problem the first time `warned` meets it. */
-export function tagRun(record: RunRecord, folder: string | undefined, warned: Set<string>, log: (line: string) => void): void {
+export function tagTrace(record: TraceRecord, folder: string | undefined, warned: Set<string>, log: (line: string) => void): void {
   if (folder === undefined) return;
   const { tags, problems } = tagsAt(folder);
   for (const problem of problems) {

@@ -1,9 +1,9 @@
 // What a new key's dialog offers to paste: per SDK, one shell block that
-// installs it, sets the key, and sends one run, so the first trace is a
+// installs it, sets the key, and sends one trace, so the first trace is a
 // paste away. Each runs in a subshell in a new directory, so a second paste
 // touches nothing of the reader's and the key outlives it nowhere. Each is
-// the book's smallest run (`api/sdks.mdx`, *A run*); the Rust one drops its
-// handles, which ends them whichever release is installed.
+// the book's smallest trace (`api/sdks.mdx`, *A trace*); the Rust one drops
+// its handles, which ends them whichever release is installed.
 
 export type Snippet = { label: string; command: string };
 
@@ -22,7 +22,7 @@ python - <<'EOF'
 from telmoni import Telmoni
 
 telmoni = Telmoni.from_env()
-with telmoni.run("my-agent"):
+with telmoni.trace("my-agent"):
     with telmoni.step("hello"):
         pass
 telmoni.flush()
@@ -37,7 +37,7 @@ cat > first-trace.mjs <<'EOF'
 import { Telmoni } from 'telmoni';
 
 const telmoni = Telmoni.fromEnv();
-telmoni.run('my-agent', (run) => run.step('hello', () => {}));
+telmoni.trace('my-agent', (trace) => trace.step('hello', () => {}));
 await telmoni.flush();
 EOF
 node first-trace.mjs`),
@@ -63,10 +63,10 @@ func main() {
         log.Fatal(err)
     }
     defer client.Shutdown(context.Background())
-    ctx, run := client.Run(context.Background(), "my-agent", telmoni.RunOptions{})
-    _, step := run.Step(ctx, "hello")
+    ctx, trace := client.Trace(context.Background(), "my-agent", telmoni.TraceOptions{})
+    _, step := trace.Step(ctx, "hello")
     step.End()
-    run.End()
+    trace.End()
 }
 EOF
 go run .`),
@@ -79,9 +79,9 @@ ${env}
 cat > src/main.rs <<'EOF'
 fn main() -> Result<(), telmoni::Error> {
     let telmoni = telmoni::Telmoni::from_env();
-    let run = telmoni.run("my-agent", telmoni::RunOptions::default())?;
-    drop(run.step("hello"));
-    drop(run);
+    let trace = telmoni.trace("my-agent", telmoni::TraceOptions::default())?;
+    drop(trace.step("hello"));
+    drop(trace);
     telmoni.flush();
     Ok(())
 }

@@ -71,7 +71,7 @@ export function titleOf(column: ColumnSpec, trace: Trace): string | undefined {
   }
 }
 
-/** A cell, as its column reads the run. A value that is a filter is a link
+/** A cell, as its column reads the trace. A value that is a filter is a link
  *  to `narrowedTo` where the page offers one, and plain text otherwise. */
 export function cellOf(
   column: ColumnSpec,
@@ -181,7 +181,7 @@ export function cellOf(
   }
 }
 
-/** A run's or a session's scores, each name and what it says a chip; a dash where it has none. */
+/** A trace's or a session's scores, each name and what it says a chip; a dash where it has none. */
 export function ScoreChips({ scores }: { scores: readonly ScoreSummary[] }) {
   if (scores.length === 0) return <span className="text-muted-foreground">—</span>;
   return (
@@ -229,14 +229,14 @@ export function TagChips({
   );
 }
 
-/** A value, or a dash where the run sent none. */
+/** A value, or a dash where the trace sent none. */
 function Plain({ value }: { value: string }) {
   if (!value) return <span className="text-muted-foreground">—</span>;
   return <span>{value}</span>;
 }
 
 /** A cell whose value is a filter: a link that narrows the list to it, plain
- *  once the list is narrowed to it alone, a dash when the run sent none. */
+ *  once the list is narrowed to it alone, a dash when the trace sent none. */
 function FilterLink({
   value,
   current,
@@ -256,7 +256,7 @@ function FilterLink({
   );
 }
 
-/** A cell of several values — a run's models, its tools — each a filter
+/** A cell of several values — a trace's models, its tools — each a filter
  *  where the page offers one. */
 function Values({
   values,

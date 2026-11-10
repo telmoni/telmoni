@@ -93,7 +93,7 @@ fn sent(
     received: DateTime<Utc>,
 ) -> SpanRow {
     SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         agent: AGENT.into(),
         environment: "production".into(),
         release: release.into(),
@@ -141,13 +141,13 @@ async fn last_pass(pool: &PgPool, at: DateTime<Utc>) {
     .expect("the last pass");
 }
 
-/// A row as the table holds it: environment, kind, prompt, value, run, mark.
-type Stored = (String, String, Option<String>, String, Uuid, String);
+/// A row as the table holds it: environment, kind, prompt, value, trace, mark.
+type Stored = (String, String, Option<String>, String, String, String);
 
 /// The project's rows, in the order they changed.
 async fn stored(pool: &PgPool, project: &ProjectId) -> Vec<Stored> {
     sqlx::query_as(
-        "SELECT environment, kind, prompt, value, run_id, mark FROM telemetry.changes
+        "SELECT environment, kind, prompt, value, trace_id, mark FROM telemetry.changes
           WHERE project_id = $1 ORDER BY changed_at, kind, value",
     )
     .bind(project)
@@ -162,7 +162,7 @@ fn row(environment: &str, kind: &str, prompt: Option<&str>, value: &str, run: Uu
         kind.into(),
         prompt.map(Into::into),
         value.into(),
-        run,
+        run.simple().to_string(),
         "shown".into(),
     )
 }
@@ -181,7 +181,7 @@ async fn a_new_release_is_marked_once_and_again_in_another_environment(pool: PgP
         &[sent(
             &w.project,
             first,
-            SpanKind::Run,
+            SpanKind::Agent,
             "1.4.2",
             at("2026-11-02T10:00:00Z"),
         )],
@@ -214,7 +214,7 @@ async fn a_new_release_is_marked_once_and_again_in_another_environment(pool: PgP
             sent(
                 &w.project,
                 again,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "1.4.2",
                 at("2026-11-02T10:05:00Z"),
             ),
@@ -223,7 +223,7 @@ async fn a_new_release_is_marked_once_and_again_in_another_environment(pool: PgP
                 ..sent(
                     &w.project,
                     staged,
-                    SpanKind::Run,
+                    SpanKind::Agent,
                     "1.4.2",
                     at("2026-11-02T10:06:00Z"),
                 )
@@ -323,7 +323,7 @@ async fn an_agent_past_24_changes_of_a_kind_in_a_day_is_marked_no_further(pool: 
             sent(
                 &w.project,
                 Uuid::new_v4(),
-                SpanKind::Run,
+                SpanKind::Agent,
                 &format!("v{n:02}"),
                 at(&format!("2026-11-03T10:00:{n:02}Z")),
             )
@@ -350,7 +350,7 @@ async fn an_agent_past_24_changes_of_a_kind_in_a_day_is_marked_no_further(pool: 
             sent(
                 &w.project,
                 Uuid::new_v4(),
-                SpanKind::Run,
+                SpanKind::Agent,
                 "v26",
                 at("2026-11-03T10:02:00Z"),
             ),
@@ -390,14 +390,14 @@ async fn an_agent_past_24_changes_of_a_kind_in_a_day_is_marked_no_further(pool: 
             sent(
                 &w.project,
                 Uuid::new_v4(),
-                SpanKind::Run,
+                SpanKind::Agent,
                 "v25",
                 at("2026-11-04T10:00:00Z"),
             ),
             sent(
                 &w.project,
                 next_day,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "v27",
                 at("2026-11-04T10:00:30Z"),
             ),
@@ -502,7 +502,7 @@ async fn an_agents_first_run_marks_what_it_ran_on(pool: PgPool) {
             sent(
                 &w.project,
                 run,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "2.0.0",
                 at("2026-11-04T11:00:01Z"),
             ),
@@ -548,14 +548,14 @@ async fn another_exporters_run_landed_late_is_marked_by_its_own_first_run(pool: 
             sent(
                 &w.project,
                 landed,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "3.1.0",
                 now - TimeDelta::minutes(40),
             ),
             sent(
                 &w.project,
                 earlier,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "3.0.9",
                 now - TimeDelta::minutes(40),
             ),
@@ -568,15 +568,13 @@ async fn another_exporters_run_landed_late_is_marked_by_its_own_first_run(pool: 
     ] {
         sqlx::query(
             "INSERT INTO telemetry.held_spans
-                 (project_id, trace_id, span_id, parent_span_id, received_at, run_id, agent,
-                  landed_at)
-             VALUES ($1, $2, $3, '', $4, $5, $6, $7)",
+                 (project_id, trace_id, span_id, parent_span_id, received_at, agent, landed_at)
+             VALUES ($1, $2, $3, '', $4, $5, $6)",
         )
         .bind(&w.project)
-        .bind("ab".repeat(16))
+        .bind(run.simple().to_string())
         .bind(span.repeat(8))
         .bind(now - TimeDelta::minutes(40))
-        .bind(run)
         .bind(AGENT)
         .bind(landed_at)
         .execute(&pool)
@@ -605,14 +603,14 @@ async fn a_pass_after_an_outage_goes_on_from_the_last(pool: PgPool) {
             sent(
                 &w.project,
                 during,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "a",
                 down + TimeDelta::minutes(30),
             ),
             sent(
                 &w.project,
                 later,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "b",
                 down + TimeDelta::hours(3),
             ),
@@ -659,7 +657,7 @@ async fn one_replica_writes_and_a_project_a_move_holds_is_left(pool: PgPool) {
         &[sent(
             &w.project,
             run,
-            SpanKind::Run,
+            SpanKind::Agent,
             "5.0",
             at("2026-11-07T10:00:00Z"),
         )],
@@ -709,8 +707,9 @@ async fn kept(
     sqlx::query(
         "INSERT INTO telemetry.changes
              (id, project_id, agent, environment, kind, prompt, value, identity, changed_at,
-              run_id, seen_at, mark)
-         VALUES ($1, $2, $3, 'production', $4, $5, $6, $7, $8, $1, $9, $10)",
+              trace_id, seen_at, mark)
+         VALUES ($1, $2, $3, 'production', $4, $5, $6, $7, $8, replace($1::text, '-', ''),
+                 $9, $10)",
     )
     .bind(Uuid::new_v4())
     .bind(project)
@@ -976,10 +975,11 @@ async fn the_lanes_answer_the_newest_first_narrowed_and_held_to_the_project(pool
 
     sqlx::query(
         "INSERT INTO telemetry.changes
-             (id, project_id, agent, environment, kind, value, identity, changed_at, run_id,
+             (id, project_id, agent, environment, kind, value, identity, changed_at, trace_id,
               seen_at, mark)
          SELECT gen_random_uuid(), $1, $2, 'production', 'release', 'r' || n,
-                lpad(to_hex(n), 64, '0'), $3, gen_random_uuid(), $3, 'shown'
+                lpad(to_hex(n), 64, '0'), $3, replace(gen_random_uuid()::text, '-', ''), $3,
+                'shown'
            FROM generate_series(1, 500) AS n",
     )
     .bind(&w.project)
@@ -1006,7 +1006,7 @@ async fn the_agents_page_reads_each_agents_newest_change_of_each_kind(pool: PgPo
         &[sent(
             &w.project,
             Uuid::new_v4(),
-            SpanKind::Run,
+            SpanKind::Agent,
             "1.1",
             ago(1),
         )],

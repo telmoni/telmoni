@@ -1,9 +1,10 @@
-"""Runs, steps, model calls, tool calls and retrievals, as context managers and
-decorators.
+"""Traces, steps, model calls, tool calls and retrievals, as context managers
+and decorators.
 
-A run is a span of its own in whatever trace is current; every span inside it
-carries the run's id, agent, user and session, so ingest knows each span's run
-without waiting for the trace's tree. Nothing is sent outside a run.
+A trace is one execution of an agent: its agent's span at the root of a trace
+of its own, linked to whatever span the application had current; every span
+inside it carries the agent, user and session, so ingest knows each span's
+trace without waiting for its tree. Nothing is sent outside a trace.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ import json
 import math
 import threading
 import traceback
-import uuid
 from collections.abc import (
     AsyncIterator,
     Callable,
@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar
 from opentelemetry import context, trace
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import (
+    Link,
     NonRecordingSpan,
     Span,
     SpanContext,
@@ -48,9 +49,9 @@ from . import contract, guard, ids, scores
 from .models import (
     CallRecord,
     ModelCallRecord,
-    RunRecord,
     StepRecord,
     ToolCallRecord,
+    TraceRecord,
     Usage,
     WarningInfo,
     _blank,
@@ -60,7 +61,7 @@ from .models import (
 if TYPE_CHECKING:
     from .client import Telmoni
 
-_RUN_KEY = context.create_key("telmoni.run")
+_TRACE_KEY = context.create_key("telmoni.trace")
 # Every warning here is about what the code handed the SDK.
 _INPUT = WarningInfo("input")
 
@@ -69,10 +70,10 @@ C = TypeVar("C", bound="Handle")
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def current_run(ctx: context.Context | None = None) -> Run | None:
-    """The run open in this context, if any."""
-    run = context.get_value(_RUN_KEY, ctx)
-    return run if isinstance(run, Run) else None
+def current_trace(ctx: context.Context | None = None) -> Trace | None:
+    """The trace open in this context, if any."""
+    opened = context.get_value(_TRACE_KEY, ctx)
+    return opened if isinstance(opened, Trace) else None
 
 
 class Handle:
@@ -129,7 +130,7 @@ class Handle:
         stack trace are content, kept on the span for the exporter's lock."""
         warn_once = self._client.exporter.warn_once
         text = _error_type(error_type, warn_once) if error_type else ""
-        # Ingest refuses the span over an empty one, and with a run's, the run.
+        # Ingest refuses the span over an empty one, and with the agent's, the trace.
         if text:
             text = _cut(text, contract.ERROR_TYPE_MAX, "span's error type", warn_once)
             self._span.set_attribute(contract.ERROR_TYPE, text)
@@ -171,41 +172,44 @@ class Handle:
         return not ended
 
 
-class Run(Handle):
+class Trace(Handle):
+    """One execution of an agent: its agent's span, and the trace it heads,
+    whose id ``trace_id`` holds as 32 hex digits."""
+
     def __init__(
         self,
         client: Telmoni,
         span: Span,
         *,
-        run_id: str,
+        trace_id: str,
         agent: str,
         inherited: Mapping[str, str],
         caps: guard.Guard | None = None,
     ) -> None:
         super().__init__(span, client)
-        self.run_id = run_id
+        self.trace_id = trace_id
         self.agent = agent
         self._inherited = dict(inherited)
         self._guard = caps or guard.Guard(None, None)
 
     @property
     def inherited(self) -> dict[str, str]:
-        """What every span inside the run carries."""
+        """What every span inside the trace carries."""
         return dict(self._inherited)
 
     @property
     def spent(self) -> float:
-        """What the run's model calls have cost so far in US dollars, counted
+        """What the trace's model calls have cost so far in US dollars, counted
         as its spend cap counts them, in this process."""
         return self._guard.spent
 
     def answered(self, *, output_messages: object | None = None) -> None:
-        """What the run answered: its messages. An answer given after the run
-        ended is not sent."""
+        """What the agent answered: its messages. An answer given after the
+        trace ended is not sent."""
         if self._ended:
             self._client.exporter.warn_once(
-                "run:late",
-                "telmoni: a run must be answered before it ends; an answer given "
+                "trace:late",
+                "telmoni: a trace must be answered before it ends; an answer given "
                 "after is not sent",
                 _INPUT,
             )
@@ -216,7 +220,7 @@ class Run(Handle):
             )
 
     def step(self, name: str) -> Scope[Step]:
-        return self._client.step(name, run=self)
+        return self._client.step(name, trace=self)
 
     def model_call(
         self,
@@ -237,13 +241,13 @@ class Run(Handle):
             prompt_version=prompt_version,
             input_messages=input_messages,
             system_instructions=system_instructions,
-            run=self,
+            trace=self,
         )
 
     def tool_call(
         self, name: str, *, arguments: object | None = None
     ) -> Scope[ToolCall]:
-        return self._client.tool_call(name, arguments=arguments, run=self)
+        return self._client.tool_call(name, arguments=arguments, trace=self)
 
     def retrieval(
         self,
@@ -254,7 +258,7 @@ class Run(Handle):
         memory: bool = False,
     ) -> Scope[Retrieval]:
         return self._client.retrieval(
-            source, query=query, top_k=top_k, memory=memory, run=self
+            source, query=query, top_k=top_k, memory=memory, trace=self
         )
 
 
@@ -264,8 +268,8 @@ class Step(Handle):
 
 class ModelCall(Handle):
     # What the guard prices it by, its usage as its span holds it, and what it
-    # last counted to its run.
-    _run: Run | None = None
+    # last counted to its trace.
+    _trace: Trace | None = None
     _provider = ""
     _model = ""
     _held: Mapping[str, int | float] = MappingProxyType({})
@@ -315,7 +319,7 @@ class ModelCall(Handle):
                     (
                         "telmoni: a model call must be answered before it ends; an "
                         "answer given after is not sent and counts nothing toward the "
-                        "run's spend"
+                        "trace's spend"
                     ),
                 )
             else:
@@ -329,8 +333,8 @@ class ModelCall(Handle):
                 if first_token is not None:
                     self._span.set_attribute(contract.TIME_TO_FIRST_CHUNK, first_token)
                 self._held = {**self._held, **sent}
-                if self._run is not None:
-                    warning = self._count(self._run)
+                if self._trace is not None:
+                    warning = self._count(self._trace)
         # Given once the lock is released: a logging handler is the application's.
         if warning is not None:
             warn_once(*warning, _INPUT)
@@ -340,9 +344,10 @@ class ModelCall(Handle):
         with self._answering:
             return super()._ending()
 
-    def _count(self, run: Run) -> tuple[str, str] | None:
-        """Its cost, reported, else priced by its name, else nothing, to its run's
-        spend in place of what it counted; and the warning that calls for."""
+    def _count(self, owner: Trace) -> tuple[str, str] | None:
+        """Its cost, reported, else priced by its name, else nothing, to its
+        trace's spend in place of what it counted; and the warning that calls
+        for."""
         held = self._held
         tokens = guard.Tokens(
             int(held.get(contract.INPUT_TOKENS, 0)),
@@ -358,17 +363,17 @@ class ModelCall(Handle):
         warning = None
         if cost is None:
             cost = 0.0
-            if run._guard.capped and tokens.some():
+            if owner._guard.capped and tokens.some():
                 warning = (
                     f"unpriced:{self._provider}:{self._model}",
                     (
                         "telmoni: no price for "
                         f"{self._model or 'a call with no model'} "
                         f"({self._provider or 'no provider'}), which reported no "
-                        "cost; it counts nothing toward the run's spend cap"
+                        "cost; it counts nothing toward the trace's spend cap"
                     ),
                 )
-        run._guard.counts(self._counted, cost)
+        owner._guard.counts(self._counted, cost)
         self._counted = cost
         return warning
 
@@ -406,7 +411,7 @@ class Retrieval(Handle):
 
 class Scope(Generic[H]):
     """Opens a handle on ``with``, ``async with``, or each call of a decorated
-    function; ``None`` from ``_open`` means nothing is opened (no run)."""
+    function; ``None`` from ``_open`` means nothing is opened (no trace)."""
 
     def __init__(self, open_handle: Callable[[], H | None]) -> None:
         self._open = open_handle
@@ -418,7 +423,7 @@ class Scope(Generic[H]):
     def __enter__(self) -> H | Nothing:
         if not self._busy.acquire(blocking=False):
             raise RuntimeError(
-                "this scope is open; call telmoni.step() (or run, model_call, "
+                "this scope is open; call telmoni.step() (or trace, model_call, "
                 "tool_call, retrieval) again for each block that opens one"
             )
         try:
@@ -501,25 +506,25 @@ class _InContext(Generator[Any, Any, Any]):
         return self._own.run(self._items.throw, *exc)
 
 
-class RunScope(Scope[Run]):
-    """A run always opens, so its handle is never the no-op one."""
+class TraceScope(Scope[Trace]):
+    """A trace always opens, so its handle is never the no-op one."""
 
-    def __enter__(self) -> Run:
+    def __enter__(self) -> Trace:
         super().__enter__()
         handle = self._handle
         if handle is None:
             self.__exit__(None, None, None)
-            raise RuntimeError("a run did not open")
+            raise RuntimeError("a trace did not open")
         return handle
 
-    async def __aenter__(self) -> Run:
+    async def __aenter__(self) -> Trace:
         return self.__enter__()
 
 
 class Nothing:
-    """The handle given outside a run: every method does nothing."""
+    """The handle given outside a trace: every method does nothing."""
 
-    run_id = ""
+    trace_id = ""
     agent = ""
     span_id = ""
 
@@ -545,7 +550,7 @@ class Opener:
     def __init__(self, client: Telmoni) -> None:
         self._client = client
 
-    def run(
+    def trace(
         self,
         agent: str,
         *,
@@ -555,78 +560,83 @@ class Opener:
         max_steps: int | None = None,
         max_spend: float | None = None,
         input_messages: object | None = None,
-    ) -> Run:
+    ) -> Trace:
         warn_once = self._client.exporter.warn_once
         given: object = agent
         if given is None or _blank(_str(given)):
-            raise ValueError("a run needs its agent's name")
+            raise ValueError("a trace needs its agent's name")
         agent = _cut(
-            _text(given, "run's agent", warn_once),
+            _text(given, "trace's agent", warn_once),
             contract.AGENT_MAX,
-            "run's agent",
+            "trace's agent",
             warn_once,
         )
         caps = guard.Guard(*guard.caps(max_steps, max_spend))
-        run_id = str(uuid.uuid4())
         user = _text(user_id, "user id", warn_once) if user_id is not None else ""
         if user and not _within(
-            user, contract.USER_ID_MAX, "user id", "run", warn_once
+            user, contract.USER_ID_MAX, "user id", "trace", warn_once
         ):
             user = ""
         session = (
             _text(session_id, "session id", warn_once) if session_id is not None else ""
         )
         if session and not _within(
-            session, contract.SESSION_ID_MAX, "session id", "run", warn_once
+            session, contract.SESSION_ID_MAX, "session id", "trace", warn_once
         ):
             session = ""
-        inherited = _inherited(run_id, agent, user, session)
-        name, attributes = _run_opening(agent, inherited, tags, warn_once)
+        inherited = _inherited(agent, user, session)
+        name, attributes = _agent_opening(agent, inherited, tags, warn_once)
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
-        parent = context.get_current()
-        span = self._start(name, parent, attributes, SpanKind.INTERNAL)
-        ctx = trace.set_span_in_context(span, parent)
-        # The run's opening, under it and at its start: the processor sends
-        # it at once, so the run is seen open before it ends.
+        application = context.get_current()
+        # A trace of its own, linked to the span the application has current:
+        # ingest reads each trace whole, never a tree the application heads.
+        current = trace.get_current_span(application).get_span_context()
+        links = [Link(current)] if current.is_valid else []
+        span = self._start(
+            name, context.Context(), attributes, SpanKind.INTERNAL, links=links
+        )
+        ctx = trace.set_span_in_context(span, application)
+        # The trace's opening, under its agent's span and at its start: the
+        # processor sends it at once, so the trace is seen open before it ends.
         opened_at = span.start_time if isinstance(span, ReadableSpan) else None
         start = self._start(
-            contract.RUN_START, ctx, inherited, SpanKind.INTERNAL, opened_at
+            contract.TRACE_START, ctx, inherited, SpanKind.INTERNAL, opened_at
         )
         start.end(end_time=opened_at)
-        run = Run(
+        opened = Trace(
             self._client,
             span,
-            run_id=run_id,
+            trace_id=format(span.get_span_context().trace_id, "032x"),
             agent=agent,
             inherited=inherited,
             caps=caps,
         )
-        # The run is found from the context by step(), model_call() and
-        # tool_call() called on the client rather than on the run.
-        run._attach(context.set_value(_RUN_KEY, run, ctx))
-        return run
+        # The trace is found from the context by step(), model_call() and
+        # tool_call() called on the client rather than on the trace.
+        opened._attach(context.set_value(_TRACE_KEY, opened, ctx))
+        return opened
 
-    def continued(self, remote: SpanContext, run_id: str, agent: str) -> Run:
-        """A run another service opened, continued here under the span the
-        headers named: a run whose own span is the caller's, non-recording
-        here, so its steps and calls nest under it and carry the run, and
+    def continued(self, remote: SpanContext, agent: str) -> Trace:
+        """A trace another service opened, continued here under the span the
+        headers named: a trace whose own span is the caller's, non-recording
+        here, so its steps and calls nest under it and carry the agent, and
         nothing of it is sent or ended from this side."""
         warn_once = self._client.exporter.warn_once
-        agent = _cut(agent, contract.AGENT_MAX, "run's agent", warn_once)
-        return Run(
+        agent = _cut(agent, contract.AGENT_MAX, "trace's agent", warn_once)
+        return Trace(
             self._client,
             NonRecordingSpan(remote),
-            run_id=run_id,
+            trace_id=format(remote.trace_id, "032x"),
             agent=agent,
-            inherited=_inherited(run_id, agent, None, None),
+            inherited=_inherited(agent, None, None),
         )
 
-    def step(self, name: str, run: Run | None) -> Step | None:
-        run = run or self._outside("step")
-        if run is None:
+    def step(self, name: str, owner: Trace | None) -> Step | None:
+        owner = owner or self._outside("step")
+        if owner is None:
             return None
-        run._guard.opens(step=True)
+        owner._guard.opens(step=True)
         warn_once = self._client.exporter.warn_once
         name = _text(name, "step's name", warn_once)
         # Ingest refuses a span named nothing.
@@ -638,12 +648,12 @@ class Opener:
             )
             name = "step"
         name = _cut(name, contract.NAME_MAX, "step's name", warn_once)
-        return self._child(run, Step, name, run.inherited, SpanKind.INTERNAL)
+        return self._child(owner, Step, name, owner.inherited, SpanKind.INTERNAL)
 
     def model_call(
         self,
         model: str,
-        run: Run | None,
+        owner: Trace | None,
         *,
         provider: str | None,
         operation: str,
@@ -652,10 +662,10 @@ class Opener:
         input_messages: object | None,
         system_instructions: object | None,
     ) -> ModelCall | None:
-        run = run or self._outside("model_call")
-        if run is None:
+        owner = owner or self._outside("model_call")
+        if owner is None:
             return None
-        run._guard.opens(step=False)
+        owner._guard.opens(step=False)
         warn_once = self._client.exporter.warn_once
         model = _text(model, "model", warn_once)
         # Ingest refuses a call over an empty model, but keeps one with none.
@@ -675,24 +685,24 @@ class Opener:
         name, own = _model_call_opening(
             model, operation, provider, prompt, prompt_version
         )
-        attributes: dict[str, Any] = {**run.inherited, **own}
+        attributes: dict[str, Any] = {**owner.inherited, **own}
         if input_messages is not None:
             attributes[contract.INPUT_MESSAGES] = _as_json(input_messages)
         if system_instructions is not None:
             attributes[contract.SYSTEM_INSTRUCTIONS] = _as_json(system_instructions)
-        call = self._child(run, ModelCall, name, attributes, SpanKind.CLIENT)
-        call._run = run
+        call = self._child(owner, ModelCall, name, attributes, SpanKind.CLIENT)
+        call._trace = owner
         call._provider = provider
         call._model = model
         return call
 
     def tool_call(
-        self, name: str, run: Run | None, *, arguments: object | None
+        self, name: str, owner: Trace | None, *, arguments: object | None
     ) -> ToolCall | None:
-        run = run or self._outside("tool_call")
-        if run is None:
+        owner = owner or self._outside("tool_call")
+        if owner is None:
             return None
-        run._guard.opens(step=False)
+        owner._guard.opens(step=False)
         warn_once = self._client.exporter.warn_once
         name = _cut(
             _text(name, "tool's name", warn_once),
@@ -701,24 +711,24 @@ class Opener:
             warn_once,
         )
         span_name, own = _tool_call_opening(name)
-        attributes: dict[str, Any] = {**run.inherited, **own}
+        attributes: dict[str, Any] = {**owner.inherited, **own}
         if arguments is not None:
             attributes[contract.TOOL_CALL_ARGUMENTS] = _as_json(arguments)
-        return self._child(run, ToolCall, span_name, attributes, SpanKind.INTERNAL)
+        return self._child(owner, ToolCall, span_name, attributes, SpanKind.INTERNAL)
 
     def retrieval(
         self,
         source: str,
-        run: Run | None,
+        owner: Trace | None,
         *,
         query: object | None,
         top_k: int | None,
         memory: bool,
     ) -> Retrieval | None:
-        run = run or self._outside("retrieval")
-        if run is None:
+        owner = owner or self._outside("retrieval")
+        if owner is None:
             return None
-        run._guard.opens(step=False)
+        owner._guard.opens(step=False)
         warn_once = self._client.exporter.warn_once
         operation, source_key, query_key = (
             (
@@ -733,7 +743,7 @@ class Opener:
                 contract.RETRIEVAL_QUERY_TEXT,
             )
         )
-        attributes: dict[str, Any] = {**run.inherited, contract.OPERATION: operation}
+        attributes: dict[str, Any] = {**owner.inherited, contract.OPERATION: operation}
         name = operation
         source = _text(source, "retrieval's source", warn_once)
         # Ingest names a retrieval by its source, and one with none by its span.
@@ -762,39 +772,36 @@ class Opener:
                 attributes[contract.RETRIEVAL_TOP_K] = asked
         if query is not None:
             attributes[query_key] = _as_json(query)
-        retrieval = self._child(run, Retrieval, name, attributes, SpanKind.CLIENT)
+        retrieval = self._child(owner, Retrieval, name, attributes, SpanKind.CLIENT)
         retrieval._memory = bool(memory)
         return retrieval
 
-    def record(self, record: RunRecord) -> None:
-        """Send a run that has ended as the live calls would have sent it.
+    def record(self, record: TraceRecord) -> None:
+        """Send a trace that has ended as the live calls would have sent it.
 
-        Its trace is its own, named by the run's id, whatever trace is current;
-        each span's id is derived from that id and the span's place in the
-        record. Its spans are queued whole once built, the run's own last, and
-        travel in exports of their own, so the same record sent again is the
-        same bytes, whatever else is sent meanwhile.
+        Its trace id is the record's, whatever trace is current; each span's id
+        is derived from that id and the span's place in the record. Its spans
+        are queued whole once built, the agent's own last, and travel in
+        exports of their own, so the same record sent again is the same bytes,
+        whatever else is sent meanwhile.
         Raises ``QueueFullError``, sending nothing, when the export queue has
         no room for the whole record, and ``ShutdownError`` once the client is
         shut down.
         """
         # Checked whole before anything opens, so a refused record sends nothing.
-        if not isinstance(record, RunRecord):
-            raise TypeError("a recorded run must be a RunRecord")
+        if not isinstance(record, TraceRecord):
+            raise TypeError("a recorded trace must be a TraceRecord")
         _check(record)
         # Read before the items, whose reading runs the caller's code.
         tags = dict((record.tags or {}).items())
         if not all(isinstance(text, str) for pair in tags.items() for text in pair):
-            raise TypeError("a recorded run's tags must map str to str")
+            raise TypeError("a recorded trace's tags must map str to str")
         if _blank(record.agent):
-            raise ValueError("a run needs its agent's name")
-        run_uuid = ids.run_uuid(record.run_id)
-        if run_uuid is None:
-            raise ValueError("a recorded run's id must be a UUID")
-        # The run's id is its trace's, and a trace id of zeros is no trace at all.
-        if run_uuid.int == 0:
+            raise ValueError("a trace needs its agent's name")
+        trace_id = ids.trace_id(record.trace_id)
+        if trace_id is None:
             raise ValueError(
-                "a recorded run's id must be a UUID other than the nil UUID"
+                "a recorded trace's id must be 32 hex digits, not all zeros"
             )
         items = _read(record)
         held = list(_walk(items))
@@ -810,10 +817,8 @@ class Opener:
                 )
             if end < start:
                 raise ValueError("a recorded span cannot end before it starts")
-        inherited = _inherited(
-            str(run_uuid), record.agent, record.user_id, record.session_id
-        )
-        run_name, attributes = _run_opening(
+        inherited = _inherited(record.agent, record.user_id, record.session_id)
+        agent_name, attributes = _agent_opening(
             record.agent, inherited, tags, self._client.exporter.warn_once
         )
         for key, messages in (
@@ -823,10 +828,10 @@ class Opener:
             if messages is not None:
                 attributes[key] = _as_json(messages)
         # Queued whole or not at all: a record that outgrows the queue's room
-        # would lose its tail, the run's own span first.
+        # would lose its tail, the agent's own span first.
         need = len(spans)
         # Worked out before the hold: a count that warns runs the application's
-        # logging handlers, which may record a run of their own.
+        # logging handlers, which may record a trace of their own.
         warn_once = self._client.exporter.warn_once
         usages = {
             id(each): _usage(each.usage, warn_once)
@@ -850,8 +855,8 @@ class Opener:
             kind: SpanKind,
             at: datetime,
         ) -> Span:
-            span_id = ids.span_id(run_uuid, next(places))
-            with ids.given(run_uuid.int, span_id):
+            span_id = ids.span_id(trace_id, next(places))
+            with ids.given(trace_id, span_id):
                 return self._start(name, parent, attributes, kind, _nanos(at))
 
         def call(item: CallRecord, parent: context.Context) -> None:
@@ -888,39 +893,40 @@ class Opener:
                 build(inside, trace.set_span_in_context(step, parent))
                 _close(step, item, judged[id(item)])
 
-        with self._client.processor.hold(run_uuid.int, need):
+        with self._client.processor.hold(trace_id, need):
             root = context.Context()
             span = open_span(
-                run_name, root, attributes, SpanKind.INTERNAL, record.start
+                agent_name, root, attributes, SpanKind.INTERNAL, record.start
             )
             build(items, trace.set_span_in_context(span, root))
             _close(span, record, judged[id(record)])
 
-    def _outside(self, what: str) -> Run | None:
-        run = current_run()
-        if run is None:
+    def _outside(self, what: str) -> Trace | None:
+        opened = current_trace()
+        if opened is None:
             self._client.exporter.warn_once(
                 "outside",
-                f"telmoni: {what} opened outside a run; nothing is sent outside a run",
+                f"telmoni: {what} opened outside a trace; "
+                "nothing is sent outside a trace",
                 _INPUT,
             )
-        return run
+        return opened
 
     def _child(
         self,
-        run: Run,
+        owner: Trace,
         handle: type[C],
         name: str,
         attributes: Mapping[str, Any],
         kind: SpanKind,
     ) -> C:
         parent = context.get_current()
-        if current_run(parent) is not run:
-            # A context this run is not in, a worker thread's say, puts the
-            # span under the run itself rather than at the root of a trace of
-            # its own, and carries the run, so calls inside find it.
+        if current_trace(parent) is not owner:
+            # A context this trace is not in, a worker thread's say, puts the
+            # span under the agent's span rather than at the root of a trace
+            # of its own, and carries the trace, so calls inside find it.
             parent = context.set_value(
-                _RUN_KEY, run, trace.set_span_in_context(run._span, parent)
+                _TRACE_KEY, owner, trace.set_span_in_context(owner._span, parent)
             )
         span = self._start(name, parent, attributes, kind)
         opened = handle(span, self._client)
@@ -934,6 +940,7 @@ class Opener:
         attributes: Mapping[str, Any],
         kind: SpanKind,
         start_time: int | None = None,
+        links: Sequence[Link] = (),
     ) -> Span:
         # The handle records a failure itself, its type cut to ingest's cap.
         return self._client.tracer.start_span(
@@ -941,6 +948,7 @@ class Opener:
             context=parent,
             kind=kind,
             attributes=dict(attributes),
+            links=links,
             start_time=start_time,
             record_exception=False,
             set_status_on_exception=False,
@@ -999,11 +1007,11 @@ def _usage(
 
 
 def _inherited(
-    run_id: str, agent: str, user_id: str | None, session_id: str | None
+    agent: str, user_id: str | None, session_id: str | None
 ) -> dict[str, str]:
-    """What every span of a run carries, live or recorded: its id and agent,
-    and its user and session where it has them."""
-    inherited = {contract.RUN_ID: run_id, contract.AGENT: agent}
+    """What every span of a trace carries, live or recorded: its agent, and
+    its user and session where it has them."""
+    inherited = {contract.AGENT: agent}
     if user_id:
         inherited[contract.USER_ID] = user_id
     if session_id:
@@ -1011,31 +1019,31 @@ def _inherited(
     return inherited
 
 
-def _run_opening(
+def _agent_opening(
     agent: str,
     inherited: Mapping[str, str],
     tags: Mapping[str, str] | None,
     warn_once: Callable[[str, str, WarningInfo], None],
 ) -> tuple[str, dict[str, Any]]:
-    """A run's span name and attributes, live or recorded, its tags first:
+    """The agent's span name and attributes, live or recorded, its tags first:
     past the span's 128, Python's SDK drops the oldest."""
     attributes = _tags(tags, warn_once)
     attributes.update(
         {
-            contract.OPERATION: contract.RUN_OPERATION,
+            contract.OPERATION: contract.AGENT_OPERATION,
             contract.AGENT_NAME: agent,
             **inherited,
         }
     )
-    return f"{contract.RUN_OPERATION} {agent}", attributes
+    return f"{contract.AGENT_OPERATION} {agent}", attributes
 
 
 def _operation(
     given: object, warn_once: Callable[[str, str, WarningInfo], None]
 ) -> str:
     """A model call's operation as ingest reads one: the default for a blank one,
-    and, with one warning, for one ingest would file as a step, a run or a tool
-    call."""
+    and, with one warning, for one ingest would file as a step, an agent or a
+    tool call."""
     if not isinstance(given, str) or _blank(given):
         return contract.DEFAULT_MODEL_OPERATION
     if given in contract.MODEL_OPERATIONS:
@@ -1111,8 +1119,8 @@ def _tool_call_opening(name: str) -> tuple[str, dict[str, Any]]:
 def _tags(
     tags: Mapping[str, str] | None, warn_once: Callable[[str, str, WarningInfo], None]
 ) -> dict[str, Any]:
-    """A run's tags as its span's attributes: the first `TAGS_MAX` of those
-    ingest keeps, since past them they would crowd out the run's own."""
+    """A trace's tags as its agent's span's attributes: the first `TAGS_MAX`
+    of those ingest keeps, since past them they would crowd out the span's own."""
     kept: dict[str, Any] = {}
     for key, value in (tags or {}).items():
         if value is None:
@@ -1123,15 +1131,15 @@ def _tags(
             _shown(sent) > contract.TAG_VALUE_MAX
         ):
             warn_once(
-                "run:tag",
+                "trace:tag",
                 "telmoni: a tag's key must be 1 to 64 characters and its value "
                 "up to 256; the tag is not sent",
                 _INPUT,
             )
         elif len(kept) == contract.TAGS_MAX:
             warn_once(
-                "run:tags",
-                "telmoni: a run carries up to 32 tags, the most ingest keeps; "
+                "trace:tags",
+                "telmoni: a trace carries up to 32 tags, the most ingest keeps; "
                 "the rest are not sent",
                 _INPUT,
             )
@@ -1218,8 +1226,8 @@ def _within(
     span: str,
     warn_once: Callable[[str, str, WarningInfo], None],
 ) -> bool:
-    """Whether an id is within ingest's cap; one past it is left off its run or
-    call with one warning, since cut it would name another."""
+    """Whether an id is within ingest's cap; one past it is left off its trace
+    or call with one warning, since cut it would name another."""
     if len(value) <= most:
         return True
     warn_once(
@@ -1256,18 +1264,18 @@ def _nanos(at: datetime) -> int:
 
 # An item as read, a step with what it holds.
 _Read: TypeAlias = "tuple[StepRecord | CallRecord, tuple[_Read, ...]]"
-# How deep steps nest, a run's own at 1: past any agent's subagents, and an
-# end to a step that holds itself.
+# How deep steps nest, the trace's own at 1: past any agent's subagents, and
+# an end to a step that holds itself.
 _STEP_DEPTH_MAX = 16
 
 
-def _read(record: RunRecord) -> tuple[_Read, ...]:
+def _read(record: TraceRecord) -> tuple[_Read, ...]:
     """The record's items, each step with what it holds, read once and checked,
     so the items checked are the items built; a set, in no order, is refused."""
     inside = record.inside
     if not isinstance(inside, Sequence):
         raise TypeError(
-            "a recorded run's inside must be a sequence, in the order it ran"
+            "a recorded trace's inside must be a sequence, in the order it ran"
         )
     return _read_items(inside, 1)
 
@@ -1310,12 +1318,12 @@ _NONE = type(None)
 _TEXT: tuple[type, ...] = (str,)
 _UNSET_OR_TEXT: tuple[type, ...] = (str, _NONE)
 # What each recorded field may hold: OpenTelemetry would warn of anything else
-# inside the hold, where a handler may record a run, or send it wrong.
+# inside the hold, where a handler may record a trace, or send it wrong.
 _FIELDS: dict[type, tuple[str, dict[str, tuple[type, ...]]]] = {
-    RunRecord: (
-        "run",
+    TraceRecord: (
+        "trace",
         {
-            "run_id": _TEXT,
+            "trace_id": _TEXT,
             "agent": _TEXT,
             "user_id": _UNSET_OR_TEXT,
             "session_id": _UNSET_OR_TEXT,
@@ -1339,7 +1347,7 @@ _FIELDS: dict[type, tuple[str, dict[str, tuple[type, ...]]]] = {
 
 # The longest each recorded text may be, in characters, as ingest caps it.
 _CAPS: dict[type, dict[str, int]] = {
-    RunRecord: {
+    TraceRecord: {
         "agent": contract.AGENT_MAX,
         "user_id": contract.USER_ID_MAX,
         "session_id": contract.SESSION_ID_MAX,
@@ -1354,7 +1362,7 @@ _CAPS: dict[type, dict[str, int]] = {
 }
 
 
-def _check(item: RunRecord | StepRecord | CallRecord) -> None:
+def _check(item: TraceRecord | StepRecord | CallRecord) -> None:
     what, fields = next(
         entry for kind, entry in _FIELDS.items() if isinstance(item, kind)
     )
@@ -1409,7 +1417,7 @@ def _record_content(item: StepRecord | CallRecord) -> dict[str, str]:
 
 
 def _recorded_scores(
-    item: RunRecord | StepRecord | CallRecord,
+    item: TraceRecord | StepRecord | CallRecord,
     warn_once: Callable[[str, str, WarningInfo], None],
 ) -> list[dict[str, Any]]:
     """A recorded span's scores as their events, each held to a score's rules;
@@ -1434,7 +1442,7 @@ def _recorded_scores(
 
 def _close(
     span: Span,
-    item: RunRecord | StepRecord | ModelCallRecord | ToolCallRecord,
+    item: TraceRecord | StepRecord | ModelCallRecord | ToolCallRecord,
     events: Sequence[Mapping[str, Any]],
 ) -> None:
     end = _nanos(item.end)

@@ -10,9 +10,9 @@ pub enum ChartMeasure {
     Spend,
     /// Input and output tokens.
     Tokens,
-    /// Runs, those that failed apart.
-    Runs,
-    /// The runs' durations at the 50th, 95th and 99th percentiles.
+    /// Traces, those that failed apart.
+    Traces,
+    /// The traces' durations at the 50th, 95th and 99th percentiles.
     Latency,
     /// Time to first token, from the spans.
     FirstToken,
@@ -21,7 +21,7 @@ pub enum ChartMeasure {
 crate::wire_enum!(ChartMeasure {
     Spend => "spend",
     Tokens => "tokens",
-    Runs => "runs",
+    Traces => "traces",
     Latency => "latency",
     FirstToken => "first_token",
 });

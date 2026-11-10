@@ -1,7 +1,7 @@
-//! The door as a customer reaches it: a run that has ended, recorded with the
+//! The door as a customer reaches it: a trace that has ended, recorded with the
 //! Rust SDK over TCP into this module's own ingest, lands with its calls under
 //! it, its user hashed as the project's user ids are, and the trace lanes read
-//! it back; a live run's retrievals land as retrievals. What the console agent's own questions travel as
+//! it back; a live trace's retrievals land as retrievals. What the console agent's own questions travel as
 //! (`crates/agent/src/report.rs`), and any customer's job.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 use common::{AuthStub, SECRET, clickhouse_or_skip, state_with_stores};
 use telmoni::{
-    Config, ModelCallRecord, RetrievalOptions, RunOptions, RunRecord, Score, ScoreTarget, Telmoni,
-    ToolCallOptions, ToolCallRecord, Usage,
+    Config, ModelCallRecord, RetrievalOptions, Score, ScoreTarget, Telmoni, ToolCallOptions,
+    ToolCallRecord, TraceOptions, TraceRecord, Usage,
 };
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
 use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role};
@@ -40,7 +40,7 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
-    // The project the run is of, with an ingest key on it and one of its
+    // The project the trace is of, with an ingest key on it and one of its
     // people seated to read the traces.
     let (organization, project) = (OrganizationId::new(), ProjectId::new());
     let auth = AuthStub::new();
@@ -71,12 +71,12 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
         ..Config::new(endpoint, None, Some(INGEST_KEY.to_owned()))
     });
 
-    let run_id = Uuid::new_v4();
+    let trace_id = Uuid::new_v4();
     let session = Uuid::new_v4().to_string();
     let start = SystemTime::now() - Duration::from_secs(5);
     let at = |millis| start + Duration::from_millis(millis);
     telmoni
-        .record_run(RunRecord {
+        .record_trace(TraceRecord {
             user_id: Some("user_42".into()),
             session_id: Some(session.clone()),
             tags: BTreeMap::from([("asked_about".to_owned(), "project".to_owned())]),
@@ -110,12 +110,17 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
                 }
                 .into(),
             ],
-            ..RunRecord::new(run_id.to_string(), "nightly-triage", start, at(4_000))
+            ..TraceRecord::new(
+                trace_id.simple().to_string(),
+                "nightly-triage",
+                start,
+                at(4_000),
+            )
         })
         .expect("a record the SDK takes");
-    // Scored once the run ended, as a person's feedback comes: the run, and its session.
+    // Scored once the trace ended, as a person's feedback comes: the trace, and its session.
     telmoni.score(
-        &ScoreTarget::run(run_id.to_string()),
+        &ScoreTarget::trace(trace_id.simple().to_string()),
         Score::boolean("thumbs", true),
     );
     telmoni.score(
@@ -144,7 +149,10 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     for _ in 0..100 {
         let response = app
             .clone()
-            .oneshot(request(format!("/internal/v1/telemetry/traces/{run_id}")))
+            .oneshot(request(format!(
+                "/internal/v1/telemetry/traces/{}",
+                trace_id.simple()
+            )))
             .await
             .expect("the router answers");
         if response.status() == StatusCode::OK {
@@ -159,29 +167,32 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert!(!detail.is_null(), "the run was never recorded");
+    assert!(!detail.is_null(), "the trace was never recorded");
 
     let spans = detail["spans"].as_array().expect("spans");
     let kinds: Vec<&str> = spans
         .iter()
         .map(|s| s["kind"].as_str().expect("a kind"))
         .collect();
-    assert_eq!(kinds, ["run", "model_call", "tool_call", "model_call"]);
-    let run = &spans[0];
-    assert_eq!(run["agent"], "nightly-triage");
-    assert_eq!(run["name"], "nightly-triage");
-    assert_eq!(run["status"], "ok");
+    assert_eq!(kinds, ["agent", "model_call", "tool_call", "model_call"]);
+    let agent = &spans[0];
+    assert_eq!(agent["agent"], "nightly-triage");
+    assert_eq!(agent["name"], "nightly-triage");
+    assert_eq!(agent["status"], "ok");
     // ⚠ The user's and the session's ids are hashed at the door under the
     // project's own key, never stored as sent.
-    let user = run["user_id"].as_str().expect("a user");
+    let user = agent["user_id"].as_str().expect("a user");
     assert_eq!(user.len(), HASH_BYTES * 2);
     assert!(user.bytes().all(|b| b.is_ascii_hexdigit()));
     assert_ne!(user, "user_42");
-    let stored_session = run["session_id"].as_str().expect("a session");
+    let stored_session = agent["session_id"].as_str().expect("a session");
     assert_eq!(stored_session.len(), HASH_BYTES * 2);
     assert!(stored_session.bytes().all(|b| b.is_ascii_hexdigit()));
     assert_ne!(stored_session, session);
-    assert_eq!(run["tags"], serde_json::json!({ "asked_about": "project" }));
+    assert_eq!(
+        agent["tags"],
+        serde_json::json!({ "asked_about": "project" })
+    );
     let first = &spans[1];
     assert_eq!(first["model"], "claude-sonnet-5-5");
     assert_eq!(first["provider"], "anthropic");
@@ -219,8 +230,8 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
         .as_array()
         .expect("traces")
         .iter()
-        .find(|t| t["run_id"] == run_id.to_string())
-        .expect("the run is listed");
+        .find(|t| t["trace_id"] == trace_id.simple().to_string())
+        .expect("the trace is listed");
     assert_eq!(trace["model_calls"], 2);
     assert_eq!(trace["tool_calls"], 1);
     assert_eq!(trace["input_tokens"], 1_900);
@@ -236,7 +247,8 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     let response = app
         .clone()
         .oneshot(request(format!(
-            "/internal/v1/telemetry/scores?run_id={run_id}&session_id={stored_session}"
+            "/internal/v1/telemetry/scores?trace_id={}&session_id={stored_session}",
+            trace_id.simple()
         )))
         .await
         .expect("the router answers");
@@ -263,8 +275,8 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
         got,
         [
             ("outcome".into(), "session".into(), String::new()),
-            ("relevance".into(), "run".into(), "judge-1".into()),
-            ("thumbs".into(), "run".into(), String::new()),
+            ("relevance".into(), "trace".into(), "judge-1".into()),
+            ("thumbs".into(), "trace".into(), String::new()),
         ],
         "{scores}"
     );
@@ -300,11 +312,11 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
     let telmoni = Telmoni::new(Config::new(endpoint, None, Some(INGEST_KEY.to_owned())));
 
     // Opened, ended and flushed on the SDK's side of the runtime, as an agent's code is.
-    let run_id = tokio::task::spawn_blocking(move || {
-        let run = telmoni
-            .run("support-bot", RunOptions::default())
-            .expect("a run");
-        let found = run
+    let trace_id = tokio::task::spawn_blocking(move || {
+        let trace = telmoni
+            .trace("support-bot", TraceOptions::default())
+            .expect("a trace");
+        let found = trace
             .retrieval(
                 "docs-index",
                 RetrievalOptions {
@@ -319,7 +331,7 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
             serde_json::json!({ "id": "kb-3" }),
         ]);
         found.end();
-        let remembered = run
+        let remembered = trace
             .retrieval(
                 "preferences",
                 RetrievalOptions {
@@ -331,13 +343,14 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
             .expect("a memory search");
         remembered.returned(&[serde_json::json!({ "id": "mem-1" })]);
         remembered.end();
-        run.tool_call("docs-index", ToolCallOptions::default())
+        trace
+            .tool_call("docs-index", ToolCallOptions::default())
             .expect("a tool call")
             .end();
-        let run_id = run.run_id().to_owned();
-        run.end();
+        let trace_id = trace.trace_id().to_owned();
+        trace.end();
         assert!(telmoni.flush(), "the export did not leave within the wait");
-        run_id
+        trace_id
     })
     .await
     .expect("the run ran");
@@ -374,13 +387,13 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
     };
     let mut detail = Value::Null;
     for _ in 0..100 {
-        detail = read(format!("/internal/v1/telemetry/traces/{run_id}")).await;
+        detail = read(format!("/internal/v1/telemetry/traces/{trace_id}")).await;
         let kinds = |kind: &str| {
             detail["spans"].as_array().map_or(0, |spans| {
                 spans.iter().filter(|s| s["kind"] == kind).count()
             })
         };
-        if kinds("run") == 1 && kinds("retrieval") == 2 {
+        if kinds("agent") == 1 && kinds("retrieval") == 2 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -410,8 +423,8 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
         .as_array()
         .expect("traces")
         .iter()
-        .find(|t| t["run_id"] == run_id)
-        .expect("the run is listed");
+        .find(|t| t["trace_id"] == trace_id)
+        .expect("the trace is listed");
     assert_eq!(
         (&trace["retrievals"], &trace["tool_calls"]),
         (&Value::from(2), &Value::from(1))

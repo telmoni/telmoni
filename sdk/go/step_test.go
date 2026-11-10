@@ -11,14 +11,14 @@ import (
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
 
-func TestAStepNestsUnderItsRunAndCarriesItsIDs(t *testing.T) {
+func TestAStepNestsUnderItsAgentAndCarriesItsIDs(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{UserID: "c", SessionID: "v"})
-	planCtx, plan := run.Step(ctx, "plan")
-	_, inner := run.Step(planCtx, "plan.inner")
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{UserID: "c", SessionID: "v"})
+	planCtx, plan := tr.Step(ctx, "plan")
+	_, inner := tr.Step(planCtx, "plan.inner")
 	inner.End()
 	plan.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
 	planSpan, innerSpan, agent := spans["plan"], spans["plan.inner"], spans["invoke_agent bot"]
@@ -26,16 +26,15 @@ func TestAStepNestsUnderItsRunAndCarriesItsIDs(t *testing.T) {
 		t.Fatalf("spans sent: %v", sortedNames(h.transport.spans(t)))
 	}
 	if planSpan["parentSpanId"] != agent["spanId"] {
-		t.Error("the step is not the run's child")
+		t.Error("the step is not the agent's child")
 	}
 	if innerSpan["parentSpanId"] != planSpan["spanId"] {
 		t.Error("the inner step is not the step's child")
 	}
-	if planSpan["traceId"] != agent["traceId"] || innerSpan["traceId"] != agent["traceId"] {
-		t.Error("the steps left the run's trace")
+	if planSpan["traceId"] != tr.TraceID() || innerSpan["traceId"] != agent["traceId"] {
+		t.Error("the steps left the trace")
 	}
 	want := map[string]any{
-		"telmoni.run_id":         run.ID(),
 		"telmoni.agent":          "bot",
 		"user.id":                "c",
 		"gen_ai.conversation.id": "v",
@@ -51,50 +50,51 @@ func TestAStepNestsUnderItsRunAndCarriesItsIDs(t *testing.T) {
 	}
 }
 
-func TestAStepFromAContextWithoutASpanGoesUnderTheRun(t *testing.T) {
+func TestAStepFromAContextWithoutASpanGoesUnderTheAgent(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	stepCtx, step := run.Step(context.Background(), "background")
-	if telmoni.RunFromContext(stepCtx) != run {
-		t.Error("the step's context does not carry its run")
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	stepCtx, step := tr.Step(context.Background(), "background")
+	if telmoni.TraceFromContext(stepCtx) != tr {
+		t.Error("the step's context does not carry its trace")
 	}
 	step.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
 	if spans["background"]["parentSpanId"] != spans["invoke_agent bot"]["spanId"] {
-		t.Error("a step opened with no span in its context is not the run's child")
+		t.Error("a step opened with no span in its context is not the agent's child")
 	}
 	if spans["background"]["traceId"] != spans["invoke_agent bot"]["traceId"] {
 		t.Error("the step started a trace of its own")
 	}
 }
 
-// A context the run is not in, here the request's the run was opened from,
-// puts the step under the run, not beside it under the request's span.
-func TestAStepFromAContextOutsideItsRunGoesUnderTheRun(t *testing.T) {
+// A context the trace is not in, here the request's the trace was opened
+// from, puts the step under the agent, not beside it under the request's
+// span, in the request's trace.
+func TestAStepFromAContextOutsideItsTraceGoesUnderTheAgent(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	app, _ := appProvider(t, sdktrace.AlwaysSample())
 	requestCtx, request := app.Start(context.Background(), "request")
-	_, run := h.client.Run(requestCtx, "bot", telmoni.RunOptions{})
-	_, step := run.Step(requestCtx, "plan")
+	_, tr := h.client.Trace(requestCtx, "bot", telmoni.TraceOptions{})
+	_, step := tr.Step(requestCtx, "plan")
 	step.End()
-	run.End()
+	tr.End()
 	request.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
-	if spans["plan"]["parentSpanId"] != spans["invoke_agent bot"]["spanId"] {
-		t.Error("a step opened with the request's context is not the run's child")
+	if spans["plan"]["parentSpanId"] != spans["invoke_agent bot"]["spanId"] || spans["plan"]["traceId"] != tr.TraceID() {
+		t.Error("a step opened with the request's context is not the agent's child")
 	}
 }
 
-func TestAFailingStepRecordsTheErrorTypeAndTheRunGoesOn(t *testing.T) {
+func TestAFailingStepRecordsTheErrorTypeAndTheTraceGoesOn(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, step := run.Step(ctx, "plan")
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, step := tr.Step(ctx, "plan")
 	step.Fail(&planningFailed{detail: "secret details"})
 	step.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
 	if !reflect.DeepEqual(spans["plan"]["status"], map[string]any{"code": float64(2)}) {
@@ -104,7 +104,7 @@ func TestAFailingStepRecordsTheErrorTypeAndTheRunGoesOn(t *testing.T) {
 		t.Errorf("error.type = %v", got)
 	}
 	if _, has := spans["invoke_agent bot"]["status"]; has {
-		t.Error("the run itself did not go on")
+		t.Error("the trace itself did not go on")
 	}
 	if strings.Contains(h.transport.text(), "secret details") {
 		t.Error("the error's message was sent")
@@ -113,16 +113,16 @@ func TestAFailingStepRecordsTheErrorTypeAndTheRunGoesOn(t *testing.T) {
 
 func TestAFunctionWrappedInAStep(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	plan := func(ctx context.Context, n int) int {
-		_, step := telmoni.RunFromContext(ctx).Step(ctx, "plan")
+		_, step := telmoni.TraceFromContext(ctx).Step(ctx, "plan")
 		defer step.End()
 		return n + 1
 	}
 	if got := plan(ctx, 1); got != 2 {
 		t.Errorf("plan(1) = %d", got)
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	if _, has := byName(h.transport.spans(t))["plan"]; !has {
 		t.Error("the step was not sent")
@@ -131,14 +131,14 @@ func TestAFunctionWrappedInAStep(t *testing.T) {
 
 func TestASecondEndAndALateMarkDoNothing(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, step := run.Step(ctx, "plan")
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, step := tr.Step(ctx, "plan")
 	step.End()
 	step.End()
 	step.FailWith("Late")
 	step.Cancel()
-	run.End()
-	run.End()
+	tr.End()
+	tr.End()
 	h.flush()
 	spans := h.transport.spans(t)
 	if got := sortedNames(spans); !reflect.DeepEqual(got, []string{"invoke_agent bot", "plan"}) {
@@ -157,13 +157,13 @@ func TestASecondEndAndALateMarkDoNothing(t *testing.T) {
 // byte one of them, which JSON sends as U+FFFD.
 func TestAStepNamedNothingOrPastIngestsCapKeepsItsSpan(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	n := func(count int) string { return strings.Repeat("n", count) }
 	for _, name := range []string{"", "", n(146), n(146), n(145), strings.Repeat("\xff", 146)} {
-		_, step := run.Step(ctx, name)
+		_, step := tr.Step(ctx, name)
 		step.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	want := []string{"invoke_agent bot", n(145), n(145), n(145), "step", "step", strings.Repeat("�", 145)}
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, want) {

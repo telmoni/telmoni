@@ -8,13 +8,12 @@ package telmoni
 const (
 	// scope is the instrumentation scope every span the SDK opens is under.
 	scope = "telmoni"
-	// runStart is the span of no length a run sends as it opens, exported at
-	// once, so the run is seen before it ends.
-	runStart   = "telmoni.run.start"
+	// traceStart is the span of no length a trace sends as it opens, exported
+	// at once, so the trace is seen before it ends.
+	traceStart = "telmoni.trace.start"
 	distroName = "telemetry.distro.name"
 	distro     = "telmoni"
 
-	attrRunID     = "telmoni.run_id"
 	attrAgent     = "telmoni.agent"
 	attrUserID    = "user.id"
 	tagPrefix     = "telmoni.tag."
@@ -26,8 +25,8 @@ const (
 	// Release.
 	attrEnvironment = "deployment.environment.name"
 	attrRelease     = "service.version"
-	// The W3C headers a run crosses services in: the span's context, and the
-	// run's id and agent as baggage members.
+	// The W3C headers a trace crosses services in: the span's context, and
+	// the agent as a baggage member.
 	headerTraceparent = "traceparent"
 	headerBaggage     = "baggage"
 
@@ -72,7 +71,7 @@ const (
 	attrMemoryQueryText    = "gen_ai.memory.query.text"
 	attrMemoryRecords      = "gen_ai.memory.records"
 
-	runOperation          = "invoke_agent"
+	agentOperation        = "invoke_agent"
 	toolOperation         = "execute_tool"
 	defaultModelOperation = "chat"
 	// A search of a vector store or an index, and of a memory: ingest reads
@@ -84,7 +83,7 @@ const (
 	// off or on.
 	contentModeHeader = "Telmoni-Content-Mode"
 	// sentAtHeader names this clock as an export leaves, in nanoseconds since
-	// the epoch, by which ingest moves a run from a clock a zone or a date out.
+	// the epoch, by which ingest moves a trace from a clock a zone or a date out.
 	sentAtHeader = "Telmoni-Sent-At"
 )
 

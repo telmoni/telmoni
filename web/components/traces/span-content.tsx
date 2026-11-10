@@ -304,9 +304,9 @@ export function SpanContent({ fields }: { fields: Readonly<Record<string, string
   );
 }
 
-/** A run's turn: the person's message, then the agent's answer, from the
- *  run's own span; a line where it kept none, or where none could be read. */
-export function RunTurn({ fields }: { fields: Readonly<Record<string, string>> | null | undefined }) {
+/** A trace's turn: the person's message, then the agent's answer, from the
+ *  agent's own span; a line where it kept none, or where none could be read. */
+export function TraceTurn({ fields }: { fields: Readonly<Record<string, string>> | null | undefined }) {
   if (fields === null) {
     return <p className="text-xs text-muted-foreground">This trace&apos;s content could not be read. Reload to try again.</p>;
   }

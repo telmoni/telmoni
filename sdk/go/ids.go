@@ -14,9 +14,9 @@ import (
 )
 
 // ids makes the client's trace and span ids: at random, as OpenTelemetry's own
-// generator makes them, except for the spans of a recorded run, whose ids are
-// derived from the run's id, so that a record sent twice is the same bytes and
-// ingest's claim on the body answers it once.
+// generator makes them, except for the spans of a recorded trace, whose ids
+// are derived from the trace's id, so that a record sent twice is the same
+// bytes and ingest's claim on the body answers it once.
 type ids struct{}
 
 // givenKey carries the ids a span started with that context takes. In the
@@ -61,11 +61,12 @@ func randomSpanID() trace.SpanID {
 	return spanID
 }
 
-// recordedSpanID is the id of a recorded run's span at place: the first eight
-// bytes of the version 5 UUID (RFC 9562) named by the place, in decimal, under
-// the run's id. Its version's bits are among those eight, so it is never zero.
-func recordedSpanID(runID [16]byte, place int) trace.SpanID {
-	u := uuid5(runID, strconv.Itoa(place))
+// recordedSpanID is the id of a recorded trace's span at place: the first
+// eight bytes of the version 5 UUID (RFC 9562) named by the place, in decimal,
+// under the trace's 16 bytes. Its version's bits are among those eight, so it
+// is never zero.
+func recordedSpanID(traceID trace.TraceID, place int) trace.SpanID {
+	u := uuid5([16]byte(traceID), strconv.Itoa(place))
 	return trace.SpanID(u[:8])
 }
 
@@ -80,18 +81,17 @@ func uuid5(namespace [16]byte, name string) [16]byte {
 	return u
 }
 
-// parseUUID reads a UUID in its 8-4-4-4-12 form, in either case and of any
-// version.
-func parseUUID(s string) ([16]byte, bool) {
-	var u [16]byte
-	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
-		return u, false
+// parseTraceID reads a trace id as a caller gives one: 32 hex digits in
+// either case, not all zeros, which is no trace at all.
+func parseTraceID(s string) (trace.TraceID, bool) {
+	var id trace.TraceID
+	if len(s) != 32 {
+		return id, false
 	}
-	digits := s[:8] + s[9:13] + s[14:18] + s[19:23] + s[24:]
-	if _, err := hex.Decode(u[:], []byte(digits)); err != nil {
-		return u, false
+	if _, err := hex.Decode(id[:], []byte(s)); err != nil || !id.IsValid() {
+		return trace.TraceID{}, false
 	}
-	return u, true
+	return id, true
 }
 
 // formatUUID is u in its lowercase 8-4-4-4-12 form.

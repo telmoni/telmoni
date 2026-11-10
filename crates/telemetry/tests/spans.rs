@@ -56,7 +56,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
     };
     let run = SpanRow {
         sample_rate: Some(0.25),
-        ..span(&project, SpanKind::Run, "nightly-report", 2_000)
+        ..span(&project, SpanKind::Agent, "nightly-report", 2_000)
     };
     let tool = SpanRow {
         status: SpanStatus::Error,
@@ -76,7 +76,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         .store
         .read(
             &only,
-            "SELECT project_id, received_at, units, run_id, agent, trace_id, span_id, \
+            "SELECT project_id, received_at, units, agent, trace_id, span_id, \
              parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
              cache_write_input_tokens, cost, time_to_first_token, user_id, session_id, environment, \
@@ -85,7 +85,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
              ORDER BY kind",
         )
-        .param("kinds", vec!["model_call", "run"])
+        .param("kinds", vec!["model_call", "agent"])
         .fetch_all()
         .await
         .expect("read the spans back");
@@ -127,7 +127,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
                 0
             ),
             (
-                "run".into(),
+                "agent".into(),
                 String::new(),
                 "ok".into(),
                 String::new(),
@@ -275,8 +275,8 @@ async fn a_read_naming_one_project_sees_no_other() {
     let (mine, theirs) = (ProjectId::new(), ProjectId::new());
     ch.store
         .insert_spans(&[
-            span(&mine, SpanKind::Run, "nightly-report", 2_000),
-            span(&theirs, SpanKind::Run, "nightly-report", 2_000),
+            span(&mine, SpanKind::Agent, "nightly-report", 2_000),
+            span(&theirs, SpanKind::Agent, "nightly-report", 2_000),
             span(&theirs, SpanKind::ToolCall, "search_docs", 30),
         ])
         .await
@@ -285,9 +285,8 @@ async fn a_read_naming_one_project_sees_no_other() {
         project_id: project.clone(),
         received_at: Utc::now(),
         score_id: uuid::Uuid::new_v4(),
-        target: telmoni_shared::ScoreTarget::Run,
-        run_id: uuid::Uuid::new_v4(),
-        trace_id: String::new(),
+        target: telmoni_shared::ScoreTarget::Trace,
+        trace_id: uuid::Uuid::new_v4().simple().to_string(),
         span_id: String::new(),
         session_id: String::new(),
         name: "helpful".into(),
@@ -386,7 +385,7 @@ async fn a_read_naming_no_project_fails() {
     };
     let project = ProjectId::new();
     ch.store
-        .insert_spans(&[span(&project, SpanKind::Run, "nightly-report", 100)])
+        .insert_spans(&[span(&project, SpanKind::Agent, "nightly-report", 100)])
         .await
         .expect("insert a span");
 
@@ -492,8 +491,8 @@ async fn the_migrator_is_not_held_by_the_row_policy() {
     let (one, two) = (ProjectId::new(), ProjectId::new());
     ch.store
         .insert_spans(&[
-            span(&one, SpanKind::Run, "nightly-report", 100),
-            span(&two, SpanKind::Run, "nightly-report", 100),
+            span(&one, SpanKind::Agent, "nightly-report", 100),
+            span(&two, SpanKind::Agent, "nightly-report", 100),
         ])
         .await
         .expect("insert two projects' spans");
@@ -526,9 +525,9 @@ async fn the_nightly_purge_drops_whole_days_and_months_past_retention() {
     let inside = Utc::now() - Duration::days(retention::SPAN_RETENTION_DAYS - 1);
     ch.store
         .insert_spans(&[
-            received(&project, SpanKind::Run, "nightly-report", 100, long_ago),
-            received(&project, SpanKind::Run, "nightly-report", 100, inside),
-            span(&project, SpanKind::Run, "nightly-report", 100),
+            received(&project, SpanKind::Agent, "nightly-report", 100, long_ago),
+            received(&project, SpanKind::Agent, "nightly-report", 100, inside),
+            span(&project, SpanKind::Agent, "nightly-report", 100),
         ])
         .await
         .expect("insert spans of three days");
@@ -597,10 +596,16 @@ async fn a_project_that_keeps_fewer_days_loses_its_older_spans_and_no_other_does
     );
     let mut rows = Vec::new();
     for project in [&shortened, &longest] {
-        rows.push(received(project, SpanKind::Run, "nightly-report", 100, old));
         rows.push(received(
             project,
-            SpanKind::Run,
+            SpanKind::Agent,
+            "nightly-report",
+            100,
+            old,
+        ));
+        rows.push(received(
+            project,
+            SpanKind::Agent,
             "nightly-report",
             100,
             recent,
@@ -642,9 +647,9 @@ async fn a_deleted_projects_rows_are_hidden_within_moments_and_off_the_disk_by_t
     let (gone, kept) = (ProjectId::new(), ProjectId::new());
     ch.store
         .insert_spans(&[
-            span(&gone, SpanKind::Run, "nightly-report", 100),
+            span(&gone, SpanKind::Agent, "nightly-report", 100),
             span(&gone, SpanKind::ToolCall, "search_docs", 30),
-            span(&kept, SpanKind::Run, "nightly-report", 100),
+            span(&kept, SpanKind::Agent, "nightly-report", 100),
         ])
         .await
         .expect("insert both projects' spans");

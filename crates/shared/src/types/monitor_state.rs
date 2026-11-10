@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::Severity;
 
 /// Where a monitor stands: `new` until its agent's first run since it was
-/// made or resumed, then `up`, `late` once a run due has not started, and
-/// `down` past its grace or after a run that failed; `paused` while it is
+/// made or resumed, then `up`, `late` once a trace due has not started, and
+/// `down` past its grace or after a trace that failed; `paused` while it is
 /// not judged. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

@@ -763,10 +763,12 @@ impl ComposingMailer {
     ) -> Result<(), MailError> {
         let product = telmoni_shared::PRODUCT_NAME;
         let (subject, what) = match receipt {
-            Receipt::Trace { run_id, spans, .. } => (
+            Receipt::Trace {
+                trace_id, spans, ..
+            } => (
                 format!("A trace was deleted from {project}"),
                 format!(
-                    "The trace {run_id} of {project} was deleted as you asked: its \
+                    "The trace {trace_id} of {project} was deleted as you asked: its \
                      spans, {spans} in all, and any content they kept."
                 ),
             ),

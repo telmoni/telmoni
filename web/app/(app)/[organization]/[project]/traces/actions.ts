@@ -12,8 +12,9 @@ import { pathAndQuery, requestUrl } from "@/lib/server/path";
 import { COMMENT_MAX, SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "@/lib/scores";
 import { FILTER_VALUE_MAX, SCORE_NAME_MAX } from "@/lib/traces";
 import { ScoreType } from "@/lib/types/enums";
+import { TraceIdSchema } from "@/lib/types/traces";
 
-// A run's deletion, an end user's erasure and a member's scores: each through
+// A trace's deletion, an end user's erasure and a member's scores: each through
 // its lane in telemetry, which holds the role each takes and checks every
 // value. What this checks is the shape the browser sent.
 
@@ -70,11 +71,11 @@ async function callAs(
   return { ok: true, res };
 }
 
-/** One trace deleted, by its run's id: the page then goes back to the list,
- *  where it no longer shows. The receipt is mailed by the server. */
-export async function deleteTraceAction(projectId: string, runId: string): Promise<ActionResult> {
-  if (!z.guid().safeParse(runId).success) return refused("Invalid trace id.");
-  const sent = await call("DELETE", `/traces/${runId}`, projectId, undefined, DELETIONS, DELETION_WAIT_MS);
+/** One trace deleted, by its id: the page then goes back to the list, where
+ *  it no longer shows. The receipt is mailed by the server. */
+export async function deleteTraceAction(projectId: string, traceId: string): Promise<ActionResult> {
+  if (!TraceIdSchema.safeParse(traceId).success) return refused("Invalid trace id.");
+  const sent = await call("DELETE", `/traces/${traceId}`, projectId, undefined, DELETIONS, DELETION_WAIT_MS);
   if (!sent.ok) return sent;
   const here = await requestUrl();
   here.pathname = here.pathname.replace(/\/[^/]+$/, "");
@@ -115,7 +116,7 @@ const SCORINGS: Ceiling = { call: "traces:scores", limit: 30 };
 /** What a member's score sends: what it scores and what it says, before the
  *  server checks its every rule. */
 const ScoreInputSchema = z.object({
-  run_id: z.guid().optional(),
+  trace_id: TraceIdSchema.optional(),
   span_id: z.string().max(64).optional(),
   session_id: z.string().max(FILTER_VALUE_MAX.session).optional(),
   name: z.string().min(1).max(SCORE_NAME_MAX),
@@ -125,7 +126,7 @@ const ScoreInputSchema = z.object({
   comment: z.string().max(COMMENT_MAX).optional(),
 });
 
-/** A member's score of a run, one of its spans or a session, given again
+/** A member's score of a trace, one of its spans or a session, given again
  *  replacing their last of that name. */
 export async function putScoreAction(projectId: string, score: unknown): Promise<ActionResult> {
   const parsed = ScoreInputSchema.safeParse(score);

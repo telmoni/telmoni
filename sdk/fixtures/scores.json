@@ -332,74 +332,91 @@
   ],
   "targets": [
     {
-      "case": "a run",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "case": "a trace",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "kept": {
-        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+        "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a"
       }
     },
     {
-      "case": "a run in capitals, sent lowercase",
-      "run_id": "5B7E1C2A-9D4F-4E8B-A6C3-1F2E3D4C5B6A",
+      "case": "a trace in capitals, sent lowercase",
+      "trace_id": "5B7E1C2A9D4F4E8BA6C31F2E3D4C5B6A",
       "kept": {
-        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+        "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a"
       }
     },
     {
-      "case": "a span of a run",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "case": "a trace with leading zeros, kept whole",
+      "trace_id": "0000a3b47c2e7d3f8e4a5b6c7d8e9f01",
+      "kept": {
+        "trace_id": "0000a3b47c2e7d3f8e4a5b6c7d8e9f01"
+      }
+    },
+    {
+      "case": "a span of a trace",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "span_id": "00f067aa0ba902b7",
       "kept": {
-        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+        "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
         "span_id": "00f067aa0ba902b7"
       }
     },
     {
       "case": "a span in capitals, sent lowercase",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "span_id": "00F067AA0CD902B7",
       "kept": {
-        "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+        "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
         "span_id": "00f067aa0cd902b7"
       }
     },
     {
       "case": "a span of 15 digits",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "span_id": "00f067aa0ba902b",
       "refused": true
     },
     {
       "case": "a span that is no hex",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "span_id": "00f067aa0cd902bz",
       "refused": true
     },
     {
-      "case": "a blank span, which names no run in its place",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "case": "a blank span, which names no trace in its place",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "span_id": "  ",
       "refused": true
     },
     {
       "case": "a span with spaces round it",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "span_id": " 00f067aa0ba902b7 ",
       "refused": true
     },
     {
-      "case": "a span with no run",
+      "case": "a span with no trace",
       "span_id": "00f067aa0ba902b7",
       "refused": true
     },
     {
-      "case": "a run that is no UUID",
-      "run_id": "run-1",
+      "case": "a trace that is no hex",
+      "trace_id": "trace-1",
       "refused": true
     },
     {
-      "case": "the nil run",
-      "run_id": "00000000-0000-0000-0000-000000000000",
+      "case": "a trace spelled as a UUID, with hyphens",
+      "trace_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "refused": true
+    },
+    {
+      "case": "a trace of 31 digits",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6",
+      "refused": true
+    },
+    {
+      "case": "a trace of zeros",
+      "trace_id": "00000000000000000000000000000000",
       "refused": true
     },
     {
@@ -434,8 +451,8 @@
       "refused": true
     },
     {
-      "case": "a run and a session",
-      "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+      "case": "a trace and a session",
+      "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
       "session_id": "conv-1",
       "refused": true
     },
@@ -448,7 +465,7 @@
     "scores": [
       {
         "target": {
-          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a"
+          "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a"
         },
         "name": "thumbs",
         "type": "boolean",
@@ -456,7 +473,7 @@
       },
       {
         "target": {
-          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+          "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
           "span_id": "00f067aa0ba902b7"
         },
         "name": "relevance",
@@ -481,14 +498,14 @@
       "scores": [
         {
           "id": "<uuid>",
-          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+          "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
           "name": "thumbs",
           "data_type": "boolean",
           "value": 1
         },
         {
           "id": "<uuid>",
-          "run_id": "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
+          "trace_id": "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
           "span_id": "00f067aa0ba902b7",
           "name": "relevance",
           "data_type": "number",

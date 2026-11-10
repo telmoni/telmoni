@@ -1,13 +1,12 @@
-//! Another exporter's spans, with no `telmoni.run_id` and `telmoni.agent`:
-//! held at the door ([`hold`]), then placed in the run their trace's tree
-//! says and landed by a loop on every replica ([`run`], [`place`]).
+//! Another exporter's spans, with no `telmoni.agent`: held at the door
+//! ([`hold`]), then each named for the agent its trace's tree puts it under
+//! and landed by a loop on every replica ([`run`], [`place`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
 
 use telmoni_shared::acting::ActingKey;
 use telmoni_shared::db::tenant_session::{maintenance_scope, project_scope};
@@ -39,7 +38,7 @@ const QUIET_SECS: f64 = 60.0;
 const WAITED_MAX_SECS: f64 = 300.0;
 
 /// How long a span waits for a parent that has not arrived: a span ends
-/// before its parent, so an agent's own span comes last, after its run.
+/// before its parent, so an agent's own span comes last, after its calls.
 pub const ORPHAN_MAX_SECS: i64 = 3600;
 
 /// [`ORPHAN_MAX_SECS`] as an interval's seconds.
@@ -55,33 +54,17 @@ const TRACES_A_PASS: i64 = 200;
 /// refused, so a flood of a service's other spans fills no table.
 pub const HELD_MAX: i64 = 100_000;
 
-/// The name runs derived here are made under, so no other id collides.
-const NAMESPACE: Uuid = Uuid::from_u128(0x6a1f_3c52_9e04_4d7b_b8e1_52c0_7f3a_9d16);
-
-/// The resource's name of the process, which names a run of calls alone.
+/// The resource's name of the process, which names a trace with no agent's
+/// span of its own.
 const SERVICE_NAME: &str = "service.name";
 
 /// What a process names itself with no `service.name`, as OpenTelemetry does.
 const UNKNOWN_SERVICE: &str = "unknown_service";
 
-/// A run's id read from its own span: the same on every replica.
-#[must_use]
-pub fn run_of_span(project_id: &ProjectId, trace_id: &str, span_id: &str) -> Uuid {
-    Uuid::new_v5(
-        &NAMESPACE,
-        format!("{project_id}/{trace_id}/{span_id}").as_bytes(),
-    )
-}
-
-/// The run of a trace's calls with no run above them.
-#[must_use]
-pub fn run_of_trace(project_id: &ProjectId, trace_id: &str) -> Uuid {
-    Uuid::new_v5(&NAMESPACE, format!("{project_id}/{trace_id}").as_bytes())
-}
-
-/// The span id of the run [`run_of_trace`] names, which no exporter sent.
-fn run_span_of_trace(trace_id: &str) -> String {
-    sha256_hex(format!("{trace_id}/run").as_bytes())
+/// The span id of the agent's span the loop writes for a trace whose
+/// exporter sent none, which no exporter sent.
+fn agent_span_of_trace(trace_id: &str) -> String {
+    sha256_hex(format!("{trace_id}/agent").as_bytes())
         .chars()
         .take(16)
         .collect()
@@ -167,46 +150,38 @@ pub async fn hold(
     Ok(refused)
 }
 
-/// A span already landed: the run it was placed in.
+/// A span already landed: the agent its children are placed under, its own
+/// name where it was an agent's span. The trace's own agent is kept under
+/// the span id the loop would write one with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Landed {
     pub span_id: String,
-    pub run_id: Uuid,
     pub agent: String,
 }
 
 /// What a trace's held spans came to.
 #[derive(Debug, Default, PartialEq)]
 pub struct Placed {
-    /// The spans to write, each in its run, and a run's own span the loop
-    /// wrote for calls with no run above them.
+    /// The spans to write, each named for its agent, and an agent's span the
+    /// loop wrote for a trace whose exporter sent none.
     pub rows: Vec<SpanRow>,
-    /// Each span placed, and that run's span, as the held rows mark them.
-    pub runs: Vec<Landed>,
-    /// The spans no run holds.
-    pub dropped: Vec<String>,
+    /// Each span placed, and that agent's span, as the held rows mark them.
+    pub placed: Vec<Landed>,
+    /// Another exporter's agents nested under the trace's own, written as
+    /// plain spans, so the trace has one agent's span.
+    pub nested: Vec<String>,
     /// The spans whose parent has not arrived, left waiting for it.
     pub waiting: Vec<String>,
 }
 
-/// Where a held span goes.
-enum Place {
-    /// The run of a span among the held ones.
-    Root(String),
-    /// A run a span of it landed in before.
-    Landed(Uuid, String),
-    /// The run of the trace's calls with no run above them.
-    Trace,
-    Nowhere,
-    /// Its parent has not arrived yet.
-    Wait,
-}
-
-/// A trace's held spans placed under their topmost agent, else a call in the trace's
-/// run of calls, else dropped; one whose parent has not arrived waits until `waited`.
+/// A trace's held spans, each named for the nearest agent above it, else the
+/// trace's own: the topmost agent's name, or the service's for a trace with
+/// no agent's span at all, which then gets one the loop writes. Every other
+/// agent's span, nested, beside it or arriving later, becomes a plain span,
+/// so the trace keeps one; a span whose parent has not arrived waits until
+/// `waited`.
 #[must_use]
 pub fn place(
-    project_id: &ProjectId,
     trace_id: &str,
     waiting: Vec<SpanRow>,
     landed: &[Landed],
@@ -220,137 +195,117 @@ pub fn place(
         .iter()
         .map(|one| (one.span_id.as_str(), one))
         .collect();
-    let places: Vec<Place> = waiting
+    // Each span's agents above it, nearest first, as far as the tree is known;
+    // `None` where its parent has not arrived and it has not waited out.
+    let above: Vec<Option<Vec<String>>> = waiting
         .iter()
         .map(|row| {
-            let mut root = None;
+            let mut agents = Vec::new();
             let mut at = row;
-            let mut lost = false;
             // A loop in the tree is the sender's; it ends the walk.
             for _ in 0..=waiting.len() {
-                if at.kind == SpanKind::Run {
-                    root = Some(at.span_id.clone());
-                }
                 let parent = at.parent_span_id.as_str();
                 if parent.is_empty() {
-                    break;
+                    return Some(agents);
                 }
                 if let Some(next) = by_id.get(parent) {
+                    if next.kind == SpanKind::Agent {
+                        agents.push(cut(&next.name));
+                    }
                     at = next;
                     continue;
                 }
                 if let Some(one) = landed_by_id.get(parent) {
-                    return Place::Landed(one.run_id, one.agent.clone());
+                    agents.push(one.agent.clone());
+                    return Some(agents);
                 }
-                lost = true;
-                break;
+                return (row.received_at < waited).then_some(agents);
             }
-            if lost && row.received_at >= waited {
-                return Place::Wait;
-            }
-            match root {
-                Some(root) => Place::Root(root),
-                None if matches!(
-                    row.kind,
-                    SpanKind::ModelCall | SpanKind::ToolCall | SpanKind::Retrieval
-                ) =>
-                {
-                    Place::Trace
-                }
-                None => Place::Nowhere,
-            }
+            Some(agents)
         })
         .collect();
-
-    let trace_run = run_of_trace(project_id, trace_id);
-    let trace_span = run_span_of_trace(trace_id);
-    let service = waiting
-        .iter()
-        .find_map(|row| {
-            row.attributes
-                .iter()
-                .find(|(key, _)| key == SERVICE_NAME)
-                .map(|(_, name)| name.clone())
-        })
-        .unwrap_or_else(|| UNKNOWN_SERVICE.to_owned());
-    let trace_agent = cut(&service);
-    let names: HashMap<String, String> = waiting
-        .iter()
-        .filter(|row| row.kind == SpanKind::Run)
-        .map(|row| (row.span_id.clone(), cut(&row.name)))
-        .collect();
-
     let mut placed = Placed::default();
-    let mut calls: Vec<SpanRow> = Vec::new();
-    for (mut row, place) in waiting.into_iter().zip(places) {
-        let (run_id, agent, of_trace) = match place {
-            Place::Root(root) => {
-                let agent = names.get(&root).cloned().unwrap_or_default();
-                if row.span_id != root && row.kind == SpanKind::Run {
-                    row.kind = SpanKind::Span;
-                }
-                (run_of_span(project_id, trace_id, &root), agent, false)
-            }
-            Place::Landed(run_id, agent) => {
-                if row.kind == SpanKind::Run {
-                    row.kind = SpanKind::Span;
-                }
-                (run_id, agent, false)
-            }
-            Place::Trace => (trace_run, trace_agent.clone(), true),
-            Place::Nowhere => {
-                placed.dropped.push(row.span_id);
-                continue;
-            }
-            Place::Wait => {
-                placed.waiting.push(row.span_id);
-                continue;
-            }
-        };
-        row.run_id = run_id;
-        row.agent.clone_from(&agent);
-        row.units = units_of(&row);
-        placed.runs.push(Landed {
-            span_id: row.span_id.clone(),
-            run_id,
-            agent,
-        });
-        if of_trace {
-            calls.push(row);
-        } else {
-            placed.rows.push(row);
-        }
-    }
-    if !calls.is_empty() {
-        // A parent outside the run was a span no run keeps: the call hangs
-        // from the run's own span instead.
-        let mut ours: HashSet<String> = calls.iter().map(|call| call.span_id.clone()).collect();
-        ours.extend(
-            landed
+    let written_span = agent_span_of_trace(trace_id);
+    // A trace placed before has its agent's span already, and its name on
+    // the mark that placement left.
+    let settled = landed
+        .iter()
+        .find(|one| one.span_id == written_span)
+        .or_else(|| landed.first())
+        .map(|one| one.agent.clone());
+    // Else its one agent's span: of those with no agent above, the first to
+    // start, so siblings and the order they were read in change nothing.
+    let chosen = if settled.is_some() {
+        None
+    } else {
+        waiting
+            .iter()
+            .zip(&above)
+            .filter(|(row, agents)| {
+                row.kind == SpanKind::Agent && agents.as_ref().is_some_and(Vec::is_empty)
+            })
+            .map(|(row, _)| row)
+            .min_by(|a, b| (a.started_at, &a.span_id).cmp(&(b.started_at, &b.span_id)))
+            .map(|row| (row.span_id.clone(), cut(&row.name)))
+    };
+    // The trace's own agent: the one placed before, the one chosen, else the service's.
+    let own = settled
+        .clone()
+        .or_else(|| chosen.as_ref().map(|(_, name)| name.clone()))
+        .unwrap_or_else(|| {
+            let service = waiting
                 .iter()
-                .filter(|one| one.run_id == trace_run)
-                .map(|one| one.span_id.clone()),
-        );
-        ours.insert(trace_span.clone());
-        for call in &mut calls {
-            if !ours.contains(&call.parent_span_id) {
-                call.parent_span_id.clone_from(&trace_span);
+                .find_map(|row| {
+                    row.attributes
+                        .iter()
+                        .find(|(key, _)| key == SERVICE_NAME)
+                        .map(|(_, name)| name.clone())
+                })
+                .unwrap_or_else(|| UNKNOWN_SERVICE.to_owned());
+            cut(&service)
+        });
+    let has_agent = settled.is_some() || chosen.is_some();
+    let mut rows = Vec::new();
+    for (mut row, agents) in waiting.into_iter().zip(above) {
+        let Some(agents) = agents else {
+            placed.waiting.push(row.span_id);
+            continue;
+        };
+        row.agent = agents.first().cloned().unwrap_or_else(|| own.clone());
+        // What sits under an agent's span is that agent's, demoted or not.
+        let mut below = row.agent.clone();
+        if row.kind == SpanKind::Agent {
+            below = cut(&row.name);
+            if chosen.as_ref().is_none_or(|(id, _)| *id != row.span_id) {
+                row.kind = SpanKind::Span;
+                placed.nested.push(row.span_id.clone());
             }
         }
-        // Written once: the store keeps no second copy to move its end.
-        if let Some(first) = calls.first()
-            && !landed.iter().any(|one| one.span_id == trace_span)
-        {
-            let run = run_row(trace_run, &trace_agent, &trace_span, first, &calls);
-            placed.runs.push(Landed {
-                span_id: trace_span.clone(),
-                run_id: trace_run,
-                agent: trace_agent.clone(),
-            });
-            placed.rows.push(run);
+        // A trace with no agent's span hangs its roots from the one the loop writes.
+        if !has_agent && row.parent_span_id.is_empty() {
+            row.parent_span_id.clone_from(&written_span);
         }
-        placed.rows.extend(calls);
+        row.units = units_of(&row);
+        placed.placed.push(Landed {
+            span_id: row.span_id.clone(),
+            agent: below,
+        });
+        rows.push(row);
     }
+    // The first placement marks the trace with its agent's name, and writes
+    // the agent's span where the exporter sent none.
+    if settled.is_none() && !rows.is_empty() {
+        if chosen.is_none()
+            && let Some(agent) = agent_row(&own, &written_span, &rows)
+        {
+            placed.rows.push(agent);
+        }
+        placed.placed.push(Landed {
+            span_id: written_span,
+            agent: own,
+        });
+    }
+    placed.rows.extend(rows);
     placed
 }
 
@@ -359,42 +314,37 @@ fn cut(name: &str) -> String {
     name.chars().take(contract::AGENT_MAX).collect()
 }
 
-/// The span of a run of calls alone: from the first call's start to the last
-/// one's end, failed where any failed, for the user and session they name.
-fn run_row(
-    run_id: Uuid,
-    agent: &str,
-    span_id: &str,
-    first: &SpanRow,
-    calls: &[SpanRow],
-) -> SpanRow {
+/// The agent's span of a trace whose exporter sent none: from the first
+/// span's start to the last one's end, failed where any failed, for the user
+/// and session they name; none where no span landed.
+fn agent_row(agent: &str, span_id: &str, spans: &[SpanRow]) -> Option<SpanRow> {
+    let first = spans.first()?;
     let named = |pick: fn(&SpanRow) -> &String| {
-        calls
+        spans
             .iter()
             .map(pick)
             .find(|name| !name.is_empty())
             .cloned()
             .unwrap_or_default()
     };
-    let failed = calls.iter().find(|c| c.status == SpanStatus::Error);
+    let failed = spans.iter().find(|c| c.status == SpanStatus::Error);
     let mut row = SpanRow {
-        run_id,
         agent: agent.to_owned(),
         span_id: span_id.to_owned(),
         parent_span_id: String::new(),
-        kind: SpanKind::Run,
+        kind: SpanKind::Agent,
         name: agent.to_owned(),
-        started_at: calls
+        started_at: spans
             .iter()
             .map(|c| c.started_at)
             .min()
             .unwrap_or(first.started_at),
-        ended_at: calls
+        ended_at: spans
             .iter()
             .map(|c| c.ended_at)
             .max()
             .unwrap_or(first.ended_at),
-        received_at: calls
+        received_at: spans
             .iter()
             .map(|c| c.received_at)
             .min()
@@ -422,7 +372,7 @@ fn run_row(
         ..first.clone()
     };
     row.units = units_of(&row);
-    row
+    Some(row)
 }
 
 /// [`land_quiet`], every fifteen seconds, forever.
@@ -490,7 +440,6 @@ type HeldRow = (
     Vec<String>,
     Vec<Vec<u8>>,
     Vec<Vec<u8>>,
-    Option<Uuid>,
     Option<String>,
     Option<String>,
     bool,
@@ -514,7 +463,7 @@ async fn locked(
         return Ok(None);
     }
     let held = sqlx::query_as(
-        "SELECT span_id, row::text, fields, ciphertexts, nonces, run_id, agent, landing,
+        "SELECT span_id, row::text, fields, ciphertexts, nonces, agent, landing,
                 landing IS NOT NULL AND tried_at > now() - make_interval(secs => $3)
            FROM telemetry.held_spans
           WHERE project_id = $1 AND trace_id = $2
@@ -559,7 +508,7 @@ async fn land_trace(
         return Ok(());
     };
     // The lock goes with the token's commit: a landing still writing is its replica's.
-    if held.iter().any(|one| one.8) {
+    if held.iter().any(|one| one.7) {
         return Ok(());
     }
 
@@ -568,15 +517,11 @@ async fn land_trace(
     let mut sealed: HashMap<String, SealedFields> = HashMap::new();
     let mut unreadable = Vec::new();
     let mut token = None;
-    for (span_id, row, fields, ciphertexts, nonces, run_id, agent, landing, _) in held {
-        match (row, run_id, agent) {
-            (_, Some(run_id), Some(agent)) => landed.push(Landed {
-                span_id,
-                run_id,
-                agent,
-            }),
+    for (span_id, row, fields, ciphertexts, nonces, agent, landing, _) in held {
+        match (row, agent) {
+            (_, Some(agent)) => landed.push(Landed { span_id, agent }),
             // Read from text: the row's ids decode borrowed, as ClickHouse's are.
-            (Some(row), None, _) => match serde_json::from_str::<SpanRow>(&row) {
+            (Some(row), None) => match serde_json::from_str::<SpanRow>(&row) {
                 Ok(row) => {
                     // A landing begun holds its spans alone, under its token.
                     if landing.is_some() && token.is_none() {
@@ -612,7 +557,7 @@ async fn land_trace(
         .await?;
     }
     let waited = Utc::now() - chrono::Duration::seconds(ORPHAN_MAX_SECS);
-    let mut placed = place(project_id, trace_id, waiting, &landed, waited);
+    let mut placed = place(trace_id, waiting, &landed, waited);
     sqlx::query(
         "UPDATE telemetry.held_spans SET tried_at = now()
           WHERE project_id = $1 AND trace_id = $2 AND span_id = ANY($3)",
@@ -623,10 +568,9 @@ async fn land_trace(
     .execute(lane.conn())
     .await?;
     let mut taken: Vec<String> = placed
-        .runs
+        .placed
         .iter()
         .map(|one| one.span_id.clone())
-        .chain(placed.dropped.iter().cloned())
         .collect();
     if taken.is_empty() {
         lane.commit().await?;
@@ -687,49 +631,30 @@ async fn land_trace(
         &token,
     )
     .await?;
-    crate::scores::place_waiting(
-        &state.store,
-        project_id,
-        trace_id,
-        &batch.rows,
-        &placed.dropped,
-        &token,
-    )
-    .await;
+    crate::scores::demote(&state.store, project_id, trace_id, &placed.nested, &token).await;
 
     let mut lane = maintenance_scope(&state.db, TelemetryLane).await?;
-    let (mut spans, mut runs, mut agents) = (Vec::new(), Vec::new(), Vec::new());
-    for one in placed.runs {
+    let (mut spans, mut agents) = (Vec::new(), Vec::new());
+    for one in placed.placed {
         spans.push(one.span_id);
-        runs.push(one.run_id);
         agents.push(one.agent);
     }
-    // Each placed span, and a run's span the loop wrote, marked with its run.
+    // Each placed span, and an agent's span the loop wrote, marked with its agent.
     sqlx::query(
         "INSERT INTO telemetry.held_spans AS h
              (project_id, trace_id, span_id, parent_span_id, received_at,
-              row, run_id, agent, landed_at)
-         SELECT $1, $2, p.span_id, '', now(), NULL, p.run_id, p.agent, now()
-           FROM unnest($3::text[], $4::uuid[], $5::text[]) AS p(span_id, run_id, agent)
+              row, agent, landed_at)
+         SELECT $1, $2, p.span_id, '', now(), NULL, p.agent, now()
+           FROM unnest($3::text[], $4::text[]) AS p(span_id, agent)
          ON CONFLICT (project_id, trace_id, span_id) DO UPDATE
             SET row = NULL, fields = '{}', ciphertexts = '{}', nonces = '{}',
                 landing = NULL, tried_at = NULL,
-                run_id = excluded.run_id, agent = excluded.agent, landed_at = now()",
+                agent = excluded.agent, landed_at = now()",
     )
     .bind(project_id)
     .bind(trace_id)
     .bind(&spans)
-    .bind(&runs)
     .bind(&agents)
-    .execute(lane.conn())
-    .await?;
-    sqlx::query(
-        "DELETE FROM telemetry.held_spans
-          WHERE project_id = $1 AND trace_id = $2 AND span_id = ANY($3)",
-    )
-    .bind(project_id)
-    .bind(trace_id)
-    .bind(&placed.dropped)
     .execute(lane.conn())
     .await?;
     lane.commit().await?;
@@ -770,7 +695,6 @@ async fn opened(
             .collect();
         match fields {
             Ok(fields) => kept.push(SpanContent {
-                run_id: row.run_id,
                 trace_id: row.trace_id.clone(),
                 span_id: row.span_id.clone(),
                 fields,
@@ -799,7 +723,6 @@ mod tests {
             project_id: ProjectId::new(),
             received_at: now,
             units: 1,
-            run_id: Uuid::nil(),
             agent: String::new(),
             trace_id: "ab".repeat(16),
             span_id: id.into(),
@@ -837,7 +760,7 @@ mod tests {
     /// A held row reads back from Postgres's text as it was written.
     #[test]
     fn a_held_row_reads_back_as_it_was_written() {
-        let row = span("a", "", SpanKind::Run, "planner");
+        let row = span("a", "", SpanKind::Agent, "planner");
         let value = serde_json::to_value(&row).expect("encoded").to_string();
         match serde_json::from_str::<SpanRow>(&value) {
             Ok(back) => assert_eq!(back, row),
@@ -845,55 +768,64 @@ mod tests {
         }
     }
 
-    /// The topmost agent is the run, a nested one a span of it; its calls and
-    /// plain spans are its, and a span above it, in no run, is dropped.
+    /// The topmost agent is the trace's; a nested one is a plain span, and
+    /// what sits under it is named for it; a span above the agent is the
+    /// trace's too, named for its agent.
     #[test]
-    fn an_agent_with_none_above_it_is_the_run() {
-        let (project, trace) = (ProjectId::new(), "ab".repeat(16));
+    fn the_topmost_agent_names_the_trace_and_each_span_its_nearest() {
+        let trace = "ab".repeat(16);
         let placed = place(
-            &project,
             &trace,
             vec![
                 span("http", "", SpanKind::Span, "GET /chat"),
-                span("agent", "http", SpanKind::Run, "planner"),
-                span("sub", "agent", SpanKind::Run, "researcher"),
+                span("agent", "http", SpanKind::Agent, "planner"),
+                span("sub", "agent", SpanKind::Agent, "researcher"),
                 span("call", "sub", SpanKind::ModelCall, "chat gpt"),
                 span("db", "agent", SpanKind::Span, "SELECT"),
             ],
             &[],
             waited_out(),
         );
-        let run = run_of_span(&project, &trace, "agent");
-        assert_eq!(placed.dropped, vec!["http".to_owned()]);
-        assert_eq!(placed.rows.len(), 4);
-        assert!(
+        assert!(placed.waiting.is_empty());
+        assert_eq!(placed.rows.len(), 5, "every span of the trace lands");
+        let of = |id: &str| {
             placed
                 .rows
                 .iter()
-                .all(|row| row.run_id == run && row.agent == "planner")
+                .find(|r| r.span_id == id)
+                .map(|r| (r.kind, r.agent.as_str()))
+        };
+        assert_eq!(of("http"), Some((SpanKind::Span, "planner")));
+        assert_eq!(of("agent"), Some((SpanKind::Agent, "planner")));
+        assert_eq!(
+            of("sub"),
+            Some((SpanKind::Span, "planner")),
+            "a nested agent is a span, under the agent above it"
         );
-        let kind = |id: &str| placed.rows.iter().find(|r| r.span_id == id).map(|r| r.kind);
-        assert_eq!(kind("agent"), Some(SpanKind::Run));
-        assert_eq!(kind("sub"), Some(SpanKind::Span), "one run's span a run");
-        assert_ne!(
-            run,
-            run_of_span(&ProjectId::new(), &trace, "agent"),
-            "another project's trace is another run"
+        assert_eq!(of("call"), Some((SpanKind::ModelCall, "researcher")));
+        assert_eq!(of("db"), Some((SpanKind::Span, "planner")));
+        assert_eq!(placed.nested, ["sub"]);
+        assert_eq!(
+            placed
+                .rows
+                .iter()
+                .filter(|r| r.kind == SpanKind::Agent)
+                .count(),
+            1,
+            "one agent's span a trace"
         );
     }
 
-    /// Calls and retrievals with no run above them are one run, named by the
-    /// service, whose own span is written once, its calls under it; anything
-    /// else is dropped, a plan among them.
+    /// A trace with no agent's span is named by the service, which gets an
+    /// agent's span written once, its roots hanging from it.
     #[test]
-    fn calls_with_no_run_above_them_are_one_run_of_the_service() {
-        let (project, trace) = (ProjectId::new(), "ab".repeat(16));
+    fn a_trace_with_no_agent_is_the_services_with_a_span_written_once() {
+        let trace = "ab".repeat(16);
         let mut failed = span("tool", "", SpanKind::ToolCall, "search");
         failed.status = SpanStatus::Error;
         failed.error_type = "TimeoutError".into();
         failed.user_id = "u1".into();
         let placed = place(
-            &project,
             &trace,
             vec![
                 span("http", "", SpanKind::Span, "POST /ask"),
@@ -905,69 +837,145 @@ mod tests {
             &[],
             waited_out(),
         );
-        let run_span = run_span_of_trace(&trace);
-        assert_eq!(placed.dropped, vec!["http".to_owned(), "plan".to_owned()]);
-        let run = placed
+        let written = agent_span_of_trace(&trace);
+        let agent = placed
             .rows
             .iter()
-            .find(|row| row.kind == SpanKind::Run)
-            .expect("the run's own span");
+            .find(|row| row.kind == SpanKind::Agent)
+            .expect("the agent's span");
         assert_eq!(
-            (run.span_id.as_str(), run.agent.as_str()),
-            (run_span.as_str(), "checkout")
+            (agent.span_id.as_str(), agent.agent.as_str()),
+            (written.as_str(), "checkout")
         );
-        assert_eq!(run.run_id, run_of_trace(&project, &trace));
         assert_eq!(
-            (run.status, run.error_type.as_str(), run.user_id.as_str()),
+            (
+                agent.status,
+                agent.error_type.as_str(),
+                agent.user_id.as_str()
+            ),
             (SpanStatus::Error, "TimeoutError", "u1"),
-            "it fails as its calls did, for whom they name"
+            "it fails as its spans did, for whom they name"
         );
-        for id in ["found", "call", "tool"] {
-            let call = placed.rows.iter().find(|r| r.span_id == id).expect("kept");
-            assert_eq!(call.parent_span_id, run_span, "{id} hangs from the run");
-            assert_eq!(call.run_id, run.run_id);
+        for id in ["http", "tool"] {
+            let root = placed.rows.iter().find(|r| r.span_id == id).expect("kept");
+            assert_eq!(
+                root.parent_span_id, written,
+                "{id} hangs from the agent's span"
+            );
         }
+        assert!(
+            placed.rows.iter().all(|r| r.agent == "checkout"),
+            "every span is the service's"
+        );
+        assert_eq!(placed.rows.len(), 6);
 
-        // A late call, its parent waited out, joins the same run; its span is not written again.
+        // A late span, its parent waited out, joins the same trace; the span is not written again.
         let later = place(
-            &project,
             &trace,
             vec![span("late", "http", SpanKind::ModelCall, "chat gpt")],
-            &placed.runs,
+            &placed.placed,
             waited_out(),
         );
         assert_eq!(later.rows.len(), 1);
-        assert_eq!(later.rows[0].run_id, run.run_id);
+        assert_eq!(later.rows[0].agent, "checkout");
     }
 
-    /// A child landing after its run did is placed in that run.
+    /// A child landing after its parent did is named for the parent's agent.
     #[test]
-    fn a_late_child_joins_the_run_its_parent_landed_in() {
-        let (project, trace) = (ProjectId::new(), "ab".repeat(16));
-        let run = run_of_span(&project, &trace, "agent");
+    fn a_late_child_is_named_for_the_agent_its_parent_landed_under() {
+        let trace = "ab".repeat(16);
         let placed = place(
-            &project,
             &trace,
             vec![span("tool", "agent", SpanKind::ToolCall, "search")],
             &[Landed {
                 span_id: "agent".into(),
-                run_id: run,
                 agent: "planner".into(),
             }],
             waited_out(),
         );
-        assert!(placed.dropped.is_empty());
-        assert_eq!(
-            (placed.rows[0].run_id, placed.rows[0].agent.as_str()),
-            (run, "planner")
-        );
+        assert!(placed.waiting.is_empty());
+        assert_eq!(placed.rows.len(), 1);
+        assert_eq!(placed.rows[0].agent, "planner");
+        assert!(placed.nested.is_empty());
     }
 
-    /// An agent's children, sent before it ends, wait for it rather than land
-    /// as calls alone; past the wait, a call lands in the trace's run.
+    /// Two agents side by side under a request are one trace: the first to
+    /// start is its agent's span, whatever order they are read in.
+    #[test]
+    fn sibling_agents_leave_one_agents_span() {
+        let trace = "ab".repeat(16);
+        let mut second = span("b", "http", SpanKind::Agent, "writer");
+        second.started_at += chrono::Duration::seconds(1);
+        let spans = || {
+            vec![
+                span("http", "", SpanKind::Span, "GET /chat"),
+                second.clone(),
+                span("a", "http", SpanKind::Agent, "planner"),
+                span("call", "b", SpanKind::ModelCall, "chat gpt"),
+            ]
+        };
+        let mut reversed = spans();
+        reversed.reverse();
+        for waiting in [spans(), reversed] {
+            let placed = place(&trace, waiting, &[], waited_out());
+            let of = |id: &str| {
+                placed
+                    .rows
+                    .iter()
+                    .find(|r| r.span_id == id)
+                    .map(|r| (r.kind, r.agent.as_str()))
+            };
+            assert_eq!(of("a"), Some((SpanKind::Agent, "planner")));
+            assert_eq!(of("b"), Some((SpanKind::Span, "planner")));
+            assert_eq!(of("call"), Some((SpanKind::ModelCall, "writer")));
+            assert_eq!(of("http"), Some((SpanKind::Span, "planner")));
+            assert_eq!(placed.nested, ["b"]);
+        }
+    }
+
+    /// A span landing after its trace was placed is named as it would have
+    /// been beside it: a nested agent's child for that agent, a root for the
+    /// trace's, and a late agent's span is a plain span.
+    #[test]
+    fn a_late_span_is_placed_as_it_would_have_been_with_the_rest() {
+        let trace = "ab".repeat(16);
+        let first = place(
+            &trace,
+            vec![
+                span("agent", "", SpanKind::Agent, "planner"),
+                span("sub", "agent", SpanKind::Agent, "researcher"),
+            ],
+            &[],
+            waited_out(),
+        );
+        let later = place(
+            &trace,
+            vec![
+                span("call", "sub", SpanKind::ModelCall, "chat gpt"),
+                span("root", "", SpanKind::Span, "cleanup"),
+                span("other", "", SpanKind::Agent, "reviewer"),
+            ],
+            &first.placed,
+            waited_out(),
+        );
+        let of = |id: &str| {
+            later
+                .rows
+                .iter()
+                .find(|r| r.span_id == id)
+                .map(|r| (r.kind, r.agent.as_str()))
+        };
+        assert_eq!(of("call"), Some((SpanKind::ModelCall, "researcher")));
+        assert_eq!(of("root"), Some((SpanKind::Span, "planner")));
+        assert_eq!(of("other"), Some((SpanKind::Span, "planner")));
+        assert_eq!(later.rows.len(), 3, "no agent's span is written again");
+    }
+
+    /// An agent's children, sent before it ends, wait for it rather than
+    /// land under the service's name; past the wait, they land.
     #[test]
     fn children_wait_for_a_parent_not_yet_arrived() {
-        let (project, trace) = (ProjectId::new(), "ab".repeat(16));
+        let trace = "ab".repeat(16);
         let early = || {
             vec![
                 span("call", "agent", SpanKind::ModelCall, "chat gpt"),
@@ -975,22 +983,22 @@ mod tests {
             ]
         };
         let placed = place(
-            &project,
             &trace,
             early(),
             &[],
             Utc::now() - chrono::Duration::hours(1),
         );
-        assert!(placed.rows.is_empty() && placed.dropped.is_empty());
+        assert!(placed.rows.is_empty());
         assert_eq!(placed.waiting, ["call", "db"]);
 
-        let gave_up = place(&project, &trace, early(), &[], waited_out());
-        assert_eq!(gave_up.dropped, ["db"]);
+        let gave_up = place(&trace, early(), &[], waited_out());
+        assert!(gave_up.waiting.is_empty());
         assert!(
             gave_up
                 .rows
                 .iter()
-                .any(|r| r.span_id == "call" && r.run_id == run_of_trace(&project, &trace))
+                .any(|r| r.span_id == "call" && r.agent == "checkout")
         );
+        assert!(gave_up.rows.iter().any(|r| r.kind == SpanKind::Agent));
     }
 }

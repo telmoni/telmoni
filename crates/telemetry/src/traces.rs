@@ -1,21 +1,19 @@
 //! The trace list and a trace's spans, read through the one query module
-//! ([`crate::store`]). A trace is a run's record: its root span and every
-//! span under it, found by `run_id`, which every span of a run carries, and
-//! never by the wire's trace id, since a run may sit inside an application's
-//! own trace.
+//! ([`crate::store`]). A trace is one agent's execution: the agent's own span
+//! and every span under it, found by OpenTelemetry's trace id, which every
+//! span of it carries.
 //!
 //! The list is one aggregation over the project's spans in a window of days,
-//! a row per run, and its page, its count, its histogram and its download are
-//! each one read over those rows; its facets, one more beside them. A filter
-//! is a list of values, any of which admits a run, and an empty one binds as
-//! `[]` and admits every run, so one literal serves every combination; the
-//! sort is a literal chosen in code from the closed set, never text from the
-//! request.
+//! a row per trace, and its page, its count, its histogram and its download
+//! are each one read over those rows; its facets, one more beside them. A
+//! filter is a list of values, any of which admits a trace, and an empty one
+//! binds as `[]` and admits every trace, so one literal serves every
+//! combination; the sort is a literal chosen in code from the closed set,
+//! never text from the request.
 
 use chrono::{DateTime, Utc};
 use clickhouse::{Row, RowOwned, RowRead};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use telmoni_shared::{SortDirection, SpanStatus, TraceSort};
 
@@ -30,10 +28,10 @@ pub const MAX_DAYS: u16 = 360;
 pub const DEFAULT_LIMIT: u32 = 100;
 /// The most traces one answer holds.
 pub const MAX_LIMIT: u32 = 500;
-/// The most spans a trace's page shows; a run past it is shown cut short.
+/// The most spans a trace's page shows; a trace past it is shown cut short.
 pub const SPANS_MAX: u32 = 5_000;
 /// The most units of its spans a trace's page shows, a KiB of their text
-/// each: a run of wide spans is cut short before [`SPANS_MAX`], at some
+/// each: a trace of wide spans is cut short before [`SPANS_MAX`], at some
 /// 8 MiB of text.
 pub const TRACE_UNITS_MAX: u32 = 8_192;
 /// The most values one filter admits: more than a person ticks, and few
@@ -43,17 +41,17 @@ pub const FILTER_VALUES_MAX: usize = 50;
 /// before it skips to its own, so a page this deep is a read to narrow, not
 /// one to turn to.
 pub const MAX_PAGE: u32 = 1_000;
-/// How many of each facet's values the facets name, the most runs first:
+/// How many of each facet's values the facets name, the most traces first:
 /// those a person picks from, and the ones ticked already.
 pub const FACET_VALUES_MAX: usize = 50;
 /// The most traces one download holds.
 pub const EXPORT_MAX: u32 = 10_000;
 /// What narrows the list, and its count, facets, histogram and download with
-/// it. Each filter admits a run matching any of its values; an empty one
-/// admits every run.
+/// it. Each filter admits a trace matching any of its values; an empty one
+/// admits every trace.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceFilter {
-    /// The runs' agents.
+    /// The traces' agents.
     pub agents: Vec<String>,
     /// Their end users, as stored: hashed, unless the project keeps them
     /// plain.
@@ -70,25 +68,25 @@ pub struct TraceFilter {
     pub environments: Vec<String>,
     /// The releases their spans were sent from.
     pub releases: Vec<String>,
-    /// Tags, each `key:value`, which a run carries where any of its spans
+    /// Tags, each `key:value`, which a trace carries where any of its spans
     /// does.
     pub tags: Vec<String>,
-    /// Prompt names (`gen_ai.prompt.name`) a run carries where any of its
+    /// Prompt names (`gen_ai.prompt.name`) a trace carries where any of its
     /// spans does.
     pub prompts: Vec<String>,
-    /// Prompts by name and version, each `name:version`, which a run carries
-    /// where any of its spans carries both.
+    /// Prompts by name and version, each `name:version`, which a trace
+    /// carries where any of its spans carries both.
     pub prompt_versions: Vec<String>,
     /// How many days back, by the day each span arrived.
     pub days: u16,
     /// The window's prices for the spend the rows show and sort by; none prices
     /// only what calls reported.
     pub prices: crate::prices::PriceBook,
-    /// A score the runs carry, within its bounds.
+    /// A score the traces carry, within its bounds.
     pub score: Option<ScoreFilter>,
 }
 
-/// A run admitted by a score of `name` it carries, `min` to `max` where given.
+/// A trace admitted by a score of `name` it carries, `min` to `max` where given.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoreFilter {
     pub name: String,
@@ -117,21 +115,20 @@ impl Default for TraceFilter {
     }
 }
 
-/// One trace as the list reads it: a run's spans, summed. Its status is the
-/// run's own span's once that has arrived, else `error` where any span of
+/// One trace as the list reads it: its spans, summed. Its status is the
+/// agent's own span's once that has arrived, else `error` where any span of
 /// it failed and `ok` otherwise; `ended` says which.
 #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
 pub struct TraceRow {
-    /// The run.
-    #[serde(deserialize_with = "clickhouse::serde::uuid::deserialize")]
-    pub run_id: Uuid,
+    /// The trace.
+    pub trace_id: String,
     /// Its agent, the same on every span of it.
     pub agent: String,
     /// The end user, as stored; empty when none was sent.
     pub user_id: String,
     /// The session's id; empty when none was sent.
     pub session_id: String,
-    /// Whether the run's own span has arrived.
+    /// Whether the agent's own span has arrived.
     pub ended: bool,
     /// How it ended.
     #[serde(deserialize_with = "text::deserialize")]
@@ -177,7 +174,7 @@ pub struct TraceRow {
     /// The tools its calls ran, each once, sorted.
     pub tools: Vec<String>,
     /// The deployments its spans were sent from, each once, sorted: one,
-    /// unless the run crossed services deployed apart.
+    /// unless the trace crossed services deployed apart.
     pub environments: Vec<String>,
     /// The releases its spans were sent from, each once, sorted.
     pub releases: Vec<String>,
@@ -186,7 +183,7 @@ pub struct TraceRow {
     pub tags: Vec<String>,
 }
 
-/// How many runs the filter admits in the window.
+/// How many traces the filter admits in the window.
 #[derive(Debug, Row, Deserialize)]
 pub(crate) struct CountRow {
     pub(crate) total: u64,
@@ -241,18 +238,18 @@ pub struct FacetRow {
     pub facet: Facet,
     /// The value, as stored.
     pub value: String,
-    /// How many of the list's runs carry it.
+    /// How many of the list's traces carry it.
     pub listed: u64,
 }
 
-/// One bar of the histogram as the read answers it: the runs that started in
-/// it, by how they ended, their tokens, and their durations' median and 95th
-/// percentile. A bar no run started in is not a row.
+/// One bar of the histogram as the read answers it: the traces that started
+/// in it, by how they ended, their tokens, and their durations' median and
+/// 95th percentile. A bar no trace started in is not a row.
 #[derive(Debug, Clone, PartialEq, Row, Deserialize)]
 pub struct BucketRow {
     /// Where the bar starts, in milliseconds since the epoch.
     pub at_ms: i64,
-    /// Its runs that ended well.
+    /// Its traces that ended well.
     pub ok: u64,
     /// That failed.
     pub error: u64,
@@ -273,12 +270,12 @@ pub struct BucketRow {
 }
 
 /// One bar of the histogram as the console draws it: a [`BucketRow`], or a
-/// bar no run started in, whose durations are none.
+/// bar no trace started in, whose durations are none.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Bar {
     /// Where the bar starts.
     pub at: DateTime<Utc>,
-    /// Its runs that ended well.
+    /// Its traces that ended well.
     pub ok: u64,
     /// That failed.
     pub error: u64,
@@ -286,9 +283,9 @@ pub struct Bar {
     pub cancelled: u64,
     /// Their input and output tokens, summed.
     pub tokens: u64,
-    /// What their model calls cost, in US dollars, each run its own.
+    /// What their model calls cost, in US dollars, each trace its own.
     pub spend: f64,
-    /// Their durations' median, in milliseconds, where it had runs.
+    /// Their durations' median, in milliseconds, where it had traces.
     pub duration_p50_ms: Option<f64>,
     /// And 95th percentile.
     pub duration_p95_ms: Option<f64>,
@@ -297,31 +294,31 @@ pub struct Bar {
     /// And 95th percentile.
     pub time_to_first_token_p95_ms: Option<f64>,
     /// The mean of the scores given in it of the score the list is narrowed
-    /// to, on the runs it admits; none where it holds none, or the list is
+    /// to, on the traces it admits; none where it holds none, or the list is
     /// narrowed to no score.
     pub score_mean: Option<f64>,
 }
 
-/// A run's status: its own span's once that has arrived, else `error` where
-/// any span failed and `ok` otherwise.
-macro_rules! run_status {
+/// A trace's status: the agent's own span's once that has arrived, else
+/// `error` where any span failed and `ok` otherwise.
+macro_rules! trace_status {
     () => {
-        "if(countIf(kind = 'run') > 0, anyIf(status, kind = 'run'), \
+        "if(countIf(kind = 'agent') > 0, anyIf(status, kind = 'agent'), \
          if(countIf(status = 'error') > 0, 'error', 'ok'))"
     };
 }
 
-/// Whether the run's sums pass one filter, each admitting every run while
-/// it is empty: what the list keeps and the facets flag.
+/// Whether the trace's sums pass one filter, each admitting every trace
+/// while it is empty: what the list keeps and the facets flag.
 macro_rules! admits {
     (user) => {
-        "(empty({users:Array(String)}) OR has({users:Array(String)}, run_user_id))"
+        "(empty({users:Array(String)}) OR has({users:Array(String)}, trace_user_id))"
     };
     (session) => {
-        "(empty({sessions:Array(String)}) OR has({sessions:Array(String)}, run_session_id))"
+        "(empty({sessions:Array(String)}) OR has({sessions:Array(String)}, trace_session_id))"
     };
     (status) => {
-        "(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, run_status))"
+        "(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, trace_status))"
     };
     (model) => {
         "(empty({models:Array(String)}) OR hasAny(models, {models:Array(String)}))"
@@ -348,12 +345,12 @@ macro_rules! admits {
     };
 }
 
-/// What a run carries where any of its spans does, each value once and
+/// What a trace carries where any of its spans does, each value once and
 /// sorted: the deployments and releases its spans were sent from, its tags
 /// as `key:value`, the prompt names among its attributes, and each prompt by
 /// name and version, `name:version`, where one span carries both. Named
 /// apart from the columns, as the sums below are.
-macro_rules! run_carries {
+macro_rules! trace_carries {
     () => {
         concat!(
             "arraySort(groupUniqArrayIf(environment, environment != '')) AS environments, ",
@@ -369,24 +366,27 @@ macro_rules! run_carries {
     };
 }
 
-/// A run's spans summed, under names no column has, since ClickHouse
+/// A trace's spans summed, under names no column has, since ClickHouse
 /// resolves a SELECT alias before a column of the same name anywhere in the
 /// query: `any(agent) AS agent` would turn the `WHERE` on the span's agent
 /// into an aggregate, and `countIf(status = …)` into one inside another.
-macro_rules! run_sums {
+/// The trace's agent is the agent's own span's, the topmost; any span of
+/// it names that agent too but a nested agent's of another exporter's.
+macro_rules! trace_sums {
     () => {
         concat!(
-            "run_id, any(agent) AS run_agent, ",
-            "anyIf(user_id, user_id != '') AS run_user_id, ",
-            "anyIf(session_id, session_id != '') AS run_session_id, ",
-            "CAST(countIf(kind = 'run') > 0 AS Bool) AS run_ended, ",
-            run_status!(),
-            " AS run_status, ",
-            "anyIf(error_type, kind = 'run') AS run_error_type, ",
+            "trace_id, ",
+            "if(countIf(kind = 'agent') > 0, anyIf(agent, kind = 'agent'), any(agent)) AS trace_agent, ",
+            "anyIf(user_id, user_id != '') AS trace_user_id, ",
+            "anyIf(session_id, session_id != '') AS trace_session_id, ",
+            "CAST(countIf(kind = 'agent') > 0 AS Bool) AS trace_ended, ",
+            trace_status!(),
+            " AS trace_status, ",
+            "anyIf(error_type, kind = 'agent') AS trace_error_type, ",
             "min(started_at) AS first_started_at, max(ended_at) AS last_ended_at, ",
             "greatest(dateDiff('millisecond', first_started_at, last_ended_at), 0) AS duration_ms, ",
             "argMinIf(time_to_first_token, started_at, kind = 'model_call') * 1000 AS time_to_first_token_ms, ",
-            "countIf(kind != 'run_start') AS spans, countIf(kind = 'step') AS steps, ",
+            "countIf(kind != 'trace_start') AS spans, countIf(kind = 'step') AS steps, ",
             "countIf(kind = 'model_call') AS model_calls, ",
             "countIf(kind = 'tool_call') AS tool_calls, ",
             "countIf(kind = 'retrieval') AS retrievals, ",
@@ -401,7 +401,7 @@ macro_rules! run_sums {
             ", kind = 'model_call') AS spent, ",
             "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
             "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
-            run_carries!()
+            trace_carries!()
         )
     };
 }
@@ -413,26 +413,26 @@ macro_rules! window {
             "FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            // A run carrying a score of that name, within its bounds, on itself or a span.
-            "AND ({score:String} = '' OR run_id IN (SELECT run_id FROM telemetry.scores FINAL ",
+            // A trace carrying a score of that name, within its bounds, on itself or a span.
+            "AND ({score:String} = '' OR trace_id IN (SELECT trace_id FROM telemetry.scores FINAL ",
             "WHERE project_id IN {projects:Array(String)} AND name = {score:String} ",
             "AND value >= {score_min:Float64} AND value <= {score_max:Float64})) "
         )
     };
 }
 
-/// The runs the filter admits, a row each: what the list pages through,
+/// The traces the filter admits, a row each: what the list pages through,
 /// counts, buckets and downloads. The agent's filter is read off the spans,
-/// each of which names its run's agent, so another agent's run is never
-/// summed; the rest are read off the sums.
-macro_rules! runs {
+/// each of which names its agent, so another agent's trace is never summed;
+/// the rest are read off the sums.
+macro_rules! traces {
     () => {
         concat!(
             "SELECT ",
-            run_sums!(),
+            trace_sums!(),
             window!(),
             "AND (empty({agents:Array(String)}) OR has({agents:Array(String)}, agent)) ",
-            "GROUP BY run_id ",
+            "GROUP BY trace_id ",
             "HAVING ",
             admits!(user),
             " AND ",
@@ -458,10 +458,10 @@ macro_rules! runs {
 }
 
 pub(crate) use admits;
-pub(crate) use run_carries;
-pub(crate) use run_status;
-pub(crate) use run_sums;
-pub(crate) use runs;
+pub(crate) use trace_carries;
+pub(crate) use trace_status;
+pub(crate) use trace_sums;
+pub(crate) use traces;
 pub(crate) use window;
 
 /// The list's SQL with one `ORDER BY`, so every (column, direction) is a
@@ -470,9 +470,9 @@ pub(crate) use window;
 macro_rules! list_sql {
     ($order:expr) => {
         concat!(
-            "SELECT run_id, run_agent AS agent, run_user_id AS user_id, ",
-            "run_session_id AS session_id, run_ended AS ended, run_status AS status, ",
-            "run_error_type AS error_type, ",
+            "SELECT trace_id, trace_agent AS agent, trace_user_id AS user_id, ",
+            "trace_session_id AS session_id, trace_ended AS ended, trace_status AS status, ",
+            "trace_error_type AS error_type, ",
             "first_started_at AS started_at, last_ended_at AS ended_at, duration_ms, ",
             "time_to_first_token_ms, ",
             "spans, steps, model_calls, tool_calls, retrievals, errors, ",
@@ -481,10 +481,10 @@ macro_rules! list_sql {
             "cache_write_total AS cache_write_input_tokens, spent AS spend, models, tools, ",
             "environments, releases, tag_pairs AS tags ",
             "FROM (",
-            runs!(),
+            traces!(),
             ") ORDER BY ",
             $order,
-            ", started_at DESC, run_id ",
+            ", started_at DESC, trace_id ",
             "LIMIT {limit:UInt32} OFFSET {offset:UInt64}"
         )
     };
@@ -543,37 +543,37 @@ const fn list_sql(sort: TraceSort, direction: SortDirection) -> &'static str {
     }
 }
 
-/// How many runs the filter admits: the list's total, a second read beside
+/// How many traces the filter admits: the list's total, a second read beside
 /// its page, since a page past the last holds no row to carry it.
-const COUNT_SQL: &str = concat!("SELECT count() AS total FROM (", runs!(), ")");
+const COUNT_SQL: &str = concat!("SELECT count() AS total FROM (", traces!(), ")");
 
-/// The histogram: the runs the filter admits, by the bar their first span
+/// The histogram: the traces the filter admits, by the bar their first span
 /// started in. A bar is `{bucket}` milliseconds wide and starts where the
 /// reader's clock, `{shift}` milliseconds east of UTC, starts an hour or a
-/// day; a run that started before the window, its spans arriving late, or
+/// day; a trace that started before the window, its spans arriving late, or
 /// after the store's now, its clock ahead, is drawn in the bar at that end.
 /// `token_total` is named apart from `tokens`, a sum it adds up, for the
-/// reason [`run_sums!`] gives.
+/// reason [`trace_sums!`] gives.
 const HISTOGRAM_SQL: &str = concat!(
     "SELECT intDiv(toUnixTimestamp64Milli(least(greatest(first_started_at, ",
     "now64(6) - toIntervalDay({days:UInt16})), now64(6))) + {shift:Int64}, {bucket:Int64}) ",
     "* {bucket:Int64} - {shift:Int64} AS at_ms, ",
-    "countIf(run_status = 'ok') AS ok, countIf(run_status = 'error') AS error, ",
-    "countIf(run_status = 'cancelled') AS cancelled, sum(tokens) AS token_total, ",
+    "countIf(trace_status = 'ok') AS ok, countIf(trace_status = 'error') AS error, ",
+    "countIf(trace_status = 'cancelled') AS cancelled, sum(tokens) AS token_total, ",
     "sum(spent) AS spend_total, ",
     "quantile(0.5)(duration_ms) AS duration_p50_ms, ",
     "quantile(0.95)(duration_ms) AS duration_p95_ms, ",
     "quantile(0.5)(time_to_first_token_ms) AS time_to_first_token_p50_ms, ",
     "quantile(0.95)(time_to_first_token_ms) AS time_to_first_token_p95_ms ",
     "FROM (",
-    runs!(),
+    traces!(),
     ") GROUP BY at_ms ORDER BY at_ms"
 );
 
 /// A list's facets: each value of each facet, and how many of the list's
-/// rows (`$count`, of those `$holds` keeps) carry it among the runs every
+/// rows (`$count`, of those `$holds` keeps) carry it among the traces every
 /// OTHER filter admits — so a value beside a ticked one
-/// still counts what ticking it would add. Every run is summed once, its
+/// still counts what ticking it would add. Every trace is summed once, its
 /// matches kept as flags, then spread to a row per value it carries; the
 /// ticked values first, so none past the first fifty is lost, then the most
 /// rows, one more than [`FACET_VALUES_MAX`] each to say there were more.
@@ -583,15 +583,16 @@ macro_rules! facets_sql {
             "SELECT tupleElement(facet_value, 1) AS facet, tupleElement(facet_value, 2) AS value, ",
             $count,
             " AS listed ",
-            "FROM (SELECT run_id, any(agent) AS run_agent, ",
-            "anyIf(user_id, user_id != '') AS run_user_id, ",
-            "anyIf(session_id, session_id != '') AS run_session_id, ",
-            $crate::traces::run_status!(),
-            " AS run_status, ",
+            "FROM (SELECT trace_id, ",
+            "if(countIf(kind = 'agent') > 0, anyIf(agent, kind = 'agent'), any(agent)) AS trace_agent, ",
+            "anyIf(user_id, user_id != '') AS trace_user_id, ",
+            "anyIf(session_id, session_id != '') AS trace_session_id, ",
+            $crate::traces::trace_status!(),
+            " AS trace_status, ",
             "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
             "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
-            $crate::traces::run_carries!(),
-            ", toUInt8(empty({agents:Array(String)}) OR has({agents:Array(String)}, run_agent)) ",
+            $crate::traces::trace_carries!(),
+            ", toUInt8(empty({agents:Array(String)}) OR has({agents:Array(String)}, trace_agent)) ",
             "AS m_agent, ",
             "toUInt8(", $crate::traces::admits!(user), ") AS m_user, ",
             "toUInt8(", $crate::traces::admits!(session), ") AS m_session, ",
@@ -603,19 +604,19 @@ macro_rules! facets_sql {
             "toUInt8(", $crate::traces::admits!(tag), ") AS m_tag, ",
             "toUInt8(", $crate::traces::admits!(prompt), ") AS m_prompt, ",
             "toUInt8(", $crate::traces::admits!(prompt_version), ") AS m_prompt_version, ",
-            // How many filters the run fails, so a value counts where no
-            // filter but its own refuses the run: with its own flag up it
+            // How many filters the trace fails, so a value counts where no
+            // filter but its own refuses the trace: with its own flag up it
             // needs no miss, with it down that one miss alone.
             "(1 - m_agent) + (1 - m_user) + (1 - m_session) + (1 - m_status) + (1 - m_model) ",
             "+ (1 - m_tool) + (1 - m_environment) + (1 - m_release) + (1 - m_tag) ",
             "+ (1 - m_prompt) + (1 - m_prompt_version) AS misses ",
             $crate::traces::window!(),
-            "GROUP BY run_id) ",
+            "GROUP BY trace_id) ",
             "ARRAY JOIN arrayConcat(",
-            "[tuple('agent', CAST(run_agent AS String), toUInt8(misses + m_agent = 1))], ",
-            "[tuple('user', CAST(run_user_id AS String), toUInt8(misses + m_user = 1))], ",
-            "[tuple('session', CAST(run_session_id AS String), toUInt8(misses + m_session = 1))], ",
-            "[tuple('status', CAST(run_status AS String), toUInt8(misses + m_status = 1))], ",
+            "[tuple('agent', CAST(trace_agent AS String), toUInt8(misses + m_agent = 1))], ",
+            "[tuple('user', CAST(trace_user_id AS String), toUInt8(misses + m_user = 1))], ",
+            "[tuple('session', CAST(trace_session_id AS String), toUInt8(misses + m_session = 1))], ",
+            "[tuple('status', CAST(trace_status AS String), toUInt8(misses + m_status = 1))], ",
             "arrayMap(x -> tuple('model', CAST(x AS String), toUInt8(misses + m_model = 1)), models), ",
             "arrayMap(x -> tuple('tool', CAST(x AS String), toUInt8(misses + m_tool = 1)), tools), ",
             "arrayMap(x -> tuple('environment', CAST(x AS String), ",
@@ -645,24 +646,24 @@ macro_rules! facets_sql {
     };
 }
 
-/// The trace list's facets, each counting the runs that carry a value.
+/// The trace list's facets, each counting the traces that carry a value.
 const FACETS_SQL: &str = facets_sql!("count()", "");
 
 /// A trace's spans whole, in the order they started — of two that started
 /// together, the one that ended later, which holds the other — up to the one
 /// that takes their units past `{units_max}`, summed on the light columns.
-const SPANS_SQL: &str = "SELECT project_id, received_at, units, run_id, agent, trace_id, \
+const SPANS_SQL: &str = "SELECT project_id, received_at, units, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
      cost, time_to_first_token, user_id, session_id, environment, release, tags, sample_rate, \
      attributes, sent \
      FROM telemetry.spans \
-     WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
+     WHERE project_id IN {projects:Array(String)} AND trace_id = {trace:String} \
      AND span_id IN (SELECT span_id FROM (SELECT span_id, sum(units) OVER (\
      ORDER BY started_at, ended_at DESC, span_id \
      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS units_before \
      FROM (SELECT span_id, started_at, ended_at, units FROM telemetry.spans \
-     WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} \
+     WHERE project_id IN {projects:Array(String)} AND trace_id = {trace:String} \
      ORDER BY started_at, ended_at DESC, span_id LIMIT {limit:UInt32})) \
      WHERE units_before <= {units_max:UInt32}) \
      ORDER BY started_at, ended_at DESC, span_id \
@@ -707,7 +708,7 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         )
 }
 
-/// One list over a window's runs, by what it lists: its rows, its sorts, and the SQL of its three reads.
+/// One list over a window's traces, by what it lists: its rows, its sorts, and the SQL of its three reads.
 pub(crate) trait Listing {
     type Row: RowOwned + RowRead + serde::de::DeserializeOwned;
     type Sort: Copy + std::str::FromStr + std::fmt::Display + 'static;
@@ -764,7 +765,7 @@ impl<S: std::fmt::Display> Serialize for ListSort<S> {
     }
 }
 
-/// The trace list: a run a row.
+/// The trace list: a trace a row.
 pub(crate) struct Traces;
 
 impl Listing for Traces {
@@ -886,7 +887,7 @@ pub const fn bucket_seconds(days: u16) -> u32 {
 
 /// The bars of the histogram of `projects`' traces the filter admits, each
 /// `bucket_seconds` wide and starting on the reader's clock, `shift_minutes`
-/// east of UTC. A bar no run started in is not a row; [`bars`] fills it in.
+/// east of UTC. A bar no trace started in is not a row; [`bars`] fills it in.
 ///
 /// # Errors
 ///
@@ -905,8 +906,9 @@ pub async fn histogram(
         .await
 }
 
-/// The mean of the narrowing score given in each bar, on the runs the filter
-/// admits, a number's value and a yes or no's 1 or 0, by when it was given.
+/// The mean of the narrowing score given in each bar, on the traces the
+/// filter admits, a number's value and a yes or no's 1 or 0, by when it was
+/// given.
 const SCORE_MEANS_SQL: &str = concat!(
     "SELECT intDiv(toUnixTimestamp64Milli(received_at) + {shift:Int64}, {bucket:Int64}) ",
     "* {bucket:Int64} - {shift:Int64} AS at_ms, avg(value) AS mean ",
@@ -914,8 +916,8 @@ const SCORE_MEANS_SQL: &str = concat!(
     "WHERE project_id IN {projects:Array(String)} AND name = {score:String} AND is_deleted = 0 ",
     "AND data_type IN ('number', 'boolean') ",
     "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-    "AND run_id IN (SELECT run_id FROM (",
-    runs!(),
+    "AND trace_id IN (SELECT trace_id FROM (",
+    traces!(),
     ")) GROUP BY at_ms ORDER BY at_ms"
 );
 
@@ -967,7 +969,7 @@ const fn bar_start(ms: i64, bucket_ms: i64, shift_ms: i64) -> i64 {
 }
 
 /// The histogram's every bar, from the one the window opens in to the one
-/// `now_ms` falls in, those no run started in drawn empty; a bar the read
+/// `now_ms` falls in, those no trace started in drawn empty; a bar the read
 /// answered beyond either end, its clock and ours apart, is drawn too.
 #[must_use]
 pub fn bars(
@@ -1026,8 +1028,9 @@ pub fn bars(
     drawn
 }
 
-/// The spans of run `run_id` in `projects` in the order they started, up to
-/// `limit`, through the one past `units` units; none for a run not theirs.
+/// The spans of trace `trace_id` in `projects` in the order they started, up
+/// to `limit`, through the one past `units` units; none for a trace not
+/// theirs.
 ///
 /// # Errors
 ///
@@ -1035,13 +1038,13 @@ pub fn bars(
 pub async fn spans(
     store: &Store,
     projects: &Projects,
-    run_id: Uuid,
+    trace_id: &str,
     limit: u32,
     units: u32,
 ) -> clickhouse::error::Result<Vec<SpanRow>> {
     store
         .read(projects, SPANS_SQL)
-        .param("run", run_id)
+        .param("trace", trace_id)
         .param("limit", limit)
         .param("units_max", units)
         .fetch_all()
@@ -1121,14 +1124,14 @@ mod tests {
             }
         }
         assert!(SPANS_SQL.contains(PROJECTS_PARAM));
-        assert!(SPANS_SQL.contains("{run:UUID}"));
+        assert!(SPANS_SQL.contains("{trace:String}"));
         assert!(SPANS_SQL.contains("{units_max:UInt32}"));
     }
 
     /// A trace shows its spans up to the count and while their units fit, a row of none taking none.
     #[test]
     fn a_trace_shows_its_spans_while_their_count_and_units_fit() {
-        assert_eq!(shown([1, 1, 1], 5, 8), 3, "a small run whole");
+        assert_eq!(shown([1, 1, 1], 5, 8), 3, "a small trace whole");
         assert_eq!(shown([1, 1, 1, 1], 3, 8), 3, "cut at the count");
         assert_eq!(shown([4, 4, 4], 5, 8), 2, "cut where the units pass");
         assert_eq!(shown([4, 4], 5, 8), 2, "units that reach the cap fit");
@@ -1140,12 +1143,12 @@ mod tests {
         assert_eq!(shown([], 5, 8), 0);
     }
 
-    /// What a run carries where any of its spans does — its deployments,
+    /// What a trace carries where any of its spans does — its deployments,
     /// releases, tags, prompts and their versions — is summed once, apart
-    /// from the columns, and filtered by `hasAny`, so a run crossing two
+    /// from the columns, and filtered by `hasAny`, so a trace crossing two
     /// deployments answers to either.
     #[test]
-    fn what_a_run_carries_is_summed_once_and_filtered_by_any_of_it() {
+    fn what_a_trace_carries_is_summed_once_and_filtered_by_any_of_it() {
         let sql = list_sql(TraceSort::Started, SortDirection::Desc);
         for (alias, filter) in [
             (
@@ -1180,10 +1183,10 @@ mod tests {
     }
 
     /// Every facet is spread to its tuple and ranked by its own filter, in
-    /// the facets read, under the one spelling of a run's status the list and
-    /// the facets share.
+    /// the facets read, under the one spelling of a trace's status the list
+    /// and the facets share.
     #[test]
-    fn every_facet_is_counted_and_ranked_and_a_runs_status_is_spelled_once() {
+    fn every_facet_is_counted_and_ranked_and_a_traces_status_is_spelled_once() {
         for facet in Facet::all() {
             let word = facet.as_str();
             assert!(
@@ -1195,19 +1198,21 @@ mod tests {
                 "no rank for {word}"
             );
         }
-        let status = run_status!();
+        let status = trace_status!();
         assert!(list_sql(TraceSort::Started, SortDirection::Desc).contains(status));
         assert!(FACETS_SQL.contains(status));
         assert!(FACETS_SQL.contains("AS misses"));
     }
 
-    /// Each row of the list carries the class of error its run ended on,
-    /// read off the run's own span and never a call's.
+    /// Each row of the list carries the class of error its agent's span
+    /// ended on, read off that span and never a call's; and its agent is
+    /// that span's, not a nested agent's.
     #[test]
-    fn the_list_reads_the_runs_own_error_class() {
+    fn the_list_reads_the_agents_own_error_class_and_name() {
         let sql = list_sql(TraceSort::Started, SortDirection::Desc);
-        assert!(sql.contains("anyIf(error_type, kind = 'run') AS run_error_type"));
-        assert!(sql.contains("run_error_type AS error_type"));
+        assert!(sql.contains("anyIf(error_type, kind = 'agent') AS trace_error_type"));
+        assert!(sql.contains("trace_error_type AS error_type"));
+        assert!(sql.contains("anyIf(agent, kind = 'agent'), any(agent)) AS trace_agent"));
     }
 
     /// The count, the histogram and the facets read the same window under
@@ -1239,7 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn the_default_filter_is_a_week_of_every_run() {
+    fn the_default_filter_is_a_week_of_every_trace() {
         let filter = TraceFilter::default();
         assert_eq!(filter.days, DEFAULT_DAYS);
         assert!(filter.agents.is_empty() && filter.statuses.is_empty());

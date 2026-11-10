@@ -28,7 +28,7 @@ const TOKENS: ChartConfig = {
   input: { label: "Input", color: "var(--muted-foreground)" },
   output: { label: "Output", color: "var(--foreground)" },
 };
-const RUNS: ChartConfig = {
+const TRACES: ChartConfig = {
   ok: { label: "OK", color: "var(--muted-foreground)" },
   failed: { label: "Failed", color: "var(--destructive)" },
 };
@@ -173,11 +173,11 @@ export function DashboardCharts({
         kind="stacked"
       />
       <Chart
-        title="Runs"
-        summary={`${formatCount(sum((bar) => bar.ok + bar.failed))} runs, ${formatCount(
+        title="Traces"
+        summary={`${formatCount(sum((bar) => bar.ok + bar.failed))} traces, ${formatCount(
           sum((bar) => bar.failed),
         )} failed, over the window.`}
-        config={RUNS}
+        config={TRACES}
         bars={bars}
         hourly={hourly}
         format={formatCount}

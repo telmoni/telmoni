@@ -7,15 +7,15 @@ import { ChangeKind } from "@/lib/types/enums";
 import type { Read } from "./read";
 import { readLane } from "./traces";
 
-// The first run of an agent, in one environment, to carry a value its runs
-// there had not, and when that run started.
+// The first trace of an agent, in one environment, to carry a value its
+// traces there had not, and when that trace started.
 const changeFields = {
   agent: z.string(),
   /** Empty where its spans named none. */
   environment: z.string(),
   value: z.string(),
   changed_at: z.string(),
-  run_id: z.string(),
+  trace_id: z.string(),
   /** Its agent's later changes of its kind that UTC day were not marked. */
   capped: z.boolean(),
 };

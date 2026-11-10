@@ -1,9 +1,9 @@
 package telmoni_test
 
-// A run across services: Inject writes the W3C traceparent and our two
-// baggage members as sdk/fixtures/headers.json spells them, Extract reads
-// them back as a run continued here, and nothing of a continued run but its
-// steps and calls is sent.
+// A trace across services: Inject writes the W3C traceparent and our baggage
+// member as sdk/fixtures/headers.json spells them, Extract reads them back as
+// a trace continued here, and nothing of a continued trace but its steps and
+// calls is sent.
 
 import (
 	"context"
@@ -32,13 +32,12 @@ type headersFixture struct {
 	Extract []struct {
 		Name    string            `json:"name"`
 		Headers map[string]string `json:"headers"`
-		Run     *struct {
-			RunID        string `json:"run_id"`
+		Trace   *struct {
 			Agent        string `json:"agent"`
 			TraceID      string `json:"trace_id"`
 			ParentSpanID string `json:"parent_span_id"`
 			Sampled      bool   `json:"sampled"`
-		} `json:"run"`
+		} `json:"trace"`
 	} `json:"extract"`
 }
 
@@ -65,20 +64,22 @@ func TestInjectWritesTheHeadersTheFixtureSpellsBesideTheCarriersOwn(t *testing.T
 	header := http.Header{}
 	beside := http.Header{}
 	beside.Set("Baggage", fixture.Inject.Beside.Given)
-	ctx, run := h.client.Run(context.Background(), fixture.Inject.Agent, telmoni.RunOptions{})
-	stepCtx, step := run.Step(ctx, "plan")
+	ctx, tr := h.client.Trace(context.Background(), fixture.Inject.Agent, telmoni.TraceOptions{})
+	stepCtx, step := tr.Step(ctx, "plan")
 	h.client.Inject(stepCtx, header)
 	h.client.Inject(stepCtx, beside)
 	step.End()
-	run.End()
+	tr.End()
 	h.flush()
 	plan := byName(h.transport.spans(t))["plan"]
 	fill := func(template string) string {
 		return strings.NewReplacer(
 			"<trace>", plan["traceId"].(string),
 			"<span>", plan["spanId"].(string),
-			"<uuid>", run.ID(),
 		).Replace(template)
+	}
+	if plan["traceId"] != tr.TraceID() {
+		t.Errorf("the step is in trace %v, TraceID() says %s", plan["traceId"], tr.TraceID())
 	}
 	if got := header.Get("traceparent"); got != fill(fixture.Inject.Traceparent) {
 		t.Errorf("traceparent = %q, want %q", got, fill(fixture.Inject.Traceparent))
@@ -97,67 +98,70 @@ func TestInjectWritesTheHeadersTheFixtureSpellsBesideTheCarriersOwn(t *testing.T
 	}
 }
 
-func TestInjectWritesNothingOutsideARun(t *testing.T) {
+func TestInjectWritesNothingOutsideATrace(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	outside := http.Header{}
 	outside.Set("baggage", "tenant=acme")
 	h.client.Inject(context.Background(), outside)
 	if got := outside.Get("baggage"); got != "tenant=acme" || outside.Get("traceparent") != "" {
-		t.Errorf("outside a run something was written: %v", outside)
+		t.Errorf("outside a trace something was written: %v", outside)
 	}
 	h.client.Inject(context.Background(), nil)
 }
 
-func TestExtractReadsTheRunTheFixtureNamesAndNothingFromHeadersNamingNone(t *testing.T) {
+func TestExtractReadsTheTraceTheFixtureNamesAndNothingFromHeadersNamingNone(t *testing.T) {
 	fixture := loadHeaders(t)
 	h := newHarness(t, testConfig(), nil)
 	for _, given := range fixture.Extract {
 		ctx := h.client.Extract(context.Background(), headerOf(given.Headers))
-		run := telmoni.RunFromContext(ctx)
-		if given.Run == nil {
-			if run != nil {
-				t.Errorf("%s: a run was read: %s %s", given.Name, run.ID(), run.Agent())
+		tr := telmoni.TraceFromContext(ctx)
+		if given.Trace == nil {
+			if tr != nil {
+				t.Errorf("%s: a trace was read: %s %s", given.Name, tr.TraceID(), tr.Agent())
 			}
 			continue
 		}
-		if run == nil {
-			t.Errorf("%s: no run was read", given.Name)
+		if tr == nil {
+			t.Errorf("%s: no trace was read", given.Name)
 			continue
 		}
-		if run.ID() != given.Run.RunID || run.Agent() != given.Run.Agent {
-			t.Errorf("%s: read %q %q, want %q %q", given.Name, run.ID(), run.Agent(), given.Run.RunID, given.Run.Agent)
+		if tr.TraceID() != given.Trace.TraceID || tr.Agent() != given.Trace.Agent {
+			t.Errorf("%s: read %q %q, want %q %q", given.Name, tr.TraceID(), tr.Agent(), given.Trace.TraceID, given.Trace.Agent)
 		}
 		span := trace.SpanContextFromContext(ctx)
-		if span.TraceID().String() != given.Run.TraceID || span.SpanID().String() != given.Run.ParentSpanID {
-			t.Errorf("%s: under %s/%s, want %s/%s", given.Name, span.TraceID(), span.SpanID(), given.Run.TraceID, given.Run.ParentSpanID)
+		if span.TraceID().String() != given.Trace.TraceID || span.SpanID().String() != given.Trace.ParentSpanID {
+			t.Errorf("%s: under %s/%s, want %s/%s", given.Name, span.TraceID(), span.SpanID(), given.Trace.TraceID, given.Trace.ParentSpanID)
 		}
-		if span.IsSampled() != given.Run.Sampled || !span.IsRemote() {
+		if span.IsSampled() != given.Trace.Sampled || !span.IsRemote() {
 			t.Errorf("%s: sampled %t remote %t", given.Name, span.IsSampled(), span.IsRemote())
 		}
 	}
 }
 
-func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T) {
+func TestAContinuedTracesStepsAndCallsCarryTheCallersAgentUnderItsSpan(t *testing.T) {
 	caller := newHarness(t, testConfig(), nil)
 	header := http.Header{}
-	ctx, run := caller.client.Run(context.Background(), "orchestrator", telmoni.RunOptions{})
-	stepCtx, step := run.Step(ctx, "hand over")
+	ctx, tr := caller.client.Trace(context.Background(), "orchestrator", telmoni.TraceOptions{})
+	stepCtx, step := tr.Step(ctx, "hand over")
 	callerSpan := trace.SpanContextFromContext(stepCtx).SpanID().String()
 	caller.client.Inject(stepCtx, header)
 	step.End()
-	run.End()
+	tr.End()
 	caller.flush()
 	callerTrace := byName(caller.transport.spans(t))["hand over"]["traceId"].(string)
 
 	worker := newHarness(t, testConfig(), nil)
 	workerCtx := worker.client.Extract(context.Background(), header)
-	continued := telmoni.RunFromContext(workerCtx)
+	continued := telmoni.TraceFromContext(workerCtx)
 	if continued == nil {
-		t.Fatal("the worker read no run")
+		t.Fatal("the worker read no trace")
+	}
+	if continued.TraceID() != callerTrace {
+		t.Errorf("the worker continues trace %s, want the caller's %s", continued.TraceID(), callerTrace)
 	}
 	workCtx, work := continued.Step(workerCtx, "work")
-	if telmoni.RunFromContext(workCtx) != continued {
-		t.Error("the run is not found from the step's context")
+	if telmoni.TraceFromContext(workCtx) != continued {
+		t.Error("the trace is not found from the step's context")
 	}
 	_, call := continued.ModelCall(workCtx, "gpt-x", telmoni.ModelCallOptions{Provider: "openai"})
 	call.End()
@@ -170,15 +174,17 @@ func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T)
 
 	spans := worker.transport.spans(t)
 	if got := sortedNames(spans); !reflect.DeepEqual(got, []string{"chat gpt-x", "execute_tool search", "work"}) {
-		t.Fatalf("sent %v: nothing of the run itself, whose invoke_agent the caller sends", got)
+		t.Fatalf("sent %v: nothing of the trace itself, whose invoke_agent the caller sends", got)
 	}
 	for _, span := range spans {
 		if span["traceId"] != callerTrace {
 			t.Errorf("%s is in trace %v, want the caller's %s", span["name"], span["traceId"], callerTrace)
 		}
-		attributes := attributesOf(t, span)
-		if attributes["telmoni.run_id"] != run.ID() || attributes["telmoni.agent"] != "orchestrator" {
-			t.Errorf("%s carries %v %v, want the caller's run", span["name"], attributes["telmoni.run_id"], attributes["telmoni.agent"])
+		if got := attributesOf(t, span)["telmoni.agent"]; got != "orchestrator" {
+			t.Errorf("%s carries telmoni.agent %v, want the caller's", span["name"], got)
+		}
+		if _, has := span["links"]; has {
+			t.Errorf("%s is linked, want a span of the caller's trace itself", span["name"])
 		}
 	}
 	named := byName(spans)
@@ -193,8 +199,8 @@ func TestAContinuedRunsStepsAndCallsCarryTheCallersRunUnderItsSpan(t *testing.T)
 	}
 }
 
-// Uncut, ingest would refuse every span this side sends of the run.
-func TestAContinuedRunsSpansCarryItsAgentCutToItsCap(t *testing.T) {
+// Uncut, ingest would refuse every span this side sends of the trace.
+func TestAContinuedTracesSpansCarryItsAgentCutToItsCap(t *testing.T) {
 	fixture := loadHeaders(t)
 	h := newHarness(t, testConfig(), nil)
 	for _, given := range fixture.Extract {
@@ -202,25 +208,25 @@ func TestAContinuedRunsSpansCarryItsAgentCutToItsCap(t *testing.T) {
 			continue
 		}
 		ctx := h.client.Extract(context.Background(), headerOf(given.Headers))
-		_, work := telmoni.RunFromContext(ctx).Step(ctx, "work")
+		_, work := telmoni.TraceFromContext(ctx).Step(ctx, "work")
 		work.End()
 		h.flush()
 		span := byName(h.transport.spans(t))["work"]
-		if got := attributesOf(t, span)["telmoni.agent"]; got != given.Run.Agent {
-			t.Errorf("the continued run's step carries telmoni.agent %q, want it cut", got)
+		if got := attributesOf(t, span)["telmoni.agent"]; got != given.Trace.Agent {
+			t.Errorf("the continued trace's step carries telmoni.agent %q, want it cut", got)
 		}
 		return
 	}
 	t.Fatal("headers.json holds no agent past its cap")
 }
 
-func TestAContinuedRunHandsItselfOnAgainUnderTheSpanCurrentHere(t *testing.T) {
+func TestAContinuedTraceHandsItselfOnAgainUnderTheSpanCurrentHere(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	first := http.Header{}
 	first.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-	first.Set("baggage", "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot")
+	first.Set("baggage", "telmoni.agent=bot")
 	ctx := h.client.Extract(context.Background(), first)
-	continued := telmoni.RunFromContext(ctx)
+	continued := telmoni.TraceFromContext(ctx)
 	relayCtx, relay := continued.Step(ctx, "relay")
 	onwards := http.Header{}
 	h.client.Inject(relayCtx, onwards)
@@ -230,7 +236,7 @@ func TestAContinuedRunHandsItselfOnAgainUnderTheSpanCurrentHere(t *testing.T) {
 	if got := onwards.Get("traceparent"); got != "00-4bf92f3577b34da6a3ce929d0e0e4736-"+relaySpan+"-01" {
 		t.Errorf("traceparent = %q", got)
 	}
-	if got := onwards.Get("baggage"); got != "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot" {
+	if got := onwards.Get("baggage"); got != "telmoni.agent=bot" {
 		t.Errorf("baggage = %q", got)
 	}
 }
@@ -257,27 +263,27 @@ func TestABaggageValueIsEncodedAsTheGrammarAsksAndReadBack(t *testing.T) {
 // Bytes that are no UTF-8 are one U+FFFD a maximal subpart, as the other three read them.
 func TestABaggageValueThatIsNoUTF8IsReadAsTheOtherSDKsReadIt(t *testing.T) {
 	for given, want := range map[string]string{
-		"bot%E2%82%FF":                          "bot\uFFFD\uFFFD",
-		"%E2%82":                                "\uFFFD",
-		"%FF%FE":                                "\uFFFD\uFFFD",
-		"%C0%AF":                                "\uFFFD\uFFFD",
-		"%C3(":                                  "\uFFFD(",
-		"%E0%80%AF":                             "\uFFFD\uFFFD\uFFFD",
-		"%E0%9F%BF":                             "\uFFFD\uFFFD\uFFFD",
-		"%E0%A0":                                "\uFFFD",
-		"%E2%82%C0":                             "\uFFFD\uFFFD",
-		"%E2%82%7F":                             "\uFFFD\x7f",
-		"%ED%A0%80":                             "\uFFFD\uFFFD\uFFFD",
-		"%ED%9F%BF":                             "\uD7FF",
-		"%F0%8F%BF%BF":                          "\uFFFD\uFFFD\uFFFD\uFFFD",
-		"%F0%9F%98":                             "\uFFFD",
-		"%F0%9F%98%80%9F":                       "\U0001F600\uFFFD",
+		"bot%E2%82%FF":                          "bot��",
+		"%E2%82":                                "�",
+		"%FF%FE":                                "��",
+		"%C0%AF":                                "��",
+		"%C3(":                                  "�(",
+		"%E0%80%AF":                             "���",
+		"%E0%9F%BF":                             "���",
+		"%E0%A0":                                "�",
+		"%E2%82%C0":                             "��",
+		"%E2%82%7F":                             "�\x7f",
+		"%ED%A0%80":                             "���",
+		"%ED%9F%BF":                             "퟿",
+		"%F0%8F%BF%BF":                          "����",
+		"%F0%9F%98":                             "�",
+		"%F0%9F%98%80%9F":                       "\U0001F600�",
 		"%F4%8F%BF%BF":                          "\U0010FFFF",
-		"%F4%90%80%80":                          "\uFFFD\uFFFD\uFFFD\uFFFD",
-		"%F5%80":                                "\uFFFD\uFFFD",
-		"%EF%BF%BD%C3":                          "\uFFFD\uFFFD",
-		"a%E2%82%FFb%ED%A0%80c%F0%9F%98":        "a\uFFFD\uFFFDb\uFFFD\uFFFD\uFFFDc\uFFFD",
-		"%C0%AF%E0%80%AF%F4%90%80%80%F8%88%80x": "\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFD\uFFFDx",
+		"%F4%90%80%80":                          "����",
+		"%F5%80":                                "��",
+		"%EF%BF%BD%C3":                          "��",
+		"a%E2%82%FFb%ED%A0%80c%F0%9F%98":        "a��b���c�",
+		"%C0%AF%E0%80%AF%F4%90%80%80%F8%88%80x": "������������x",
 	} {
 		if got := telmoni.DecodeBaggageValue(given); got != want {
 			t.Errorf("decode %q = %+q, want %+q", given, got, want)

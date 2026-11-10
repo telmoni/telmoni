@@ -27,10 +27,9 @@ const defaultWait = 30 * time.Second
 
 // processor is the SDK's own batch processor: OpenTelemetry's batching and
 // bounded queue, without the check that skips a span whose trace is not
-// sampled, so a run inside a trace the application does not sample is still
-// sent. The queue is bounded, so a slow Telmoni never slows an agent: past its
-// size, spans are dropped and counted. A recorded run goes at once, in exports
-// of its own.
+// sampled, so a trace the sampler does not sample is still sent. The queue is
+// bounded, so a slow Telmoni never slows an agent: past its size, spans are
+// dropped and counted. A recorded trace goes at once, in exports of its own.
 type processor struct {
 	exporter *exporter
 	limits   queueLimits
@@ -50,7 +49,7 @@ type processor struct {
 	reserved int
 	dropped  int
 	flushing int
-	// opening is a run's opening queued, which goes without waiting.
+	// opening is a trace's opening queued, which goes without waiting.
 	opening   bool
 	exporting bool
 	stopped   bool
@@ -139,7 +138,7 @@ func (p *processor) OnEnd(span sdktrace.ReadOnlySpan) {
 		return
 	}
 	p.queue = append(p.queue, span)
-	if span.Name() == runStart && span.Parent().IsValid() {
+	if span.Name() == traceStart && span.Parent().IsValid() {
 		p.opening = true
 		p.signal()
 	} else if len(p.queue) >= p.limits.maxBatch {
@@ -302,7 +301,7 @@ func (p *processor) export(batch []sdktrace.ReadOnlySpan) {
 }
 
 // due is whether the worker should export without waiting; under the lock. A
-// record queued, or a run's opening, goes at once.
+// record queued, or a trace's opening, goes at once.
 func (p *processor) due() bool {
 	return p.stopped || p.flushing > 0 || p.opening || len(p.fences) > 0 || len(p.queue) >= p.limits.maxBatch
 }

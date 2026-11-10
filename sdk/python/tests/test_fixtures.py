@@ -1,5 +1,5 @@
 """The golden fixtures in ``sdk/fixtures``: the export every SDK must send for
-the same run, and what each must do with the server's answers."""
+the same trace, and what each must do with the server's answers."""
 
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ from telmoni import Config, Telmoni, Usage, contract
 from telmoni.exporter import Answer
 from telmoni.processor import Batching
 
-UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 VERSIONED = {"telemetry.sdk.version", "telemetry.distro.version"}
@@ -47,7 +46,6 @@ def normalize(export: dict[str, Any]) -> dict[str, Any]:
     for span in spans:
         assert HEX16.match(span["spanId"])
         names[span["spanId"]] = span["name"]
-    run_ids = set()
     for span in spans:
         span["traceId"] = "<trace>"
         span["spanId"] = f"<span:{names[span['spanId']]}>"
@@ -58,11 +56,6 @@ def normalize(export: dict[str, Any]) -> dict[str, Any]:
         assert end >= start
         span["startTimeUnixNano"] = span["endTimeUnixNano"] = "<time>"
         span["attributes"] = sorted(span["attributes"], key=lambda a: a["key"])
-        for attribute in span["attributes"]:
-            if attribute["key"] == "telmoni.run_id":
-                run_ids.add(attribute["value"]["stringValue"])
-                attribute["value"]["stringValue"] = "<uuid>"
-    assert len(run_ids) == 1 and UUID.match(next(iter(run_ids)))
     scope_spans[0]["spans"] = spans
     scope_spans[0]["scope"]["version"] = "<version>"
     resource = resource_spans[0]["resource"]
@@ -76,14 +69,14 @@ def normalize(export: dict[str, Any]) -> dict[str, Any]:
 
 
 def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
-    run_spec = scenario["run"]
-    with telmoni.run(
-        run_spec["agent"],
-        user_id=run_spec["user_id"],
-        session_id=run_spec["session_id"],
-        tags=run_spec["tags"],
+    trace_spec = scenario["trace"]
+    with telmoni.trace(
+        trace_spec["agent"],
+        user_id=trace_spec["user_id"],
+        session_id=trace_spec["session_id"],
+        tags=trace_spec["tags"],
     ):
-        step_spec = run_spec["inside"][0]
+        step_spec = trace_spec["inside"][0]
         with telmoni.step(step_spec["step"]):
             call_spec = step_spec["inside"][0]["model_call"]
             with telmoni.model_call(
@@ -99,16 +92,16 @@ def perform(telmoni: Telmoni, scenario: dict[str, Any]) -> None:
                     output_messages=call_spec["output_messages"],
                     time_to_first_token=call_spec["time_to_first_token"],
                 )
-        tool_spec = run_spec["inside"][1]["tool_call"]
+        tool_spec = trace_spec["inside"][1]["tool_call"]
         with telmoni.tool_call(tool_spec["name"]) as tool:
             tool.fail(tool_spec["fails_with"])
     assert telmoni.flush()
 
 
-def test_the_run_matches_the_golden_export(
+def test_the_trace_matches_the_golden_export(
     transport: FakeTransport, sleeps: list[float]
 ) -> None:
-    fixture = load_fixture("run.json")
+    fixture = load_fixture("trace.json")
     scenario = fixture["scenario"]
     telmoni = Telmoni(
         Config(
@@ -125,7 +118,7 @@ def test_the_run_matches_the_golden_export(
     finally:
         telmoni.shutdown()
     bodies = transport.bodies()
-    assert bodies, "the run was sent"
+    assert bodies, "the trace was sent"
     gathered = copy.deepcopy(bodies[0])
     gathered["resourceSpans"][0]["scopeSpans"][0]["spans"] = [
         span
@@ -145,7 +138,7 @@ def test_the_retrievals_match_the_golden_export(
     case: dict[str, Any], transport: FakeTransport
 ) -> None:
     fixture = load_fixture("retrieval.json")
-    spec = fixture["scenario"]["run"]
+    spec = fixture["scenario"]["trace"]
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
     transport.answers = [mode] * 4
     client = Telmoni(
@@ -153,7 +146,7 @@ def test_the_retrievals_match_the_golden_export(
         transport=transport,
     )
     try:
-        with client.run(
+        with client.trace(
             spec["agent"], user_id=spec["user_id"], session_id=spec["session_id"]
         ):
             for item in spec["inside"]:
@@ -182,10 +175,10 @@ def test_the_retrievals_match_the_golden_export(
     assert normalize(gathered) == fixture[case["sends"]]
 
 
-def test_a_run_is_sent_from_its_start(transport: FakeTransport) -> None:
-    fixture = load_fixture("run-start.json")
+def test_a_trace_is_sent_from_its_start(transport: FakeTransport) -> None:
+    fixture = load_fixture("trace-start.json")
     scenario = fixture["scenario"]
-    spec = scenario["run"]
+    spec = scenario["trace"]
     telmoni = Telmoni(
         Config(
             api_key="telmoni_test_key",
@@ -197,45 +190,39 @@ def test_a_run_is_sent_from_its_start(transport: FakeTransport) -> None:
         batching=Batching(schedule_delay_s=scenario["schedule_delay_ms"] / 1000),
     )
     try:
-        with telmoni.run(
+        with telmoni.trace(
             spec["agent"],
             user_id=spec["user_id"],
             session_id=spec["session_id"],
             tags=spec["tags"],
         ):
             assert transport.wait_for_openings(1, scenario["sent_within_ms"] / 1000)
-            assert not transport.requests, "nothing else before the run ends"
+            assert not transport.requests, "nothing else before the trace ends"
             first = copy.deepcopy(transport.openings)
-            assert len(first) == 1, "one body, before the run ends"
+            assert len(first) == 1, "one body, before the trace ends"
             (start,) = first[0]["resourceSpans"][0]["scopeSpans"][0]["spans"]
             assert start["startTimeUnixNano"] == start["endTimeUnixNano"]
             parent = start.pop("parentSpanId")
             normalized = normalize(first[0])
             normalized["resourceSpans"][0]["scopeSpans"][0]["spans"][0][
                 "parentSpanId"
-            ] = "<span:run>"
+            ] = "<span:agent>"
             assert normalized == fixture["first_export"]
         assert telmoni.flush()
     finally:
         telmoni.shutdown()
-    runs = [
+    agents = [
         s for s in transport.spans() if s["name"] == f"invoke_agent {spec['agent']}"
     ]
-    assert len(runs) == 1
-    (run,) = runs
-    assert run["spanId"] == parent
-    assert run["startTimeUnixNano"] == start["startTimeUnixNano"]
-    ids = {
-        a["value"]["stringValue"]
-        for s in (run, start)
-        for a in s["attributes"]
-        if a["key"] == contract.RUN_ID
-    }
-    assert len(ids) == 1
+    assert len(agents) == 1
+    (agent,) = agents
+    assert agent["spanId"] == parent
+    assert agent["traceId"] == start["traceId"]
+    assert agent["startTimeUnixNano"] == start["startTimeUnixNano"]
 
 
 def normalize_failure(span: dict[str, Any]) -> dict[str, Any]:
-    """The run's span as ``failure.json``'s README normalizes it."""
+    """The agent's span as ``failure.json``'s README normalizes it."""
     error_type = next(
         a["value"]["stringValue"]
         for a in span["attributes"]
@@ -272,18 +259,18 @@ def test_a_failure_leaves_in_full_only_under_both_locks(
     fixture = load_fixture("failure.json")
     scenario = fixture["scenario"]
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
-    # The mode to each export: a run's spans may leave in more than one.
+    # The mode to each export: a trace's spans may leave in more than one.
     transport.answers = [mode] * 4
     client = Telmoni(
         Config(api_key="k", capture_content=case["capture_content"]),
         transport=transport,
     )
     try:
-        with client.run(scenario["agent"]):
+        with client.trace(scenario["agent"]):
             pass
         assert client.flush()
         assert client.content_mode == case["content_mode"]
-        with pytest.raises(RateLimited), client.run(scenario["agent"]):
+        with pytest.raises(RateLimited), client.trace(scenario["agent"]):
             event = scenario["event"]
             trace.get_current_span().add_event(event["name"], event["attributes"])
             raise RateLimited(scenario["message"])
@@ -318,7 +305,7 @@ def test_the_mode_is_asked_before_the_first_content_it_would_send(
     try:
         for _ in range(2):
             with (
-                client.run(fixture["agent"]),
+                client.trace(fixture["agent"]),
                 client.model_call(fixture["model"], input_messages=messages),
             ):
                 pass
@@ -364,11 +351,11 @@ def test_images_are_lifted_out_of_messages_only_under_both_locks(
         transport=transport,
     )
     try:
-        a_run(client)
+        a_trace(client)
         # Twice, in two exports: each file is put once.
         for _ in range(2):
             with (
-                client.run(scenario["agent"]),
+                client.trace(scenario["agent"]),
                 client.model_call(
                     scenario["model"],
                     provider=scenario["provider"],
@@ -432,17 +419,17 @@ def test_the_mask_answers_each_content_field_only_under_both_locks(
         return str(rule["replace"])
 
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
-    # The mode to each export: a run's spans may leave in more than one.
+    # The mode to each export: a trace's spans may leave in more than one.
     transport.answers = [mode] * 4
     client = Telmoni(
         Config(api_key="k", capture_content=case["capture_content"], mask=mask),
         transport=transport,
     )
     try:
-        a_run(client)
+        a_trace(client)
         with (
             pytest.raises(Declined),
-            client.run(
+            client.trace(
                 scenario["agent"],
                 user_id=scenario["user"],
                 session_id=scenario["session"],
@@ -509,10 +496,10 @@ def test_a_mask_that_raises_is_warned_of_once_and_asked_each_export(
         Config(api_key="k", capture_content=True, mask=mask), transport=transport
     )
     try:
-        a_run(client)
+        a_trace(client)
         for _ in range(2):
             with (
-                client.run("support-bot"),
+                client.trace("support-bot"),
                 client.model_call("gpt-4o", input_messages="a secret"),
             ):
                 pass
@@ -535,9 +522,9 @@ def test_a_mask_answering_no_string_sends_the_span_without_the_field(
         transport=transport,
     )
     try:
-        a_run(client)
+        a_trace(client)
         with (
-            client.run("support-bot"),
+            client.trace("support-bot"),
             client.model_call("gpt-4o", input_messages="a secret"),
         ):
             pass
@@ -561,8 +548,8 @@ def test_a_mask_answering_a_value_unchanged_keeps_its_type(
         transport=transport,
     )
     try:
-        a_run(client)
-        with client.run("support-bot"):
+        a_trace(client)
+        with client.trace("support-bot"):
             trace.get_current_span().add_event("checked", {"count": 3, "found": True})
         assert client.flush()
     finally:
@@ -580,7 +567,7 @@ def test_a_mask_that_is_no_function_is_refused() -> None:
 
 
 def test_each_attempt_carries_this_clock_as_it_leaves() -> None:
-    """In nanoseconds, a retry its own: ingest moves a run by it."""
+    """In nanoseconds, a retry its own: ingest moves a trace by it."""
     unavailable = answer_from(load_fixture("answers/unavailable.json"))
     transport = FakeTransport([unavailable])
     before = time.time_ns()
@@ -588,7 +575,7 @@ def test_each_attempt_carries_this_clock_as_it_leaves() -> None:
         Config(api_key="k"), transport=transport, sleep=lambda _: time.sleep(0.005)
     )
     try:
-        a_run(telmoni)
+        a_trace(telmoni)
     finally:
         telmoni.shutdown()
     after = time.time_ns()
@@ -616,9 +603,9 @@ def fields_in(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
     return fields
 
 
-def a_run(telmoni: Telmoni) -> None:
-    """One empty run, sent in an export of its own."""
-    with telmoni.run("bot"):
+def a_trace(telmoni: Telmoni) -> None:
+    """One empty trace, sent in an export of its own."""
+    with telmoni.trace("bot"):
         pass
     assert telmoni.flush()
 
@@ -628,7 +615,7 @@ def test_kept(sleeps: list[float], caplog: pytest.LogCaptureFixture) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
     try:
         assert client.content_mode is None
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == []
@@ -641,8 +628,8 @@ def test_dropped_is_warned_once(caplog: pytest.LogCaptureFixture) -> None:
     transport = FakeTransport([answer_from(dropped)] * 2)
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        a_run(client)
-        a_run(client)
+        a_trace(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [dropped["warning"]]
@@ -656,7 +643,7 @@ def test_unlisted_names_the_tag_that_would_keep_it(
     transport = FakeTransport([answer_from(unlisted)])
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [unlisted["warning"]]
@@ -670,7 +657,7 @@ def test_a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it(
     transport = FakeTransport([answer_from(cardinality)])
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [cardinality["warning"]]
@@ -684,13 +671,13 @@ def test_refused_is_warned_once_and_never_retried(
     transport = FakeTransport([answer_from(refused)] * 2)
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        a_run(client)
-        a_run(client)
+        a_trace(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [refused["warning"]]
     assert fields_in(caplog) == [refused["fields"]]
-    assert len(transport.requests) == 2, "one export each run, neither sent again"
+    assert len(transport.requests) == 2, "one export each trace, neither sent again"
 
 
 def test_rate_limited_waits_retry_after_and_sends_the_same_bytes(
@@ -702,7 +689,7 @@ def test_rate_limited_waits_retry_after_and_sends_the_same_bytes(
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert sleeps == [2.0]
@@ -718,7 +705,7 @@ def test_a_retry_after_past_the_cap_waits_the_cap(
     )
     client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert sleeps == [60.0]
@@ -744,7 +731,7 @@ def test_retry_after_is_read_as_text(
     client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
     try:
         for _ in range(3):
-            a_run(client)
+            a_trace(client)
     finally:
         client.shutdown()
     assert sleeps == [60.0, 2.0, 0.0, 7.0, 60.0]
@@ -761,15 +748,15 @@ def test_unavailable_is_retried_three_times_then_dropped(
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
-        a_run(client)
-        a_run(client)
+        a_trace(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert sleeps == [1.0, 1.0]
     assert warnings_in(caplog) == [fixture["warning"]]
     assert fields_in(caplog) == [fixture["fields"]]
     assert len(transport.requests) == 4, (
-        "three for the first run, then the next run's own export"
+        "three for the first trace, then the next trace's own export"
     )
 
 
@@ -781,7 +768,7 @@ def test_a_failure_whose_last_attempt_met_no_answer_names_no_status(
     transport = FakeTransport([unavailable, unavailable, OSError("refused")])
     client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [
@@ -798,8 +785,8 @@ def test_forbidden_is_not_retried_and_the_next_batch_is_still_sent(
     transport = FakeTransport([forbidden, forbidden])
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        a_run(client)
-        a_run(client)
+        a_trace(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [fixture["warning"]]
@@ -818,7 +805,7 @@ def test_each_answer_is_warned_word_for_word(
     transport = FakeTransport([answer_from(fixture)] * 3)
     client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     warning = fixture["warning"]
@@ -834,8 +821,8 @@ def test_an_export_that_raises_is_dropped_in_the_words_plugins_read(
     transport = FakeTransport([RuntimeError("the transport broke"), kept()])
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        a_run(client)
-        a_run(client)
+        a_trace(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert warnings_in(caplog) == [
@@ -852,7 +839,7 @@ def test_a_network_failure_is_retried_with_backoff(
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert sleeps == [1.0, 2.0]
@@ -872,7 +859,7 @@ def test_an_answer_broken_before_its_status_is_retried_like_a_refused_connection
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
-        a_run(client)
+        a_trace(client)
     finally:
         client.shutdown()
     assert sleeps == [1.0, 2.0]

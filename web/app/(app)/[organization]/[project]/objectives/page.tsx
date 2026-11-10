@@ -31,7 +31,7 @@ const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFracti
 /** A burn as the page reads it: `14.4×`. */
 const burnWords = (burn: number) => amount(RuleMeasure.Burn, RuleAggregation.Avg, burn);
 
-// The project's objectives: each one agent's runs promised to succeed, or to
+// The project's objectives: each one agent's traces promised to succeed, or to
 // end inside a time, over its days, with the budget its misses have left and
 // how fast its last hour and six hours spend it. Each is the burn alert it
 // is: its incidents, pauses and windows stand under it on the Alerts page.
@@ -66,7 +66,7 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
       <PageHeader
         title="Objectives"
         headingId={OBJECTIVES_HEADING}
-        info="Each promises a share of one agent's runs succeed, or end inside a time, over its days. The runs that miss it spend its error budget; it pages when its last hour spends the budget 14.4× as fast as it lasts, and warns at 6× over its last six hours. Each counts as one of the plan's alerts, and its incidents stand under it on the Alerts page."
+        info="Each promises a share of one agent's traces succeed, or end inside a time, over its days. The traces that miss it spend its error budget; it pages when its last hour spends the budget 14.4× as fast as it lasts, and warns at 6× over its last six hours. Each counts as one of the plan's alerts, and its incidents stand under it on the Alerts page."
         action={<NewObjective projectId={project.id} connections={connections} history={history} />}
       />
       <div className="grid gap-page">
@@ -74,7 +74,7 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
         {objectives.length === 0 ? (
           <NoticeCard
             title="No objective yet."
-            body="Promise a share of an agent's runs succeed, or end inside a time, and be paged within the hour when they miss it fast enough to spend the budget early."
+            body="Promise a share of an agent's traces succeed, or end inside a time, and be paged within the hour when they miss it fast enough to spend the budget early."
           />
         ) : (
           <>
@@ -120,7 +120,7 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
                               {PERCENT.format(standing.budget_left)}
                             </span>
                             <span className="block text-xs text-muted-foreground">
-                              {standing.missed.toLocaleString("en-US")} of {standing.runs.toLocaleString("en-US")} runs
+                              {standing.missed.toLocaleString("en-US")} of {standing.traces.toLocaleString("en-US")} traces
                               missed, {standing.days} days
                             </span>
                           </>

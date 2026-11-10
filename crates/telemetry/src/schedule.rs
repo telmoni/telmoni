@@ -1,6 +1,6 @@
 //! A monitor's schedule: a period, or a five-field cron line read as Vixie
 //! cron reads it — never seconds, the `@daily` nicknames, and day-of-month
-//! *or* day-of-week where both are set — in an IANA zone, so a run due at
+//! *or* day-of-week where both are set — in an IANA zone, so a trace due at
 //! nine stays due at nine across a clock change. A fixed time a spring
 //! change skips is due at the first minute after it, and one an autumn change
 //! repeats is due once, the first time (croner's rules).
@@ -88,7 +88,7 @@ impl Schedule {
         Ok(schedule)
     }
 
-    /// The first time due after `after`, strictly: a run at its due minute
+    /// The first time due after `after`, strictly: a trace at its due minute
     /// counts for it, and the next is the one after.
     pub fn next_after(&self, after: DateTime<Utc>) -> Result<DateTime<Utc>, Fault> {
         match self {
@@ -200,7 +200,7 @@ mod tests {
         );
     }
 
-    /// Nine in London is eight UTC in summer and nine in winter, and a run at
+    /// Nine in London is eight UTC in summer and nine in winter, and a trace at
     /// its due minute makes the next one due.
     #[test]
     fn the_next_due_time_is_found_in_the_zone() {

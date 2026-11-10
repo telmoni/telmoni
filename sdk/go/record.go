@@ -14,16 +14,16 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// RunRecord is a run that has already ended, as RecordRun sends it: its id, a
-// UUID the caller gives, and everything in it, each with its own times.
-type RunRecord struct {
-	// RunID is the run's id: a UUID in its 8-4-4-4-12 form, of any version
-	// and in either case, sent in lowercase. Give a run the same id each time
-	// it is sent: the same record is then the same bytes.
-	RunID string
+// TraceRecord is a trace that has already ended, as RecordTrace sends it: its
+// id, which the caller gives, and everything in it, each with its own times.
+type TraceRecord struct {
+	// TraceID is the trace's id: 32 hex digits in either case, sent in
+	// lowercase, and not all zeros. Give a trace the same id each time it is
+	// sent: the same record is then the same bytes.
+	TraceID string
 	// Agent is the agent's name.
 	Agent string
-	// UserID, SessionID and Tags are as a live run's RunOptions has them.
+	// UserID, SessionID and Tags are as a live trace's TraceOptions has them.
 	UserID    string
 	SessionID string
 	Tags      map[string]string
@@ -31,25 +31,25 @@ type RunRecord struct {
 	// only when CaptureContent is on and the project's mode allows.
 	InputMessages  any
 	OutputMessages any
-	// Start and End are when the run began and ended. A zero time is refused:
-	// it is a time never set, not one the run had.
+	// Start and End are when the trace began and ended. A zero time is
+	// refused: it is a time never set, not one the trace had.
 	Start time.Time
 	End   time.Time
-	// Inside is what ran inside the run, in the order it ran.
+	// Inside is what ran inside the trace, in the order it ran.
 	Inside []RecordItem
-	// ErrorType, when set, marks the run failed with it as its error.type,
+	// ErrorType, when set, marks the trace failed with it as its error.type,
 	// as FailWith does.
 	ErrorType string
-	// Cancelled marks the run cancelled by the agent, as Cancel does.
+	// Cancelled marks the trace cancelled by the agent, as Cancel does.
 	Cancelled bool
-	// Scores score the run, each sent at its end; one the rules refuse is left
-	// off with one warning, the record still sent. A step's or call's score its
-	// own span the same way.
+	// Scores score the trace, each sent at its end; one the rules refuse is
+	// left off with one warning, the record still sent. A step's or call's
+	// score its own span the same way.
 	Scores []RecordedScore
 }
 
-// RecordItem is what a recorded run holds: a StepRecord, a ModelCallRecord or
-// a ToolCallRecord, or a pointer to one.
+// RecordItem is what a recorded trace holds: a StepRecord, a ModelCallRecord
+// or a ToolCallRecord, or a pointer to one.
 type RecordItem interface {
 	recordItem()
 }
@@ -64,8 +64,8 @@ type CallRecord interface {
 // StepRecord is a step that has ended, with what ran inside it, in the order
 // it ran: its calls, and its own steps, a subagent's say, up to 16 deep.
 // InputMessages and OutputMessages, a subagent's task and answer say, are
-// content as a RunRecord's are. ErrorType and Cancelled mark it as a
-// RunRecord's mark a run.
+// content as a TraceRecord's are. ErrorType and Cancelled mark it as a
+// TraceRecord's mark a trace.
 type StepRecord struct {
 	Name           string
 	InputMessages  any
@@ -82,8 +82,9 @@ type StepRecord struct {
 // tokens. Provider and Operation are as a live call's ModelCallOptions has
 // them, a blank Operation meaning chat, and Usage as its Answer has it.
 // ReasoningEffort, how hard the model was asked to reason, is sent in every
-// content mode; InputMessages and OutputMessages are content as a RunRecord's
-// are. ErrorType and Cancelled mark it as a RunRecord's mark a run.
+// content mode; InputMessages and OutputMessages are content as a
+// TraceRecord's are. ErrorType and Cancelled mark it as a TraceRecord's mark a
+// trace.
 type ModelCallRecord struct {
 	Model           string
 	Provider        string
@@ -100,8 +101,8 @@ type ModelCallRecord struct {
 }
 
 // ToolCallRecord is a tool call that has ended: its name and its times.
-// Arguments and Result are content as a RunRecord's messages are. ErrorType
-// and Cancelled mark it as a RunRecord's mark a run.
+// Arguments and Result are content as a TraceRecord's messages are. ErrorType
+// and Cancelled mark it as a TraceRecord's mark a trace.
 type ToolCallRecord struct {
 	Name      string
 	Arguments any
@@ -125,13 +126,13 @@ var errNotAnItem = errors.New("telmoni: a recorded item must be a StepRecord, a 
 // empty: ingest takes a name of spaces as given.
 var errNoName = errors.New("telmoni: a recorded step's name or model call's model cannot be empty")
 
-// stepDepthMax is how deep steps nest, a run's own at 1: past any agent's
+// stepDepthMax is how deep steps nest, a trace's own at 1: past any agent's
 // subagents, and an end to a step that holds itself through a pointer.
 const stepDepthMax = 16
 
 var errTooDeep = fmt.Errorf("telmoni: a recorded step must be nested at most %d deep", stepDepthMax)
 
-// ErrQueueFull is returned by RecordRun when the export queue has no room for
+// ErrQueueFull is returned by RecordTrace when the export queue has no room for
 // the whole record, so nothing of it was queued: flush, or wait for the queue
 // to drain, and record it again; one of more spans than the queue holds, once
 // WithBatching raises its size, its error saying so.
@@ -148,86 +149,82 @@ func (e queueTooSmall) Error() string {
 
 func (queueTooSmall) Is(target error) bool { return target == ErrQueueFull }
 
-// ErrShutdown is returned by RecordRun once the client is shut down, so
+// ErrShutdown is returned by RecordTrace once the client is shut down, so
 // nothing of the record was queued.
 var ErrShutdown = errors.New("telmoni: the client is shut down; the record was not sent")
 
-// RecordRun sends a run that has ended as the live calls would have sent it:
-// for a job that keeps its own log, or a hook run after the turn it reports.
-// It goes through the same exporter and content rules, in a trace of its own
-// named by the run's id, whatever span ctx carries. Each span's id derives
-// from the run's id and its place in the record, and the spans are queued
-// whole once built, in exports of their own, so the same record sent again is
-// the same bytes whatever else is sent meanwhile, and ingest answers it once.
+// RecordTrace sends a trace that has ended as the live calls would have sent
+// it: for a job that keeps its own log, or a hook run after the turn it
+// reports. It goes through the same exporter and content rules, in the trace
+// its id names, whatever span ctx carries. Each span's id derives from the
+// trace's id and its place in the record, and the spans are queued whole once
+// built, in exports of their own, so the same record sent again is the same
+// bytes whatever else is sent meanwhile, and ingest answers it once.
 //
-// It returns an error, sending nothing, for a blank agent, a run id that is
-// not a UUID, text past ingest's caps, a time at or before the Unix epoch or
-// 2^64 nanoseconds or more after it, an empty step or model, a nil item, a
-// step nested past 16 deep or a span that ends before it starts, ErrQueueFull
-// when the queue has no room for it, and ErrShutdown once the client is shut
-// down. A record is handed over whole, so it is refused whole, where a live
-// run's mistakes are warned of.
-func (c *Client) RecordRun(ctx context.Context, record RunRecord) error {
+// It returns an error, sending nothing, for a blank agent, a trace id that is
+// not 32 hex digits or is all zeros, text past ingest's caps, a time at or
+// before the Unix epoch or 2^64 nanoseconds or more after it, an empty step or
+// model, a nil item, a step nested past 16 deep or a span that ends before it
+// starts, ErrQueueFull when the queue has no room for it, and ErrShutdown once
+// the client is shut down. A record is handed over whole, so it is refused
+// whole, where a live trace's mistakes are warned of.
+func (c *Client) RecordTrace(ctx context.Context, record TraceRecord) error {
 	if !c.built() {
 		return errors.New("telmoni: a Client must come from New; nothing is sent")
 	}
 	if strings.TrimSpace(record.Agent) == "" {
-		return errors.New("telmoni: a run needs its agent's name")
+		return errors.New("telmoni: a trace needs its agent's name")
 	}
-	runUUID, ok := parseUUID(record.RunID)
+	traceID, ok := parseTraceID(record.TraceID)
 	if !ok {
-		return errors.New("telmoni: a recorded run's id must be a UUID")
-	}
-	// The run's id is its trace's, and a trace id of zeros is no trace at all.
-	if runUUID == [16]byte{} {
-		return errors.New("telmoni: a recorded run's id must be a UUID other than the nil UUID")
+		return errors.New("telmoni: a recorded trace's id must be 32 hex digits, not all zeros")
 	}
 	// Checked whole before anything is queued, so a record refused sends
-	// nothing rather than half a run.
+	// nothing rather than half a trace.
 	if err := checkRecord(record); err != nil {
 		return err
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	inherited := inheritedAttributes(formatUUID(runUUID), record.Agent, record.UserID, record.SessionID)
-	name, attrs := c.runOpening(record.Agent, inherited, record.Tags)
+	inherited := inheritedAttributes(record.Agent, record.UserID, record.SessionID)
+	name, attrs := c.agentOpening(record.Agent, inherited, record.Tags)
 	if record.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(record.InputMessages)))
 	}
 	if record.OutputMessages != nil {
 		attrs = append(attrs, attribute.String(attrOutputMessages, asJSON(record.OutputMessages)))
 	}
-	// Before the hold: a logger that records a run would wait on it for good.
+	// Before the hold: a logger that records a trace would wait on it for good.
 	c.warnUsage(record)
 	scores := c.recordScores(record)
-	// Before the hold too: a MarshalJSON of the caller's may record a run.
+	// Before the hold too: a MarshalJSON of the caller's may record a trace.
 	contents := recordContents(record)
 	// Queued whole or not at all: a record that outgrows the queue's room
-	// would lose its tail, the run's own span first.
-	release, err := c.processor.hold(trace.TraceID(runUUID), recordSpans(record))
+	// would lose its tail, the agent's own span first.
+	release, err := c.processor.hold(traceID, recordSpans(record))
 	if err != nil {
 		return err
 	}
 	built := false
 	defer func() { release(built) }()
-	r := &recorder{tracer: c.tracer, runID: runUUID, inherited: inherited, contents: contents, scores: scores}
+	r := &recorder{tracer: c.tracer, traceID: traceID, inherited: inherited, contents: contents, scores: scores}
 	// No span in it: whatever span ctx carries, the record's trace is its
 	// own.
 	root := trace.ContextWithSpanContext(ctx, trace.SpanContext{})
-	run, runScores := r.open(root, name, trace.SpanKindInternal, attrs, record.Start)
-	r.items(trace.ContextWithSpan(root, run), record.Inside)
-	endRecorded(run, runScores, record.End, record.ErrorType, record.Cancelled)
+	agent, agentScores := r.open(root, name, trace.SpanKindInternal, attrs, record.Start)
+	r.items(trace.ContextWithSpan(root, agent), record.Inside)
+	endRecorded(agent, agentScores, record.End, record.ErrorType, record.Cancelled)
 	built = true
 	return nil
 }
 
 // recorder opens a record's spans, each with the ids its place gives it: 0 the
-// run, then each step and call from 1 in the record's order, depth first, a
-// step before what it holds.
+// agent's, then each step and call from 1 in the record's order, depth first,
+// a step before what it holds.
 type recorder struct {
 	tracer    trace.Tracer
-	runID     [16]byte
+	traceID   trace.TraceID
 	inherited []attribute.KeyValue
 	contents  [][]attribute.KeyValue
 	scores    [][][]attribute.KeyValue
@@ -236,7 +233,7 @@ type recorder struct {
 
 // open starts the span at the next place, and is the scores it ends with.
 func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue, start time.Time) (trace.Span, [][]attribute.KeyValue) {
-	ctx := withIDs(parent, trace.TraceID(r.runID), recordedSpanID(r.runID, r.place))
+	ctx := withIDs(parent, r.traceID, recordedSpanID(r.traceID, r.place))
 	attrs = slices.Concat(attrs, r.contents[r.place])
 	scores := r.scores[r.place]
 	r.place++
@@ -249,9 +246,9 @@ func (r *recorder) open(parent context.Context, name string, kind trace.SpanKind
 }
 
 // recordContents is each span's content by its place in the record: none for
-// the run, whose own goes with its opening, then each step and call as
+// the agent's, whose own goes with its opening, then each step and call as
 // eachItem places them.
-func recordContents(record RunRecord) [][]attribute.KeyValue {
+func recordContents(record TraceRecord) [][]attribute.KeyValue {
 	contents := [][]attribute.KeyValue{nil}
 	eachItem(record.Inside, func(item RecordItem) {
 		contents = append(contents, contentOf(item))
@@ -261,7 +258,7 @@ func recordContents(record RunRecord) [][]attribute.KeyValue {
 
 // recordScores is each span's scores by its place in the record, as
 // recordContents places content, each refused one warned of.
-func (c *Client) recordScores(record RunRecord) [][][]attribute.KeyValue {
+func (c *Client) recordScores(record TraceRecord) [][][]attribute.KeyValue {
 	scores := [][][]attribute.KeyValue{c.recordedScores(record.Scores)}
 	eachItem(record.Inside, func(item RecordItem) {
 		scores = append(scores, c.recordedScores(scoresOf(item)))
@@ -317,8 +314,8 @@ func contentOf(item RecordItem) []attribute.KeyValue {
 	return out
 }
 
-// items opens what a run or a step holds under parent, each step's own under
-// it, so each ends before what holds it.
+// items opens what a trace or a step holds under parent, each step's own
+// under it, so each ends before what holds it.
 func (r *recorder) items(parent context.Context, items []RecordItem) {
 	for _, item := range items {
 		switch item := itemValue(item).(type) {
@@ -342,7 +339,7 @@ func (r *recorder) call(parent context.Context, call CallRecord) {
 		if call.ReasoningEffort != "" {
 			own = append(own, attribute.String(attrRequestReasoningLevel, call.ReasoningEffort))
 		}
-		// No warning under the hold: RecordRun gave it before.
+		// No warning under the hold: RecordTrace gave it before.
 		attrs := slices.Concat(r.inherited, own, usageAttributes(call.Usage, nil))
 		span, scores := r.open(parent, name, trace.SpanKindClient, attrs, call.Start)
 		endRecorded(span, scores, call.End, call.ErrorType, call.Cancelled)
@@ -392,14 +389,14 @@ func itemValue(item RecordItem) RecordItem {
 	return item
 }
 
-func checkRecord(record RunRecord) error {
-	if err := checkRun(record); err != nil {
+func checkRecord(record TraceRecord) error {
+	if err := checkTrace(record); err != nil {
 		return err
 	}
 	return checkItems(record.Inside, 1)
 }
 
-// checkItems checks what a run or a step holds, each step in it depth deep.
+// checkItems checks what a trace or a step holds, each step in it depth deep.
 func checkItems(items []RecordItem, depth int) error {
 	for _, item := range items {
 		switch item := itemValue(item).(type) {
@@ -424,9 +421,9 @@ func checkItems(items []RecordItem, depth int) error {
 	return nil
 }
 
-// recordSpans counts the spans a record queues: the run, then each step and
-// each call.
-func recordSpans(record RunRecord) int {
+// recordSpans counts the spans a record queues: the agent's, then each step
+// and each call.
+func recordSpans(record TraceRecord) int {
 	n := 1
 	eachItem(record.Inside, func(RecordItem) { n++ })
 	return n
@@ -434,7 +431,7 @@ func recordSpans(record RunRecord) int {
 
 // warnUsage warns of each token count the record's calls leave off, and of
 // an operation sent as chat.
-func (c *Client) warnUsage(record RunRecord) {
+func (c *Client) warnUsage(record TraceRecord) {
 	eachItem(record.Inside, func(item RecordItem) {
 		if call, ok := item.(ModelCallRecord); ok {
 			usageAttributes(call.Usage, c.warnCount)
@@ -445,8 +442,8 @@ func (c *Client) warnUsage(record RunRecord) {
 	})
 }
 
-func checkRun(record RunRecord) error {
-	err := checkCaps("run", []capped{
+func checkTrace(record TraceRecord) error {
+	err := checkCaps("trace", []capped{
 		{"Agent", record.Agent, agentMax},
 		{"UserID", record.UserID, userIDMax},
 		{"SessionID", record.SessionID, sessionIDMax},

@@ -1,10 +1,10 @@
 /**
  * A sampler that records every span and decides nothing of its own.
  *
- * A run takes the sampled flag of the trace it joins, or the configured
- * sampler's decision where it starts one, so an application sampling at a tenth
- * keeps a tenth of its own spans inside runs as outside them; the SDK's
- * processor exports recorded spans whatever the flag.
+ * A trace takes the configured sampler's decision as it opens, a continued
+ * one the caller's flag, so an application sampling at a tenth keeps a tenth
+ * of its own spans inside traces as outside them; the SDK's processor exports
+ * recorded spans whatever the flag.
  */
 
 import { TraceFlags, isSpanContextValid, trace } from '@opentelemetry/api';
@@ -16,7 +16,7 @@ export class RecordingSampler implements Sampler {
   readonly #root: Sampler;
 
   // The api gives no way to read the application's provider's sampler, as
-  // Python's does; without one given, a root run samples, as an application's
+  // Python's does; without one given, a trace samples, as an application's
   // default ParentBased(AlwaysOn) would.
   constructor(root?: Sampler) {
     this.#root = root ?? new AlwaysOnSampler();

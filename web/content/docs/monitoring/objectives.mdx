@@ -1,24 +1,24 @@
 ---
 title: "Objectives"
-description: "A project's Objectives page: each objective promises a share of one agent's runs succeed, or end inside a time, over 7, 28 or 30 days, with the error budget its misses have left, and pages when its last hour spends that budget 14.4 times as fast as it lasts."
+description: "A project's Objectives page: each objective promises a share of one agent's traces succeed, or end inside a time, over 7, 28 or 30 days, with the error budget its misses have left, and pages when its last hour spends that budget 14.4 times as fast as it lasts."
 ---
 
-An **objective** promises that a share of one agent's runs succeed — 99% of
-`support-bot`'s runs over the last 30 days — or end inside a time: 95% of
-them inside 2,000 ms. The runs that miss it — for success, those that ended
+An **objective** promises that a share of one agent's traces succeed — 99% of
+`support-bot`'s traces over the last 30 days — or end inside a time: 95% of
+them inside 2,000 ms. The traces that miss it — for success, those that ended
 in error; for a time, those that ran past it — spend its **error budget**, the share it lets miss: 1% of the
-runs for a 99% objective. A project's **Objectives** page
+traces for a 99% objective. A project's **Objectives** page
 (`/{organization}/{project}/objectives`) lists them, and any member of the
 project makes, edits, pauses, mutes and deletes them, as they do
 [alerts](/docs/monitoring/alerts).
 
 ## Burn rate
 
-How fast an objective's budget goes is its **burn**: the share of its runs
+How fast an objective's budget goes is its **burn**: the share of its traces
 that missed it over a window, over the share it allows. A burn of 1 spends
 the budget in exactly its days; at 2 it is gone in half of them.
 
-Every minute each objective's burn is read twice, from its agent's runs:
+Every minute each objective's burn is read twice, from its agent's traces:
 
 | Window | Past | Then |
 |---|---|---|
@@ -27,8 +27,8 @@ Every minute each objective's burn is read twice, from its agent's runs:
 
 The incident is told in the project's feed and to the connectors the
 objective links, as an alert's is, and resolves once both burns are under
-their thresholds again. A run counts in the window it landed in; a window with
-no run spends nothing. Each notice says what the objective promises, the burn
+their thresholds again. A trace counts in the window it landed in; a window with
+no trace spends nothing. Each notice says what the objective promises, the burn
 that crossed, and how soon the budget is gone at that rate.
 
 ## The list
@@ -37,7 +37,7 @@ that crossed, and how soon the budget is gone at that rate.
 |---|---|
 | Name | The objective, where it stands, and a link to its incidents on the Alerts page |
 | Promise | What it promises, in words |
-| Budget left | The share of its budget its runs' misses have left over its days, below 0 once spent past it, with how many of how many runs missed. On a plan that keeps the spans fewer days, over as many as it keeps |
+| Budget left | The share of its budget its traces' misses have left over its days, below 0 once spent past it, with how many of how many traces missed. On a plan that keeps the spans fewer days, over as many as it keeps |
 | Last hour | Its burn over the last hour |
 | Last six hours | Its burn over the last six hours, and, past 1, how soon the budget is gone at the faster of the two |
 
@@ -48,10 +48,10 @@ that crossed, and how soon the budget is gone at that rate.
 | Field | What it takes |
 |---|---|
 | Name | 1 to 60 characters; a project holds one alert or objective of a name, whatever its case |
-| Agent | The one agent whose runs it promises, as its spans name it |
-| Its runs | **Succeed**, or **End inside a time** |
-| Inside | For a latency, the time in milliseconds, 1 to 3,600,000. Its 50th, 90th and 99th percentile run durations over the last 14 whole days are offered as buttons, each saying what it replaces |
-| Promised | The share of its runs, 50% to 99.99% |
+| Agent | The one agent whose traces it promises, as its spans name it |
+| Its traces | **Succeed**, or **End inside a time** |
+| Inside | For a latency, the time in milliseconds, 1 to 3,600,000. Its 50th, 90th and 99th percentile trace durations over the last 14 whole days are offered as buttons, each saying what it replaces |
+| Promised | The share of its traces, 50% to 99.99% |
 | Over | The last 7, 28 or 30 days |
 | Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |
 | Connectors | The project's Slack channels and webhooks it tells, as an [alert's](/docs/monitoring/alerts#making-an-alert) do |

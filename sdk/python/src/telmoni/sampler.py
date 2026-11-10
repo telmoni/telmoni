@@ -1,10 +1,10 @@
 """A sampler that records every span and decides nothing of its own.
 
-A run takes the sampled flag of the trace it joins. Where it starts a trace,
-it takes the decision the application's own sampler gives it, so an
-application sampling at a tenth keeps a tenth of its own spans inside runs as
-outside them. Nothing is ever dropped here: the SDK's processor exports
-recorded spans whether the flag is set or not.
+A trace of its own takes the decision of the sampler configured, else the
+application's own, so an application sampling at a tenth keeps a tenth of its
+own spans inside traces as outside them; a continued trace, and every span
+inside one, takes its parent's sampled flag. Nothing is ever dropped here: the
+SDK's processor exports recorded spans whether the flag is set or not.
 """
 
 from __future__ import annotations

@@ -16,15 +16,15 @@ def test_a_tool_call_carries_the_conventions_names(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot", user_id="user") as run,
+        telmoni.trace("bot", user_id="user") as trace,
         telmoni.tool_call("search", arguments={"q": "weather"}) as tool,
     ):
         tool.returned({"temp": 21})
     assert telmoni.flush()
     (span,) = tools(transport)
     assert span["name"] == "execute_tool search" and span["kind"] == 1
+    assert span["traceId"] == trace.trace_id
     assert attributes_of(span) == {
-        "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
         "user.id": "user",
         "gen_ai.operation.name": "execute_tool",
@@ -38,7 +38,7 @@ def test_a_tool_call_carries_the_conventions_names(
 def test_a_failing_tool_records_its_error_class(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         try:
             with telmoni.tool_call("search"):
                 raise TimeoutError("took 30 s")
@@ -57,7 +57,7 @@ def test_a_tool_name_past_ingests_cap_is_cut_warned_once(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ingest refuses a tool call named past 145 characters."""
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         for name in ("t" * 146, "t" * 146, "t" * 145):
             with telmoni.tool_call(name):
                 pass
@@ -79,7 +79,7 @@ def test_the_tool_call_decorator(telmoni: Telmoni, transport: FakeTransport) -> 
     def search(q: str) -> str:
         return q[::-1]
 
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         assert search("abc") == "cba"
     assert telmoni.flush()
     assert len(tools(transport)) == 1
@@ -88,7 +88,7 @@ def test_the_tool_call_decorator(telmoni: Telmoni, transport: FakeTransport) -> 
 def test_a_scope_entered_again_while_open_refuses_and_keeps_its_span(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         search = telmoni.tool_call("search")
         with search, pytest.raises(RuntimeError, match="this scope is open"):
             search.__enter__()
@@ -112,9 +112,9 @@ def test_content_that_will_not_serialize_never_raises(
     deep: list[object] = []
     for _ in range(10_000):
         deep = [deep]
-    with telmoni.run("bot"), telmoni.tool_call("search", arguments=cyclic) as tool:
+    with telmoni.trace("bot"), telmoni.tool_call("search", arguments=cyclic) as tool:
         tool.returned([Unprintable()])
-    with telmoni.run("bot"), telmoni.tool_call("search", arguments=deep) as tool:
+    with telmoni.trace("bot"), telmoni.tool_call("search", arguments=deep) as tool:
         # Past 4,300 digits, json and str() both refuse an int.
         tool.returned(10**5000)
     assert telmoni.flush()

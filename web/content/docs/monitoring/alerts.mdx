@@ -1,13 +1,13 @@
 ---
 title: "Alerts"
-description: "A project's Alerts page: every alert — a measure of the project's runs, steps or calls, or of its scores, over a window against its thresholds, or its change from the window before — with where its notices go, its maintenance windows and the incidents it opened, made, edited, paused, muted and deleted there, its incidents acknowledged or resolved by any member."
+description: "A project's Alerts page: every alert — a measure of the project's traces, steps or calls, or of its scores, over a window against its thresholds, or its change from the window before — with where its notices go, its maintenance windows and the incidents it opened, made, edited, paused, muted and deleted there, its incidents acknowledged or resolved by any member."
 ---
 
 An **alert** watches a measure of a project's spans over the last hour, day
 or week against an alert threshold and, if you give one, a warning threshold
-met first: the share of runs that failed, the p95 duration of model calls,
-the tokens they used, the most a run spent, the most times a run called one
-tool in a row, the runs left open, the average of a
+met first: the share of traces that failed, the p95 duration of model calls,
+the tokens they used, the most a trace spent, the most times a trace called one
+tool in a row, the traces left open, the average of a
 [score](/docs/monitoring/scores) — or its change from the window before, so a
 drop opens an incident. It is evaluated every minute, a
 [starter alert](#starter-alerts) every five.
@@ -22,7 +22,7 @@ notice.
 A project with no alert opens **Alerts** on a guide: where its alerts go
 first, Slack or a webhook on the **Connectors** page, ticked once the project
 has one, and then what to watch: the three [starter alerts](#starter-alerts)
-its first run makes, and more with **New alert**.
+its first trace makes, and more with **New alert**.
 
 Any member of the project, whatever their role, makes, edits, pauses, mutes
 and deletes its alerts, and acknowledges and resolves its incidents, each
@@ -85,8 +85,8 @@ resolved ones may not show. Each says:
 | Status | **Open**; **Acknowledged**, by whom and when; **Resolved** by a member, or **Recovered** where its alert came back inside its thresholds, and when |
 | Opened | When it opened, and how often it reopened |
 | Told | Where its notices went: the feed, then each connector they were sent to; one the project has removed since says so |
-| Run | The run its last notice showed, a link to the run's trace |
-| Changed | What the alert's agents [changed to](#what-changed-before-it) in the 24 hours before it opened, each a link to the run that first carried it; nothing where nothing changed |
+| Trace | The trace its last notice showed, a link to it |
+| Changed | What the alert's agents [changed to](#what-changed-before-it) in the 24 hours before it opened, each a link to the trace that first carried it; nothing where nothing changed |
 
 **Acknowledge** takes an open incident, and its reminders stop. **Resolve**
 ends it by hand, told to its alert's connectors as a recovery is; an alert
@@ -106,7 +106,7 @@ the incident it is in. What each notice says is on
 
 An incident names each [change](/docs/monitoring/traces#changes) its alert's
 agents made in the 24 hours before it opened: a release, a model or a
-prompt's version their runs had not carried, and how long before, as
+prompt's version their traces had not carried, and how long before, as
 *release 2026.11.3 in production, 14 minutes before*. The newest stands
 first, 20 at most, and the incident says where there were more. Nothing is
 inferred: Telmoni says what changed and when, and whether it broke anything
@@ -129,7 +129,7 @@ is yours to judge.
 - **Only what is marked.** A change past its agent's 24 of a kind in a UTC
   day is marked nowhere, so it is not named here either; the 24th says its
   day marked no more.
-- **As long as its runs are kept.** A change goes with its run's day once
+- **As long as its traces are kept.** A change goes with its trace's day once
   the project's [retention](/docs/workspace/data-retention) passes it, so an
   old incident names fewer.
 
@@ -148,15 +148,15 @@ project's feed alone.
 | Field | What it takes |
 |---|---|
 | Name | 1 to 60 characters; a project holds one alert of a name, whatever its case |
-| Reads | Runs, steps, model calls, tool calls or retrievals |
-| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on runs: what each run's model calls cost, read from the calls as they land, so an alert on it tells while the run is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)); **Steps**, on runs: each run's steps; **Repeats**, on runs: the most times in a row each run called one tool; **Stalled**, on runs: the runs left open ([loops and stalls](#loops-and-stalls)); **Score**, on runs: every [score](/docs/monitoring/scores) of the name you give, 1 to 64 characters, the project holds — your code's and its members' — a number's value, a yes as 1 and a no as 0, each once as it stands, counted in the window its last change landed in — a score given again or taken back moves to then — one taken back left out and a category never read |
-| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; a run's cost as the most a run spent — an alert tells, and the SDKs' [guard](/docs/api/sdks#the-guard) is what stops a run at its cap — the average a run spent, or what the runs spent in all; a run's steps as the most a run took, their p95, p99, p90, p50 or average; repeats as the most; stalled runs as how many; and scores' average, p50, p90, p95, p99, highest, or how many |
+| Reads | Traces, steps, model calls, tool calls or retrievals |
+| Measure | **Count**, how many there were; **Failures**, those that ended in error; **Duration**; **Tokens**, on model calls; **Cost**, on traces: what each trace's model calls cost, read from the calls as they land, so an alert on it tells while the trace is still going ([what a call cost](/docs/api/ingest#what-a-call-cost)); **Steps**, on traces: each trace's steps; **Repeats**, on traces: the most times in a row each trace called one tool; **Stalled**, on traces: the traces left open ([loops and stalls](#loops-and-stalls)); **Score**, on traces: every [score](/docs/monitoring/scores) of the name you give, 1 to 64 characters, the project holds — your code's and its members' — a number's value, a yes as 1 and a no as 0, each once as it stands, counted in the window its last change landed in — a score given again or taken back moves to then — one taken back left out and a category never read |
+| Folded as | How the measure is read over the window: a count; failures as how many or as the share that failed; a duration's p95, p99, p90, p50, average or total; tokens' average or total; a trace's cost as the most a trace spent — an alert tells, and the SDKs' [guard](/docs/api/sdks#the-guard) is what stops a trace at its cap — the average a trace spent, or what the traces spent in all; a trace's steps as the most a trace took, their p95, p99, p90, p50 or average; repeats as the most; stalled traces as how many; and scores' average, p50, p90, p95, p99, highest, or how many |
 | Window | The last hour, day or week, or the calendar month so far, from its first at midnight UTC; **Stalled** takes the last hour, day or week alone |
 | Read as | Its value; or its change from the window of the same length before it, in percent of that window's value, so a drop is below 0 — the average relevance score down a fifth on the day before is −20% — and none where either window held nothing, or the one before 0; a count of an empty window is 0, so a stream that stops reads as −100%. Not on **This month**, which has no window of its length before it |
-| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a run's cost, read from its calls; tag, each `key:value`, on a run's cost alone, a run passing where any of its spans carries it; tool on tool calls; source on retrievals, the vector store or memory each searched; and the status a span ended with, on all but a cost, steps, repeats and stalls, which are read before a run has a status of its own. None on a score, which names no agent, model or status of its own. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
+| Filters | Agent, environment and release on every kind; model and provider on model calls, and on a trace's cost, read from its calls; tag, each `key:value`, on a trace's cost alone, a trace passing where any of its spans carries it; tool on tool calls; source on retrievals, the vector store or memory each searched; and the status a span ended with, on all but a cost, steps, repeats and stalls, which are read before a trace has a status of its own. None on a score, which names no agent, model or status of its own. Separate a field's values with commas, and put a value that holds one between double quotes: a span passes a field it carries any of the values of, and passes the alert when it passes every field filled |
 | Compared as | How the value is compared: above, at or above, below, at or below, equal to, or not equal to |
 | Alert when | The alert threshold under that comparison: in milliseconds for a duration, as a percentage for the share failed, in US dollars for a cost, and as a percentage for a change, below 0 for a drop: **Below** −20 alerts on a fall of more than a fifth |
-| From its history | Where the alert reads one agent, or every agent, and filters by nothing else: the 50th, 90th and 99th percentiles of what that agent usually does, read from the hourly totals of the last 14 whole UTC days, so they change once a night. For a duration, its spans' own durations; for tokens folded as an average, an hour's tokens a model call, and as a total over the last hour, an hour's tokens; for a run's cost totalled over the last hour, an hour's spend; and for failures folded as the share that failed over the last hour, the share of an hour's spans that failed, in whole percents up. Each percentile is a button that puts it in **Alert when**, and the line under them says what it replaces |
+| From its history | Where the alert reads one agent, or every agent, and filters by nothing else: the 50th, 90th and 99th percentiles of what that agent usually does, read from the hourly totals of the last 14 whole UTC days, so they change once a night. For a duration, its spans' own durations; for tokens folded as an average, an hour's tokens a model call, and as a total over the last hour, an hour's tokens; for a trace's cost totalled over the last hour, an hour's spend; and for failures folded as the share that failed over the last hour, the share of an hour's spans that failed, in whole percents up. Each percentile is a button that puts it in **Alert when**, and the line under them says what it replaces |
 | Warn when | A warning threshold under the same comparison, met before the alert's: below it for above, above it for below. Optional, and none for equal to or not equal to |
 | No data | A window holding nothing to read is read as 0; keeps the alert's last severity; is shown as **No data**; or is shown so and told once a whole window has passed with none. A window of no score, and a change with nothing to compare, is no 0, so neither takes **Read as 0** unless the alert counts |
 | Notify again | Every 1 to 10,080 minutes while an incident holds at one severity and nobody has acknowledged it; empty for never |
@@ -170,11 +170,11 @@ question, and it is evaluated again within a minute.
 
 ### A budget
 
-A budget is an alert on what the runs spent in all over **This month**: on
-runs, measured as **Cost**, folded as what the runs spent, its alert
+A budget is an alert on what the traces spent in all over **This month**: on
+traces, measured as **Cost**, folded as what the traces spent, its alert
 threshold the budget and its warning threshold where you want to hear first,
-80% of it say, for the project or, with a tag filter, for the runs one team's
-tag names, each run counted as the runs its [sample
+80% of it say, for the project or, with a tag filter, for the traces one team's
+tag names, each trace counted as the traces its [sample
 rate](/docs/api/ingest#what-is-dropped-at-the-door) stands for where a plan
 sampled it. Without a tag it reads the month
 from the hourly totals, which outlive a retention shorter than a month. Its
@@ -184,60 +184,60 @@ budget opens its month again on the first, at midnight UTC.
 
 ### Loops and stalls
 
-An alert on **Repeats** reads each run's tool calls in the order they started
+An alert on **Repeats** reads each trace's tool calls in the order they started
 and counts the longest stretch of one tool's name called back to back.
-Whatever the run does between two of them, a model call or a step, breaks no
+Whatever the trace does between two of them, a model call or a step, breaks no
 stretch, so an agent that asks its model and calls `search` again, twelve
 times over, is a stretch of 12; calls that start at the same moment, as a
 model's parallel tool calls do, count as back to back. Folded as the most, its
 alert threshold is the stretch you call a loop. An alert on **Steps** counts
-each run's steps. Both read every run with a span in the window whole, from a
-day before the window on, and as its spans land, so a run still going is read
+each trace's steps. Both read every trace with a span in the window whole, from a
+day before the window on, and as its spans land, so a trace still going is read
 as far as it has gone, and one that loops tells before it ends.
 
-An alert on **Stalled** counts the runs whose spans have landed and whose own
-span, which the SDK sends as the run ends, has not, quiet longer than the
-window: on the last hour, each run whose last span landed one to two hours ago
-and that never ended. The SDKs send a run's opening as it opens, so a run
-that stops before any step of it lands still counts. A run is counted so for
-one window, then left out, so the
+An alert on **Stalled** counts the traces whose spans have landed and whose
+agent's own span, which the SDK sends as the trace ends, has not, quiet longer
+than the window: on the last hour, each trace whose last span landed one to
+two hours ago and that never ended. The SDKs send a trace's opening as it
+opens, so a trace that stops before any step of it lands still counts. A trace
+is counted so for one window, then left out, so the
 alert recovers once its stalls are that old, or as soon as their own spans
-land. A run that waits longer than the window, on a person say, counts too:
-choose a window longer than your runs wait. Runs from another exporter
-([frameworks](/docs/api/frameworks)) land whole, their own span with them, so
-none reads as stalled.
+land. A trace that waits longer than the window, on a person say, counts too:
+choose a window longer than your traces wait. Traces from another exporter
+([frameworks](/docs/api/frameworks)) land whole, their agent's span with them,
+so none reads as stalled.
 
-A notice of a loop counts the runs of its agent that called its tool as often:
-"3 runs of support-agent called search 12 or more times in a row, this one 15".
+A notice of a loop counts the traces of its agent that called its tool as often:
+"3 traces of support-agent called search 12 or more times in a row, this one 15".
 
 ## Starter alerts
 
-A project's first run makes three alerts for it, so it is watched before
+A project's first trace makes three alerts for it, so it is watched before
 anyone writes one:
 
 | Starter | What it reads | Alerts | Warns |
 |---|---|---|---|
-| Failing runs | The share of the last hour's runs that ended in error | Above 10% | Above 5% |
-| Looping runs | The most times in a row a run of the last hour called one tool ([loops and stalls](#loops-and-stalls)) | At 10 or more | — |
-| Stalled runs | The runs left open longer than the last hour | At 1 or more | — |
+| Failing traces | The share of the last hour's traces that ended in error | Above 10% | Above 5% |
+| Looping traces | The most times in a row a trace of the last hour called one tool ([loops and stalls](#loops-and-stalls)) | At 10 or more | — |
+| Stalled traces | The traces left open longer than the last hour | At 1 or more | — |
 
-Each reads every agent of the project, reads a window with no run as 0, tells
+Each reads every agent of the project, reads a window with no trace as 0, tells
 the project's feed alone until you link a connector to it, and is evaluated
 every five minutes rather than every minute. Each says **Starter** beside its
 severity and is edited, paused, muted and deleted as any alert is; one deleted
-is never made again. A run's cost and duration differ too much from one agent
+is never made again. A trace's cost and duration differ too much from one agent
 to the next for one number to start from, so no starter reads them: start
 them from an agent's history with **New alert**, or keep an
 [objective](/docs/monitoring/objectives).
 
-Once the project has run for 14 days, **Failing runs** takes its own history,
+Once the project has run for 14 days, **Failing traces** takes its own history,
 as **From its history** offers it: its alert threshold the 99th percentile of
-the share of an hour's runs that failed over the last 14 whole UTC days, in
+the share of an hour's traces that failed over the last 14 whole UTC days, in
 whole percents up and at least 1%, and its warning the 90th, where that is
-lower. A project with no run in those days keeps 10% and 5%, and one you
+lower. A project with no trace in those days keeps 10% and 5%, and one you
 edited first keeps yours. It is set once.
 
-The project's feed is told what its first run made, and the making and the
+The project's feed is told what its first trace made, and the making and the
 threshold its history sets are recorded in the
 [audit log](/docs/workspace/audit-log) as `service:starter-alerts`. On a
 deployment that sells plans, a starter counts in the plan's alerts as any
@@ -265,7 +265,7 @@ one early.
 
 ## From a trace
 
-A notice that opens, reopens or raises an incident names the run that best
+A notice that opens, reopens or raises an incident names the trace that best
 shows it — the latest that failed, the slowest call, the one with the most
 tokens, the one that spent the most, the one with the most steps, the one that
 called one tool the most times in a row, the one quiet longest, or the one
@@ -273,5 +273,5 @@ scored lowest for an alert below its threshold and highest above it, as the
 alert measures, and the latest for a count — and links its trace. That trace's page links back, beside its
 tags, to each incident whose notices showed it, under its alert on the Alerts
 page, even an incident too old for the page's 200. An incident keeps the last
-twenty runs its notices showed, so a run shown before those links back no
+twenty traces its notices showed, so a trace shown before those links back no
 more.

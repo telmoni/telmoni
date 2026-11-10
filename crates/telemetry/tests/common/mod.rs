@@ -688,7 +688,7 @@ pub(crate) struct LoggedNotice {
 fn carried(notice: &Notice<'_>) -> Option<(Uuid, Option<String>)> {
     notice
         .incident
-        .map(|incident| (incident.id, incident.run_url.map(str::to_owned)))
+        .map(|incident| (incident.id, incident.trace_url.map(str::to_owned)))
 }
 
 /// Notifications as this module holds it: every notice handed through the
@@ -1290,7 +1290,7 @@ pub(crate) fn run_of(
     n: u64,
 ) -> [SpanRow; 3] {
     let ids = |row: SpanRow, span: u64, parent: Option<u64>| SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         agent: "support-bot".into(),
         span_id: format!("{span:016x}"),
         parent_span_id: parent.map(|p| format!("{p:016x}")).unwrap_or_default(),
@@ -1313,7 +1313,7 @@ pub(crate) fn run_of(
                 } else {
                     String::new()
                 },
-                ..span(project, SpanKind::Run, "support-bot", 2_000)
+                ..span(project, SpanKind::Agent, "support-bot", 2_000)
             },
             n,
             None,
@@ -1363,9 +1363,8 @@ pub(crate) fn received(
         project_id: project_id.clone(),
         received_at: at,
         units: 1,
-        run_id: Uuid::new_v4(),
         agent: "nightly-report".into(),
-        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".into(),
+        trace_id: Uuid::new_v4().simple().to_string(),
         span_id: "00f067aa0ba902b7".into(),
         parent_span_id: String::new(),
         kind,

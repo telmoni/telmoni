@@ -1,8 +1,8 @@
-"""A run across services: the W3C ``traceparent`` of the span current inside
-a run, and the run's id and agent as the W3C ``baggage`` members
-``telmoni.run_id`` and ``telmoni.agent``, written into an outgoing request's
-headers and read back from an incoming one's. The SDK's own helpers, never a
-propagator set globally: an application's propagators are its own.
+"""A trace across services: the W3C ``traceparent`` of the span current inside
+a trace, and the trace's agent as the W3C ``baggage`` member ``telmoni.agent``,
+written into an outgoing request's headers and read back from an incoming
+one's. The SDK's own helpers, never a propagator set globally: an
+application's propagators are its own.
 """
 
 from __future__ import annotations
@@ -16,26 +16,22 @@ from opentelemetry.trace import SpanContext, TraceFlags
 from . import contract
 from .models import header, replace_surrogates
 
-_UUID = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
-)
 _HEX = re.compile(r"^[0-9a-f]+$")
 
 
 @dataclass(frozen=True)
 class Continued:
-    """What headers name: the span to continue under, and the run."""
+    """What headers name: the span to continue under, and the trace's agent."""
 
     span_context: SpanContext
-    run_id: str
     agent: str
 
 
 def write_headers(
-    headers: MutableMapping[str, str], span: SpanContext, run_id: str, agent: str
+    headers: MutableMapping[str, str], span: SpanContext, agent: str
 ) -> None:
-    """``span`` and the run as the next service reads them, beside the
-    members ``headers`` already hold."""
+    """``span`` and the trace's agent as the next service reads them, beside
+    the members ``headers`` already hold."""
     sampled = "01" if span.trace_flags & TraceFlags.SAMPLED else "00"
     _set_header(
         headers,
@@ -47,13 +43,12 @@ def write_headers(
         for member in (header(headers, contract.BAGGAGE) or "").split(",")
     ]
     kept = [m for m in members if m and not _is_ours(m)]
-    kept.append(f"{contract.RUN_ID}={run_id}")
     kept.append(f"{contract.AGENT}={encode_baggage_value(agent)}")
     _set_header(headers, contract.BAGGAGE, ",".join(kept))
 
 
 def read_headers(headers: Mapping[str, str]) -> Continued | None:
-    """The run ``headers`` name, or ``None`` for headers that name none."""
+    """The trace ``headers`` name, or ``None`` for headers that name none."""
     traceparent = header(headers, contract.TRACEPARENT)
     if traceparent is None:
         return None
@@ -61,11 +56,10 @@ def read_headers(headers: Mapping[str, str]) -> Continued | None:
     if span_context is None:
         return None
     members = _baggage_members(header(headers, contract.BAGGAGE) or "")
-    run_id = members.get(contract.RUN_ID)
     agent = members.get(contract.AGENT)
-    if run_id is None or not _UUID.fullmatch(run_id) or not agent:
+    if not agent:
         return None
-    return Continued(span_context, run_id.lower(), agent)
+    return Continued(span_context, agent)
 
 
 def parse_traceparent(header: str) -> SpanContext | None:
@@ -110,8 +104,7 @@ def _baggage_members(header: str) -> dict[str, str]:
 
 
 def _is_ours(member: str) -> bool:
-    key = member.split("=", 1)[0].strip()
-    return key in (contract.RUN_ID, contract.AGENT)
+    return member.split("=", 1)[0].strip() == contract.AGENT
 
 
 def _is_hex(text: str, length: int) -> bool:

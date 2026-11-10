@@ -202,7 +202,7 @@ fn span(
     ago: i64,
 ) -> SpanRow {
     SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         agent: agent.into(),
         environment: "production".into(),
         ..common::received(
@@ -221,16 +221,16 @@ fn failing(project: &ProjectId, agent: &str) -> Vec<SpanRow> {
         SpanRow {
             status: SpanStatus::Error,
             error_type: "TimeoutError".into(),
-            ..span(project, agent, Uuid::new_v4(), SpanKind::Run, "trip", 10)
+            ..span(project, agent, Uuid::new_v4(), SpanKind::Agent, "trip", 10)
         },
-        span(project, agent, Uuid::new_v4(), SpanKind::Run, "trip", 5),
+        span(project, agent, Uuid::new_v4(), SpanKind::Agent, "trip", 5),
     ]
 }
 
 /// An alert on the share of runs failed past `threshold`, read through `filters`.
 fn failures(name: &str, filters: &Value, threshold: f64) -> Value {
     json!({
-        "name": name, "kind": "run", "measure": "failures", "aggregation": "avg",
+        "name": name, "kind": "agent", "measure": "failures", "aggregation": "avg",
         "window": "hour", "operator": "gt", "alert_threshold": threshold, "filters": filters,
     })
 }
@@ -268,7 +268,7 @@ async fn changed(
     sqlx::query(
         "INSERT INTO telemetry.changes
              (id, project_id, agent, environment, kind, prompt, value, identity, changed_at,
-              run_id, seen_at, mark)
+              trace_id, seen_at, mark)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9, $11)",
     )
     .bind(Uuid::new_v4())
@@ -284,7 +284,7 @@ async fn changed(
         Uuid::new_v4().simple()
     ))
     .bind(changed_at)
-    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4().simple().to_string())
     .bind(change.mark)
     .execute(pool)
     .await
@@ -467,7 +467,7 @@ async fn an_incident_names_what_its_agent_changed_to_in_the_day_before(pool: PgP
         json!({
             "agent": SUPPORT, "environment": "production", "kind": "release",
             "value": "2026.11.3", "changed_at": listed[1]["changed_at"],
-            "run_id": listed[1]["run_id"], "capped": false,
+            "trace_id": listed[1]["trace_id"], "capped": false,
         }),
         "a change as the changes lane answers one"
     );
@@ -615,12 +615,11 @@ async fn a_monitors_incident_names_its_agents_changes(pool: PgPool) {
     let project = Project::new(&pool, &ch, |project| {
         let started = at("2026-11-10T02:00:02Z");
         vec![SpanRow {
-            run_id: Uuid::new_v4(),
             agent: AGENT.into(),
             started_at: started,
             ended_at: started,
             units: 0,
-            ..common::received(project, SpanKind::RunStart, AGENT, 0, started)
+            ..common::received(project, SpanKind::TraceStart, AGENT, 0, started)
         }]
     })
     .await;
@@ -690,7 +689,7 @@ async fn an_objectives_incident_names_its_agents_changes_to_the_instant(pool: Pg
         .make(
             RULES,
             &json!({
-                "name": "Support succeeds", "kind": "run", "measure": "burn",
+                "name": "Support succeeds", "kind": "agent", "measure": "burn",
                 "aggregation": "avg", "filters": { "agent": [SUPPORT] }, "window": "hour",
                 "operator": "gte", "alert_threshold": 14.4,
                 "objective": { "target": 0.99, "days": 30 },
@@ -777,9 +776,9 @@ async fn a_notice_names_five_changes_inside_its_bound_and_counts_the_rest(pool: 
             SpanRow {
                 status: SpanStatus::Error,
                 error_type: "E".repeat(128),
-                ..span(project, &agent, failed, SpanKind::Run, "trip", 10)
+                ..span(project, &agent, failed, SpanKind::Agent, "trip", 10)
             },
-            span(project, &agent, Uuid::new_v4(), SpanKind::Run, "trip", 5),
+            span(project, &agent, Uuid::new_v4(), SpanKind::Agent, "trip", 5),
         ]
     })
     .await;

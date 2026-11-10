@@ -50,7 +50,7 @@ export const DEFAULT_ROWS = 50;
 export const MAX_PAGE = 1_000;
 
 /** The filters every list takes, each a list of values any of which admits a
- *  run, in the order the sidebar shows them: the keys of the one schema. */
+ *  trace, in the order the sidebar shows them: the keys of the one schema. */
 export const FILTERS = FILTER_KEYS;
 export type FilterKey = (typeof FILTERS)[number];
 
@@ -214,7 +214,7 @@ export function tracesHref(
   return listHref(organization, project, "/traces", { ...query, ...patch, ...ui });
 }
 
-/** What the list groups its runs by: their session or their end user, the
+/** What the list groups its traces by: their session or their end user, the
  *  rows sorted by it and each group headed in the table. */
 export type Group = "session" | "user";
 
@@ -235,9 +235,9 @@ export function groupedBy(query: TraceQuery, group: Group | undefined): TraceQue
   return compact({ ...query, sort, dir: SortDirection.Asc, page: undefined });
 }
 
-/** A session's runs on the list, the first to start first: where a run's
+/** A session's traces on the list, the first to start first: where a trace's
  *  session opens. */
-export function sessionRunsHref(
+export function sessionTracesHref(
   organization: string,
   project: string,
   sessionId: string,
@@ -264,22 +264,22 @@ export function listPageHref(
 }
 
 /** A trace's own page. */
-export function traceHref(organization: string, project: string, runId: string): string {
-  return projectPath(organization, project, `/traces/${encodeURIComponent(runId)}`);
+export function traceHref(organization: string, project: string, traceId: string): string {
+  return projectPath(organization, project, `/traces/${encodeURIComponent(traceId)}`);
 }
 
-/** A run opened in the peek over the Runs list of `listHref`, so the list
- *  stands around it and its neighbours are a step away. */
-export function peekHref(listHref: string, runId: string): string {
-  return `${listHref}${listHref.includes("?") ? "&" : "?"}${PEEK_PARAM}=${encodeURIComponent(runId)}`;
+/** A trace opened in the peek over the Traces list of `listHref`, so the
+ *  list stands around it and its neighbours are a step away. */
+export function peekHref(listHref: string, traceId: string): string {
+  return `${listHref}${listHref.includes("?") ? "&" : "?"}${PEEK_PARAM}=${encodeURIComponent(traceId)}`;
 }
 
-/** A run's spans, through the console's own route. */
-export function traceReadHref(runId: string, projectId: string): string {
-  return `/api/v1/traces/${encodeURIComponent(runId)}?project=${encodeURIComponent(projectId)}`;
+/** A trace's spans, through the console's own route. */
+export function traceReadHref(traceId: string, projectId: string): string {
+  return `/api/v1/traces/${encodeURIComponent(traceId)}?project=${encodeURIComponent(projectId)}`;
 }
 
-/** The list's key for the run its peek holds open (`components/traces/peek.tsx`):
+/** The list's key for the trace its peek holds open (`components/traces/peek.tsx`):
  *  the browser's, never the server's, so the list is not read again for it. */
 export const PEEK_PARAM = "peek";
 
@@ -352,7 +352,7 @@ export function activeFilters(query: ListQuery<string>): ActiveFilter[] {
   );
 }
 
-/** Where the columns menu files a column: the counts of a run's parts, and its tokens. */
+/** Where the columns menu files a column: the counts of a trace's parts, and its tokens. */
 export type ColumnGroup = "counts" | "tokens";
 
 /** Each group's heading in the columns menu. */
@@ -390,7 +390,7 @@ export type ListTable<K extends string = string, S extends string = string> = {
  *  columns menu, ticked and not to be unticked. */
 export const TRACE_ID_COLUMN = {
   label: "Trace ID",
-  hint: "The run's id, which opens its trace. Always shown.",
+  hint: "The trace's id, which opens it. Always shown.",
 } as const;
 
 /** Every column but the trace's id, which always shows, in the table's
@@ -401,7 +401,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
   {
     key: TraceColumn.Ended,
     label: "Ended",
-    hint: "When the run's last span ended; Running until the run's own span arrives.",
+    hint: "When the trace's last span ended; Running until the agent's own span arrives.",
   },
   { key: TraceColumn.Agent, label: "Agent", sort: TraceSort.Agent, first: SortDirection.Asc },
   {
@@ -409,36 +409,36 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     label: "User",
     sort: TraceSort.User,
     first: SortDirection.Asc,
-    hint: "The end user the run was for, as stored: hashed under the project's own key.",
+    hint: "The end user the tracewas for, as stored: hashed under the project's own key.",
   },
   {
     key: TraceColumn.Session,
     label: "Session",
     sort: TraceSort.Session,
     first: SortDirection.Asc,
-    hint: "The session the run belongs to, gen_ai.conversation.id.",
+    hint: "The session the tracebelongs to, gen_ai.conversation.id.",
   },
   {
     key: TraceColumn.Environment,
     label: "Environment",
-    hint: "The deployment the run's spans were sent from, deployment.environment.name on their resource; each once where the run crossed services deployed apart.",
+    hint: "The deployment the trace's spans were sent from, deployment.environment.name on their resource; each once where the tracecrossed services deployed apart.",
   },
   {
     key: TraceColumn.Release,
     label: "Release",
-    hint: "The version or commit the run's spans were sent from, service.version on their resource; each once where the run crossed services.",
+    hint: "The version or commit the trace's spans were sent from, service.version on their resource; each once where the tracecrossed services.",
   },
   {
     key: TraceColumn.Status,
     label: "Status",
     sort: TraceSort.Status,
     first: SortDirection.Asc,
-    hint: "OK, Error or Cancelled once the run's own span arrives; Running until it does. Beside any but Error, how many of the run's spans failed.",
+    hint: "OK, Error or Cancelled once the agent's own span arrives; Running until it does. Beside any but Error, how many of the trace's spans failed.",
   },
   {
     key: TraceColumn.ErrorType,
     label: "Error",
-    hint: "The class of the error the run ended on, never its message: TimeoutError, RateLimitError.",
+    hint: "The class of the error the traceended on, never its message: TimeoutError, RateLimitError.",
   },
   {
     key: TraceColumn.Steps,
@@ -469,7 +469,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     label: "Retrievals",
     numeric: true,
     group: "counts",
-    hint: "The run's searches of a vector store or a memory.",
+    hint: "The trace's searches of a vector store or a memory.",
   },
   {
     key: TraceColumn.Errors,
@@ -478,14 +478,14 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     first: SortDirection.Desc,
     numeric: true,
     group: "counts",
-    hint: "How many of the run's spans failed.",
+    hint: "How many of the trace's spans failed.",
   },
   {
     key: TraceColumn.Spans,
     label: "Spans",
     numeric: true,
     group: "counts",
-    hint: "Every span the run sent: its own, its steps, its calls and any other.",
+    hint: "Every span the tracesent: its own, its steps, its calls and any other.",
   },
   {
     key: TraceColumn.InputTokens,
@@ -508,14 +508,14 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     label: "Cache read",
     numeric: true,
     group: "tokens",
-    hint: "Input tokens the run's model calls read from a provider's prompt cache.",
+    hint: "Input tokens the trace's model calls read from a provider's prompt cache.",
   },
   {
     key: TraceColumn.CacheWriteTokens,
     label: "Cache write",
     numeric: true,
     group: "tokens",
-    hint: "Input tokens the run's model calls wrote to a provider's prompt cache.",
+    hint: "Input tokens the trace's model calls wrote to a provider's prompt cache.",
   },
   {
     key: TraceColumn.Tokens,
@@ -532,7 +532,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     sort: TraceSort.Spend,
     first: SortDirection.Desc,
     numeric: true,
-    hint: "What the run's model calls cost: each as it reported, else its tokens at the project's price or the price table's.",
+    hint: "What the trace's model calls cost: each as it reported, else its tokens at the project's price or the price table's.",
   },
   {
     key: TraceColumn.Duration,
@@ -540,7 +540,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     sort: TraceSort.Duration,
     first: SortDirection.Desc,
     numeric: true,
-    hint: "From the run's first span's start to its last span's end.",
+    hint: "From the trace's first span's start to its last span's end.",
   },
   {
     key: TraceColumn.TimeToFirstToken,
@@ -556,12 +556,12 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     key: TraceColumn.Tags,
     label: "Tags",
     byTag: true,
-    hint: "The run's tags, each key:value. The heading sorts the list by one key's value, the runs without it last.",
+    hint: "The trace's tags, each key:value. The heading sorts the list by one key's value, the traces without it last.",
   },
   {
     key: TraceColumn.Scores,
     label: "Scores",
-    hint: "The run's own scores, each name's mean, or a category's values: from your code or a member.",
+    hint: "The trace's own scores, each name's mean, or a category's values: from your code or a member.",
   },
 ];
 
@@ -730,9 +730,9 @@ export const TRACES = listSpec<TraceColumn, TraceSort | TagSort>({
   sorts: TraceSort,
   defaultSort: TraceSort.Started,
   presets: [
-    { id: "errors", label: "Errors", hint: "Only the runs with failed spans" },
-    { id: "slow", label: "Slow", hint: "The longest runs first" },
-    { id: "tokens", label: "Tokens", hint: "The runs that used the most tokens first" },
+    { id: "errors", label: "Errors", hint: "Only the traces with failed spans" },
+    { id: "slow", label: "Slow", hint: "The longest traces first" },
+    { id: "tokens", label: "Tokens", hint: "The traces that used the most tokens first" },
   ],
   presetSorts: { slow: TraceSort.Duration, tokens: TraceSort.Tokens },
   readSort: readTagSort,
@@ -849,8 +849,8 @@ export const STATUS_LABEL: Record<SpanStatus, string> = {
 
 /** The word the console gives each kind of span. */
 export const KIND_LABEL: Record<SpanKind, string> = {
-  [SpanKind.Run]: "Run",
-  [SpanKind.RunStart]: "Run opened",
+  [SpanKind.Agent]: "Agent",
+  [SpanKind.TraceStart]: "Trace opened",
   [SpanKind.Step]: "Step",
   [SpanKind.ModelCall]: "Model call",
   [SpanKind.ToolCall]: "Tool call",
@@ -885,7 +885,7 @@ export type ChangeMark = { at: string; changes: string[] };
 
 /** Each change on the bar it fell in, read off the bars' own starts: the last
  *  to start at or before it, so one before the first is on the first and one
- *  after the last on the last, as the histogram clamps runs. A bar's changes
+ *  after the last on the last, as the histogram clamps traces. A bar's changes
  *  are one mark, in the order given. */
 export function marksOn(bars: readonly { at: string }[], changes: readonly Change[]): ChangeMark[] {
   const starts = bars.map((bar) => Date.parse(bar.at));
@@ -946,7 +946,7 @@ export function retrievalSource(span: {
   return ids.find((id) => id === span.name) ?? ids[0] ?? null;
 }
 
-/** A run's id as a row shows it: its first eight characters, enough to tell
+/** A trace's id as a row shows it: its first eight characters, enough to tell
  *  two apart, the whole on the trace's own page. */
 export function shortId(id: string): string {
   return id.slice(0, 8);

@@ -1,7 +1,7 @@
 //! `GET /internal/v1/telemetry/agents` — each of the project's agents as its
-//! Agents page reads it: its runs over the last [`AGENTS_DAYS`] days, those
-//! that failed, its last run, what that run cost against what its ended
-//! runs usually cost, and its newest change of each kind ([`crate::changes`]).
+//! Agents page reads it: its traces over the last [`AGENTS_DAYS`] days, those
+//! that failed, its last trace, what that trace cost against what its ended
+//! traces usually cost, and its newest change of each kind ([`crate::changes`]).
 
 use std::sync::Arc;
 
@@ -10,7 +10,6 @@ use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use clickhouse::Row;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::extract::Json;
@@ -20,29 +19,31 @@ use crate::AppState;
 use crate::changes::Change;
 use crate::handler::traces::{read_failed, reader, window_prices};
 use crate::store::{Projects, text};
-// The run's sums by their own names, which `runs!` expands to.
-use crate::traces::{TraceFilter, admits, filtered, run_carries, run_status, run_sums, window};
+// The trace's sums by their own names, which `traces!` expands to.
+use crate::traces::{
+    TraceFilter, admits, filtered, trace_carries, trace_status, trace_sums, window,
+};
 
-/// The days an agent's runs are read over: as many as the history an alert's
-/// threshold starts from (`handler/history.rs`).
+/// The days an agent's traces are read over: as many as the history an
+/// alert's threshold starts from (`handler/history.rs`).
 pub const AGENTS_DAYS: u16 = 14;
 
 /// The most agents one answer holds.
 pub const AGENTS_MAX: u32 = 200;
 
-/// The window's runs, a row each as the trace list sums them, folded by agent,
-/// the newest last run first.
+/// The window's traces, a row each as the trace list sums them, folded by
+/// agent, the newest last trace first.
 const AGENTS_SQL: &str = concat!(
-    "SELECT run_agent AS agent, count() AS runs, ",
-    "countIf(run_status = 'error') AS failed_runs, ",
-    "argMax(run_id, first_started_at) AS last_run_id, ",
+    "SELECT trace_agent AS agent, count() AS traces, ",
+    "countIf(trace_status = 'error') AS failed_traces, ",
+    "argMax(trace_id, first_started_at) AS last_trace_id, ",
     "max(first_started_at) AS last_started_at, ",
-    "argMax(run_ended, first_started_at) AS last_ended, ",
-    "argMax(run_status, first_started_at) AS last_status, ",
+    "argMax(trace_ended, first_started_at) AS last_ended, ",
+    "argMax(trace_status, first_started_at) AS last_status, ",
     "argMax(spent, first_started_at) AS last_spend, ",
-    "if(countIf(run_ended) > 0, quantileExactIf(0.5)(spent, run_ended), NULL) AS usual_spend ",
+    "if(countIf(trace_ended) > 0, quantileExactIf(0.5)(spent, trace_ended), NULL) AS usual_spend ",
     "FROM (",
-    crate::traces::runs!(),
+    crate::traces::traces!(),
     ") GROUP BY agent ORDER BY last_started_at DESC, agent LIMIT {max:UInt32}"
 );
 
@@ -50,22 +51,21 @@ const AGENTS_SQL: &str = concat!(
 #[derive(Debug, Clone, PartialEq, Row, Serialize, Deserialize)]
 pub struct AgentRow {
     pub agent: String,
-    /// Its runs that started in the window, those still running among them.
-    pub runs: u64,
+    /// Its traces that started in the window, those still running among them.
+    pub traces: u64,
     /// Those that ended in error.
-    pub failed_runs: u64,
+    pub failed_traces: u64,
     /// The one that started last.
-    #[serde(deserialize_with = "clickhouse::serde::uuid::deserialize")]
-    pub last_run_id: Uuid,
+    pub last_trace_id: String,
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub last_started_at: DateTime<Utc>,
-    /// Whether its own span has arrived.
+    /// Whether the agent's own span has arrived.
     pub last_ended: bool,
     #[serde(deserialize_with = "text::deserialize")]
     pub last_status: SpanStatus,
-    /// What it cost in US dollars, as the trace list prices a run.
+    /// What it cost in US dollars, as the trace list prices a trace.
     pub last_spend: f64,
-    /// The median of what its ended runs cost; none before one has ended.
+    /// The median of what its ended traces cost; none before one has ended.
     pub usual_spend: Option<f64>,
 }
 

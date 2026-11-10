@@ -8,7 +8,7 @@ const MARK: Record<SpanStatus, string> = {
   [SpanStatus.Cancelled]: "bg-muted-foreground/50",
 };
 
-/** How a run or a span ended, as a square in its colour, as an alert's
+/** How a trace or a span ended, as a square in its colour, as an alert's
  *  severity is (`SeverityMark`): a failure keeps its error's class in words
  *  beside it; `null`, still running, is a muted square that breathes. The
  *  word is the square's title and a screen reader's. */

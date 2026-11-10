@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// The guard: a run's opt-in caps on its steps and its spend, counted in this
+// The guard: a trace's opt-in caps on its steps and its spend, counted in this
 // process with no call to Telmoni. A call's cost is counted as the server
 // counts it: as reported, else its tokens at its price in the table this
 // release carries (model_prices.json, LiteLLM's, whose notice it holds), else
@@ -22,9 +22,9 @@ import (
 //go:embed model_prices.json
 var pricesFile []byte
 
-// CapExceededError is a cap a run reached, the cause of the context its next
-// step, model call, tool call or retrieval opens with: Cap is "steps" or
-// "spend", Limit the cap, and Used what the run had used of it, its steps
+// CapExceededError is a cap a trace reached, the cause of the context its
+// next step, model call, tool call or retrieval opens with: Cap is "steps" or
+// "spend", Limit the cap, and Used what the trace had used of it, its steps
 // opened or the US dollars it spent.
 type CapExceededError struct {
 	Cap   string
@@ -36,9 +36,9 @@ type CapExceededError struct {
 // the shortest decimal that reads back as it, with no exponent.
 func (e *CapExceededError) Error() string {
 	if e.Cap == "steps" {
-		return "the run reached its step cap of " + strconv.FormatFloat(e.Limit, 'f', -1, 64)
+		return "the trace reached its step cap of " + strconv.FormatFloat(e.Limit, 'f', -1, 64)
 	}
-	return "the run reached its spend cap of $" + strconv.FormatFloat(e.Limit, 'f', -1, 64) +
+	return "the trace reached its spend cap of $" + strconv.FormatFloat(e.Limit, 'f', -1, 64) +
 		", having spent $" + strconv.FormatFloat(e.Used, 'f', -1, 64)
 }
 
@@ -149,7 +149,7 @@ func (c *Client) priced(provider, model string, t tokens) (float64, bool) {
 	return 0, false
 }
 
-// guard is one run's caps, 0 for none, and what it has used of them.
+// guard is one trace's caps, 0 for none, and what it has used of them.
 type guard struct {
 	mu       sync.Mutex
 	maxSteps int
@@ -159,7 +159,7 @@ type guard struct {
 	refused  error
 }
 
-// opens counts a step opening, or answers why nothing opens: the run reached
+// opens counts a step opening, or answers why nothing opens: the trace reached
 // its spend cap, for whatever opens, or its steps, for a step.
 func (g *guard) opens(step bool) error {
 	g.mu.Lock()

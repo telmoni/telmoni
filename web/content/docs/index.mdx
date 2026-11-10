@@ -5,7 +5,7 @@ description: "What Telmoni is today, core architecture, and navigation guide."
 
 Telmoni is privacy-first, open-source monitoring for AI agents. Know when your
 agents fail, stall, loop or overspend, and stop them at the cap you set.
-Prompts stay in your process unless you turn content on. Its SDKs record an agent's runs, ingest keeps them as metadata with content dropped at
+Prompts stay in your process unless you turn content on. Its SDKs record an agent's traces, ingest keeps them as metadata with content dropped at
 the door, or kept in full where a project turns it on
 ([Content](/docs/monitoring/content)), and the console reads them as [traces](/docs/monitoring/traces),
 grouped by session or user where you ask, [alerts](/docs/monitoring/alerts) on them,
@@ -42,7 +42,7 @@ and, from launch, as a hosted cloud service:
   and organization notices, and fan-out delivery to
   [Slack](/docs/integrations/slack) and signed
   [Webhooks](/docs/integrations/webhooks).
-- **[Alerts](/docs/monitoring/alerts)**: A measure of a project's runs, steps,
+- **[Alerts](/docs/monitoring/alerts)**: A measure of a project's traces, steps,
   model calls, tool calls or retrievals over the last hour, day or week, or their spend
   over the month as a budget, against an alert threshold and an optional
   warning one, evaluated every minute; each incident
@@ -56,17 +56,17 @@ and, from launch, as a hosted cloud service:
   device code authorization ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)),
   organization switching, and JSON output from `telmoni status --json`.
 - **[Client SDKs](/docs/api/sdks)**: SDKs for Python, TypeScript / JavaScript, Go and
-  Rust that record an agent's runs, steps, model calls, tool calls and retrievals as
+  Rust that record an agent's traces, steps, model calls, tool calls and retrievals as
   OpenTelemetry spans, with content taken off before it leaves the process
   unless you turn it on and the project keeps content,
-  and hold a run to the caps on its steps and spend you give it, in the
+  and hold a trace to the caps on its steps and spend you give it, in the
   agent's own process; each installed with its language's own tool.
 - **[Frameworks](/docs/api/frameworks)**: The OpenAI and Anthropic SDKs,
   LangChain and LangGraph, the OpenAI Agents SDK, CrewAI, LiteLLM and the
-  Vercel AI SDK, reporting their runs through their own OpenTelemetry
+  Vercel AI SDK, reporting their traces through their own OpenTelemetry
   instrumentation, with no SDK of ours.
 - **[Coding agents](/docs/api/coding-agents)**: Each turn of Claude Code, Codex or
-  Antigravity recorded as a run by its plugin, with no code: metadata alone, unless you
+  Antigravity recorded as a trace by its plugin, with no code: metadata alone, unless you
   turn its content on.
 - **[API keys and /v1 API](/docs/api/api-keys)**: Project-owned `tm_` keys,
   each opening [ingest](/docs/api/ingest), the read-only [API](/docs/api/reference)
@@ -77,7 +77,7 @@ and, from launch, as a hosted cloud service:
 1. [Signing up and signing in](/docs/getting-started/sign-in): How you sign in,
    the organization your first sign-in creates, and your first project.
 2. [Telmoni CLI](/docs/api/cli): Installing the CLI and signing in via device code or API key.
-3. [Client SDKs](/docs/api/sdks): Recording an agent's runs from Python, TypeScript, Go or Rust.
+3. [Client SDKs](/docs/api/sdks): Recording an agent's traces from Python, TypeScript, Go or Rust.
 4. [Organizations and projects](/docs/workspace/organizations-and-projects): Organizations
    and projects, their URLs, keyboard shortcuts, and their lifecycle.
 5. [Members and invitations](/docs/workspace/members): Inviting collaborators

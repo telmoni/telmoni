@@ -1,16 +1,15 @@
 /**
- * Runs, steps, model calls, tool calls and retrievals, as callbacks on handles.
+ * Traces, steps, model calls, tool calls and retrievals, as callbacks on handles.
  *
- * A run is a span of its own in whatever trace is current; every span inside
- * it carries the run's id, agent, user and session, so ingest knows each
- * span's run without waiting for the trace's tree. Steps and calls open on a
- * run's handle, or a step's, so nothing can be opened — or sent — outside a run.
+ * A trace is one execution of an agent: the agent's span at the root of a
+ * trace of its own, linked to whatever span the application had current, and
+ * every span inside it carries the agent, user and session. Steps and calls
+ * open on a trace's handle, or a step's, so nothing can be opened — or sent —
+ * outside a trace.
  */
 
-import { randomUUID } from 'node:crypto';
-
-import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, createContextKey, trace } from '@opentelemetry/api';
-import type { Attributes, Context, HrTime, Span, SpanContext, Tracer } from '@opentelemetry/api';
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context, createContextKey, isSpanContextValid, trace } from '@opentelemetry/api';
+import type { Attributes, Context, HrTime, Link, Span, SpanContext, Tracer } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 
 import * as contract from './contract.js';
@@ -18,7 +17,7 @@ import { errorType, isAbort } from './errors.js';
 import { Guard, type OwnRates, type Tokens, ownRates, priced } from './guard.js';
 import { type Ids, spanIdAt } from './ids.js';
 import type { Processor } from './processor.js';
-import { WHY, eventOf, hyphenated, judge, lateItem, refuse, uuidHexOf } from './scores.js';
+import { WHY, eventOf, judge, lateItem, refuse, traceHexOf } from './scores.js';
 import { isBlank } from './whitespace.js';
 import type {
   CallRecord,
@@ -29,32 +28,32 @@ import type {
   RecordTime,
   ResolvedConfig,
   RetrievalOptions,
-  RunAnswer,
-  RunOptions,
-  RunRecord,
   ScoreOptions,
   ScoreTarget,
   ScoreValue,
   StepRecord,
   ToolCallOptions,
   ToolCallRecord,
+  TraceAnswer,
+  TraceOptions,
+  TraceRecord,
   Usage,
   Warning,
 } from './types.js';
 
-const RUN_KEY = createContextKey('telmoni.run');
+const TRACE_KEY = createContextKey('telmoni.trace');
 const END: unique symbol = Symbol('telmoni.end');
 const GUARD: unique symbol = Symbol('telmoni.guard');
 
 type Outcome = { failed: false } | { failed: true; error: unknown };
 
 /**
- * The run open in `ctx`, if any; the active context by default, which an
+ * The trace open in `ctx`, if any; the active context by default, which an
  * application running OpenTelemetry's context manager carries into callbacks.
  */
-export function currentRun(ctx: Context = context.active()): Run | undefined {
-  const run = ctx.getValue(RUN_KEY);
-  return run instanceof Run ? run : undefined;
+export function currentTrace(ctx: Context = context.active()): Trace | undefined {
+  const found = ctx.getValue(TRACE_KEY);
+  return found instanceof Trace ? found : undefined;
 }
 
 /** A span the SDK opened, until its callback settles. */
@@ -69,11 +68,11 @@ export class Handle {
   #ended = false;
   #scores = 0;
 
-  constructor(span: Span, parent: Context, run: Run | undefined, warnOnce: WarnOnce) {
+  constructor(span: Span, parent: Context, owner: Trace | undefined, warnOnce: WarnOnce) {
     this.span = span;
     this.#warnOnce = warnOnce;
-    // A run is found from any context inside it; a run's own handle is the run.
-    this.context = trace.setSpan(parent, span).setValue(RUN_KEY, run ?? this);
+    // A trace is found from any context inside it; a trace's own handle is the trace.
+    this.context = trace.setSpan(parent, span).setValue(TRACE_KEY, owner ?? this);
   }
 
   /**
@@ -82,7 +81,7 @@ export class Handle {
    */
   fail(error: unknown): void {
     let text = error ? typeOfError(error, this.#warnOnce) : '';
-    // Ingest refuses the span over an empty one, and with a run's, the run.
+    // Ingest refuses the span over an empty one, and with the agent's, the trace.
     if (text !== '') {
       text = cut(text, contract.ERROR_TYPE_MAX, "span's error type", this.#warnOnce);
       this.span.setAttribute(contract.ERROR_TYPE, text);
@@ -138,17 +137,17 @@ export class Handle {
   }
 }
 
-/** A handle steps and calls open under: a run, or a step. */
+/** A handle steps and calls open under: a trace, or a step. */
 export abstract class Parent extends Handle {
   readonly #opener: Opener;
 
-  constructor(opener: Opener, span: Span, parent: Context, run: Run | undefined) {
-    super(span, parent, run, opener.warnOnce);
+  constructor(opener: Opener, span: Span, parent: Context, owner: Trace | undefined) {
+    super(span, parent, owner, opener.warnOnce);
     this.#opener = opener;
   }
 
-  /** The run its steps and calls open in: a run's own self. */
-  protected abstract get owner(): Run;
+  /** The trace its steps and calls open in: a trace's own self. */
+  protected abstract get owner(): Trace;
 
   step<R>(name: string, fn: (step: Step) => R): R {
     return within(this.#opener.step(this.owner, this.context, name), fn);
@@ -184,38 +183,31 @@ export abstract class Parent extends Handle {
   }
 }
 
-export class Run extends Parent {
-  readonly runId: string;
+export class Trace extends Parent {
+  /** Its trace's id, 32 lowercase hex digits: what the client's `score` names once it has ended. */
+  readonly traceId: string;
   readonly agent: string;
   readonly #inherited: Attributes;
   readonly #warnOnce: WarnOnce;
   readonly [GUARD]: Guard;
 
-  constructor(
-    opener: Opener,
-    span: Span,
-    parent: Context,
-    runId: string,
-    agent: string,
-    inherited: Attributes,
-    guard = new Guard(),
-  ) {
+  constructor(opener: Opener, span: Span, parent: Context, agent: string, inherited: Attributes, guard = new Guard()) {
     super(opener, span, parent, undefined);
-    this.runId = runId;
+    this.traceId = span.spanContext().traceId;
     this.agent = agent;
     this.#inherited = { ...inherited };
     this.#warnOnce = opener.warnOnce;
     this[GUARD] = guard;
   }
 
-  protected get owner(): Run {
+  protected get owner(): Trace {
     return this;
   }
 
-  /** What the run answered: its messages. An answer given after the run ended is not sent. */
-  answered(answer: RunAnswer): void {
+  /** What the agent answered: its messages. An answer given after the trace ended is not sent. */
+  answered(answer: TraceAnswer): void {
     if (this.ended) {
-      this.#warnOnce('run:late', 'telmoni: a run must be answered before it ends; an answer given after is not sent', {
+      this.#warnOnce('trace:late', 'telmoni: a trace must be answered before it ends; an answer given after is not sent', {
         kind: 'input',
       });
       return;
@@ -225,27 +217,27 @@ export class Run extends Parent {
     }
   }
 
-  /** What every span inside the run carries. */
+  /** What every span inside the trace carries. */
   get inherited(): Attributes {
     return { ...this.#inherited };
   }
 
-  /** What the run's model calls have cost so far in US dollars, counted as its spend cap counts them, in this process. */
+  /** What the trace's model calls have cost so far in US dollars, counted as its spend cap counts them, in this process. */
   get spent(): number {
     return this[GUARD].spent;
   }
 }
 
 export class Step extends Parent {
-  readonly #run: Run;
+  readonly #trace: Trace;
 
-  constructor(opener: Opener, span: Span, parent: Context, run: Run) {
-    super(opener, span, parent, run);
-    this.#run = run;
+  constructor(opener: Opener, span: Span, parent: Context, owner: Trace) {
+    super(opener, span, parent, owner);
+    this.#trace = owner;
   }
 
-  protected get owner(): Run {
-    return this.#run;
+  protected get owner(): Trace {
+    return this.#trace;
   }
 }
 
@@ -258,7 +250,7 @@ interface Priced {
 
 export class ModelCall extends Handle {
   readonly #warnOnce: WarnOnce;
-  readonly #run: Run;
+  readonly #trace: Trace;
   readonly #provider: string;
   readonly #prices: OwnRates;
   #model: string;
@@ -266,10 +258,10 @@ export class ModelCall extends Handle {
   #held: Attributes = {};
   #counted = 0;
 
-  constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce, by: Priced) {
-    super(span, parent, run, warnOnce);
+  constructor(span: Span, parent: Context, owner: Trace, warnOnce: WarnOnce, by: Priced) {
+    super(span, parent, owner, warnOnce);
     this.#warnOnce = warnOnce;
-    this.#run = run;
+    this.#trace = owner;
     this.#provider = by.provider;
     this.#model = by.model;
     this.#prices = by.prices;
@@ -295,7 +287,7 @@ export class ModelCall extends Handle {
       this.#warnOnce(
         'call:late',
         'telmoni: a model call must be answered before it ends; an answer given after is not sent ' +
-          "and counts nothing toward the run's spend",
+          "and counts nothing toward the trace's spend",
         { kind: 'input' },
       );
       return;
@@ -314,7 +306,7 @@ export class ModelCall extends Handle {
     this.#count();
   }
 
-  /** Its cost to its run's spend, in place of what it counted before: reported, else priced, else nothing. */
+  /** Its cost to its trace's spend, in place of what it counted before: reported, else priced, else nothing. */
   #count(): void {
     const held = this.#held;
     const count = (key: string): number => {
@@ -329,14 +321,14 @@ export class ModelCall extends Handle {
     };
     const reported = held[contract.COST];
     let cost = typeof reported === 'number' ? reported : priced(this.#prices, this.#provider, this.#model, tokens);
-    const guard = this.#run[GUARD];
+    const guard = this.#trace[GUARD];
     if (cost === undefined) {
       cost = 0;
       if (guard.capped && Object.values(tokens).some((n) => n > 0)) {
         this.#warnOnce(
           `unpriced:${this.#provider}:${this.#model}`,
           `telmoni: no price for ${this.#model || 'a call with no model'} (${this.#provider || 'no provider'}), ` +
-            "which reported no cost; it counts nothing toward the run's spend cap",
+            "which reported no cost; it counts nothing toward the trace's spend cap",
           { kind: 'input' },
         );
       }
@@ -358,8 +350,8 @@ export class Retrieval extends Handle {
   /** Whether it searched a memory, whose names its finds go under. */
   readonly #memory: boolean;
 
-  constructor(span: Span, parent: Context, run: Run, warnOnce: WarnOnce, memory: boolean) {
-    super(span, parent, run, warnOnce);
+  constructor(span: Span, parent: Context, owner: Trace, warnOnce: WarnOnce, memory: boolean) {
+    super(span, parent, owner, warnOnce);
     this.#warnOnce = warnOnce;
     this.#memory = memory;
   }
@@ -442,64 +434,65 @@ export class Opener {
     return this.#warnOnce;
   }
 
-  run(given: string, options: RunOptions): Run {
+  trace(given: string, options: TraceOptions): Trace {
     const named: unknown = given;
     if (!isSet(named) || isBlank(textOf(named))) {
-      throw new TypeError("a run needs its agent's name");
+      throw new TypeError("a trace needs its agent's name");
     }
-    const agent = cut(asText(named, "run's agent", this.#warnOnce), contract.AGENT_MAX, "run's agent", this.#warnOnce);
+    const agent = cut(asText(named, "trace's agent", this.#warnOnce), contract.AGENT_MAX, "trace's agent", this.#warnOnce);
     const guard = Guard.of(options);
-    const runId = randomUUID();
     const user = filled(options.userId, 'user id', this.#warnOnce);
     const session = filled(options.sessionId, 'session id', this.#warnOnce);
     const inherited = inheritedOf(
-      runId,
       agent,
-      user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', 'run', this.#warnOnce) ? user : undefined,
-      session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', 'run', this.#warnOnce) ? session : undefined,
+      user !== undefined && fits(user, contract.USER_ID_MAX, 'user id', 'trace', this.#warnOnce) ? user : undefined,
+      session !== undefined && fits(session, contract.SESSION_ID_MAX, 'session id', 'trace', this.#warnOnce) ? session : undefined,
     );
-    const attributes = runAttributes(agent, inherited, tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce));
+    const attributes = agentAttributes(agent, inherited, tagsOf(Object.entries(options.tags ?? {}), this.#warnOnce));
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
-    const parent = context.active();
-    const span = this.#start(runSpanName(agent), parent, attributes, SpanKind.INTERNAL);
-    // The run's opening, under it and at its start: the processor sends it at
-    // once, so the run is seen open before it ends; a span not recording has none.
+    // Linked to the application's span rather than opened under it, so a job
+    // looping over executions is a trace each, never one.
+    const application = context.active();
+    const linked = trace.getSpanContext(application);
+    const links: Link[] = linked !== undefined && isSpanContextValid(linked) ? [{ context: linked }] : [];
+    const span = this.#tracer.startSpan(agentSpanName(agent), { kind: SpanKind.INTERNAL, attributes, links }, ROOT_CONTEXT);
+    // The trace's opening, under the agent's span and at its start: the processor sends
+    // it at once, so the trace is seen open before it ends; a span not recording has none.
     const openedAt = (span as Partial<ReadableSpan>).startTime;
     if (openedAt !== undefined) {
       const options = { kind: SpanKind.INTERNAL, attributes: inherited, startTime: openedAt };
-      this.#tracer.startSpan(contract.RUN_START, options, trace.setSpan(parent, span)).end(openedAt);
+      this.#tracer.startSpan(contract.TRACE_START, options, trace.setSpan(application, span)).end(openedAt);
     }
-    return new Run(this, span, parent, runId, agent, inherited, guard);
+    return new Trace(this, span, application, agent, inherited, guard);
   }
 
   /**
-   * A run another service opened, continued here under the span the headers
-   * named: a run whose own span is the caller's, non-recording here, so its
-   * steps and calls nest under it and carry the run, and nothing of it is
+   * A trace another service opened, continued here under the span the headers
+   * named: a trace whose own span is the caller's, non-recording here, so its
+   * steps and calls nest under it and carry the agent, and nothing of it is
    * sent or ended from this side.
    */
-  continued(remote: SpanContext, runId: string, given: string): Run {
-    const agent = cut(given, contract.AGENT_MAX, "run's agent", this.#warnOnce);
-    const inherited = inheritedOf(runId, agent);
-    return new Run(this, trace.wrapSpanContext(remote), context.active(), runId, agent, inherited);
+  continued(remote: SpanContext, given: string): Trace {
+    const agent = cut(given, contract.AGENT_MAX, "trace's agent", this.#warnOnce);
+    return new Trace(this, trace.wrapSpanContext(remote), context.active(), agent, inheritedOf(agent));
   }
 
-  step(run: Run, parent: Context, given: string): Step {
-    run[GUARD].opens(true);
+  step(owner: Trace, parent: Context, given: string): Step {
+    owner[GUARD].opens(true);
     let name = asText(given, "step's name", this.#warnOnce);
     // Ingest refuses a span named nothing.
     if (name === '') {
       this.#warnOnce('step:name', 'telmoni: a step needs its name; one without is sent named step', { kind: 'input' });
       name = 'step';
     }
-    const span = this.#start(cut(name, contract.NAME_MAX, "step's name", this.#warnOnce), parent, run.inherited, SpanKind.INTERNAL);
-    return new Step(this, span, parent, run);
+    const span = this.#start(cut(name, contract.NAME_MAX, "step's name", this.#warnOnce), parent, owner.inherited, SpanKind.INTERNAL);
+    return new Step(this, span, parent, owner);
   }
 
-  modelCall(run: Run, parent: Context, given: string, options: ModelCallOptions): ModelCall {
-    run[GUARD].opens(false);
+  modelCall(owner: Trace, parent: Context, given: string, options: ModelCallOptions): ModelCall {
+    owner[GUARD].opens(false);
     const asked = asText(given, 'model', this.#warnOnce);
     // Ingest refuses a call over an empty model, but keeps one with none.
     const model = asked === '' ? '' : cut(asked, contract.MODEL_MAX, 'model', this.#warnOnce);
@@ -514,7 +507,7 @@ export class Opener {
     const provider = named === undefined ? '' : cut(named, contract.PROVIDER_MAX, 'provider', this.#warnOnce);
     const operation = operationOf(options.operation, this.#warnOnce);
     const [prompt, promptVersion] = promptOf(options, this.#warnOnce);
-    const [name, attributes] = modelCallOpening(run.inherited, model, operation, provider, prompt, promptVersion);
+    const [name, attributes] = modelCallOpening(owner.inherited, model, operation, provider, prompt, promptVersion);
     if (isSet(options.inputMessages)) {
       attributes[contract.INPUT_MESSAGES] = asJson(options.inputMessages);
     }
@@ -522,27 +515,27 @@ export class Opener {
       attributes[contract.SYSTEM_INSTRUCTIONS] = asJson(options.systemInstructions);
     }
     const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
-    return new ModelCall(span, parent, run, this.#warnOnce, { provider, model, prices: this.#prices });
+    return new ModelCall(span, parent, owner, this.#warnOnce, { provider, model, prices: this.#prices });
   }
 
-  toolCall(run: Run, parent: Context, given: string, options: ToolCallOptions): ToolCall {
-    run[GUARD].opens(false);
+  toolCall(owner: Trace, parent: Context, given: string, options: ToolCallOptions): ToolCall {
+    owner[GUARD].opens(false);
     const name = cut(asText(given, "tool's name", this.#warnOnce), contract.NAME_MAX, "tool's name", this.#warnOnce);
-    const attributes = toolAttributes(run.inherited, name);
+    const attributes = toolAttributes(owner.inherited, name);
     if (isSet(options.arguments)) {
       attributes[contract.TOOL_CALL_ARGUMENTS] = asJson(options.arguments);
     }
     const span = this.#start(toolSpanName(name), parent, attributes, SpanKind.INTERNAL);
-    return new ToolCall(span, parent, run, this.#warnOnce);
+    return new ToolCall(span, parent, owner, this.#warnOnce);
   }
 
-  retrieval(run: Run, parent: Context, given: string, options: RetrievalOptions): Retrieval {
-    run[GUARD].opens(false);
+  retrieval(owner: Trace, parent: Context, given: string, options: RetrievalOptions): Retrieval {
+    owner[GUARD].opens(false);
     const memory = Boolean(options.memory);
     const [operation, sourceKey, queryKey] = memory
       ? [contract.SEARCH_MEMORY, contract.MEMORY_STORE_ID, contract.MEMORY_QUERY_TEXT]
       : [contract.RETRIEVAL_OPERATION, contract.DATA_SOURCE_ID, contract.RETRIEVAL_QUERY_TEXT];
-    const attributes: Attributes = { ...run.inherited, [contract.OPERATION]: operation };
+    const attributes: Attributes = { ...owner.inherited, [contract.OPERATION]: operation };
     const named = asText(given, "retrieval's source", this.#warnOnce);
     const source = isBlank(named) ? '' : cut(named, contract.NAME_MAX, "retrieval's source", this.#warnOnce);
     // Ingest names a retrieval by its source, and one with none by its span.
@@ -570,37 +563,38 @@ export class Opener {
     }
     if (isSet(options.query)) attributes[queryKey] = asJson(options.query);
     const span = this.#start(name, parent, attributes, SpanKind.CLIENT);
-    return new Retrieval(span, parent, run, this.#warnOnce, memory);
+    return new Retrieval(span, parent, owner, this.#warnOnce, memory);
   }
 
   /**
-   * A run that has ended, sent as the live calls would have sent it.
+   * A trace that has ended, sent as the live calls would have sent it.
    *
-   * Its trace is its own, named by the run's id, whatever context is active;
+   * It goes under the trace id the record gives, whatever context is active;
    * each span's id is derived from that id and the span's place in the record.
-   * Its spans are queued whole once built, the run's own last, and travel in
+   * Its spans are queued whole once built, the agent's own last, and travel in
    * exports of their own, so the same record sent again is the same bytes,
    * whatever else is sent meanwhile. Throws `QueueFullError`, queuing nothing,
    * when the export queue has no room for the whole record, and
    * `ShutdownError` once the client is shut down.
    */
-  record(record: RunRecord): void {
+  record(record: TraceRecord): void {
     const agent: unknown = record.agent;
     if (typeof agent !== 'string' || isBlank(agent)) {
-      throw new TypeError("a run needs its agent's name");
+      throw new TypeError("a trace needs its agent's name");
     }
     if ([...agent].length > contract.AGENT_MAX) {
-      throw new RangeError(`a recorded run's agent must be up to ${contract.AGENT_MAX} characters`);
+      throw new RangeError(`a recorded trace's agent must be up to ${contract.AGENT_MAX} characters`);
     }
-    const runHex = uuidHex(record.runId);
+    const traceHex = traceHexOf(record.traceId);
+    if (traceHex === undefined) throw new TypeError("a recorded trace's id must be 32 hex digits, not all zeros");
     // Checked whole before anything is queued, so a record refused sends
-    // nothing rather than half a run.
-    check(record, 'run');
+    // nothing rather than half a trace.
+    check(record, 'trace');
     // Read before the items, whose getters may change them.
     const tags = record.tags ?? {};
     const tagged = isObject(tags) ? Object.entries(tags) : undefined;
     if (tagged === undefined || tagged.some(([, value]) => typeof value !== 'string')) {
-      throw new TypeError("a recorded run's tags must be an object of strings");
+      throw new TypeError("a recorded trace's tags must be an object of strings");
     }
     const messages = [
       [contract.INPUT_MESSAGES, record.inputMessages],
@@ -617,14 +611,13 @@ export class Opener {
       }
       if (later(start, end)) throw new RangeError('a recorded span cannot end before it starts');
     }
-    const runId = hyphenated(runHex);
-    const inherited = inheritedOf(runId, record.agent, record.userId, record.sessionId);
-    const attributes = runAttributes(record.agent, inherited, tagsOf(tagged, this.#warnOnce));
+    const inherited = inheritedOf(record.agent, record.userId, record.sessionId);
+    const attributes = agentAttributes(record.agent, inherited, tagsOf(tagged, this.#warnOnce));
     for (const [key, value] of messages) {
       if (isSet(value)) attributes[key] = asJson(value);
     }
     // Worked out before the record is built: a count that warns calls the
-    // `warn` hook, which may record a run of its own.
+    // `warn` hook, which may record a trace of its own.
     const usages = new Map<CallRecord, Attributes>();
     const operations = new Map<CallRecord, string>();
     // Content too, whose encoding may run the caller's `toJSON`.
@@ -640,7 +633,7 @@ export class Opener {
     }
     let place = 0;
     const open = (name: string, parent: Context, spanAttributes: Attributes, kind: SpanKind, at: RecordTime): Span =>
-      this.#ids.given(runHex, spanIdAt(runHex, place++), () =>
+      this.#ids.given(traceHex, spanIdAt(traceHex, place++), () =>
         this.#tracer.startSpan(name, { kind, attributes: spanAttributes, startTime: hrTimeOf(at) }, parent),
       );
     const call = (item: CallRecord, parent: Context): void => {
@@ -668,9 +661,9 @@ export class Opener {
       }
     };
     // Queued whole or not at all: a record that outgrows the queue's room
-    // would lose its tail, the run's own span first.
-    this.#processor.record(runHex, 1 + every.length, () => {
-      const span = open(runSpanName(record.agent), ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
+    // would lose its tail, the agent's own span first.
+    this.#processor.record(traceHex, 1 + every.length, () => {
+      const span = open(agentSpanName(record.agent), ROOT_CONTEXT, attributes, SpanKind.INTERNAL, record.start);
       build(items, trace.setSpan(ROOT_CONTEXT, span));
       close(span, record, scored.get(record));
     });
@@ -692,15 +685,6 @@ export class Opener {
   #start(name: string, parent: Context, attributes: Attributes, kind: SpanKind): Span {
     return this.#tracer.startSpan(name, { kind, attributes }, parent);
   }
-}
-
-/** A run id's 32 hex digits, lowercase: the trace's id. */
-function uuidHex(runId: unknown): string {
-  const hex = uuidHexOf(runId);
-  if (hex === undefined) throw new TypeError("a recorded run's id must be a UUID");
-  // The run's id is its trace's, and a trace id of zeros is no trace at all.
-  if (/^0+$/.test(hex)) throw new TypeError("a recorded run's id must be a UUID other than the nil UUID");
-  return hex;
 }
 
 /**
@@ -727,15 +711,15 @@ type Item = StepRecord | CallRecord;
 /** An item as read, a step with what it holds. */
 type Read = readonly [Item, readonly Read[]];
 
-/** How deep steps nest, a run's own at 1: past any agent's subagents, and an end to a step that holds itself. */
+/** How deep steps nest, a trace's own at 1: past any agent's subagents, and an end to a step that holds itself. */
 const STEP_DEPTH_MAX = 16;
 
 /** The record's items, each step with what it holds, read once and checked, so the items checked are the items built. */
-function read(record: RunRecord): Read[] {
+function read(record: TraceRecord): Read[] {
   const inside = record.inside ?? [];
   // Cast: narrowing the name itself by `Array.isArray` makes its items `any`.
   if (!Array.isArray(inside as unknown)) {
-    throw new TypeError("a recorded run's inside must be an array, in the order it ran");
+    throw new TypeError("a recorded trace's inside must be an array, in the order it ran");
   }
   return readItems(inside, 1);
 }
@@ -774,7 +758,7 @@ function* walk(items: readonly Read[]): Generator<Item> {
 
 /** Each kind of record, whose fields the tables below name by its keys. */
 interface Kinds {
-  run: RunRecord;
+  trace: TraceRecord;
   step: StepRecord;
   model_call: ModelCallRecord;
   tool_call: ToolCallRecord;
@@ -787,7 +771,7 @@ type Field<T> = readonly [name: keyof T & string, type: 'string' | 'boolean' | '
  * OpenTelemetry would warn of another mid-build, or send it wrong.
  */
 const FIELDS = {
-  run: [
+  trace: [
     ['userId', 'string', true],
     ['sessionId', 'string', true],
   ],
@@ -808,13 +792,13 @@ const OUTCOME: readonly Field<RecordOutcome>[] = [
 
 /** The longest each recorded text may be, in characters, as ingest caps it. */
 const CAPS = {
-  run: { userId: contract.USER_ID_MAX, sessionId: contract.SESSION_ID_MAX },
+  trace: { userId: contract.USER_ID_MAX, sessionId: contract.SESSION_ID_MAX },
   step: { name: contract.NAME_MAX },
   model_call: { model: contract.MODEL_MAX, provider: contract.PROVIDER_MAX, reasoningEffort: contract.ATTRIBUTE_VALUE_MAX },
   tool_call: { name: contract.NAME_MAX },
 } satisfies { [K in keyof Kinds]: Partial<Record<keyof Kinds[K], number>> };
 
-function check(item: RunRecord | Item, kind: keyof typeof FIELDS): void {
+function check(item: TraceRecord | Item, kind: keyof typeof FIELDS): void {
   const what = kind.replace('_', ' ');
   const caps: Readonly<Record<string, number>> = { ...CAPS[kind], errorType: contract.ERROR_TYPE_MAX };
   const read: Record<string, unknown> = {};
@@ -979,18 +963,18 @@ function numberOf(value: unknown): number {
   return typeof value === 'string' && DECIMAL.test(value) ? Number(value) : Number.NaN;
 }
 
-/** What every span of a run carries, live or recorded: its id and agent, and its user and session where it has them. */
-function inheritedOf(runId: string, agent: string, user?: string, session?: string): Attributes {
-  const inherited: Attributes = { [contract.RUN_ID]: runId, [contract.AGENT]: agent };
+/** What every span of a trace carries, live or recorded: its agent, and its user and session where it has them. */
+function inheritedOf(agent: string, user?: string, session?: string): Attributes {
+  const inherited: Attributes = { [contract.AGENT]: agent };
   if (user) inherited[contract.USER_ID] = user;
   if (session) inherited[contract.SESSION_ID] = session;
   return inherited;
 }
 
-/** A run's own span's attributes, live or recorded: its tags last. */
-function runAttributes(agent: string, inherited: Attributes, tags: Attributes): Attributes {
+/** The agent's own span's attributes, live or recorded: its tags last. */
+function agentAttributes(agent: string, inherited: Attributes, tags: Attributes): Attributes {
   return {
-    [contract.OPERATION]: contract.RUN_OPERATION,
+    [contract.OPERATION]: contract.AGENT_OPERATION,
     [contract.AGENT_NAME]: agent,
     ...inherited,
     ...tags,
@@ -1039,8 +1023,8 @@ function toolAttributes(inherited: Attributes, name: string): Attributes {
   return { ...inherited, [contract.OPERATION]: contract.TOOL_OPERATION, [contract.TOOL_NAME]: name };
 }
 
-function runSpanName(agent: string): string {
-  return `${contract.RUN_OPERATION} ${agent}`;
+function agentSpanName(agent: string): string {
+  return `${contract.AGENT_OPERATION} ${agent}`;
 }
 
 function toolSpanName(name: string): string {
@@ -1049,7 +1033,7 @@ function toolSpanName(name: string): string {
 
 /**
  * A model call's operation as ingest reads one: the default for a blank one,
- * and, with one warning, for one ingest would file as a step, a run or a tool call.
+ * and, with one warning, for one ingest would file as a step, an agent or a tool call.
  */
 function operationOf(given: unknown, warnOnce: WarnOnce): string {
   if (typeof given !== 'string' || isBlank(given)) return contract.DEFAULT_MODEL_OPERATION;
@@ -1063,8 +1047,8 @@ function operationOf(given: unknown, warnOnce: WarnOnce): string {
 }
 
 /**
- * A run's tags as its span's attributes: the first `TAGS_MAX` of those
- * ingest keeps, since past them they would crowd out the run's own.
+ * A trace's tags as the agent's span's attributes: the first `TAGS_MAX` of
+ * those ingest keeps, since past them they would crowd out the span's own.
  */
 function tagsOf(given: ReadonlyArray<readonly [string, unknown]>, warnOnce: WarnOnce): Attributes {
   const kept: Attributes = {};
@@ -1076,12 +1060,12 @@ function tagsOf(given: ReadonlyArray<readonly [string, unknown]>, warnOnce: Warn
     // Ingest drops it before counting, so it takes no place among the 32.
     if (length === 0 || length > contract.TAG_KEY_MAX || shown(sent) > contract.TAG_VALUE_MAX) {
       warnOnce(
-        'run:tag',
+        'trace:tag',
         "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent",
         { kind: 'input' },
       );
     } else if (count === contract.TAGS_MAX) {
-      warnOnce('run:tags', 'telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent', {
+      warnOnce('trace:tags', 'telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent', {
         kind: 'input',
       });
     } else {
@@ -1147,8 +1131,8 @@ function cut(value: string, most: number, what: string, warnOnce: WarnOnce): str
   return characters.slice(0, most).join('');
 }
 
-/** Whether an id is within ingest's cap; one past it is left off its run or call with one warning, since cut it would name another. */
-function fits(value: string, most: number, what: string, span: 'run' | 'call', warnOnce: WarnOnce): boolean {
+/** Whether an id is within ingest's cap; one past it is left off its trace or call with one warning, since cut it would name another. */
+function fits(value: string, most: number, what: string, span: 'trace' | 'call', warnOnce: WarnOnce): boolean {
   if (value.length <= most || [...value].length <= most) return true;
   warnOnce(`long:${what}`, `telmoni: a ${what} must be up to ${most} characters; the ${span} is sent without it`, {
     kind: 'input',

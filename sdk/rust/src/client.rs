@@ -1,4 +1,4 @@
-//! The client: a tracer provider of its own, and the runs it records.
+//! The client: a tracer provider of its own, and the traces it records.
 
 use std::fmt;
 use std::sync::Arc;
@@ -18,10 +18,10 @@ use crate::guard::{OwnRates, own_rates};
 use crate::ids::Ids;
 use crate::processor::{Batching, Processor};
 use crate::propagation::{self, Carrier};
-use crate::records::{self, RunRecord};
-use crate::runs::{self, Run, RunOptions};
+use crate::records::{self, TraceRecord};
 use crate::sampler::RecordingSampler;
 use crate::scores::{self, Score, ScoreTarget};
+use crate::traces::{self, Trace, TraceOptions};
 use crate::transport::{Reqwest, Transport};
 use crate::warnings::{Sink, Warner, Warning};
 
@@ -71,7 +71,7 @@ impl fmt::Debug for Hooks {
     }
 }
 
-/// What the client and its runs share.
+/// What the client and its traces share.
 pub(crate) struct Inner {
     pub(crate) config: Config,
     pub(crate) tracer: SdkTracer,
@@ -83,7 +83,7 @@ pub(crate) struct Inner {
     pub(crate) prices: OwnRates,
 }
 
-/// The client: a tracer provider of its own, and the runs it records.
+/// The client: a tracer provider of its own, and the traces it records.
 ///
 /// The provider is built part by part — resource, sampler, limits, id
 /// generator, processor — so no `OTEL_*` variable reaches it, and an
@@ -134,10 +134,11 @@ impl Telmoni {
         let provider = SdkTracerProvider::builder()
             .with_resource(resource)
             .with_sampler(RecordingSampler::new(config.sampler.clone()))
+            // One link: the application's span a trace is opened beside.
             .with_span_limits(SpanLimits {
                 max_attributes_per_span: 128,
                 max_events_per_span: 32,
-                max_links_per_span: 0,
+                max_links_per_span: 1,
                 max_attributes_per_event: 32,
                 max_attributes_per_link: 0,
             })
@@ -177,77 +178,77 @@ impl Telmoni {
         self.inner.exporter.content_mode()
     }
 
-    /// A run of `agent`, as a guard: the span `invoke_agent <agent>` in
-    /// whatever trace is current, ended when the guard drops or on
-    /// [`Run::end`]. An agent past 128 characters is cut to them, and a tag
-    /// out of range, a tag past the first 32 by key, or a user or session past
-    /// its cap is left off, each with one warning.
+    /// A trace of `agent`, as a guard: the span `invoke_agent <agent>` at the
+    /// root of a trace of its own, linked to whatever span the application
+    /// had current, ended when the guard drops or on [`Trace::end`]. An agent
+    /// past 128 characters is cut to them, and a tag out of range, a tag past
+    /// the first 32 by key, or a user or session past its cap is left off,
+    /// each with one warning.
     ///
     /// # Errors
     ///
     /// [`Error::EmptyAgent`] for a blank name; [`Error::MaxSteps`] for a
     /// `max_steps` of 0; [`Error::MaxSpend`] for a `max_spend` not a finite
     /// number of US dollars above 0.
-    pub fn run(&self, agent: &str, options: RunOptions) -> Result<Run, Error> {
-        runs::open(&self.inner, agent, options)
+    pub fn trace(&self, agent: &str, options: TraceOptions) -> Result<Trace, Error> {
+        traces::open(&self.inner, agent, options)
     }
 
-    /// [`Self::run`] around `f`: the run ends when `f` returns, and `f`'s
+    /// [`Self::trace`] around `f`: the trace ends when `f` returns, and `f`'s
     /// value is returned.
     ///
     /// # Errors
     ///
-    /// As [`Self::run`].
-    pub fn run_with<R>(
+    /// As [`Self::trace`].
+    pub fn trace_with<R>(
         &self,
         agent: &str,
-        options: RunOptions,
-        f: impl FnOnce(&Run) -> R,
+        options: TraceOptions,
+        f: impl FnOnce(&Trace) -> R,
     ) -> Result<R, Error> {
-        let run = self.run(agent, options)?;
-        let value = f(&run);
-        run.end();
+        let trace = self.trace(agent, options)?;
+        let value = f(&trace);
+        trace.end();
         Ok(value)
     }
 
-    /// [`Self::run_with`] for a fallible `f`: an `Err` marks the run failed
-    /// with `E`'s type name (its last path segment) and its message, content
-    /// under the exporter's lock, and is returned unchanged. An `Err` is the
-    /// only error a closure can carry out; a panic unwinding through marks the
-    /// span `panic`.
+    /// [`Self::trace_with`] for a fallible `f`: an `Err` marks the trace
+    /// failed with `E`'s type name (its last path segment) and its message,
+    /// content under the exporter's lock, and is returned unchanged. An `Err`
+    /// is the only error a closure can carry out; a panic unwinding through
+    /// marks the span `panic`.
     ///
     /// # Errors
     ///
-    /// `f`'s, or a run that did not open ([`Self::run`]), turned into `E`.
-    pub fn try_run_with<T, E: From<Error> + std::fmt::Display>(
+    /// `f`'s, or a trace that did not open ([`Self::trace`]), turned into `E`.
+    pub fn try_trace_with<T, E: From<Error> + std::fmt::Display>(
         &self,
         agent: &str,
-        options: RunOptions,
-        f: impl FnOnce(&Run) -> Result<T, E>,
+        options: TraceOptions,
+        f: impl FnOnce(&Trace) -> Result<T, E>,
     ) -> Result<T, E> {
-        let run = self.run(agent, options).map_err(E::from)?;
-        let result = run.on_result(f(&run));
-        run.end();
+        let trace = self.trace(agent, options).map_err(E::from)?;
+        let result = trace.on_result(f(&trace));
+        trace.end();
         result
     }
 
-    /// Sends a run that has already ended, from its record, as the live calls
-    /// would have sent it: for a job that keeps its own log, or a hook that
-    /// runs after the turn it reports. The same exporter and content rules
-    /// apply.
+    /// Sends a trace that has already ended, from its record, as the live
+    /// calls would have sent it: for a job that keeps its own log, or a hook
+    /// that runs after the turn it reports. The same exporter and content
+    /// rules apply.
     ///
-    /// Its trace is its own, named by the run's id, whatever trace is
-    /// current, and each span's id is derived from that id and the span's
-    /// place in the record, so the same record sent again is the same bytes,
-    /// which ingest answers once: give a run the same id each time it is
-    /// sent. Its spans travel in exports of their own, whatever else is sent
-    /// meanwhile, in one when it holds no more than a batch, the run's own
-    /// span last.
+    /// Its trace id is the record's, whatever trace is current, and each
+    /// span's id is derived from that id and the span's place in the record,
+    /// so the same record sent again is the same bytes, which ingest answers
+    /// once: give a trace the same id each time it is sent. Its spans travel
+    /// in exports of their own, whatever else is sent meanwhile, in one when
+    /// it holds no more than a batch, the agent's own span last.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime};
     ///
-    /// use telmoni::{Config, ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+    /// use telmoni::{Config, ModelCallRecord, Telmoni, ToolCallRecord, TraceRecord, Usage};
     ///
     /// # fn main() -> Result<(), telmoni::Error> {
     /// let telmoni = Telmoni::new(Config::from_env());
@@ -255,7 +256,7 @@ impl Telmoni {
     /// let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_795_600);
     /// let at = |millis| start + Duration::from_millis(millis);
     ///
-    /// telmoni.record_run(RunRecord {
+    /// telmoni.record_trace(TraceRecord {
     ///     session_id: Some("conv_7".into()),
     ///     inside: vec![
     ///         ModelCallRecord {
@@ -275,7 +276,7 @@ impl Telmoni {
     ///         .into(),
     ///     ],
     ///     // Yours, kept with the log.
-    ///     ..RunRecord::new("3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
+    ///     ..TraceRecord::new("3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d", "nightly-triage", start, at(9_000))
     /// })?;
     /// telmoni.flush();
     /// # Ok(())
@@ -284,19 +285,19 @@ impl Telmoni {
     ///
     /// # Errors
     ///
-    /// [`Error::EmptyAgent`], [`Error::RunId`], [`Error::EmptyName`],
+    /// [`Error::EmptyAgent`], [`Error::TraceId`], [`Error::EmptyName`],
     /// [`Error::TooLong`], [`Error::RecordedTime`] or [`Error::EndBeforeStart`]
     /// for a record ingest would refuse, as each says; [`Error::TooDeep`] for
     /// steps nested past 16 deep; [`Error::QueueFull`] when the export queue
     /// has no room for the whole record; and [`Error::Shutdown`] once the
     /// client is shut down. A record refused sends nothing, and is taken: send
     /// a clone where it may be recorded again.
-    pub fn record_run(&self, record: RunRecord) -> Result<(), Error> {
+    pub fn record_trace(&self, record: TraceRecord) -> Result<(), Error> {
         records::send(&self.inner, record)
     }
 
-    /// Scores what has already ended — a run, one of its spans or a session —
-    /// sent to `/v1/scores` with the next export, as a flush or a shutdown
+    /// Scores what has already ended — a trace, one of its spans or a session
+    /// — sent to `/v1/scores` with the next export, as a flush or a shutdown
     /// sends the spans queued. A score of a span still open goes on its
     /// handle's `score` instead. One breaking a score's rules, or a target
     /// that is none, is not sent, with one warning.
@@ -304,7 +305,7 @@ impl Telmoni {
         let Some(sent) = scores::sent(target, &score, &self.inner.warner) else {
             return;
         };
-        // A span of its own trace, outside whatever run is current, so the
+        // A span of its own trace, outside whatever trace is current, so the
         // queue carries it as it carries any span, and the exporter takes it out.
         self.inner
             .tracer
@@ -314,32 +315,33 @@ impl Telmoni {
             .end();
     }
 
-    /// Writes into `headers` what the next service continues the run from:
-    /// the W3C `traceparent` of the span current inside the run, and the
-    /// run's id and agent as the W3C `baggage` members `telmoni.run_id` and
-    /// `telmoni.agent`, beside whatever members the headers hold. The span
-    /// is the current context's — what a handle's [`attach`](Run::attach) or
-    /// `FutureExt::with_context` made current; [`Self::inject_from`] takes
-    /// one given. Outside a run it writes nothing.
+    /// Writes into `headers` what the next service continues the trace from:
+    /// the W3C `traceparent` of the span current inside the trace, and the
+    /// agent as the W3C `baggage` member `telmoni.agent`, beside whatever
+    /// members the headers hold. The span is the current context's — what a
+    /// handle's [`attach`](Trace::attach) or `FutureExt::with_context` made
+    /// current; [`Self::inject_from`] takes one given. Outside a trace it
+    /// writes nothing.
     pub fn inject(&self, headers: &mut dyn Carrier) {
         self.inject_from(&Context::current(), headers);
     }
 
-    /// [`Self::inject`] from `cx` — a handle's [`context`](Run::context) —
+    /// [`Self::inject`] from `cx` — a handle's [`context`](Trace::context) —
     /// rather than the current context.
     pub fn inject_from(&self, cx: &Context, headers: &mut dyn Carrier) {
         propagation::inject(cx, headers);
     }
 
-    /// The run `headers` name, continued here: its steps and calls take the
-    /// caller's span as their parent and carry the caller's run, so the trace
-    /// shows the work where it was asked for. Nothing ends a continued run
-    /// here; the caller's own span does, so dropping the guard or calling
-    /// [`Run::end`] sends nothing. `None` for headers that name no run.
+    /// The trace `headers` name, continued here: its steps and calls take the
+    /// caller's span as their parent and carry the caller's agent, so the
+    /// trace shows the work where it was asked for. Nothing ends a continued
+    /// trace here; the caller's own span does, so dropping the guard or
+    /// calling [`Trace::end`] sends nothing. `None` for headers that name no
+    /// trace.
     #[must_use]
-    pub fn extract(&self, headers: &dyn Carrier) -> Option<Run> {
+    pub fn extract(&self, headers: &dyn Carrier) -> Option<Trace> {
         let read = propagation::read_headers(headers)?;
-        Some(runs::continued(&self.inner, read))
+        Some(traces::continued(&self.inner, read))
     }
 
     /// Sends everything queued and waits, up to 30 seconds; `true` once
@@ -351,7 +353,7 @@ impl Telmoni {
 
     /// Flushes, then stops the exporter's thread; spans opened afterwards go
     /// nowhere. Past 30 seconds what is left is given up: no batch or attempt
-    /// follows. Dropping the last clone of the client and its runs does the
+    /// follows. Dropping the last clone of the client and its traces does the
     /// same, with OpenTelemetry's shorter wait.
     pub fn shutdown(&self) {
         // Ours first, with the longer wait: the provider's own call afterwards
@@ -414,7 +416,7 @@ mod tests {
     }
 
     /// Nothing a caller passes can fail a build part-way, so the guard is
-    /// held here, below `record_run`, to queue only a record built whole.
+    /// held here, below `record_trace`, to queue only a record built whole.
     #[test]
     fn a_record_not_built_queues_nothing() {
         let sent = Counting::default();

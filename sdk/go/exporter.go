@@ -950,7 +950,15 @@ type otlpSpan struct {
 	EndTimeUnixNano   string      `json:"endTimeUnixNano"`
 	Attributes        []keyValue  `json:"attributes"`
 	Events            []otlpEvent `json:"events,omitempty"`
+	Links             []otlpLink  `json:"links,omitempty"`
 	Status            *otlpStatus `json:"status,omitempty"`
+}
+
+// otlpLink is a trace's link to the application's span: the span alone, no
+// attributes.
+type otlpLink struct {
+	TraceID string `json:"traceId"`
+	SpanID  string `json:"spanId"`
 }
 
 type otlpEvent struct {
@@ -1080,6 +1088,9 @@ func encodeSpan(span sdktrace.ReadOnlySpan, keepContent, trimmed bool, cut []str
 	}
 	if parent := span.Parent(); parent.IsValid() {
 		out.ParentSpanID = parent.SpanID().String()
+	}
+	for _, link := range span.Links() {
+		out.Links = append(out.Links, otlpLink{TraceID: link.SpanContext.TraceID().String(), SpanID: link.SpanContext.SpanID().String()})
 	}
 	// Events and the status message carry an exception's message: content,
 	// and the first to go from a span trimmed to fit; a score's own keys are

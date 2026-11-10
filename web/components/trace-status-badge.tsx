@@ -3,10 +3,10 @@ import type { Trace } from "@/lib/server/entities/traces";
 import { formatCount } from "@/lib/traces";
 import { SpanStatus } from "@/lib/types/enums";
 
-// A trace's status as a list shows it: the run's own mark, and beside any but
-// Error how many of its spans failed, since a run that recovered from a
-// failed call reads as clean otherwise. A run whose own span has not arrived
-// is still running, whatever its spans so far say.
+// A trace's status as a list shows it: the agent's own mark, and beside any
+// but Error how many of its spans failed, since a trace that recovered from a
+// failed call reads as clean otherwise. A trace whose agent's span has not
+// arrived is still running, whatever its spans so far say.
 export function TraceStatusBadge({
   trace,
 }: {

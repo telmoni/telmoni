@@ -266,7 +266,7 @@ describe("GET /api/v1/events (SSE)", () => {
         data: {
           organizationId: "org_own",
           projectId: "project_1",
-          runs: ["d86dd262-54c7-445a-8647-8623af421fa5"],
+          traces: ["d86dd26254c7445a86478623af421fa5"],
           more: false,
         },
       }),
@@ -274,7 +274,7 @@ describe("GET /api/v1/events (SSE)", () => {
 
     const chunk = await reader.read();
     expect(new TextDecoder().decode(chunk.value)).toBe(
-      'event: spans:ingested\ndata: {"organizationId":"org_own","projectId":"project_1","runs":["d86dd262-54c7-445a-8647-8623af421fa5"],"more":false}\n\n',
+      'event: spans:ingested\ndata: {"organizationId":"org_own","projectId":"project_1","traces":["d86dd26254c7445a86478623af421fa5"],"more":false}\n\n',
     );
     await reader.cancel();
   });
@@ -300,7 +300,7 @@ describe("GET /api/v1/events (SSE)", () => {
           data: {
             organizationId: "org_team",
             projectId: "project_2",
-            runs: ["d86dd262-54c7-445a-8647-8623af421fa5"],
+            traces: ["d86dd26254c7445a86478623af421fa5"],
             more: false,
           },
         }),
@@ -318,7 +318,7 @@ describe("GET /api/v1/events (SSE)", () => {
       return text;
     }
 
-    it("tells a member without a seat on the project nothing of it, not even its run ids", async () => {
+    it("tells a member without a seat on the project nothing of it, not even its trace ids", async () => {
       const text = await heard([TEAM], []);
       expect(text).not.toContain("spans:ingested");
       expect(text).not.toContain("d86dd262");

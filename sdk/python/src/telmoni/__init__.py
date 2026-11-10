@@ -1,5 +1,5 @@
 """The Python SDK for Telmoni, privacy-first, open-source monitoring for AI
-agents: an agent's runs, steps, model calls, tool calls and retrievals as
+agents: an agent's traces, steps, model calls, tool calls and retrievals as
 OpenTelemetry spans, sent to Telmoni and nowhere else."""
 
 from ._version import __version__
@@ -10,16 +10,16 @@ from .models import (
     Config,
     ModelCallRecord,
     Price,
-    RunRecord,
     Secret,
     StepRecord,
     ToolCallRecord,
+    TraceRecord,
     Usage,
     WarningInfo,
     WarningKind,
 )
 from .processor import Batching, QueueFullError, ShutdownError
-from .runs import ModelCall, Retrieval, Run, Step, ToolCall, current_run
+from .traces import ModelCall, Retrieval, Step, ToolCall, Trace, current_trace
 
 __all__ = [
     "DEFAULT_ENDPOINT",
@@ -31,8 +31,6 @@ __all__ = [
     "Price",
     "QueueFullError",
     "Retrieval",
-    "Run",
-    "RunRecord",
     "Secret",
     "ShutdownError",
     "Step",
@@ -40,9 +38,11 @@ __all__ = [
     "Telmoni",
     "ToolCall",
     "ToolCallRecord",
+    "Trace",
+    "TraceRecord",
     "Usage",
     "WarningInfo",
     "WarningKind",
     "__version__",
-    "current_run",
+    "current_trace",
 ]

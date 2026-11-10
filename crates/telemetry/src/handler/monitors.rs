@@ -247,7 +247,7 @@ async fn save(
     let change = Change {
         action: AuditAction::Created,
         kind: TelmoniResourceKind::Monitor,
-        id: row.id,
+        id: row.id.to_string(),
         metadata: json!({ "agent": row.agent }),
     };
     chain::file(tx, acting, project_id, change).await?;
@@ -301,7 +301,7 @@ pub async fn update_monitor(
         let change = Change {
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Monitor,
-            id,
+            id: id.to_string(),
             metadata: json!({ "agent": row.agent, "changed": changed }),
         };
         chain::file(tx, &acting, project_id, change).await?;
@@ -344,7 +344,7 @@ pub async fn delete_monitor(
             let change = Change {
                 action: AuditAction::Deleted,
                 kind: TelmoniResourceKind::Monitor,
-                id,
+                id: id.to_string(),
                 metadata: json!({ "agent": row.agent }),
             };
             chain::file(tx, &acting, project_id, change).await?;
@@ -403,7 +403,7 @@ async fn paused(
             let change = Change {
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Monitor,
-                id,
+                id: id.to_string(),
                 metadata: json!({
                     "agent": row.agent,
                     "state": { "from": before.state, "to": row.state },

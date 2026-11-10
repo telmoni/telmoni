@@ -36,32 +36,32 @@ key without the ingest scope answers `403` `/errors/authz/forbidden`.
 
 ## What a span must carry
 
-Spans are kept inside a **run**: one execution of an agent. Our SDKs mark
-every span of a run with the run's id, `telmoni.run_id`, a UUID minted as the
-run starts and the same on each of its spans, and the run's agent,
-`telmoni.agent`, up to 128 characters, and those spans are kept as they arrive.
+Spans are kept inside a **trace**: one execution of an agent, named by its
+OpenTelemetry trace id, 32 hex digits. Our SDKs open a trace of its own for
+each execution and mark every span of it with the agent, `telmoni.agent`, up
+to 128 characters, and those spans are kept as they arrive.
 
-A span without both, from any other OpenTelemetry exporter, is kept too, once
-its trace says which run it is of. It is answered as kept and held until its
+A span without it, from any other OpenTelemetry exporter, is kept too, once
+its trace says which agent it is of. It is answered as kept and held until its
 trace has sent nothing for a minute, or for five minutes while it still sends,
 then placed. A span ends before its parent, so one whose parent has not
 arrived waits for it, up to an hour: an agent's own span comes last.
 
-- An `invoke_agent` or `invoke_workflow` span with neither above it is a run,
-  its id derived from the trace's and span's ids, its agent its
-  `gen_ai.agent.name` (or `gen_ai.workflow.name`, else its own name), cut to
-  128 characters. Every span under it is of that run; one more agent under it
-  is a plain span of it.
-- The model and tool calls of a trace with no run above them, as from an
-  application instrumented at its model client alone, are one run of their
-  own, its id derived from the trace's id and its agent the resource's
-  `service.name` (`unknown_service` where it names none), with a span of its
-  own from the first call's start to the last one's end.
-- Every other span, in no run, is dropped: Telmoni keeps agents' runs, not
-  every request a service handles.
+- The topmost `invoke_agent` or `invoke_workflow` span of a trace is the
+  agent's, its agent its `gen_ai.agent.name` (or `gen_ai.workflow.name`, else
+  its own name), cut to 128 characters. Every other span of the trace is named
+  for the nearest agent above it, else for the topmost; one more agent under
+  it is a plain span of the trace. Where two have none above them, the first
+  to start is the trace's agent and the other a plain span, as is one that
+  arrives after the trace was placed.
+- A trace with no agent's span at all, as from an application instrumented at
+  its model client alone, gets one written: named by the resource's
+  `service.name` (`unknown_service` where it names none), from the first
+  span's start to the last one's end, failed where any failed.
 
-A span arriving after its trace was placed joins the run its parent landed in,
-for a day, or waits for its parent as any other span does; the span of a run of calls alone is written once, so a call arriving later
+A span arriving after its trace was placed joins the trace for the agent its
+parent landed under, for a day, or waits for its parent as any other span
+does; the agent's span Telmoni wrote is written once, so a call arriving later
 does not move its end. Every other rule on this page holds for it as for ours —
 content, the inventory, the caps, the plan — but applied as it lands, after
 the answer: a span dropped or sampled out then is not named in it. A project
@@ -69,12 +69,12 @@ holds up to 100,000 such spans waiting at once; past it, each is refused and
 named in the answer, and an exporter does not send it again.
 
 What a span is, its **kind**, follows `gen_ai.operation.name`: `invoke_agent`
-or `invoke_workflow` is the run itself; `chat`, `generate_content`,
+or `invoke_workflow` is the agent's own span; `chat`, `generate_content`,
 `text_completion` or `embeddings` a model call; `execute_tool` a tool call;
 `retrieval` or `search_memory` a retrieval, a search of a vector store or a
 memory; `plan` a step; any other span opened under the `telmoni`
-instrumentation scope a step, and one opened elsewhere a plain span. A run is
-named by `gen_ai.agent.name` (or `gen_ai.workflow.name`), a tool call by
+instrumentation scope a step, and one opened elsewhere a plain span. An agent
+is named by `gen_ai.agent.name` (or `gen_ai.workflow.name`), a tool call by
 `gen_ai.tool.name`, a retrieval by the source it searched
 (`gen_ai.data_source.id`, or `gen_ai.memory.store.id` for a memory search),
 and every other span by its own name, 1 to 145 characters: room for a model
@@ -102,7 +102,7 @@ current ones (`gen_ai.system`, `gen_ai.usage.prompt_tokens`,
 | `session_id` | `gen_ai.conversation.id` | 1 to 200 characters; stored as its HMAC-SHA-256 under the project's key, as `user_id` is, so a session id built from an email or an account number is never kept as sent |
 | `environment`, `release` | the resource's `deployment.environment.name` and `service.version`, on every span of the export | up to 128 characters each, as sent; empty where the resource names none, or past the cap |
 | `tags` | each `telmoni.tag.<key>` | up to 32; a key up to 64 characters, a value up to 256; in a project, up to 64 keys a UTC day, each taking up to 500 values (below) |
-| `sample_rate` | a plan's sampling, [past its capacity](#what-is-dropped-at-the-door) | a tenth, on every span of a run kept whole; empty on every other span |
+| `sample_rate` | a plan's sampling, [past its capacity](#what-is-dropped-at-the-door) | a tenth, on every span of a trace kept whole; empty on every other span |
 | `attributes` | the attributes the field inventory names, and any other whose value is a number or a boolean, except a name under `telmoni.`, which is dropped as `unlisted` | up to 64, the resource's among them, which keep at most 2 KiB together since every span of the export carries them; a key up to 128 characters, a value up to 1,024; a named array as its JSON |
 
 A field whose value breaks its rule refuses the span whole; an attribute past
@@ -115,14 +115,14 @@ that timed them is a time zone or a date out. The SDKs send their clock with
 every export, as `Telmoni-Sent-At`, in nanoseconds since the Unix epoch; where
 it stands more than 55 minutes from the server's as the export arrives, ahead
 or behind, every span of the export is moved by the difference, each keeping
-its length, so every export of a run moves alike and its parts keep their
-places. A recorded run's times are read as that clock's too. A span is sent
+its length, so every export of a trace moves alike and its parts keep their
+places. A recorded trace's times are read as that clock's too. A span is sent
 once it has ended, so an export holding one that ends more than 55 minutes
 after the clock it names was not timed by that clock, or was mistyped; it is
 read as though it named none. Where none is named, as from another exporter,
 the spans one resource sends of a trace in an export are moved back together
 when they end more than 55 minutes after the export arrived, until the last
-ends as it arrived, so a run sent over several exports is moved export by
+ends as it arrived, so a trace sent over several exports is moved export by
 export, its parts perhaps landing seconds apart, or further where an export
 arrives late. A clock drifting by less is left as it is.
 
@@ -131,15 +131,15 @@ arrives late. A clock drifting by less is left as it is.
 A model call's cost is the one it reported in `gen_ai.usage.cost`, in US
 dollars, a free call's `0` among them; one below 0, or no finite number,
 refuses the span, as a token count below 0 does. A call that reported none is
-priced by its tokens wherever what runs spent is read — an alert on what each
-run spent, for one — and the price is never written beside it, so a price
+priced by its tokens wherever what traces spent is read — an alert on what each
+trace spent, for one — and the price is never written beside it, so a price
 corrected later corrects every read after it: its input tokens less the
 cache's at the input price, each cache count at its own, and its output at the
 output price, all at the price in force the day the call arrived for its
 provider and its model as they arrived, whole: the project's own price for it
 where one is set, else LiteLLM's table of model prices, which each Telmoni
 release carries. A name neither holds is unpriced, never guessed: such a call
-adds nothing to what its run spent, and an alert's notice names its model.
+adds nothing to what its trace spent, and an alert's notice names its model.
 
 A project's Owner and Admins set its own prices under **Model prices** on its
 **Settings** page — private pricing, a model it serves itself, a fine-tune the
@@ -171,14 +171,14 @@ of 1 or 0 with `telmoni.score.type` set to `boolean`, or a boolean value, is
 a yes or no. A number may name its range, `telmoni.score.range_min` and
 `telmoni.score.range_max`, which it must fall within, and any score the
 version of what scored, `telmoni.score.version`, up to 64 characters. The
-score is kept as metadata in every content mode, of the run
-where the event is on the run's own span and of the span otherwise, beside
+score is kept as metadata in every content mode, of the trace
+where the event is on the agent's own span and of the span otherwise, beside
 its trace; an event of another exporter's span waits with it and lands with
-its run. An event without a name, or with a value that is no number, is no
+its trace. An event without a name, or with a value that is no number, is no
 score. `gen_ai.evaluation.explanation` is free text, so content, kept with
 the span's events where the project keeps content. An export sent again
 keeps each score once, by its span, its name and the event's time. A score
-of something that already ended, a person's feedback on a run, say, or any
+of something that already ended, a person's feedback on a trace, say, or any
 score of a session, goes to `POST /v1/scores` instead, under the same key
 ([`POST /v1/scores`](/docs/api/reference#post-v1scores)).
 
@@ -199,7 +199,7 @@ characters, held only by the 1 MiB an export may be.
 
 **Past a plan's capacity**, on a deployment that sells plans: once an
 organization's spans pass what its plan holds for the month, every span is
-kept through the plan's grace, if it has one; after it, one run in ten is kept
+kept through the plan's grace, if it has one; after it, one trace in ten is kept
 whole, each of its spans' `sample_rate` set to a tenth, and the rest
 are counted in `partialSuccess.rejectedSpans`, the message's first line saying
 how many and what lifts it. Its owner and admins are told once a month. Past

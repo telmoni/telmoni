@@ -35,7 +35,7 @@ describe("GET traces/export", () => {
     vi.mocked(fetchProjectBySlug).mockResolvedValue(PROJECT as never);
     vi.mocked(traceDownload).mockResolvedValue({
       kind: "ok",
-      body: "run_id\n",
+      body: "trace_id\n",
       contentType: "text/csv",
     } as never);
   });

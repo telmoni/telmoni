@@ -1,10 +1,10 @@
 //! A sampler that records every span and decides nothing of its own.
 //!
-//! A run takes the sampled flag of the trace it joins. Where it starts a
-//! trace, it takes the decision the configured sampler gives it, so an
-//! application sampling at a tenth keeps a tenth of its own spans inside runs
-//! as outside them. Nothing is ever dropped here: the SDK's processor exports
-//! recorded spans whether the flag is set or not.
+//! A trace opened here takes the decision the configured sampler gives its
+//! root, so an application sampling at a tenth keeps a tenth of its own spans
+//! inside traces as outside them; one continued from another service takes
+//! the sampled flag its headers carried. Nothing is ever dropped here: the
+//! SDK's processor exports recorded spans whether the flag is set or not.
 
 use opentelemetry::trace::{Link, SpanContext, SpanKind, TraceContextExt as _, TraceId};
 use opentelemetry::{Context, KeyValue};

@@ -99,12 +99,12 @@ import TracesPage from "./page";
 
 const PARAMS = Promise.resolve({ organization: "acme", project: "web" });
 const PROJECT = "project_7bQx2mNv9BcK4dLp";
-const RUN_A = "5d4f5c68-0000-4000-8000-000000000001";
-const RUN_B = "7a1b2c3d-0000-4000-8000-000000000002";
+const TRACE_ID_A = "5d4f5c68000040008000000000000001";
+const TRACE_ID_B = "7a1b2c3d000040008000000000000002";
 const USER = "9f86d081884c7d659a2feaa0c55ad015";
 
 const TRACE_A = {
-  run_id: RUN_A,
+  trace_id: TRACE_ID_A,
   agent: "nightly-report",
   user_id: USER,
   session_id: "conv-1",
@@ -135,7 +135,7 @@ const TRACE_A = {
 };
 const TRACE_B = {
   ...TRACE_A,
-  run_id: RUN_B,
+  trace_id: TRACE_ID_B,
   agent: "support-bot",
   user_id: "",
   session_id: "",
@@ -226,9 +226,9 @@ beforeEach(() => {
 });
 
 describe("TracesPage", () => {
-  it("lists a page of runs in the default columns, each value a filter, and counts them all", async () => {
+  it("lists a page of traces in the default columns, each value a filter, and counts them all", async () => {
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByTestId("page-header")).toHaveTextContent("Runs");
+    expect(screen.getByTestId("page-header")).toHaveTextContent("Traces");
     expect(screen.getByText("Total 2")).toBeInTheDocument();
     expect(fetchProjectBySlug).toHaveBeenCalledWith("web");
     // A page holds fifty rows unless the URL names another count.
@@ -239,7 +239,7 @@ describe("TracesPage", () => {
     const table = within(screen.getByRole("table"));
     expect(table.getByRole("link", { name: "5d4f5c68" })).toHaveAttribute(
       "href",
-      `/acme/web/traces/${RUN_A}`,
+      `/acme/web/traces/${TRACE_ID_A}`,
     );
     expect(table.getByRole("link", { name: "nightly-report" })).toHaveAttribute(
       "href",
@@ -254,10 +254,10 @@ describe("TracesPage", () => {
       "/acme/web/traces?session=conv-1",
     );
     expect(table.getByText("OK")).toBeInTheDocument();
-    // A run whose own span has not arrived is running, whatever its spans say.
+    // A trace whose agent's span has not arrived is running, whatever its spans say.
     expect(table.getByText("Running")).toBeInTheDocument();
     expect(table.queryByText("Error")).toBeNull();
-    // A run that recovered from a failed call, and one still running past
+    // A trace that recovered from a failed call, and one still running past
     // one, each name it beside the badge.
     expect(table.getAllByText("1 failed span")).toHaveLength(2);
     expect(table.getByText("1,500")).toBeInTheDocument();
@@ -277,7 +277,7 @@ describe("TracesPage", () => {
   });
 
   // The class is metadata, so drawing it files no read; its message is the peek's.
-  it("writes a failed run's class under its id, and none for a run still going", async () => {
+  it("writes a failed trace's class under its id, and none for a trace still going", async () => {
     mockTraces = list({
       traces: [
         { ...TRACE_A, status: "error", error_type: "RateLimitError" },
@@ -294,10 +294,10 @@ describe("TracesPage", () => {
     );
   });
 
-  // Grouped by session, each session heads its own runs and opens them in
-  // order; a run that named none is under a head that says so.
-  it("groups the runs by session, each head opening the session's runs in order", async () => {
-    const TRACE_C = { ...TRACE_A, run_id: "9c8d7e6f-0000-4000-8000-000000000003" };
+  // Grouped by session, each session heads its own traces and opens them in
+  // order; a trace that named none is under a head that says so.
+  it("groups the traces by session, each head opening the session's traces in order", async () => {
+    const TRACE_C = { ...TRACE_A, trace_id: "9c8d7e6f000040008000000000000003" };
     mockTraces = list({ traces: [TRACE_B, TRACE_A, TRACE_C], sort: "session", dir: "asc" });
     render(
       await TracesPage({
@@ -307,8 +307,8 @@ describe("TracesPage", () => {
     );
     const heads = screen.getAllByRole("rowheader");
     expect(heads.map((head) => head.textContent)).toEqual([
-      "Session: none1 run on this page",
-      "Session: conv-12 runs on this page",
+      "Session: none1 trace on this page",
+      "Session: conv-12 traces on this page",
     ]);
     expect(within(heads[1]!).getByRole("link", { name: "conv-1" })).toHaveAttribute(
       "href",
@@ -410,20 +410,20 @@ describe("TracesPage", () => {
     );
   });
 
-  it("draws a project no run ever reached as its first run, decided on the server", async () => {
+  it("draws a project no trace ever reached as its first run, decided on the server", async () => {
     mockTraces = list({ traces: [], total: 0 });
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchTraces).toHaveBeenCalledWith(PROJECT, expect.objectContaining({ days: 360, limit: 1 }));
     expect(screen.getByRole("heading", { name: "Send your first trace" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first run");
+    expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first trace");
     expect(screen.getByText(/telmoni\.com\/docs\/api\/sdks/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "SDK" })).toHaveAttribute("href", "/docs/api/sdks");
     expect(screen.queryByText("Nothing to show yet.")).toBeNull();
     expect(screen.queryByTestId("histogram")).toBeNull();
   });
 
-  // Older runs make a quiet window, not a first run.
-  it("tells a quiet window how to send runs, and a filtered one to widen", async () => {
+  // Older traces make a quiet window, not a first run.
+  it("tells a quiet window how to send traces, and a filtered one to widen", async () => {
     fetchTraces.mockImplementation(async (_id, query) =>
       (query as { days?: number }).days === 360 ? list({ total: 1 }) : list({ traces: [], total: 0 }),
     );
@@ -483,7 +483,7 @@ describe("TracesPage", () => {
       kind: "release",
       value: "2026.10.18",
       changed_at: "2026-10-11T03:00:00Z",
-      run_id: RUN_B,
+      trace_id: TRACE_ID_B,
       capped: false,
     };
     mockChanges = { kind: "ok", value: { days: 30, more: false, changes: [release] } };
@@ -532,7 +532,7 @@ describe("TracesPage", () => {
     expect(screen.getByText(note)).toBeInTheDocument();
   });
 
-  it("shows each run's tags as chips in the Tags column, each narrowing the list to it", async () => {
+  it("shows each trace's tags as chips in the Tags column, each narrowing the list to it", async () => {
     window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ columns: ["agent", "tags"] }));
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ tag: "team:core" }) }));
     const table = within(screen.getByRole("table"));
@@ -545,7 +545,7 @@ describe("TracesPage", () => {
     // The tag the list is narrowed to alone is a chip, no longer a link.
     expect(row.queryByRole("link", { name: "team:core" })).toBeNull();
     expect(row.getByText("team:core").closest("[data-slot=badge]")).toBeInTheDocument();
-    // A run with no tags shows a dash.
+    // A trace with no tags shows a dash.
     expect(within(table.getByRole("link", { name: "7a1b2c3d" }).closest("tr")!).getByText("—")).toBeInTheDocument();
   });
 
@@ -596,7 +596,7 @@ describe("TracesPage", () => {
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     fireEvent.keyDown(screen.getByRole("button", { name: /^Columns/ }), { key: "Enter" });
     const trace = await screen.findByRole("menuitemcheckbox", { name: "Trace ID" });
-    expect(trace).toHaveAccessibleDescription("The run's id, which opens its trace. Always shown.");
+    expect(trace).toHaveAccessibleDescription("The trace's id, which opens it. Always shown.");
   });
 
   it("keeps the list when the facets or the histogram cannot be read", async () => {

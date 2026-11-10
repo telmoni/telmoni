@@ -13,7 +13,7 @@ const READS: Ceiling = { call: "agent-versions:read", limit: 120 };
 // One agent's versions side by side, for the Agents page's panel, which reads
 // them once it is opened. The agent is a parameter, never a path segment: a
 // name is any text, `..` among it. Telemetry decides whether the person may
-// read the project's runs, and what an agent, an environment or a prompt may be.
+// read the project's traces, and what an agent, an environment or a prompt may be.
 export async function GET(request: NextRequest) {
   const gate = await admit(READS);
   if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);

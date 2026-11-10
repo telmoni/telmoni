@@ -143,7 +143,7 @@ fn span(
     ago: i64,
 ) -> SpanRow {
     SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         ..common::received(
             project,
             kind,
@@ -181,15 +181,15 @@ async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool)
             SpanRow {
                 status: SpanStatus::Error,
                 error_type: "TimeoutError".into(),
-                ..span(project, failed, SpanKind::Run, "trip", 3_000, 10)
+                ..span(project, failed, SpanKind::Agent, "trip", 3_000, 10)
             },
-            span(project, fine, SpanKind::Run, "trip", 2_000, 5),
+            span(project, fine, SpanKind::Agent, "trip", 2_000, 5),
         ]
     })
     .await;
     let calls = |threshold: f64| {
         json!({
-            "name": "Failing trips", "kind": "run", "measure": "failures",
+            "name": "Failing trips", "kind": "agent", "measure": "failures",
             "aggregation": "avg", "window": "hour", "operator": "gt",
             "alert_threshold": threshold, "renotify_minutes": 1,
         })
@@ -216,9 +216,12 @@ async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool)
         "{}",
         opened.body
     );
-    assert_eq!(opened.metadata.pointer("/run/run_id"), Some(&json!(failed)));
     assert_eq!(
-        opened.metadata.pointer("/run/error_type"),
+        opened.metadata.pointer("/trace/trace_id"),
+        Some(&json!(failed.simple().to_string()))
+    );
+    assert_eq!(
+        opened.metadata.pointer("/trace/error_type"),
         Some(&json!("TimeoutError"))
     );
 
@@ -251,7 +254,7 @@ async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool)
         "a recovery names no run: {}",
         resolved.body
     );
-    assert_eq!(resolved.metadata.get("run"), Some(&Value::Null));
+    assert_eq!(resolved.metadata.get("trace"), Some(&Value::Null));
 }
 
 /// ⚠ An incident keeps the connectors that heard its notices and the runs they showed.
@@ -266,16 +269,16 @@ async fn an_incident_keeps_where_its_notices_went_and_the_runs_they_showed(pool:
             SpanRow {
                 status: SpanStatus::Error,
                 error_type: "TimeoutError".into(),
-                ..span(project, failed, SpanKind::Run, "trip", 3_000, 10)
+                ..span(project, failed, SpanKind::Agent, "trip", 3_000, 10)
             },
-            span(project, fine, SpanKind::Run, "trip", 2_000, 5),
+            span(project, fine, SpanKind::Agent, "trip", 2_000, 5),
         ]
     })
     .await;
     let (pager, chat) = (Uuid::new_v4(), Uuid::new_v4());
     let failing = |alert: f64| {
         json!({
-            "name": "Failing trips", "kind": "run", "measure": "failures",
+            "name": "Failing trips", "kind": "agent", "measure": "failures",
             "aggregation": "avg", "window": "hour", "operator": "gt",
             "alert_threshold": alert, "warning_threshold": 0.1,
             "connectors": [
@@ -295,7 +298,7 @@ async fn an_incident_keeps_where_its_notices_went_and_the_runs_they_showed(pool:
         json!([chat]),
         "a warning reaches the connector hearing warnings alone"
     );
-    assert_eq!(opened["runs"], json!([failed]));
+    assert_eq!(opened["traces"], json!([failed.simple().to_string()]));
 
     project.send("PUT", &rule, &failing(0.4)).await;
     project.evaluate(&pool).await;
@@ -305,9 +308,9 @@ async fn an_incident_keeps_where_its_notices_went_and_the_runs_they_showed(pool:
     both.sort_unstable();
     assert_eq!(risen["told_to"], json!(both), "the rise reached both");
     assert_eq!(
-        risen["runs"],
-        json!([failed]),
-        "a run shown again is kept once"
+        risen["traces"],
+        json!([failed.simple().to_string()]),
+        "a trace shown again is kept once"
     );
 
     let (status, carrying) = project
@@ -341,19 +344,22 @@ async fn a_run_is_kept_where_its_notice_reached_someone(pool: PgPool) {
     let failed = |project: &ProjectId, run: Uuid, ago: i64| SpanRow {
         status: SpanStatus::Error,
         error_type: "TimeoutError".into(),
-        ..span(project, run, SpanKind::Run, "trip", 1_000, ago)
+        ..span(project, run, SpanKind::Agent, "trip", 1_000, ago)
     };
     let project = Project::new(&pool, &ch, |project| vec![failed(project, first, 30)]).await;
     let failing = |threshold: f64| {
         json!({
-            "name": "Failing trips", "kind": "run", "measure": "failures",
+            "name": "Failing trips", "kind": "agent", "measure": "failures",
             "aggregation": "count", "window": "hour", "operator": "gt",
             "alert_threshold": threshold,
         })
     };
     let rule = project.alert(&failing(0.0)).await;
     project.evaluate(&pool).await;
-    assert_eq!(project.incident().await["runs"], json!([first]));
+    assert_eq!(
+        project.incident().await["traces"],
+        json!([first.simple().to_string()])
+    );
 
     project.send("PUT", &rule, &failing(5.0)).await;
     project.evaluate(&pool).await;
@@ -368,9 +374,9 @@ async fn a_run_is_kept_where_its_notice_reached_someone(pool: PgPool) {
     let reopened = project.incident().await;
     assert_eq!(reopened["reopened"], 1, "{reopened}");
     assert_eq!(
-        reopened["runs"],
-        json!([first]),
-        "the reopening, told to no connector, showed its run to nobody"
+        reopened["traces"],
+        json!([first.simple().to_string()]),
+        "the reopening, told to no connector, showed its trace to nobody"
     );
 }
 
@@ -384,14 +390,14 @@ async fn a_resolution_by_hand_is_kept_as_where_it_went(pool: PgPool) {
     let project = Project::new(&pool, &ch, |project| {
         vec![SpanRow {
             status: SpanStatus::Error,
-            ..span(project, run, SpanKind::Run, "trip", 1_000, 10)
+            ..span(project, run, SpanKind::Agent, "trip", 1_000, 10)
         }]
     })
     .await;
     let linked = Uuid::new_v4();
     let failing = |connectors: Value| {
         json!({
-            "name": "Failing trips", "kind": "run", "measure": "failures",
+            "name": "Failing trips", "kind": "agent", "measure": "failures",
             "aggregation": "count", "window": "hour", "operator": "gt",
             "alert_threshold": 0.0, "connectors": connectors,
         })
@@ -422,14 +428,14 @@ async fn a_reopened_incident_resolved_by_hand_is_told_to_its_connectors(pool: Pg
     let project = Project::new(&pool, &ch, |project| {
         vec![SpanRow {
             status: SpanStatus::Error,
-            ..span(project, run, SpanKind::Run, "trip", 1_000, 10)
+            ..span(project, run, SpanKind::Agent, "trip", 1_000, 10)
         }]
     })
     .await;
     let linked = Uuid::new_v4();
     let failing = |threshold: f64| {
         json!({
-            "name": "Failing trips", "kind": "run", "measure": "failures",
+            "name": "Failing trips", "kind": "agent", "measure": "failures",
             "aggregation": "count", "window": "hour", "operator": "gt",
             "alert_threshold": threshold, "connectors": [{ "connection_id": linked }],
         })
@@ -566,7 +572,7 @@ async fn a_run_past_its_cost_cap_pages_while_it_runs(pool: PgPool) {
     .await;
     project
         .alert(&json!({
-            "name": "Cost cap", "kind": "run", "measure": "cost", "aggregation": "max",
+            "name": "Cost cap", "kind": "agent", "measure": "cost", "aggregation": "max",
             "window": "day", "operator": "gt", "alert_threshold": 3.0, "warning_threshold": 1.0,
         }))
         .await;
@@ -620,7 +626,7 @@ async fn a_notice_keeps_to_its_bounds_past_the_longest_filters_and_names(pool: P
                 error_type: long('𝔢', 145),
                 environment: "production".into(),
                 release: "v1".into(),
-                ..span(project, run, SpanKind::Run, "trip", 3_000, 10)
+                ..span(project, run, SpanKind::Agent, "trip", 3_000, 10)
             },
         ];
         spans.extend((0..5).map(|n| SpanRow {
@@ -641,7 +647,7 @@ async fn a_notice_keeps_to_its_bounds_past_the_longest_filters_and_names(pool: P
     };
     project
         .alert(&json!({
-            "name": long('n', 60), "kind": "run", "measure": "failures", "aggregation": "avg",
+            "name": long('n', 60), "kind": "agent", "measure": "failures", "aggregation": "avg",
             "window": "hour", "operator": "gt", "alert_threshold": 0.1,
             "filters": {
                 "agent": fifty("nightly-report"),

@@ -13,17 +13,17 @@
         "p99": 1400.0
       },
       "failed": 1,
-      "failed_runs": 1,
+      "failed_traces": 1,
       "input_tokens": 4000,
       "output_tokens": 600,
-      "run_duration_ms": {
+      "spans": 12,
+      "spend": 1.25,
+      "trace_duration_ms": {
         "p50": 2100.0,
         "p95": 3800.0,
         "p99": null
       },
-      "runs": 2,
-      "spans": 12,
-      "spend": 1.25,
+      "traces": 2,
       "value": "billing"
     },
     {
@@ -37,17 +37,17 @@
         "p99": 1400.0
       },
       "failed": 1,
-      "failed_runs": 1,
+      "failed_traces": 1,
       "input_tokens": 4000,
       "output_tokens": 600,
-      "run_duration_ms": {
+      "spans": 12,
+      "spend": 0.5,
+      "trace_duration_ms": {
         "p50": 2100.0,
         "p95": 3800.0,
         "p99": null
       },
-      "runs": 2,
-      "spans": 12,
-      "spend": 0.5,
+      "traces": 2,
       "value": ""
     },
     {
@@ -61,18 +61,18 @@
         "p99": 1400.0
       },
       "failed": 1,
-      "failed_runs": 1,
+      "failed_traces": 1,
       "input_tokens": 4000,
       "others": true,
       "output_tokens": 600,
-      "run_duration_ms": {
+      "spans": 12,
+      "spend": 0.75,
+      "trace_duration_ms": {
         "p50": 2100.0,
         "p95": 3800.0,
         "p99": null
       },
-      "runs": 2,
-      "spans": 12,
-      "spend": 0.75,
+      "traces": 2,
       "value": ""
     }
   ],

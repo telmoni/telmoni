@@ -115,10 +115,10 @@ const ROUTE_MAX_CHARS: usize = 200;
 /// The one bound in BYTES: `metadata` is served to a browser verbatim, so a
 /// producer must not be able to make a notice carry a megabyte.
 const METADATA_MAX_BYTES: u64 = 4_096;
-/// A notice's run link: Slack's bound on a button's.
-const RUN_URL_MAX_CHARS: usize = 3_000;
+/// A notice's trace link: Slack's bound on a button's.
+const TRACE_URL_MAX_CHARS: usize = 3_000;
 
-/// The incident a notice carries, its run link held to its bound.
+/// The incident a notice carries, its trace link held to its bound.
 fn checked_incident(
     incident: Option<IncidentNotice<'_>>,
 ) -> Result<Option<IncidentNotice<'_>>, TelmoniError> {
@@ -126,9 +126,9 @@ fn checked_incident(
         .map(|incident| {
             Ok(IncidentNotice {
                 id: incident.id,
-                run_url: incident
-                    .run_url
-                    .map(|url| bounded(url, "run_url", RUN_URL_MAX_CHARS))
+                trace_url: incident
+                    .trace_url
+                    .map(|url| bounded(url, "trace_url", TRACE_URL_MAX_CHARS))
                     .transpose()?,
             })
         })

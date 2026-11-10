@@ -39,7 +39,7 @@ pub struct Versions {
     /// The prompts the agent's runs name in the environment, read where the
     /// rows are a prompt's.
     pub prompts: Vec<Choice>,
-    /// The newest first seen first, the runs that carried none last.
+    /// The newest first seen first, the traces that carried none last.
     pub versions: Vec<Version>,
     /// The scores the rows show, the most given first.
     pub scores: Vec<String>,

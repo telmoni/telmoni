@@ -45,10 +45,10 @@ type Config struct {
 	// reads TELMONI_SCRUB_PII as the client is built: 1 alone turns it on. A
 	// span either scrubber changed carries telmoni.scrubbed, counting what went.
 	ScrubPII *bool `json:"scrub_pii,omitempty"`
-	// Sampler decides a run that starts a trace of its own, as the
-	// application's root sampler would decide its own spans; nil samples
-	// every such run. Nothing is dropped by it: a run it does not sample is
-	// still sent, with the trace's sampled flag unset.
+	// Sampler decides each trace started here, as the application's root
+	// sampler would decide its own spans; nil samples every one. Nothing is
+	// dropped by it: a trace it does not sample is still sent, with the
+	// trace's sampled flag unset.
 	Sampler sdktrace.Sampler `json:"-"`
 	// Environment is the deployment this process runs in (production,
 	// staging), sent on every span's resource as deployment.environment.name;
@@ -57,7 +57,7 @@ type Config struct {
 	// Release is the release this process runs (a version or a commit), sent
 	// on every span's resource as service.version; blank sends nothing.
 	Release string `json:"release,omitempty"`
-	// Prices are the project's own, which a run's spend cap counts a call by
+	// Prices are the project's own, which a trace's spend cap counts a call by
 	// before the table this release carries; a name given twice takes its last.
 	Prices []Price `json:"prices,omitempty"`
 }

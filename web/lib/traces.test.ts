@@ -36,7 +36,7 @@ import {
   retrievalCounts,
   retrievalSource,
   retrievalWords,
-  sessionRunsHref,
+  sessionTracesHref,
   shortId,
   orderedColumns,
   tagKeys,
@@ -284,7 +284,7 @@ describe("the URL as the list's state", () => {
   });
 
   it("orders columns as the list does, each once", () => {
-    expect(orderedColumns(["tools", "agent", "agent", "run_id"])).toEqual(["agent", "tools"]);
+    expect(orderedColumns(["tools", "agent", "agent", "trace_id"])).toEqual(["agent", "tools"]);
     expect(orderedColumns([])).toEqual([]);
   });
 
@@ -353,8 +353,8 @@ describe("a list's query, its pages and its download", () => {
     ).toBe("/acme/web/traces/export?status=error&sort=tokens&format=csv");
   });
 
-  it("opens a run's session as its runs, the first to start first", () => {
-    expect(sessionRunsHref("acme", "web", "conv 1", 30)).toBe(
+  it("opens a trace's session as its traces, the first to start first", () => {
+    expect(sessionTracesHref("acme", "web", "conv 1", 30)).toBe(
       "/acme/web/traces?session=conv+1&sort=started&dir=asc&days=30",
     );
   });
@@ -418,12 +418,12 @@ describe("numbers into words", () => {
   });
 
   it("shortens an id to eight characters", () => {
-    expect(shortId("5d4f5c68-0000-4000-8000-000000000001")).toBe("5d4f5c68");
+    expect(shortId("5d4f5c68000040008000000000000001")).toBe("5d4f5c68");
   });
 });
 
 const LISTED: Trace = {
-  run_id: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+  trace_id: "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
   agent: "nightly-report",
   user_id: "",
   session_id: "",
@@ -453,31 +453,31 @@ const LISTED: Trace = {
   scores: [],
 };
 
-describe("a run's time to first token in the list", () => {
+describe("a trace's time to first token in the list", () => {
   const column = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.TimeToFirstToken)!;
-  const run = (ms: number | null): Trace => ({ ...LISTED, time_to_first_token_ms: ms });
+  const trace = (ms: number | null): Trace => ({ ...LISTED, time_to_first_token_ms: ms });
 
   it("reads as a duration, and as a dash where none of its calls reported one", () => {
-    expect(cellOf(column, run(420), {}, null)).toBe("420 ms");
-    const none = cellOf(column, run(null), {}, null) as ReactElement<{ children: string }>;
+    expect(cellOf(column, trace(420), {}, null)).toBe("420 ms");
+    const none = cellOf(column, trace(null), {}, null) as ReactElement<{ children: string }>;
     expect(none.props.children).toBe("—");
   });
 });
 
-describe("a run's retrievals in the list", () => {
+describe("a trace's retrievals in the list", () => {
   const column = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.Retrievals)!;
   const steps = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.Steps)!;
-  const run: Trace = { ...LISTED, model_calls: 2, tool_calls: 1, retrievals: 3 };
+  const trace: Trace = { ...LISTED, model_calls: 2, tool_calls: 1, retrievals: 3 };
 
   it("counts them in a column offered beside the tool calls, hidden at first and sorting nothing", () => {
-    expect(cellOf(column, run, {}, null)).toBe("3");
+    expect(cellOf(column, trace, {}, null)).toBe("3");
     expect(column).toMatchObject({ label: "Retrievals", numeric: true, group: "counts" });
     expect(column.sort).toBeUndefined();
     expect(DEFAULT_COLUMNS).not.toContain(TraceColumn.Retrievals);
   });
 
-  it("names them beside the model and tool calls on a hover of the run's steps", () => {
-    expect(titleOf(steps, run)).toBe("2 model calls, 1 tool calls, 3 retrievals");
+  it("names them beside the model and tool calls on a hover of the trace's steps", () => {
+    expect(titleOf(steps, trace)).toBe("2 model calls, 1 tool calls, 3 retrievals");
   });
 });
 
@@ -548,7 +548,7 @@ describe("a retrieval's counts", () => {
 });
 
 describe("a trace's spans on one line of time", () => {
-  const run = span({ span_id: "01", kind: "run", name: "nightly-report" });
+  const agent = span({ span_id: "01", kind: "agent", name: "nightly-report" });
   const step = span({
     span_id: "02",
     kind: "step",
@@ -565,7 +565,7 @@ describe("a trace's spans on one line of time", () => {
   });
 
   it("places every span on the timeline as a share of the whole, by depth", () => {
-    const bars = timelineBars([run, step, call]);
+    const bars = timelineBars([agent, step, call]);
     expect(bars.map((b) => b.depth)).toEqual([0, 1, 2]);
     expect(bars[0]).toMatchObject({ offset: 0, width: 100 });
     expect(bars[1]!.offset).toBeCloseTo(1, 5);
@@ -577,7 +577,7 @@ describe("a trace's spans on one line of time", () => {
       started_at: "2026-10-11T03:00:00.500Z",
       ended_at: "2026-10-11T03:00:00.500Z",
     });
-    expect(timelineBars([run, instant])[1]!.width).toBe(0.5);
+    expect(timelineBars([agent, instant])[1]!.width).toBe(0.5);
     expect(timelineBars([])).toEqual([]);
   });
 });
@@ -592,7 +592,7 @@ describe("an agent's changes marked on the list's charts", () => {
   const BASE = {
     agent: "support",
     environment: "production",
-    run_id: "0192f3a1-7c2e-7b4d-9a61-3c5e8f0d2b17",
+    trace_id: "0192f3a17c2e7b4d9a613c5e8f0d2b17",
     capped: false,
   };
   const release = (changed_at: string, value = "1.4.2"): Change => ({
@@ -614,7 +614,7 @@ describe("an agent's changes marked on the list's charts", () => {
     }
   });
 
-  it("marks one before the first bar on the first, and one after the last on the last, as the histogram clamps runs", () => {
+  it("marks one before the first bar on the first, and one after the last on the last, as the histogram clamps traces", () => {
     expect(
       marksOn(BARS, [release("2027-01-15T11:00:00Z", "1.5.0"), release("2027-01-14T23:00:00Z", "1.3.9")]),
     ).toEqual([

@@ -99,11 +99,11 @@ describe("KeyboardShortcuts - a page's steps", () => {
     const sheet = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
     expect(within(sheet).getByText("Next trace")).toBeInTheDocument();
     expect(within(sheet).getByText("Search")).toBeInTheDocument();
-    expect(within(sheet).queryByText("Runs")).toBeNull();
+    expect(within(sheet).queryByText("Traces")).toBeNull();
     expect(within(sheet).queryByText("New alert")).toBeNull();
 
     act(() => setPageCovered(false));
-    expect(within(sheet).getByText("Runs")).toBeInTheDocument();
+    expect(within(sheet).getByText("Traces")).toBeInTheDocument();
     expect(within(sheet).getByText("New alert")).toBeInTheDocument();
   });
 

@@ -52,11 +52,11 @@ func decodedAs(t *testing.T, attributes map[string]any, key string) any {
 
 func TestARetrievalCarriesTheConventionsNames(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{UserID: "user"})
-	_, found := run.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: "refunds", TopK: 5})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{UserID: "user"})
+	_, found := tr.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: "refunds", TopK: 5})
 	found.Returned(retrieved)
 	found.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	if len(spans) != 1 {
@@ -66,7 +66,6 @@ func TestARetrievalCarriesTheConventionsNames(t *testing.T) {
 		t.Errorf("name %v kind %v, want retrieval kb-articles of kind 3", spans[0]["name"], spans[0]["kind"])
 	}
 	want := map[string]any{
-		"telmoni.run_id":             run.ID(),
 		"telmoni.agent":              "bot",
 		"user.id":                    "user",
 		"gen_ai.operation.name":      "retrieval",
@@ -84,18 +83,17 @@ func TestARetrievalCarriesTheConventionsNames(t *testing.T) {
 
 func TestAMemorySearchGoesUnderTheMemoryNames(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, found := run.Retrieval(ctx, "preferences", telmoni.RetrievalOptions{TopK: 3, Memory: true})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, found := tr.Retrieval(ctx, "preferences", telmoni.RetrievalOptions{TopK: 3, Memory: true})
 	found.Returned([]string{"mem-41"})
 	found.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	if len(spans) != 1 || spans[0]["name"] != "search_memory" || spans[0]["kind"] != float64(3) {
 		t.Fatalf("want one search_memory of kind 3, got %v", names(spans))
 	}
 	want := map[string]any{
-		"telmoni.run_id":             run.ID(),
 		"telmoni.agent":              "bot",
 		"gen_ai.operation.name":      "search_memory",
 		"gen_ai.memory.store.id":     "preferences",
@@ -107,13 +105,13 @@ func TestAMemorySearchGoesUnderTheMemoryNames(t *testing.T) {
 	}
 }
 
-// Outside a run, a retrieval does nothing, and nothing panics.
-func TestNothingIsSentForARetrievalOutsideARun(t *testing.T) {
+// Outside a trace, a retrieval does nothing, and nothing panics.
+func TestNothingIsSentForARetrievalOutsideATrace(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	ctx := context.Background()
-	opened, found := telmoni.RunFromContext(ctx).Retrieval(ctx, "kb", telmoni.RetrievalOptions{Query: "q", TopK: 5})
+	opened, found := telmoni.TraceFromContext(ctx).Retrieval(ctx, "kb", telmoni.RetrievalOptions{Query: "q", TopK: 5})
 	if opened != ctx {
-		t.Error("a retrieval outside a run changed the context")
+		t.Error("a retrieval outside a trace changed the context")
 	}
 	var never *telmoni.Retrieval
 	for _, nothing := range []*telmoni.Retrieval{found, never} {
@@ -129,21 +127,21 @@ func TestNothingIsSentForARetrievalOutsideARun(t *testing.T) {
 	}
 	h.flush()
 	if sent := len(h.transport.all()) + len(h.transport.allOpenings()); sent != 0 {
-		t.Errorf("sent %d exports outside a run", sent)
+		t.Errorf("sent %d exports outside a trace", sent)
 	}
 	expectWarnings(t, h)
 }
 
 func TestABlankSourceIsNamedByItsOperationAloneWarnedOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, source := range []string{"", " 　"} {
-		_, found := run.Retrieval(ctx, source, telmoni.RetrievalOptions{})
+		_, found := tr.Retrieval(ctx, source, telmoni.RetrievalOptions{})
 		found.End()
 	}
-	_, found := run.Retrieval(ctx, "\u0085", telmoni.RetrievalOptions{Memory: true})
+	_, found := tr.Retrieval(ctx, "\u0085", telmoni.RetrievalOptions{Memory: true})
 	found.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	if got := names(spans); !reflect.DeepEqual(got, []string{"retrieval", "retrieval", "search_memory"}) {
@@ -163,14 +161,14 @@ func TestABlankSourceIsNamedByItsOperationAloneWarnedOnce(t *testing.T) {
 
 func TestASourcePastIngestsCapIsCutWarnedOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, source := range []string{strings.Repeat("😀", 146), strings.Repeat("😀", 146), strings.Repeat("😀", 145)} {
-		_, found := run.Retrieval(ctx, source, telmoni.RetrievalOptions{})
+		_, found := tr.Retrieval(ctx, source, telmoni.RetrievalOptions{})
 		found.End()
 	}
-	_, found := run.Retrieval(ctx, strings.Repeat("😀", 146), telmoni.RetrievalOptions{Memory: true})
+	_, found := tr.Retrieval(ctx, strings.Repeat("😀", 146), telmoni.RetrievalOptions{Memory: true})
 	found.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	cut := strings.Repeat("😀", 145)
@@ -190,12 +188,12 @@ func TestASourcePastIngestsCapIsCutWarnedOnce(t *testing.T) {
 
 func TestATopKBelow0IsLeftOffWithOneWarning(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, topK := range []int{7, 0, -1, -2} {
-		_, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{TopK: topK})
+		_, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{TopK: topK})
 		found.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	var sent []any
 	for _, span := range searches(t, h) {
@@ -222,11 +220,11 @@ func TestReturnedRefusesAnythingButAListWhole(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := keeping(t, nil)
-			ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-			_, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+			ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+			_, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
 			found.Returned(given)
 			found.End()
-			run.End()
+			tr.End()
 			h.flush()
 			sent := attributesOf(t, searches(t, h)[0])
 			for _, key := range []string{"telmoni.retrieval.returned", "gen_ai.retrieval.documents"} {
@@ -242,15 +240,15 @@ func TestReturnedRefusesAnythingButAListWhole(t *testing.T) {
 
 func TestATypedNilSliceIsAnEmptyListAndAnArrayAList(t *testing.T) {
 	h := keeping(t, nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	var none []map[string]any
-	_, empty := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+	_, empty := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
 	empty.Returned(none)
 	empty.End()
-	_, pair := run.Retrieval(ctx, "pair", telmoni.RetrievalOptions{})
+	_, pair := tr.Retrieval(ctx, "pair", telmoni.RetrievalOptions{})
 	pair.Returned([2]string{"kb-112", "kb-087"})
 	pair.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	nothing, two := attributesOf(t, spans[0]), attributesOf(t, spans[1])
@@ -265,7 +263,7 @@ func TestATypedNilSliceIsAnEmptyListAndAnArrayAList(t *testing.T) {
 
 func TestTheLastListWinsWholeARefusedOneLeavingTheLast(t *testing.T) {
 	h := keeping(t, nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	more := append([]map[string]any{{"id": "kb-203", "score": 0.77}}, retrieved...)
 	for _, given := range []struct {
 		source string
@@ -275,13 +273,13 @@ func TestTheLastListWinsWholeARefusedOneLeavingTheLast(t *testing.T) {
 		{"refused-then", []any{[]byte("kb-112"), retrieved}},
 		{"twice", []any{more, retrieved[:1]}},
 	} {
-		_, found := run.Retrieval(ctx, given.source, telmoni.RetrievalOptions{})
+		_, found := tr.Retrieval(ctx, given.source, telmoni.RetrievalOptions{})
 		for _, list := range given.lists {
 			found.Returned(list)
 		}
 		found.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	got := map[string][2]any{}
 	for _, span := range searches(t, h) {
@@ -300,14 +298,14 @@ func TestTheLastListWinsWholeARefusedOneLeavingTheLast(t *testing.T) {
 
 func TestAnEmptyListIsCountedZeroAndSentAsOne(t *testing.T) {
 	h := keeping(t, nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
 	found.Returned([]any{})
 	found.End()
-	_, recalled := run.Retrieval(ctx, "prefs", telmoni.RetrievalOptions{Memory: true})
+	_, recalled := tr.Retrieval(ctx, "prefs", telmoni.RetrievalOptions{Memory: true})
 	recalled.Returned([]any{})
 	recalled.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	retrieval, memory := attributesOf(t, spans[0]), attributesOf(t, spans[1])
@@ -321,14 +319,14 @@ func TestAnEmptyListIsCountedZeroAndSentAsOne(t *testing.T) {
 
 func TestTheQueryAndDocumentsLeaveOnlyUnderBothLocks(t *testing.T) {
 	h := keeping(t, nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{Query: "refunds"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{Query: "refunds"})
 	found.Returned(retrieved)
 	found.End()
-	_, recalled := run.Retrieval(ctx, "prefs", telmoni.RetrievalOptions{Query: map[string]string{"about": "tone"}, Memory: true})
+	_, recalled := tr.Retrieval(ctx, "prefs", telmoni.RetrievalOptions{Query: map[string]string{"about": "tone"}, Memory: true})
 	recalled.Returned(retrieved[:1])
 	recalled.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	retrieval, memory := attributesOf(t, spans[0]), attributesOf(t, spans[1])
@@ -354,11 +352,11 @@ func TestAMaskThatTakesDocumentsOutLeavesTheCount(t *testing.T) {
 		}
 		return value, true
 	})
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
 	found.Returned(retrieved)
 	found.End()
-	run.End()
+	tr.End()
 	h.flush()
 	sent := attributesOf(t, searches(t, h)[0])
 	if sent["gen_ai.retrieval.documents"] != "[]" || sent["telmoni.retrieval.returned"] != int64(2) {
@@ -370,9 +368,9 @@ func TestAMaskThatTakesDocumentsOutLeavesTheCount(t *testing.T) {
 func TestListsReturnedAtOnceLeaveOneCallsPair(t *testing.T) {
 	const rounds = 400
 	h := keeping(t, nil)
-	ctx, run := h.client.Run(context.Background(), "raced", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "raced", telmoni.TraceOptions{})
 	for range rounds {
-		_, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+		_, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		for _, size := range []int{1, 3} {
@@ -387,7 +385,7 @@ func TestListsReturnedAtOnceLeaveOneCallsPair(t *testing.T) {
 		wg.Wait()
 		found.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	spans := searches(t, h)
 	if len(spans) != rounds {
@@ -407,12 +405,12 @@ func TestListsReturnedAtOnceLeaveOneCallsPair(t *testing.T) {
 
 func TestACallInsideARetrievalNestsUnderIt(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	searchCtx, found := run.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
-	_, call := run.ModelCall(searchCtx, "embed-small", telmoni.ModelCallOptions{Operation: "embeddings"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	searchCtx, found := tr.Retrieval(ctx, "kb", telmoni.RetrievalOptions{})
+	_, call := tr.ModelCall(searchCtx, "embed-small", telmoni.ModelCallOptions{Operation: "embeddings"})
 	call.End()
 	found.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
 	if spans["embeddings embed-small"]["parentSpanId"] != spans["retrieval kb"]["spanId"] {

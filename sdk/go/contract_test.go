@@ -102,8 +102,8 @@ func TestABlankEndpointOrganizationKeyEnvironmentOrReleaseReadsAsUnset(t *testin
 
 func TestWithoutAKeyNoAuthorizationHeaderIsSent(t *testing.T) {
 	h := newHarness(t, telmoni.Config{}, nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 	requests := h.transport.all()
 	if len(requests) == 0 {
@@ -158,8 +158,8 @@ func TestTheKeyIsNeverPrintedOrSerialized(t *testing.T) {
 // without a word, is left off with one warning.
 func TestADeploymentNamedPastIngestsCapIsLeftOffWithOneWarning(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), Environment: strings.Repeat("e", 129), Release: strings.Repeat("r", 128)}, nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 	resource := h.transport.bodies(t)[0]["resourceSpans"].([]any)[0].(map[string]any)["resource"].(map[string]any)["attributes"].([]any)
 	keys := map[string]bool{}
@@ -299,8 +299,8 @@ func TestAnAnswerIsReadUpToItsFirstMebibyte(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: answer}, nil
 	}
 	h := newHarness(t, testConfig(), nil, telmoni.WithTransport(transport))
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.shutdown()
 	if len(answers) == 0 {
 		t.Fatal("nothing was sent")
@@ -337,8 +337,8 @@ func TestARefusalWhoseBodyBreaksIsSentOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
 	}
-	_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	if err := client.Shutdown(ctx); err != nil {
@@ -439,20 +439,20 @@ func TestAClientNotFromNewSendsNothingAndNeverPanics(t *testing.T) {
 	ctx := context.Background()
 	header := http.Header{}
 	header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-	header.Set("baggage", "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot")
+	header.Set("baggage", "telmoni.agent=bot")
 	for name, client := range map[string]*telmoni.Client{"zero": {}, "nil": nil} {
-		runCtx, run := client.Run(ctx, "bot", telmoni.RunOptions{})
-		stepCtx, step := run.Step(runCtx, "plan")
-		_, call := run.ModelCall(stepCtx, "claude", telmoni.ModelCallOptions{})
+		traceCtx, tr := client.Trace(ctx, "bot", telmoni.TraceOptions{})
+		stepCtx, step := tr.Step(traceCtx, "plan")
+		_, call := tr.ModelCall(stepCtx, "claude", telmoni.ModelCallOptions{})
 		call.Answered(telmoni.Answer{})
 		step.End()
-		run.End()
-		client.Inject(runCtx, http.Header{})
-		if telmoni.RunFromContext(client.Extract(ctx, header)) != nil {
-			t.Errorf("%s: Extract continued a run", name)
+		tr.End()
+		client.Inject(traceCtx, http.Header{})
+		if telmoni.TraceFromContext(client.Extract(ctx, header)) != nil {
+			t.Errorf("%s: Extract continued a trace", name)
 		}
-		if err := client.RecordRun(ctx, telmoni.RunRecord{Agent: "bot"}); err == nil {
-			t.Errorf("%s: RecordRun took a record", name)
+		if err := client.RecordTrace(ctx, telmoni.TraceRecord{Agent: "bot"}); err == nil {
+			t.Errorf("%s: RecordTrace took a record", name)
 		}
 		if client.Flush(ctx) != nil || client.Shutdown(ctx) != nil || client.ContentMode() != "" || !reflect.DeepEqual(client.Config(), telmoni.Config{}) {
 			t.Errorf("%s: a client not from New answered as one that is", name)
@@ -460,7 +460,7 @@ func TestAClientNotFromNewSendsNothingAndNeverPanics(t *testing.T) {
 	}
 }
 
-func TestFlushAndShutdownTakeANilContextAsRunDoes(t *testing.T) {
+func TestFlushAndShutdownTakeANilContextAsTraceDoes(t *testing.T) {
 	client := mustNew(t, telmoni.Config{})
 	if err := client.Flush(nil); err != nil {
 		t.Errorf("Flush(nil) = %v", err)
@@ -558,8 +558,8 @@ func TestProxyEnvironmentHelper(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
 	}
-	_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	if err := client.Shutdown(ctx); err != nil {
@@ -592,8 +592,8 @@ func TestAnAnswerWhoseHeadIsCutIsSentAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
 	}
-	_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 	defer cancel()
 	if err := client.Shutdown(ctx); err != nil {
@@ -628,7 +628,7 @@ func TestTheAnswerIsReadPastEvery1xxBeforeItButA101(t *testing.T) {
 		reply  string
 		warned []string
 	}{
-		// The 200 closes its connection: the run's start goes ahead in an export of
+		// The 200 closes its connection: the trace's start goes ahead in an export of
 		// its own, and a kept connection the handler no longer serves would hold the next.
 		{"HTTP/1.1 103 Early Hints\r\nLink: </x>\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n" +
 			"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}", nil},
@@ -653,8 +653,8 @@ func TestTheAnswerIsReadPastEvery1xxBeforeItButA101(t *testing.T) {
 		if err != nil {
 			t.Fatalf("building the client: %v", err)
 		}
-		_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		run.End()
+		_, tr := client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		tr.End()
 		ctx, cancel := context.WithTimeout(context.Background(), waitTimeout)
 		if err := client.Flush(ctx); err != nil {
 			t.Errorf("%.12q: the flush waited on the answer: %v", c.reply, err)
@@ -811,7 +811,7 @@ func TestASpanPastItForASliceOfShortStringsGoesWithoutTheSlice(t *testing.T) {
 }
 
 // A span alone past it is sent without what ingest drops for its length, rather
-// than lost, since a run's own span carries the run's end.
+// than lost, since the agent's own span carries the trace's end.
 func TestASpanAlonePastItGoesWithoutWhatIngestDropsForItsLength(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	telmoni.ExportSpans(h.client, bigSpans(100, 1<<20, 100))

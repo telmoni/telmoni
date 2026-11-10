@@ -119,8 +119,8 @@ func WithBatching(maxQueue, maxBatch int, delay time.Duration) Option {
 	}
 }
 
-// Client is the SDK's entry point: a tracer provider of its own, and the runs
-// it records. The provider is built part by part, resource, sampler, limits
+// Client is the SDK's entry point: a tracer provider of its own, and the
+// traces it records. The provider is built part by part, resource, sampler, limits
 // and processor, so no OTEL_* variable reaches what is sent, and an
 // application's own OpenTelemetry is neither replaced, sent to Telmoni, nor
 // changed.
@@ -183,10 +183,11 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		root = sdktrace.AlwaysSample()
 	}
 	// WithSampler and WithRawSpanLimits replace what OTEL_TRACES_SAMPLER and
-	// the OTEL_SPAN_* variables would have set. OpenTelemetry merges
-	// OTEL_RESOURCE_ATTRIBUTES into the provider's resource whatever is given
-	// here, so the exporter writes a resource of its own. The id generator is
-	// ours, for a record's derived ids, and reads nothing either.
+	// the OTEL_SPAN_* variables would have set; the one link is a trace's to
+	// the application's span. OpenTelemetry merges OTEL_RESOURCE_ATTRIBUTES
+	// into the provider's resource whatever is given here, so the exporter
+	// writes a resource of its own. The id generator is ours, for a record's
+	// derived ids, and reads nothing either.
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(resource.NewSchemaless(
 			attribute.String(distroName, distro),
@@ -198,7 +199,7 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 			AttributeValueLengthLimit:   -1,
 			AttributeCountLimit:         128,
 			EventCountLimit:             32,
-			LinkCountLimit:              0,
+			LinkCountLimit:              1,
 			AttributePerEventCountLimit: 32,
 			AttributePerLinkCountLimit:  0,
 		}),

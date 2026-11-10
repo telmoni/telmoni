@@ -21,11 +21,11 @@ func tools(t *testing.T, h *harness) []map[string]any {
 
 func TestAToolCallCarriesTheConventionsNames(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{UserID: "user"})
-	_, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{UserID: "user"})
+	_, tool := tr.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
 	tool.Returned(map[string]int{"temp": 21})
 	tool.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := tools(t, h)
 	if len(spans) != 1 {
@@ -36,7 +36,6 @@ func TestAToolCallCarriesTheConventionsNames(t *testing.T) {
 		t.Errorf("name %v kind %v, want execute_tool search of kind 1", span["name"], span["kind"])
 	}
 	want := map[string]any{
-		"telmoni.run_id":        run.ID(),
 		"telmoni.agent":         "bot",
 		"user.id":               "user",
 		"gen_ai.operation.name": "execute_tool",
@@ -54,14 +53,14 @@ func TestAToolCallCarriesTheConventionsNames(t *testing.T) {
 
 func TestAFailingToolRecordsItsErrorType(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, search := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, search := tr.ToolCall(ctx, "search", telmoni.ToolCallOptions{})
 	search.Fail(tookTooLong{})
 	search.End()
-	_, lookup := run.ToolCall(ctx, "lookup", telmoni.ToolCallOptions{})
+	_, lookup := tr.ToolCall(ctx, "lookup", telmoni.ToolCallOptions{})
 	lookup.FailWith("NotFound")
 	lookup.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(tools(t, h))
 	if got := attributesOf(t, spans["execute_tool search"])["error.type"]; got != "telmoni_test.tookTooLong" {
@@ -81,17 +80,17 @@ func TestAFailingToolRecordsItsErrorType(t *testing.T) {
 func TestToolContentTravelsWhenAskedAndAllowed(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on, on, on))
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, warm := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	warm.End()
 	h.flush()
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, search := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, search := tr.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
 	search.Returned(map[string]int{"temp": 21})
 	search.End()
-	_, echo := run.ToolCall(ctx, "echo", telmoni.ToolCallOptions{Arguments: "plain"})
+	_, echo := tr.ToolCall(ctx, "echo", telmoni.ToolCallOptions{Arguments: "plain"})
 	echo.Returned(nil)
 	echo.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(tools(t, h))
 	searchAttributes := attributesOf(t, spans["execute_tool search"])
@@ -116,11 +115,11 @@ func TestContentJSONRefusesGoesAsItsType(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	cyclic := map[string]any{"a": math.NaN()}
 	cyclic["self"] = cyclic
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: cyclic})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, tool := tr.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: cyclic})
 	tool.Returned(cyclic)
 	tool.End()
-	run.End()
+	tr.End()
 	h.flush()
 	if got := names(withPrefix(h.transport.spans(t), "execute_tool ")); !reflect.DeepEqual(got, []string{"execute_tool search"}) {
 		t.Errorf("sent %v", got)
@@ -129,9 +128,9 @@ func TestContentJSONRefusesGoesAsItsType(t *testing.T) {
 
 func TestAFunctionWrappedInAToolCall(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	search := func(ctx context.Context, q string) string {
-		_, tool := telmoni.RunFromContext(ctx).ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: q})
+		_, tool := telmoni.TraceFromContext(ctx).ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: q})
 		defer tool.End()
 		runes := []rune(q)
 		for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
@@ -142,7 +141,7 @@ func TestAFunctionWrappedInAToolCall(t *testing.T) {
 	if got := search(ctx, "abc"); got != "cba" {
 		t.Errorf("search(abc) = %q", got)
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	if got := len(tools(t, h)); got != 1 {
 		t.Errorf("want one tool call, got %d", got)
@@ -152,12 +151,12 @@ func TestAFunctionWrappedInAToolCall(t *testing.T) {
 // Ingest refuses a tool call named past 145 characters.
 func TestAToolNamePastIngestsCapIsCutWarnedOnce(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, name := range []string{strings.Repeat("t", 146), strings.Repeat("t", 146), strings.Repeat("t", 145)} {
-		_, tool := run.ToolCall(ctx, name, telmoni.ToolCallOptions{})
+		_, tool := tr.ToolCall(ctx, name, telmoni.ToolCallOptions{})
 		tool.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	spans := tools(t, h)
 	if len(spans) != 3 {

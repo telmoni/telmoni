@@ -42,15 +42,9 @@ use telmoni_telemetry::{
 const KEY: &str = "tm_content_key";
 /// A key holding `read` alone, on the same project.
 const READ_KEY: &str = "tm_content_read_key";
-const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
 const SPAN: &str = "00f067aa0ba902b7";
 const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
 const MESSAGES: &str = r#"[{"role":"user","parts":[{"type":"text","content":"hi"}]}]"#;
-
-/// A run's id, as content is opened by.
-fn run(id: &str) -> uuid::Uuid {
-    id.parse().expect("a run's id")
-}
 
 struct Door {
     app: Router,
@@ -109,14 +103,13 @@ async fn door_over(pool: &PgPool, mode: ContentMode, stores: bool) -> Door {
 /// A model call carrying a message, a tool's result past an attribute's cap,
 /// a map no inventory names, and its kept metadata.
 fn export(long: &str) -> Vec<u8> {
-    export_of(RUN, TRACE, SPAN, &[], long)
+    export_of(TRACE, SPAN, &[], long)
 }
 
-/// [`export`], as run `run`'s span `span` of trace `trace`, with the text
-/// attributes `named`.
-fn export_of(run: &str, trace: &str, span: &str, named: &[(&str, &str)], long: &str) -> Vec<u8> {
+/// [`export`], as span `span` of trace `trace`, with the text attributes
+/// `named`.
+fn export_of(trace: &str, span: &str, named: &[(&str, &str)], long: &str) -> Vec<u8> {
     let mut attributes = vec![
-        json!({ "key": contract::RUN_ID, "value": { "stringValue": run } }),
         json!({ "key": contract::AGENT, "value": { "stringValue": "nightly-report" } }),
         json!({ "key": contract::OPERATION, "value": { "stringValue": "chat" } }),
         json!({ "key": "gen_ai.response.id", "value": { "stringValue": "resp_01" } }),
@@ -451,7 +444,7 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
         &door.state,
         Actor::User("user-1"),
         &door.project,
-        &[run(RUN_C)],
+        &[TRACE_C.to_owned()],
     )
     .await
     .expect("a run without content opens to nothing");
@@ -460,7 +453,7 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
         &door.state,
         Actor::User("user-1"),
         &ProjectId::new(),
-        &[run(RUN)],
+        &[TRACE.to_owned()],
     )
     .await
     .expect("a project that never exported keeps no content, and says so");
@@ -470,14 +463,13 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
         "nothing read, nothing filed"
     );
 
-    let runs = [run(RUN), run(RUN_C), run(RUN)];
+    let runs = [TRACE.to_owned(), TRACE_C.to_owned(), TRACE.to_owned()];
     let opened = content::open(&door.state, Actor::User("user-1"), &door.project, &runs)
         .await
         .expect("the trace's content opens");
     assert_eq!(
         opened,
         [SpanContent {
-            run_id: run(RUN),
             trace_id: TRACE.to_owned(),
             span_id: SPAN.to_owned(),
             fields: vec![
@@ -509,7 +501,7 @@ async fn a_read_that_cannot_be_recorded_opens_nothing(pool: PgPool) {
     };
     let door = door(&pool, ContentMode::On).await;
     door.send(export("result")).await;
-    let runs = [run(RUN)];
+    let runs = [TRACE.to_owned()];
     let read = || content::open(&door.state, Actor::User("user-1"), &door.project, &runs);
 
     assert!(read().await.is_err(), "no chain, no content");
@@ -846,7 +838,6 @@ async fn a_retrievals_documents_are_content_and_its_counts_metadata(pool: PgPool
                 "startTimeUnixNano": "1760000000000000000",
                 "endTimeUnixNano": "1760000000200000000",
                 "attributes": [
-                    text(contract::RUN_ID, RUN),
                     text(contract::AGENT, "nightly-report"),
                     text(contract::OPERATION, "retrieval"),
                     text(contract::DATA_SOURCE_ID, "docs-index"),
@@ -923,15 +914,13 @@ async fn the_posture_counts_what_arrived_by_inventory_row_dropped_content_too(po
         Some(Role::Member),
     );
     door.send(export_of(
-        RUN,
         TRACE,
         SPAN,
         &[("telmoni.tag.team", "ops")],
         "long",
     ))
     .await;
-    door.send(export_of(RUN_B, TRACE_B, SPAN_B, &[], "other"))
-        .await;
+    door.send(export_of(TRACE_B, SPAN_B, &[], "other")).await;
     common::eventually("both traces are read", || async {
         door.lane("GET", "/privacy", "member-1", None).await.1["spans"] == 2
     })
@@ -967,7 +956,6 @@ async fn the_posture_counts_what_arrived_by_inventory_row_dropped_content_too(po
         })
         .collect();
     for (attribute, spans) in [
-        (contract::RUN_ID, 2),
         ("gen_ai.input.messages", 2),
         ("gen_ai.tool.call.result", 2),
         (contract::OTHER_TEXT, 2),
@@ -1077,7 +1065,7 @@ async fn a_row_sealed_under_another_key_is_read_as_none(pool: PgPool) {
         None,
     );
     door.send(export("result")).await;
-    let runs = [run(RUN)];
+    let runs = [TRACE.to_owned()];
     let open = || content::open(&door.state, Actor::User("owner-1"), &door.project, &runs);
     assert!(!open().await.expect("the content opens").is_empty());
     sqlx::query(
@@ -1117,9 +1105,9 @@ async fn the_purge_of_a_deleted_key_leaves_content_under_a_later_key(pool: PgPoo
     let old = uuid::Uuid::new_v4();
     sqlx::query(
         "INSERT INTO telemetry.plain_content
-             (project_id, run_id, trace_id, span_id, field, received_at, ciphertext, nonce,
+             (project_id, trace_id, span_id, field, received_at, ciphertext, nonce,
               bytes, key_id)
-         SELECT project_id, run_id, trace_id, span_id || 'old', field, received_at, ciphertext,
+         SELECT project_id, trace_id, span_id || 'old', field, received_at, ciphertext,
                 nonce, bytes, $2
            FROM telemetry.plain_content WHERE project_id = $1",
     )
@@ -1250,7 +1238,6 @@ async fn content_kept_after_the_switch_to_off_is_refused(pool: PgPool) {
         &door.project,
         Utc::now(),
         vec![SpanContent {
-            run_id: run(RUN_B),
             trace_id: TRACE_B.to_owned(),
             span_id: SPAN_B.to_owned(),
             fields: vec![("app.note".to_owned(), "kept late".to_owned())],
@@ -1296,7 +1283,7 @@ async fn going_off_with_content_deleted_leaves_none_that_opens(pool: PgPool) {
         None,
     );
     door.send(export("result")).await;
-    let runs = [run(RUN)];
+    let runs = [TRACE.to_owned()];
     let open = || content::open(&door.state, Actor::User("owner-1"), &door.project, &runs);
     assert!(!open().await.expect("the content opens").is_empty());
 
@@ -1397,10 +1384,10 @@ async fn no_content_reaches_a_log_an_answer_clickhouse_or_what_the_agent_reads(p
     );
     let mut answers = Vec::new();
     for door in [&kept, &dropped] {
-        let (_, answer) = door.send(export_of(RUN, TRACE, SPAN, &named, &long)).await;
+        let (_, answer) = door.send(export_of(TRACE, SPAN, &named, &long)).await;
         answers.push(answer.to_string());
     }
-    common::eventually("the kept trace is read", || found(&kept, RUN)).await;
+    common::eventually("the kept trace is read", || found(&kept, TRACE)).await;
     assert!(
         !kept.kept(&pool).await.is_empty(),
         "the on project kept it, sealed"
@@ -1435,18 +1422,18 @@ async fn no_content_reaches_a_log_an_answer_clickhouse_or_what_the_agent_reads(p
         &kept.state,
         Actor::User("admin-1"),
         &kept.project,
-        &[run(RUN)],
+        &[TRACE.to_owned()],
     )
     .await
     .expect("the content opens, its read filed");
     let refused = door_over(&pool, ContentMode::On, false).await;
     let (status, _, answer) = refused
-        .post(export_of(RUN_B, TRACE_B, SPAN_B, &named, &long))
+        .post(export_of(TRACE_B, SPAN_B, &named, &long))
         .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{answer}");
     answers.push(answer.to_string());
     let (status, answer) = kept
-        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .lane("DELETE", &format!("/traces/{TRACE}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
     answers.push(answer.to_string());
@@ -1501,9 +1488,8 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
         None,
     );
     let named = [("telmoni.tag.app", TAG), ("user.id", USER)];
-    door.send(export_of(RUN, TRACE, SPAN, &named, "result"))
-        .await;
-    common::eventually("the trace is read", || found(&door, RUN)).await;
+    door.send(export_of(TRACE, SPAN, &named, "result")).await;
+    common::eventually("the trace is read", || found(&door, TRACE)).await;
 
     let tag = format!("app:{TAG}");
     let mut errors = Vec::new();
@@ -1573,7 +1559,6 @@ async fn a_kept_field_is_compressed_before_it_is_sealed(pool: PgPool) {
         text.push_str(if seed % 13 == 0 { ". " } else { " " });
     }
     door.send(export_of(
-        RUN,
         TRACE,
         SPAN,
         &[("app.note", text.as_str())],
@@ -1709,20 +1694,19 @@ async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(p
         r#"[{{"role":"user","parts":[{{"type":"file","modality":"image","mime_type":"image/png","file_id":"telmoni:{hash}"}}]}}]"#
     );
     door.send(export_of(
-        RUN,
         TRACE,
         SPAN,
         &[("gen_ai.input.messages", &message)],
         "result",
     ))
     .await;
-    let names: Vec<(String, uuid::Uuid)> =
-        sqlx::query_as("SELECT sha256, run_id FROM telemetry.media_names WHERE project_id = $1")
+    let names: Vec<(String, String)> =
+        sqlx::query_as("SELECT sha256, trace_id FROM telemetry.media_names WHERE project_id = $1")
             .bind(&door.project)
             .fetch_all(&pool)
             .await
             .expect("read the names");
-    assert_eq!(names, [(hash.clone(), run(RUN))]);
+    assert_eq!(names, [(hash.clone(), TRACE.to_owned())]);
 
     let read = door
         .app
@@ -1754,9 +1738,9 @@ async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(p
         "the read is filed"
     );
 
-    common::eventually("the trace is read", || found(&door, RUN)).await;
+    common::eventually("the trace is read", || found(&door, TRACE)).await;
     let (status, answer) = door
-        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .lane("DELETE", &format!("/traces/{TRACE}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
     assert_eq!(
@@ -1773,7 +1757,6 @@ async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(p
 fn turn_of(session: &str) -> Vec<u8> {
     let span = |id: &str, parent: &str, operation: &str, fields: &[(&str, &str)]| {
         let mut attributes = vec![
-            json!({ "key": contract::RUN_ID, "value": { "stringValue": RUN } }),
             json!({ "key": contract::AGENT, "value": { "stringValue": "nightly-report" } }),
             json!({ "key": contract::OPERATION, "value": { "stringValue": operation } }),
             json!({ "key": contract::SESSION_ID, "value": { "stringValue": session } }),
@@ -1829,10 +1812,10 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
         None,
     );
     kept.send(turn_of("conv-1")).await;
-    common::eventually("the trace is read", || found(&kept, RUN)).await;
+    common::eventually("the trace is read", || found(&kept, TRACE)).await;
 
     let (status, plain) = kept
-        .lane("GET", &format!("/traces/{RUN}"), "admin-1", None)
+        .lane("GET", &format!("/traces/{TRACE}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{plain}");
     assert_eq!(
@@ -1848,7 +1831,7 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
     let (status, trace) = kept
         .lane(
             "GET",
-            &format!("/traces/{RUN}?content=true"),
+            &format!("/traces/{TRACE}?content=true"),
             "admin-1",
             None,
         )
@@ -1857,11 +1840,11 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
     assert_eq!(
         trace["content"],
         json!([
-            { "run_id": RUN, "span_id": SPAN, "fields": {
+            { "trace_id": TRACE, "span_id": SPAN, "fields": {
                 "gen_ai.input.messages": MESSAGES,
                 "gen_ai.output.messages": ANSWER,
             }},
-            { "run_id": RUN, "span_id": SPAN_B, "fields": {
+            { "trace_id": TRACE, "span_id": SPAN_B, "fields": {
                 "gen_ai.input.messages": CONTEXT,
             }},
         ])
@@ -1872,7 +1855,7 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
         .lane("GET", "/traces/export?format=json", "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{file}");
-    assert_eq!(file[0]["run_id"], RUN);
+    assert_eq!(file[0]["trace_id"], TRACE);
     assert_eq!(
         file[0]["content"], trace["content"],
         "the page's content, in the file"
@@ -1888,11 +1871,11 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
         None,
     );
     dropped.send(turn_of("conv-2")).await;
-    common::eventually("the other trace is read", || found(&dropped, RUN)).await;
+    common::eventually("the other trace is read", || found(&dropped, TRACE)).await;
     let (status, trace) = dropped
         .lane(
             "GET",
-            &format!("/traces/{RUN}?content=true"),
+            &format!("/traces/{TRACE}?content=true"),
             "admin-1",
             None,
         )
@@ -1908,7 +1891,7 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
 /// Another exporter's content waits sealed, never as text, and is kept under
 /// its run once its trace lands, readable as any run's.
 #[sqlx::test]
-async fn another_exporters_content_waits_sealed_and_lands_with_its_run(pool: PgPool) {
+async fn another_exporters_content_waits_sealed_and_lands_with_its_trace(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -1953,7 +1936,7 @@ async fn another_exporters_content_waits_sealed_and_lands_with_its_run(pool: PgP
     let kept = door.kept(&pool).await;
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert_eq!(kept[0].0, "gen_ai.input.messages");
-    let run = telmoni_telemetry::foreign::run_of_trace(&door.project, TRACE);
+    let run = TRACE.to_owned();
     let opened = content::open(&door.state, Actor::Service("test"), &door.project, &[run])
         .await
         .expect("opened");
@@ -2112,13 +2095,13 @@ async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
     };
     let failed = telmoni_telemetry::store::SpanRow {
         status: telmoni_shared::SpanStatus::Error,
-        ..common::received(&door.project, SpanKind::Run, "nightly-report", 900, at)
+        ..common::received(&door.project, SpanKind::Agent, "nightly-report", 900, at)
     };
     let rows = [
         reported,
         priced.clone(),
         priced,
-        common::received(&door.project, SpanKind::Run, "nightly-report", 900, at),
+        common::received(&door.project, SpanKind::Agent, "nightly-report", 900, at),
         failed,
     ];
     ch.store.insert_spans(&rows).await.expect("the spans");
@@ -2149,12 +2132,15 @@ async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
         (spend("ours-1") - 4.0).abs() < 1e-9,
         "two calls at $1 a million: {totals}"
     );
-    let runs: u64 = points.iter().map(|p| p["runs"].as_u64().unwrap_or(0)).sum();
+    let traces: u64 = points
+        .iter()
+        .map(|p| p["traces"].as_u64().unwrap_or(0))
+        .sum();
     let failed: u64 = points
         .iter()
-        .map(|p| p["failed_runs"].as_u64().unwrap_or(0))
+        .map(|p| p["failed_traces"].as_u64().unwrap_or(0))
         .sum();
-    assert_eq!((runs, failed), (2, 1));
+    assert_eq!((traces, failed), (2, 1));
 }
 
 /// The totals keep a retrieval's source where they keep a tool's name, and a
@@ -2261,10 +2247,10 @@ async fn a_split_by_tag_user_or_session_reads_the_spans_within_retention(pool: P
             .iter()
             .map(|(k, v)| ((*k).into(), (*v).into()))
             .collect(),
-        ..common::received(&door.project, SpanKind::Run, "nightly-report", 900, at)
+        ..common::received(&door.project, SpanKind::Agent, "nightly-report", 900, at)
     };
     let call = |of: &SpanRow, cost: f64, tags: &[(&str, &str)]| SpanRow {
-        run_id: of.run_id,
+        trace_id: of.trace_id.clone(),
         provider: "openai".into(),
         model: "gpt-5".into(),
         cost: Some(cost),
@@ -2418,23 +2404,23 @@ async fn the_list_shows_spend_each_run_its_own(pool: PgPool) {
     );
     let at = Utc::now() - chrono::Duration::seconds(30);
     let run = |rate: Option<f64>, cost: f64, span: &str| {
-        let run_id = uuid::Uuid::new_v4();
+        let trace_id = uuid::Uuid::new_v4().simple().to_string();
         let own = telmoni_telemetry::store::SpanRow {
-            run_id,
+            trace_id: trace_id.clone(),
             span_id: format!("{span:0<16}"),
             session_id: "s1".into(),
             sample_rate: rate,
-            ..common::received(&door.project, SpanKind::Run, "nightly-report", 900, at)
+            ..common::received(&door.project, SpanKind::Agent, "nightly-report", 900, at)
         };
         let call = telmoni_telemetry::store::SpanRow {
-            run_id,
+            trace_id: trace_id.clone(),
             span_id: format!("{span}1{:0<14}", ""),
             parent_span_id: own.span_id.clone(),
             session_id: "s1".into(),
             cost: Some(cost),
             ..common::received(&door.project, SpanKind::ModelCall, "chat", 500, at)
         };
-        (run_id, [own, call])
+        (trace_id, [own, call])
     };
     let (sampled, sampled_rows) = run(Some(0.5), 1.0, "a");
     let (whole, whole_rows) = run(None, 3.0, "b");
@@ -2470,7 +2456,7 @@ async fn the_list_shows_spend_each_run_its_own(pool: PgPool) {
         .iter()
         .map(|t| {
             (
-                t["run_id"].as_str().unwrap_or_default().to_owned(),
+                t["trace_id"].as_str().unwrap_or_default().to_owned(),
                 t["spend"].as_f64().unwrap_or(-1.0),
             )
         })
@@ -2589,19 +2575,19 @@ async fn a_read_key_reads_traces_content_metrics_and_incidents(pool: PgPool) {
         None,
     );
     door.send(turn_of("conv-1")).await;
-    common::eventually("the trace is read", || found(&door, RUN)).await;
+    common::eventually("the trace is read", || found(&door, TRACE)).await;
 
     let (status, list) = door.read("/traces", READ_KEY).await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(list["traces"][0]["run_id"], RUN);
+    assert_eq!(list["traces"][0]["trace_id"], TRACE);
     assert_eq!(list["total"], 1);
 
-    let (status, trace) = door.read(&format!("/traces/{RUN}"), READ_KEY).await;
+    let (status, trace) = door.read(&format!("/traces/{TRACE}"), READ_KEY).await;
     assert_eq!(status, StatusCode::OK, "{trace}");
     assert_eq!(trace["spans"].as_array().map(Vec::len), Some(2));
     let head = Request::builder()
         .method("HEAD")
-        .uri(format!("/v1/traces/{RUN}?content=true"))
+        .uri(format!("/v1/traces/{TRACE}?content=true"))
         .header(header::AUTHORIZATION, format!("Bearer {READ_KEY}"))
         .body(Body::empty())
         .expect("a request");
@@ -2614,7 +2600,7 @@ async fn a_read_key_reads_traces_content_metrics_and_incidents(pool: PgPool) {
     );
 
     let (status, trace) = door
-        .read(&format!("/traces/{RUN}?content=true"), READ_KEY)
+        .read(&format!("/traces/{TRACE}?content=true"), READ_KEY)
         .await;
     assert_eq!(status, StatusCode::OK, "{trace}");
     assert_eq!(
@@ -2664,7 +2650,7 @@ async fn a_read_key_reads_traces_content_metrics_and_incidents(pool: PgPool) {
         &[ApiKeyScope::Read],
     );
     let (status, _) = door
-        .read(&format!("/traces/{RUN}"), "tm_other_project")
+        .read(&format!("/traces/{TRACE}"), "tm_other_project")
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "another project's run");
 
@@ -2696,14 +2682,13 @@ async fn a_moved_project_still_opens_its_content_and_erases_by_user_id(pool: PgP
         None,
     );
     door.send(export_of(
-        RUN,
         TRACE,
         SPAN,
         &[(contract::USER_ID, "acme-42")],
         "result",
     ))
     .await;
-    common::eventually("the trace is read", || found(&door, RUN)).await;
+    common::eventually("the trace is read", || found(&door, TRACE)).await;
 
     let taker = OrganizationId::new();
     TelemetrySeam(door.state.clone())
@@ -2727,7 +2712,7 @@ async fn a_moved_project_still_opens_its_content_and_erases_by_user_id(pool: PgP
         &moved.state,
         Actor::User("admin-1"),
         &moved.project,
-        &[run(RUN)],
+        &[TRACE.to_owned()],
     )
     .await
     .expect("the moved content opens");
@@ -2963,13 +2948,10 @@ async fn a_transfer_waits_for_a_purge_in_flight_and_moves_what_it_left(pool: PgP
     );
 }
 
-const RUN_B: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f02";
 const TRACE_B: &str = "5bf92f3577b34da6a3ce929d0e0e4737";
 const SPAN_B: &str = "01f067aa0ba902b8";
-const RUN_C: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f03";
 const TRACE_C: &str = "6bf92f3577b34da6a3ce929d0e0e4738";
 const SPAN_C: &str = "02f067aa0ba902b9";
-const RUN_D: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f04";
 const TRACE_D: &str = "7bf92f3577b34da6a3ce929d0e0e4739";
 const SPAN_D: &str = "04f067aa0ba902bb";
 const SPAN_E: &str = "05f067aa0ba902bc";
@@ -2985,7 +2967,7 @@ async fn found(door: &Door, run: &str) -> bool {
             .is_some_and(|traces| {
                 traces
                     .iter()
-                    .any(|trace| trace.get("run_id") == Some(&json!(run)))
+                    .any(|trace| trace.get("trace_id") == Some(&json!(run)))
             })
 }
 
@@ -3016,15 +2998,14 @@ async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
             Some(Role::Member),
         );
     door.send(export("result")).await;
-    door.send(export_of(RUN_B, TRACE_B, SPAN_B, &[], "other"))
-        .await;
+    door.send(export_of(TRACE_B, SPAN_B, &[], "other")).await;
     common::eventually("both traces are read", || async {
-        found(&door, RUN).await && found(&door, RUN_B).await
+        found(&door, TRACE).await && found(&door, TRACE_B).await
     })
     .await;
 
     let (status, _) = door
-        .lane("DELETE", &format!("/traces/{RUN}"), "member-1", None)
+        .lane("DELETE", &format!("/traces/{TRACE}"), "member-1", None)
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a member deletes nothing");
     let stranger = "0191a3b4-7c2e-7d3f-8e4a-000000000000";
@@ -3038,16 +3019,19 @@ async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
     );
 
     let (status, answer) = door
-        .lane("DELETE", &format!("/traces/{RUN}"), "admin-1", None)
+        .lane("DELETE", &format!("/traces/{TRACE}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{answer}");
-    assert_eq!(answer, json!({ "run_id": RUN, "spans": 1, "fields": 3 }));
+    assert_eq!(
+        answer,
+        json!({ "trace_id": TRACE, "spans": 1, "fields": 3 })
+    );
     assert_eq!(
         door.deletions(&pool).await,
         [(
             "admin-1".to_owned(),
             "trace".to_owned(),
-            RUN.to_owned(),
+            TRACE.to_owned(),
             json!({ "spans": 1 })
         )]
     );
@@ -3061,17 +3045,17 @@ async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
         .sum();
     assert_eq!(door.held(&pool, &door.organization).await, Some(other));
     assert!(
-        !found(&door, RUN).await,
+        !found(&door, TRACE).await,
         "gone from every read once answered"
     );
-    door.send(export_of(RUN, TRACE, "03f067aa0ba902ba", &[], "late"))
+    door.send(export_of(TRACE, "03f067aa0ba902ba", &[], "late"))
         .await;
     assert!(
-        !found(&door, RUN).await,
+        !found(&door, TRACE).await,
         "a span the run sends after is dropped"
     );
     assert_eq!(door.kept_traces(&pool).await, [TRACE_B], "and its content");
-    assert!(found(&door, RUN_B).await, "another trace stands");
+    assert!(found(&door, TRACE_B).await, "another trace stands");
     assert_eq!(
         door.auth.receipts(),
         [("admin-1".to_owned(), "trace".to_owned())]
@@ -3098,7 +3082,6 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
     );
     let (user, session) = (contract::USER_ID, contract::SESSION_ID);
     door.send(export_of(
-        RUN,
         TRACE,
         SPAN,
         &[(user, "acme-42"), (session, "conv-1")],
@@ -3106,7 +3089,6 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
     ))
     .await;
     door.send(export_of(
-        RUN_C,
         TRACE_C,
         SPAN_C,
         &[(session, "conv-1")],
@@ -3114,7 +3096,6 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
     ))
     .await;
     door.send(export_of(
-        RUN_B,
         TRACE_B,
         SPAN_B,
         &[(user, "acme-43"), (session, "conv-1")],
@@ -3122,27 +3103,15 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
     ))
     .await;
     // A run of the session, unnamed there, that names another user elsewhere.
-    door.send(export_of(
-        RUN_D,
-        TRACE_D,
-        SPAN_D,
-        &[(session, "conv-1")],
-        "turn",
-    ))
-    .await;
-    door.send(export_of(
-        RUN_D,
-        TRACE_D,
-        SPAN_E,
-        &[(user, "acme-44")],
-        "tool",
-    ))
-    .await;
+    door.send(export_of(TRACE_D, SPAN_D, &[(session, "conv-1")], "turn"))
+        .await;
+    door.send(export_of(TRACE_D, SPAN_E, &[(user, "acme-44")], "tool"))
+        .await;
     common::eventually("every trace is read", || async {
-        found(&door, RUN).await
-            && found(&door, RUN_B).await
-            && found(&door, RUN_C).await
-            && found(&door, RUN_D).await
+        found(&door, TRACE).await
+            && found(&door, TRACE_B).await
+            && found(&door, TRACE_C).await
+            && found(&door, TRACE_D).await
     })
     .await;
 
@@ -3173,19 +3142,19 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
     assert_eq!(answer, json!({ "traces": 2, "spans": 2, "fields": 6 }));
     assert_eq!(door.kept_traces(&pool).await, [TRACE_B, TRACE_D]);
     assert!(
-        !found(&door, RUN).await,
+        !found(&door, TRACE).await,
         "their trace is gone once answered"
     );
     assert!(
-        !found(&door, RUN_C).await,
+        !found(&door, TRACE_C).await,
         "and their session's unnamed one"
     );
     assert!(
-        found(&door, RUN_B).await,
+        found(&door, TRACE_B).await,
         "another user's trace stands, though it shares the session"
     );
     assert!(
-        found(&door, RUN_D).await,
+        found(&door, TRACE_D).await,
         "as does one naming another user on a span outside it"
     );
 
@@ -3245,13 +3214,9 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
     );
 }
 
-/// An export whose spans each carry OpenTelemetry's evaluation events.
-fn scored_export(run: &str) -> Vec<u8> {
-    scored_export_in(run, TRACE)
-}
-
-/// [`scored_export`] under its own trace.
-fn scored_export_in(run: &str, trace: &str) -> Vec<u8> {
+/// An export of trace `trace` whose spans each carry OpenTelemetry's
+/// evaluation events.
+fn scored_export(trace: &str) -> Vec<u8> {
     let text = |key: &str, value: &str| json!({ "key": key, "value": { "stringValue": value } });
     let event = |attributes: Value| {
         json!({
@@ -3264,7 +3229,7 @@ fn scored_export_in(run: &str, trace: &str) -> Vec<u8> {
             "traceId": trace, "spanId": SPAN, "name": "nightly-report",
             "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000002000000000",
             "attributes": [
-                text(contract::RUN_ID, run), text(contract::AGENT, "nightly-report"),
+                text(contract::AGENT, "nightly-report"),
                 text(contract::OPERATION, "invoke_agent"), text(contract::SESSION_ID, "conv-1"),
             ],
             "events": [event(json!([
@@ -3279,7 +3244,7 @@ fn scored_export_in(run: &str, trace: &str) -> Vec<u8> {
             "traceId": trace, "spanId": "01f067aa0ba902b8", "parentSpanId": SPAN, "name": "chat",
             "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000001000000000",
             "attributes": [
-                text(contract::RUN_ID, run), text(contract::AGENT, "nightly-report"),
+                text(contract::AGENT, "nightly-report"),
                 text(contract::OPERATION, "chat"),
             ],
             "events": [
@@ -3312,10 +3277,10 @@ async fn the_applications_evaluation_events_land_once_as_its_spans_scores(pool: 
         OrganizationRole::Owner,
         None,
     );
-    door.send(scored_export(RUN)).await;
-    door.send(scored_export(RUN)).await;
+    door.send(scored_export(TRACE)).await;
+    door.send(scored_export(TRACE)).await;
     let (status, scores) = door
-        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .lane("GET", &format!("/scores?trace_id={TRACE}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{scores}");
     let relevance = scores["scores"]
@@ -3359,7 +3324,7 @@ async fn the_applications_evaluation_events_land_once_as_its_spans_scores(pool: 
             ),
             (
                 "relevance".into(),
-                "run".into(),
+                "trace".into(),
                 "number".into(),
                 json!(0.75),
                 json!([])
@@ -3404,7 +3369,7 @@ async fn two_scores_of_one_name_at_one_time_stay_two(pool: PgPool) {
         "traceId": TRACE, "spanId": SPAN, "name": "nightly-report",
         "startTimeUnixNano": "1760000000000000000", "endTimeUnixNano": "1760000002000000000",
         "attributes": [
-            text(contract::RUN_ID, RUN), text(contract::AGENT, "nightly-report"),
+            text(contract::AGENT, "nightly-report"),
             text(contract::OPERATION, "invoke_agent"),
         ],
         "events": [event("judge-1"), event("judge-2")],
@@ -3414,7 +3379,7 @@ async fn two_scores_of_one_name_at_one_time_stay_two(pool: PgPool) {
     door.send(export.clone()).await;
     door.send(export).await;
     let (status, scores) = door
-        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .lane("GET", &format!("/scores?trace_id={TRACE}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{scores}");
     let mut versions: Vec<&str> = scores["scores"]
@@ -3455,9 +3420,9 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
         )
     };
     let scores = json!({ "scores": [
-        { "id": "0b9a3f0e-6c1d-4f7a-9e2b-5d8c7a6b4e31", "run_id": RUN, "name": "thumbs",
+        { "id": "0b9a3f0e-6c1d-4f7a-9e2b-5d8c7a6b4e31", "trace_id": TRACE, "name": "thumbs",
           "data_type": "boolean", "value": 1 },
-        { "id": "7c2e5a1b-3d4f-4a6b-8c9d-0e1f2a3b4c5d", "run_id": RUN, "span_id": SPAN.to_uppercase(),
+        { "id": "7c2e5a1b-3d4f-4a6b-8c9d-0e1f2a3b4c5d", "trace_id": TRACE, "span_id": SPAN.to_uppercase(),
           "name": "relevance", "data_type": "number", "value": 0.5, "range_min": 0, "range_max": 1,
           "version": " judge-2 " },
         { "id": "1d2c3b4a-5e6f-4a7b-8c9d-0a1b2c3d4e5f", "session_id": "conv-1", "name": "outcome",
@@ -3476,7 +3441,7 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
     let (status, read) = door
         .lane(
             "GET",
-            &format!("/scores?run_id={RUN}&session_id={session}"),
+            &format!("/scores?trace_id={TRACE}&session_id={session}"),
             "admin-1",
             None,
         )
@@ -3486,7 +3451,10 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
         .lane(
             "GET",
             // Another run: a session's score names the nil run, which would match it.
-            &format!("/scores?run_id={}&session_id=conv-1", uuid::Uuid::new_v4()),
+            &format!(
+                "/scores?trace_id={}&session_id=conv-1",
+                uuid::Uuid::new_v4()
+            ),
             "admin-1",
             None,
         )
@@ -3528,14 +3496,19 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
                 SPAN.into(),
                 "judge-2".into()
             ),
-            ("thumbs".into(), "run".into(), String::new(), String::new()),
+            (
+                "thumbs".into(),
+                "trace".into(),
+                String::new(),
+                String::new()
+            ),
         ],
         "{read}"
     );
 
     let bad = json!({ "scores": [
-        { "run_id": RUN, "name": "kept-not", "data_type": "boolean", "value": 1 },
-        { "run_id": RUN, "name": "relevance", "data_type": "number", "value": 2, "range_max": 1 },
+        { "trace_id": TRACE, "name": "kept-not", "data_type": "boolean", "value": 1 },
+        { "trace_id": TRACE, "name": "relevance", "data_type": "number", "value": 2, "range_max": 1 },
     ]});
     let answer = post("POST", bad).await.expect("an answer");
     assert_eq!(answer.status(), StatusCode::BAD_REQUEST);
@@ -3554,7 +3527,7 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
         .expect("an answer");
     assert_eq!(none.status(), StatusCode::BAD_REQUEST);
     let (_, read) = door
-        .lane("GET", &format!("/scores?run_id={RUN}"), "admin-1", None)
+        .lane("GET", &format!("/scores?trace_id={TRACE}"), "admin-1", None)
         .await;
     assert!(
         !read.to_string().contains("kept-not"),
@@ -3586,18 +3559,18 @@ async fn a_scores_comment_is_kept_as_its_runs_content(pool: PgPool) {
         OrganizationRole::Member,
         Some(Role::Member),
     );
-    door.send(scored_export(RUN)).await;
+    door.send(scored_export(TRACE)).await;
     let before = door.held(&pool, &door.organization).await.expect("counted");
     let put = |body: Value| {
         let door = &door;
         async move { door.lane("PUT", "/scores", "member-1", Some(body)).await }
     };
-    let scored = |comment: &str| json!({ "run_id": RUN, "name": "useful", "data_type": "boolean", "value": 1, "comment": comment });
+    let scored = |comment: &str| json!({ "trace_id": TRACE, "name": "useful", "data_type": "boolean", "value": 1, "comment": comment });
     let comments = || async {
         let (status, trace) = door
             .lane(
                 "GET",
-                &format!("/traces/{RUN}?content=true"),
+                &format!("/traces/{TRACE}?content=true"),
                 "member-1",
                 None,
             )
@@ -3630,7 +3603,8 @@ async fn a_scores_comment_is_kept_as_its_runs_content(pool: PgPool) {
         "the last replaces it"
     );
     let (status, _) =
-        put(json!({ "run_id": RUN, "name": "useful", "data_type": "boolean", "value": 0 })).await;
+        put(json!({ "trace_id": TRACE, "name": "useful", "data_type": "boolean", "value": 0 }))
+            .await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         comments().await.is_empty(),
@@ -3670,7 +3644,7 @@ async fn a_scores_comment_is_kept_as_its_runs_content(pool: PgPool) {
         OrganizationRole::Member,
         Some(Role::Member),
     );
-    off.send(scored_export(RUN)).await;
+    off.send(scored_export(TRACE)).await;
     let (status, answer) = off
         .lane("PUT", "/scores", "member-1", Some(scored("x")))
         .await;
@@ -3702,7 +3676,7 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
             OrganizationRole::Member,
             Some(Role::Member),
         );
-    door.send(scored_export(RUN)).await;
+    door.send(scored_export(TRACE)).await;
     // The session as the console names it: as its spans keep it, hashed.
     let conv = telmoni_telemetry::hashing::storage_for_project(&door.state, &door.project)
         .await
@@ -3712,15 +3686,15 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
         let door = &door;
         async move { door.lane("PUT", "/scores", user, Some(body)).await }
     };
-    let (status, first) = put("member-1", json!({ "run_id": RUN, "name": "useful", "data_type": "number", "value": 2, "range_min": 0, "range_max": 5 })).await;
+    let (status, first) = put("member-1", json!({ "trace_id": TRACE, "name": "useful", "data_type": "number", "value": 2, "range_min": 0, "range_max": 5 })).await;
     assert_eq!(status, StatusCode::OK, "{first}");
-    let (status, again) = put("member-1", json!({ "run_id": RUN, "name": "useful", "data_type": "number", "value": 4, "range_min": 0, "range_max": 5 })).await;
+    let (status, again) = put("member-1", json!({ "trace_id": TRACE, "name": "useful", "data_type": "number", "value": 4, "range_min": 0, "range_max": 5 })).await;
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(
         first["score_id"], again["score_id"],
         "the same name again replaces it"
     );
-    let (status, span) = put("member-1", json!({ "run_id": RUN, "span_id": SPAN, "name": "on topic", "data_type": "category", "categories": ["yes"] })).await;
+    let (status, span) = put("member-1", json!({ "trace_id": TRACE, "span_id": SPAN, "name": "on topic", "data_type": "category", "categories": ["yes"] })).await;
     assert_eq!(status, StatusCode::OK, "{span}");
     let (status, session) = put(
         "member-2",
@@ -3731,7 +3705,7 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
 
     for (body, want) in [
         (
-            json!({ "run_id": "00000000-0000-4000-8000-000000000000", "name": "x", "data_type": "boolean", "value": 1 }),
+            json!({ "trace_id": "00000000000040008000000000000000", "name": "x", "data_type": "boolean", "value": 1 }),
             StatusCode::NOT_FOUND,
         ),
         (
@@ -3739,11 +3713,11 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
             StatusCode::NOT_FOUND,
         ),
         (
-            json!({ "run_id": RUN, "name": "x", "data_type": "number", "value": 9, "range_max": 5 }),
+            json!({ "trace_id": TRACE, "name": "x", "data_type": "number", "value": 9, "range_max": 5 }),
             StatusCode::BAD_REQUEST,
         ),
         (
-            json!({ "run_id": RUN, "session_id": "conv-1", "name": "x", "data_type": "boolean", "value": 1 }),
+            json!({ "trace_id": TRACE, "session_id": "conv-1", "name": "x", "data_type": "boolean", "value": 1 }),
             StatusCode::BAD_REQUEST,
         ),
     ] {
@@ -3755,7 +3729,7 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
         let (status, scores) = door
             .lane(
                 "GET",
-                &format!("/scores?run_id={RUN}&session_id={conv}"),
+                &format!("/scores?trace_id={TRACE}&session_id={conv}"),
                 "member-1",
                 None,
             )
@@ -3848,7 +3822,7 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
         OrganizationRole::Owner,
         None,
     );
-    door.send(scored_export(RUN)).await;
+    door.send(scored_export(TRACE)).await;
     let count = |sql: &'static str| {
         let ch = &ch;
         let door = &door;
@@ -3864,13 +3838,12 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
         "SELECT count() FROM telemetry.scores FINAL WHERE project_id IN {projects:Array(String)}";
     assert_eq!(count(SCORES).await, 3);
     ch.store
-        .delete_runs(&door.project, &[RUN.parse().expect("a run")])
+        .delete_traces(&door.project, &[TRACE.to_owned()])
         .await
         .expect("deleted");
-    assert_eq!(count(SCORES).await, 0, "the run's scores went with it");
+    assert_eq!(count(SCORES).await, 0, "the trace's scores went with it");
 
-    door.send(scored_export("0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f02"))
-        .await;
+    door.send(scored_export(TRACE_B)).await;
     assert_eq!(count(SCORES).await, 3);
     ch.store
         .delete_before(&door.project, Utc::now() + chrono::Duration::seconds(5))
@@ -3880,15 +3853,13 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
 
     // A score given past the longest retention, beside today's: the night's
     // purge, at today's date so no other suite's rows go, takes it alone.
-    door.send(scored_export("0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f03"))
-        .await;
+    door.send(scored_export(TRACE_C)).await;
     let old = telmoni_telemetry::scores::ScoreRow {
         project_id: door.project.clone(),
         received_at: Utc::now() - chrono::Duration::days(400),
         score_id: uuid::Uuid::new_v4(),
-        target: telmoni_shared::ScoreTarget::Run,
-        run_id: uuid::Uuid::new_v4(),
-        trace_id: String::new(),
+        target: telmoni_shared::ScoreTarget::Trace,
+        trace_id: uuid::Uuid::new_v4().simple().to_string(),
         span_id: String::new(),
         session_id: String::new(),
         name: "old".into(),
@@ -3915,12 +3886,11 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
     })
     .await;
     ch.store
-        .delete_runs(&door.project, &[RUN_C.parse().expect("a run")])
+        .delete_traces(&door.project, &[TRACE_C.to_owned()])
         .await
         .expect("deleted");
 
-    door.send(scored_export("0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f04"))
-        .await;
+    door.send(scored_export(TRACE_D)).await;
     ch.store
         .delete_project(&door.project)
         .await
@@ -3934,7 +3904,7 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
 /// Another exporter's span's score waits with its span, and lands under its
 /// run once its trace is placed.
 #[sqlx::test]
-async fn another_exporters_score_lands_with_its_run(pool: PgPool) {
+async fn another_exporters_score_lands_with_its_trace(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -3961,7 +3931,7 @@ async fn another_exporters_score_lands_with_its_run(pool: PgPool) {
         .read(
             &Projects::one(door.project.clone()),
             "SELECT count() FROM telemetry.scores FINAL WHERE project_id IN {projects:Array(String)} \
-             AND run_id = toUUID('00000000-0000-0000-0000-000000000000')",
+             AND trace_id = ''",
         )
         .fetch_one()
         .await
@@ -3975,16 +3945,16 @@ async fn another_exporters_score_lands_with_its_run(pool: PgPool) {
     telmoni_telemetry::foreign::land_quiet(&door.state)
         .await
         .expect("a pass");
-    let run = telmoni_telemetry::foreign::run_of_trace(&door.project, TRACE);
+    let run = TRACE.to_owned();
     let (status, scores) = door
-        .lane("GET", &format!("/scores?run_id={run}"), "admin-1", None)
+        .lane("GET", &format!("/scores?trace_id={run}"), "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::OK, "{scores}");
     let scores = scores["scores"].as_array().expect("scores");
     assert_eq!(scores.len(), 1, "{scores:?}");
     assert_eq!(scores[0]["name"], "relevance");
     assert_eq!(scores[0]["target"], "span");
-    assert_eq!(scores[0]["run_id"], run.to_string());
+    assert_eq!(scores[0]["trace_id"], run.to_string());
 }
 
 /// The trace list answers each run's own scores by name and keeps only the
@@ -4003,11 +3973,11 @@ async fn the_list_carries_its_scores_and_filters_by_one(pool: PgPool) {
         OrganizationRole::Owner,
         None,
     );
-    let other = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f09";
-    door.send(scored_export(RUN)).await;
-    door.send(scored_export_in(other, TRACE_B)).await;
+    let other = TRACE_B;
+    door.send(scored_export(TRACE)).await;
+    door.send(scored_export(other)).await;
     let (status, _) = door
-        .lane("PUT", "/scores", "admin-1", Some(json!({ "run_id": other, "name": "relevance", "data_type": "number", "value": 0.25 })))
+        .lane("PUT", "/scores", "admin-1", Some(json!({ "trace_id": other, "name": "relevance", "data_type": "number", "value": 0.25 })))
         .await;
     assert_eq!(status, StatusCode::OK);
 
@@ -4019,7 +3989,7 @@ async fn the_list_carries_its_scores_and_filters_by_one(pool: PgPool) {
             .and_then(|names| names.iter().find(|s| s["name"] == "relevance").cloned())
     };
     assert_eq!(
-        relevance(RUN).map(|s| (s["mean"].clone(), s["count"].clone())),
+        relevance(TRACE).map(|s| (s["mean"].clone(), s["count"].clone())),
         Some((json!(0.75), json!(1)))
     );
     assert_eq!(
@@ -4041,7 +4011,7 @@ async fn the_list_carries_its_scores_and_filters_by_one(pool: PgPool) {
         .as_array()
         .expect("traces")
         .iter()
-        .filter_map(|t| t["run_id"].as_str())
+        .filter_map(|t| t["trace_id"].as_str())
         .collect();
     assert_eq!(runs, [other], "a run any score of the name admits: {high}");
     let (status, _) = door

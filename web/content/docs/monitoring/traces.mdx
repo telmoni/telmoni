@@ -1,10 +1,11 @@
 ---
-title: "Runs"
-description: "A project's Runs page: every run of its agents as a row, newest first, narrowed by any of its values, sorted, grouped by session or user, paged, drawn over the window and downloaded, and each run opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
+title: "Traces"
+description: "A project's Traces page: every trace of its agents as a row, newest first, narrowed by any of its values, sorted, grouped by session or user, paged, drawn over the window and downloaded, and each trace opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
 ---
 
-A **trace** is one run's record: the run's own span and every span recorded
-inside it, found by the run's id. A project's **Runs** page (`/traces`) lists them; each
+A **trace** is one execution of an agent: the agent's own span and every span
+recorded inside it, found by its id, 32 hex digits. A project's **Traces** page
+(`/traces`) lists them; each
 opens beside the list, and has a page of its own. Both show its metadata —
 timings, statuses, counts, model and tool names — and, on a project whose
 [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
@@ -12,40 +13,40 @@ is `on`, what it kept of what a person or a model wrote, in full
 ([Content](#content), below). A project left `off` keeps none, so its traces
 show none.
 
-A project no run has reached, in all its plan keeps, opens **Runs** on its
+A project no trace has reached, in all its plan keeps, opens **Traces** on its
 first run instead of an empty list: a key to mint, a prompt to paste into a
 coding agent that adds tracing with the [SDK](/docs/api/sdks) for its
 language, and the SDK and framework guides. The page listens as it waits, and draws the
-list in its place as the first run lands, with no reload.
+list in its place as the first trace lands, with no reload.
 
 ## The list
 
-Every run of the project's agents from the last seven days, newest first, one
+Every trace of the project's agents from the last seven days, newest first, one
 row each, fifty to a page:
 
 | Column | What it is |
 |---|---|
-| Trace | The first eight characters of the run's id; opens the trace beside the list, as a click anywhere else on the row does. Under it, a failed run's error class (`error.type`); its message is content, shown where the trace opens |
-| Started | When the run's first span started, in your time zone |
-| Agent | The run's agent (`telmoni.agent`) |
-| User | The end user the run was for (`user.id`), as stored: hashed under the project's own key |
-| Session | The session the run belongs to (`gen_ai.conversation.id`), as stored: hashed under the project's own key |
-| Status | **OK**, **Error** or **Cancelled** once the run's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the run's spans failed: a run can recover from a failed call |
-| Steps | How many steps the run took; hover for its model calls, tool calls and retrievals |
+| Trace | The first eight characters of the trace's id; opens it beside the list, as a click anywhere else on the row does. Under it, a failed trace's error class (`error.type`); its message is content, shown where the trace opens |
+| Started | When the trace's first span started, in your time zone |
+| Agent | The trace's agent (`telmoni.agent`) |
+| User | The end user the trace was for (`user.id`), as stored: hashed under the project's own key |
+| Session | The session the trace belongs to (`gen_ai.conversation.id`), as stored: hashed under the project's own key |
+| Status | **OK**, **Error** or **Cancelled** once the agent's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the trace's spans failed: a trace can recover from a failed call |
+| Steps | How many steps the trace took; hover for its model calls, tool calls and retrievals |
 | Tokens | Its model calls' input and output tokens, summed; hover for the split |
 | Duration | From its first span's start to its last span's end |
-| Scores | The run's own [scores](/docs/monitoring/scores) by name: a number's mean, a yes or no's share of yeses, a category's values |
+| Scores | The trace's own [scores](/docs/monitoring/scores) by name: a number's mean, a yes or no's share of yeses, a category's values |
 
 **Columns** shows or hides each of these, and more beside them: when the
-run's last span ended, the deployment its spans were sent from
+trace's last span ended, the deployment its spans were sent from
 (**Environment**: `production`, `staging`) and its release (**Release**: a
-version or a commit), each once where a run crossed services deployed apart,
+version or a commit), each once where a trace crossed services deployed apart,
 the class of the error it ended on (**Error**: `TimeoutError`,
 `RateLimitError` — never its message), its model calls, tool calls,
 retrievals, errors and spans, its input, output and cached tokens, how soon the first of its
 model calls that said began to answer (**Time to first token**), what its
 model calls cost (**Spend**: each as it reported, else its tokens at the
-project's own price or the price table's, the run's own and never scaled by
+project's own price or the price table's, the trace's own and never scaled by
 a sample rate; [What a call cost](/docs/api/ingest#what-a-call-cost)), the
 models and tools its calls used, and its [tags](#tags), each `key:value`
 (**Tags**).
@@ -60,13 +61,13 @@ your browser rather than in the page's link.
 
 The **Filters** panel beside the list names each agent, status, model, tool,
 user, session, environment, release, tag, prompt and prompt version among the
-window's runs, with how many runs carry it — counted under every other filter,
+window's traces, with how many traces carry it — counted under every other filter,
 so a value beside a ticked one says what ticking it would add. Tick values to
 narrow the list: the values of one filter add to each other, and filters
-narrow together. The panel names fifty values of each at most, the most runs
+narrow together. The panel names fifty values of each at most, the most traces
 first; a session's or a user's id can be typed in as well (**Text**), as it is
 stored: the hashed id the Session or User column shows; and so can a tag, as
-`key:value`. A run carries an environment, a release, a tag, a prompt or a
+`key:value`. A trace carries an environment, a release, a tag, a prompt or a
 prompt version where any of its spans does: the deployment is the resource's
 `deployment.environment.name` and `service.version`, a tag each
 `telmoni.tag.<key>` with its value, a prompt a span's `gen_ai.prompt.name`,
@@ -82,31 +83,31 @@ come back, until the page is reloaded; a double click puts them back at their
 own width. The edge takes the keyboard too: the arrow keys move it, Home and End
 take it to its narrowest and widest, and Enter puts it back.
 
-**Errors**, **Slow** and **Tokens** beside it are ready-made: the runs with
-failed spans, the longest runs first, or the runs that used the most tokens
+**Errors**, **Slow** and **Tokens** beside it are ready-made: the traces with
+failed spans, the longest traces first, or the traces that used the most tokens
 first. Click one again to take it off.
 
 ### Sessions and users
 
-A **session** is the runs that share the session id the application gave
-them: a chat, a thread, a support ticket worked over several runs, what
-OpenTelemetry calls `gen_ai.conversation.id`. A **user** is whoever a run was
-for, never a member of your organization. Name each when you open a run —
+A **session** is the traces that share the session id the application gave
+them: a chat, a thread, a support ticket worked over several traces, what
+OpenTelemetry calls `gen_ai.conversation.id`. A **user** is whoever a trace was
+for, never a member of your organization. Name each when you open a trace —
 `session_id` and `user_id` in the [SDKs](/docs/api/sdks) (`sessionId` and
 `userId` in TypeScript, `SessionID` and `UserID` in Go), or
 `gen_ai.conversation.id` and `user.id` on the span — and every span inside
-the run carries them. A user's id and a session's are each stored hashed
+the trace carries them. A user's id and a session's are each stored hashed
 under the project's own key, so no page names anybody by one, even a session
 id built from an email or an account number; a project admin erases a user by
 the id your app sends, on the project's **Settings** page
 ([Data deletion](/docs/workspace/data-deletion#deleting-a-trace-or-an-end-user)).
 
 **Group by**, beside **Table** and **Chart**, lays the list out by session or
-by user: each heads its own runs, with how many of them the page holds, and
-the runs that named none stand under a head that says so. Grouping sorts the
+by user: each heads its own traces, with how many of them the page holds, and
+the traces that named none stand under a head that says so. Grouping sorts the
 list by session or by user, so sorting by another column ungroups it. A
-session's head opens its runs in the order they started, as the session on a
-trace's first line does, and a user's head opens every run of theirs.
+session's head opens its traces in the order they started, as the session on a
+trace's first line does, and a user's head opens every trace of theirs.
 
 ### Sort, pages and the window
 
@@ -114,28 +115,28 @@ trace's first line does, and a user's head opens every run of theirs.
 Environment, Release, Error, Spans, Cache read, Cache write, Models and
 Tools. A second click turns it round. Names sort in the alphabet's order, and
 the newest, the longest and the most come first on the others. The **Tags**
-heading sorts by a tag: **Sort by tag** lists the keys the window's runs
-carry, and picking one orders the runs by their value of it, A to Z, picking
-it again Z to A, the runs without it last either way.
+heading sorts by a tag: **Sort by tag** lists the keys the window's traces
+carry, and picking one orders the traces by their value of it, A to Z, picking
+it again Z to A, the traces without it last either way.
 
 **Rows per page** is 25, 50 or 100; beside it, the total the filters admit,
 and the way to the first, previous, next and last page. A list past a
 thousand pages is reached by narrowing the window or the filters.
 
 **The window**, beside the page's title, is the last day, week, 30 or 90
-days, by the day each span arrived. A window of more runs than the store
+days, by the day each span arrived. A window of more traces than the store
 reads at once, about a hundred thousand, shows the page as unavailable; a
-shorter one reads. Above the rows, its runs stand as bars by when they started — how
-they ended, or their tokens, or what they cost (**Cost**, each run's own
+shorter one reads. Above the rows, its traces stand as bars by when they started — how
+they ended, or their tokens, or what they cost (**Cost**, each trace's own
 spend), or the median and 95th percentile of their durations or of their
 times to first token, as the menu above the bars picks — each bar an hour, a
 few hours, a day or a week, starting on your own clock. **Chart** shows the
 five as charts in the table's place, two to a row.
 
-As the project's runs land, a bar above the list counts the new traces rather
+As the project's traces land, a bar above the list counts the new ones rather
 than moving the rows under your hand; **Show** reads the list again, with them
 on it where the filters admit them. An empty list shows its first trace at
-once. A trace's own page draws itself again as its run's spans land, while it
+once. A trace's own page draws itself again as its spans land, while it
 is in view: at once for the first, and once more for whatever arrives in the
 next 30 seconds.
 
@@ -143,8 +144,8 @@ next 30 seconds.
 
 ### Changes
 
-A change is the first run of an agent to carry a release, a model or a
-prompt's version its runs had not carried in the 30 days before: a deploy, a
+A change is the first trace of an agent to carry a release, a model or a
+prompt's version its traces had not carried in the 30 days before: a deploy, a
 prompt edited, or a model a provider moved to under the name you call. Each
 is drawn as a line on the bar it fell in, above the list and on **Chart**, one
 line a bar naming every change in it: the agent, what changed and to what, and
@@ -152,14 +153,14 @@ the environment. The lines stand for the agents and environments the list is
 narrowed to, or for every one where it is narrowed to none; the other filters
 leave them, since a change explains the bars whatever else is ticked.
 
-Telmoni finds a change within two minutes of its run's spans landing, and
+Telmoni finds a change within two minutes of its trace's spans landing, and
 another exporter's once its trace lands. A line shows when the list is next
 read — **Show**, **Refresh** or a new filter — not as the change is found.
 Past 500 changes in the window, the newest 500 are drawn, and the page says so.
 
 - **Each environment is its own:** a release staging took first is a change
   again when production takes it.
-- **An agent's first run** marks what it ran on.
+- **An agent's first trace** marks what it ran on.
 - **A model** is the one a model call answered with; **a prompt's version**
   is a span's `gen_ai.prompt.version` beside its `gen_ai.prompt.name`, so a
   version sent alone, or a name with no version, marks nothing.
@@ -173,7 +174,7 @@ Past 500 changes in the window, the newest 500 are drawn, and the page says so.
 
 Each change is also a line of its agent's row on the
 [Agents page](/docs/workspace/organizations-and-projects#a-projects-agents),
-opening the run that first carried it, and a row of
+opening the trace that first carried it, and a row of
 [`GET /v1/changes`](/docs/api/reference#get-v1changes). An incident names
 those of the 24 hours
 [before it opened](/docs/monitoring/alerts#what-changed-before-it).
@@ -183,7 +184,7 @@ link holds the view you were looking at.
 
 ### Tags
 
-A run's tags are the labels it was sent with, `telmoni.tag.<key>` on its
+A trace's tags are the labels it was sent with, `telmoni.tag.<key>` on its
 spans or the [tags a coding agent's developer sets](/docs/api/coding-agents#tags),
 kept as they arrived. On the trace's own page or in its view beside the list,
 each tag opens the list filtered by it.
@@ -195,9 +196,9 @@ each up to 500 values ([what is dropped past them](/docs/api/ingest#what-is-drop
 ### Downloading the list
 
 **Download** writes the list as a file, CSV for a spreadsheet or JSON: every
-run its filters admit, sorted as it is, up to the first 10,000. A file holds
+trace its filters admit, sorted as it is, up to the first 10,000. A file holds
 what the list holds —
-metadata, with each user's id as stored — and each run's content where the
+metadata, with each user's id as stored — and each trace's content where the
 project keeps it, each span's fields under `content`: nested in the JSON, one
 JSON cell in the CSV. A download that holds content is one read of it in the
 [audit log](/docs/workspace/audit-log), and one that cannot open it is
@@ -206,7 +207,7 @@ refused rather than written without it.
 ## A trace
 
 A click on a row of the list, anywhere but on one of its links, opens the
-run's trace in a panel over the list's right side, under the page's header and
+trace in a panel over the list's right side, under the page's header and
 beside the sidebar, without leaving the list. The row stays marked while its
 trace is open. The panel's ↑ and ↓ open the previous and the next row's
 trace, as `k` and `j` do. Drag the panel's left edge to make it wider or
@@ -216,31 +217,31 @@ keeps both for the next trace you open. The arrow beside them opens the
 trace's own page. **Close**,
 `Esc` from inside the panel, or your browser's **Back** shuts it, and the
 page's link holds the open trace, so a link you share opens the list with it.
-A `⌘`-click or `Ctrl`-click on the run's id opens the trace's page in a new
+A `⌘`-click or `Ctrl`-click on the trace's id opens its page in a new
 tab instead. The trace's own page shows the same, with the page's room.
 
-Its first line sums the run: its status, when it started, how long it ran, its
+Its first line sums the trace: its status, when it started, how long it ran, its
 model calls' tokens — hover for the split — what it spent so far, as an
-alert on a run's cost reads it ([what a call cost](/docs/api/ingest#what-a-call-cost)),
+alert on a trace's cost reads it ([what a call cost](/docs/api/ingest#what-a-call-cost)),
 with how many of the models it called no price covers, named on hover, its
-session, a link to its runs in the order they started, its user, a link to
-the runs that share it, its tags, and each incident whose
-notices showed the run, among the last twenty each keeps, a link to it on the
+session, a link to its traces in the order they started, its user, a link to
+the traces that share it, its tags, and each incident whose
+notices showed the trace, among the last twenty each keeps, a link to it on the
 project's [Alerts](/docs/monitoring/alerts#from-a-trace) page.
 
-Below it, the run's spans stand as the tree they ran in, each under the span
+Below it, the trace's spans stand as the tree they ran in, each under the span
 it names as its parent: its kind, its name, how long it ran, a model call's
 tokens, a retrieval's results — how many came back, of how many it asked for —
 and, for a span that failed, the error's type in red. **Search spans**
 finds spans by name, kind, model, provider or error type, each with the spans
 above it.
-**Timeline** draws each span as a bar on one line of time, from the run's
+**Timeline** draws each span as a bar on one line of time, from the trace's
 first start to its last end. The arrow keys walk the tree: up and down a span,
 right to open a span's branch or step into it, left to shut it or step out of
-it. A run of more than 400 spans opens with its branches shut but the run's
-own.
+it. A trace of more than 400 spans opens with its branches shut but the
+agent's own.
 
-Beside the tree stands the span you choose, the run's own first: its kind, its
+Beside the tree stands the span you choose, the agent's own first: its kind, its
 status and the error's type, its model and provider, the environment and
 release it was sent from, the tool it called — the model, the environment,
 the release and the tool each a link to the list narrowed to them — a
@@ -248,23 +249,23 @@ retrieval's source, how many results it asked for and how many came back, its
 tokens, input, output and cached, the cost it reported, in US dollars, where
 it reported one, when it started and ended to the
 millisecond, how long it ran and how soon its answer began, when it was
-received, and its ids. The run's own span adds the
-run's steps, calls, retrievals and tokens, its user, session and tags, and its sample
-rate where a plan [kept one run in ten](/docs/api/ingest#what-is-dropped-at-the-door). **Attributes** lists what else was kept with the
+received, and its ids. The agent's own span adds the
+trace's steps, calls, retrievals and tokens, its user, session and tags, and its sample
+rate where a plan [kept one trace in ten](/docs/api/ingest#what-is-dropped-at-the-door). **Attributes** lists what else was kept with the
 span under its own name, and **Raw** shows either as it was stored. The
-trace holds a run's first 5,000 spans, fewer where their names, tags and
-attributes pass about 8 MiB; a run with more says so under them.
+trace holds its first 5,000 spans, fewer where their names, tags and
+attributes pass about 8 MiB; one with more says so under them.
 
-A run whose own span has not arrived yet is shown as running, and its trace
+A trace whose agent's own span has not arrived yet is shown as running, and
 is read again as more of its spans land. A trace that is not in the project —
-a run that has passed its retention, or one of another project's — says so.
+one that has passed its retention, or one of another project's — says so.
 
 ### Content
 
 On a project that keeps content, a trace's page and its view beside the list
 show it in full, as an SDK sent it under the GenAI conventions:
 
-- **At its head**, on the trace's own page, the run's own input and output:
+- **At its head**, on the trace's own page, the agent's own input and output:
   the person's message and the agent's answer, a turn of a conversation. A
   trace that kept none says so in a line. The view beside the list shows each
   span's content alone.

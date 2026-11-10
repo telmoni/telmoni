@@ -1,9 +1,9 @@
 /**
  * The SDK's own batch processor: OpenTelemetry's batching and bounded queue,
- * without the check that skips a span whose trace is not sampled, so a run
- * inside a trace the application does not sample is still sent. The queue is
+ * without the check that skips a span whose trace is not sampled, so a trace
+ * the configured sampler does not sample is still sent. The queue is
  * bounded, so a slow Telmoni never slows an agent: past its size, spans are
- * dropped and counted. A recorded run goes at once, in exports of its own.
+ * dropped and counted. A recorded trace goes at once, in exports of its own.
  */
 
 import type { Context } from '@opentelemetry/api';
@@ -49,7 +49,7 @@ export class Processor implements SpanProcessor {
   #stage: { traceId: string; spans: ReadableSpan[] } | undefined;
   #reserved = 0;
   #dropped = 0;
-  /** A run's opening queued, which goes without waiting for the delay. */
+  /** A trace's opening queued, which goes without waiting for the delay. */
   #opening = false;
   #flushers: Array<() => void> = [];
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -118,7 +118,7 @@ export class Processor implements SpanProcessor {
       return;
     }
     this.#queue.push(span);
-    if (span.name === contract.RUN_START && span.parentSpanContext !== undefined) this.#opening = true;
+    if (span.name === contract.TRACE_START && span.parentSpanContext !== undefined) this.#opening = true;
     this.#wake(this.#due() ? 0 : this.#delayMs);
   }
 
@@ -172,7 +172,7 @@ export class Processor implements SpanProcessor {
     return this.#queue.length === 0 && this.#inFlight === undefined;
   }
 
-  /** Whether the worker should export without waiting; a record queued, or a run's opening, goes at once. */
+  /** Whether the worker should export without waiting; a record queued, or a trace's opening, goes at once. */
   #due(): boolean {
     return (
       this.#down ||

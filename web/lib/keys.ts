@@ -67,7 +67,7 @@ export const SEQUENCE_TIMEOUT_MS = 1000;
 export const PAGE_ACTION_KEY = "c";
 
 /** Step to the next and the previous of what a page steps through
- *  (`lib/use-page-steps.ts`): the trace list's peek through the page's runs,
+ *  (`lib/use-page-steps.ts`): the trace list's peek through the page's traces,
  *  as a mail reader's j and k do;
  *  `o` opens the one stood on, where the page offers that. `k` is also the
  *  API keys row's `g k` and `o` the Agents row's `g o`, and the pending-`g`

@@ -1,6 +1,6 @@
-//! A member's scores: given on a trace's page, of the run, one of its spans
+//! A member's scores: given on a trace's page, of the trace, one of its spans
 //! or its session, filed in the organization's chain; and every score of a
-//! run read back, the application's and its members'.
+//! trace read back, the application's and its members'.
 
 use std::sync::Arc;
 
@@ -22,26 +22,26 @@ use telmoni_shared::{
 use crate::AppState;
 use crate::contract::SESSION_ID_MAX;
 use crate::handler::chain::{self, Change};
-use crate::handler::traces::read_failed;
+use crate::handler::traces::{read_failed, trace_id_of};
 use crate::hashing;
 use crate::scores::{
-    COMMENT_MAX, Judgement, RUN_SQL, ScoreRow, TargetKey, VERSION_MAX, api_score_id,
+    COMMENT_MAX, Judgement, ScoreRow, TRACE_SQL, TargetKey, VERSION_MAX, api_score_id,
     member_score_id, version_of,
 };
 use crate::store::Projects;
 
-/// What a member's score sends: what it scores — a run, one of its spans or a
-/// session — and what it says.
+/// What a member's score sends: what it scores — a trace, one of its spans
+/// or a session — and what it says.
 #[derive(Debug, Deserialize)]
 pub struct ScoreChange {
     #[serde(default)]
-    pub run_id: Option<Uuid>,
+    pub trace_id: Option<String>,
     #[serde(default)]
     pub span_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
     /// What the member says of it: content, kept only where the project keeps
-    /// content, and opened only with the run's.
+    /// content, and opened only with the trace's.
     #[serde(default)]
     pub comment: Option<String>,
     #[serde(flatten)]
@@ -53,8 +53,8 @@ pub struct ScoreChange {
 pub struct Score {
     pub score_id: Uuid,
     pub target: ScoreTarget,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub trace_id: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub span_id: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -75,7 +75,7 @@ impl From<ScoreRow> for Score {
         Self {
             score_id: row.score_id,
             target: row.target,
-            run_id: (!row.run_id.is_nil()).then_some(row.run_id),
+            trace_id: row.trace_id,
             span_id: row.span_id,
             session_id: row.session_id,
             judgement: Judgement {
@@ -94,25 +94,25 @@ impl From<ScoreRow> for Score {
     }
 }
 
-/// A run's scores, as `GET /internal/v1/telemetry/scores` answers them.
+/// A trace's scores, as `GET /internal/v1/telemetry/scores` answers them.
 #[derive(Debug, Serialize)]
 pub struct Scores {
     pub scores: Vec<Score>,
 }
 
-/// Whether what a score names is the project's: its run, the span in it, or
-/// a run of its session; and the run's trace.
-const EXISTS_SQL: &str = "SELECT count() AS n, any(trace_id) AS trace FROM telemetry.spans
+/// Whether what a score names is the project's: its trace, the span in it,
+/// or a trace of its session.
+const EXISTS_SQL: &str = "SELECT count() AS n FROM telemetry.spans
      WHERE project_id IN {projects:Array(String)}
-       AND (({session:String} = '' AND run_id = {run:UUID}
+       AND (({session:String} = '' AND trace_id = {trace:String}
              AND ({span:String} = '' OR span_id = {span:String}))
          OR ({session:String} != '' AND session_id = {session:String}))";
 
-/// The run whose scores are read, and its session's.
+/// The trace whose scores are read, and its session's.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScoresAsked {
-    pub run_id: Uuid,
+    pub trace_id: String,
     #[serde(default)]
     pub session_id: Option<String>,
 }
@@ -120,37 +120,34 @@ pub struct ScoresAsked {
 #[derive(Row, Deserialize)]
 struct Count {
     n: u64,
-    trace: String,
 }
 
-/// What a score is of, from the ids sent: a run, a run and one of its spans
-/// (16 hex digits), or a session.
+/// What a score is of, from the ids sent: a trace (32 hex digits), a trace
+/// and one of its spans (16 hex digits), or a session.
 fn target_of(
-    run_id: Option<Uuid>,
+    trace_id: Option<String>,
     span_id: Option<String>,
     session_id: Option<String>,
 ) -> Result<TargetKey, TelmoniError> {
     // A session is trimmed, as a span carries one; a span's id is its 16 hex
-    // digits as given, so one blank names no run in its place.
+    // digits as given, so one blank names no trace in its place.
     let session = session_id.map(|s| s.trim().to_owned());
-    // The nil run is a score's waiting for its trace, never one named.
-    match (run_id.filter(|run| !run.is_nil()), span_id, session) {
-        (Some(run), None, None) => Ok(TargetKey::Run(run)),
-        (Some(run), Some(span), None)
+    let trace = trace_id.as_deref().map(trace_id_of).transpose()?;
+    match (trace, span_id, session) {
+        (Some(trace), None, None) => Ok(TargetKey::Trace(trace)),
+        (Some(trace), Some(span), None)
             if span.len() == 16 && span.bytes().all(|b| b.is_ascii_hexdigit()) =>
         {
-            Ok(TargetKey::Span(run, span.to_ascii_lowercase()))
+            Ok(TargetKey::Span(trace, span.to_ascii_lowercase()))
         }
         (None, None, Some(session))
-            if run_id.is_none()
-                && !session.is_empty()
-                && session.chars().count() <= SESSION_ID_MAX =>
+            if !session.is_empty() && session.chars().count() <= SESSION_ID_MAX =>
         {
             Ok(TargetKey::Session(session))
         }
         _ => Err(TelmoniError::BadRequest(format!(
-            "a score names a run, a run and one of its spans by 16 hex digits, or a session \
-             of up to {SESSION_ID_MAX} characters"
+            "a score names a trace by 32 hex digits, a trace and one of its spans by 16, or a \
+             session of up to {SESSION_ID_MAX} characters"
         ))),
     }
 }
@@ -169,7 +166,7 @@ fn comment_of(given: Option<String>) -> Result<Option<String>, TelmoniError> {
     Ok(comment)
 }
 
-/// `PUT /internal/v1/telemetry/scores` — a member's score of a run, one of
+/// `PUT /internal/v1/telemetry/scores` — a member's score of a trace, one of
 /// its spans or a session, given again replacing their last under the same
 /// name: filed in the organization's chain, naming its target and its name,
 /// never its value, then written. `404` for a target the project does not hold.
@@ -184,13 +181,13 @@ pub async fn put_score(
         .project_id
         .clone();
     let judgement = change.judgement.checked()?;
-    let target = target_of(change.run_id, change.span_id, change.session_id)?;
+    let target = target_of(change.trace_id, change.span_id, change.session_id)?;
     let comment = comment_of(change.comment)?;
     if comment.is_some() {
-        // No run carries a session's comment through an end user's erasure.
+        // No trace carries a session's comment through an end user's erasure.
         if target.kind() == ScoreTarget::Session {
             return Err(TelmoniError::BadRequest(
-                "a session's score takes no comment: comment on one of its runs".into(),
+                "a session's score takes no comment: comment on one of its traces".into(),
             ));
         }
         super::content_kept(
@@ -211,12 +208,12 @@ pub async fn put_score(
             ));
         }
     }
-    let (run, span, session) = target.ids();
+    let (trace, span, session) = target.ids();
     let projects = Projects::one(project_id.clone());
     let found: Count = state
         .store
         .read(&projects, EXISTS_SQL)
-        .param("run", run)
+        .param("trace", trace.as_str())
         .param("span", span.as_str())
         .param("session", session.as_str())
         .fetch_one()
@@ -238,8 +235,7 @@ pub async fn put_score(
         received_at: Utc::now(),
         score_id,
         target: target.kind(),
-        run_id: run,
-        trace_id: String::new(),
+        trace_id: trace.clone(),
         span_id: span,
         session_id: session,
         value: judgement.stored_value(),
@@ -270,10 +266,10 @@ pub async fn put_score(
             Change {
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Trace,
-                id: if filed.run_id.is_nil() {
-                    filed.score_id
+                id: if filed.trace_id.is_empty() {
+                    filed.score_id.to_string()
                 } else {
-                    filed.run_id
+                    filed.trace_id.clone()
                 },
                 metadata: json!({ "score": {
                     "name": filed.name, "target": filed.target, "data_type": filed.data_type,
@@ -296,14 +292,8 @@ pub async fn put_score(
     .await?;
     // A comment given again replaces the last, and none takes it back.
     if target.kind() != ScoreTarget::Session {
-        crate::content::keep_comment(
-            &state,
-            &project_id,
-            (run, &found.trace),
-            score_id,
-            comment.as_deref(),
-        )
-        .await?;
+        crate::content::keep_comment(&state, &project_id, &trace, score_id, comment.as_deref())
+            .await?;
     }
     tracing::info!(project_id = %project_id, score_id = %score_id, target = %row.target, "telemetry: a member scored");
     Ok(Json(Score::from(row)))
@@ -328,7 +318,7 @@ pub struct ScoreSent {
     #[serde(default)]
     pub id: Option<Uuid>,
     #[serde(default)]
-    pub run_id: Option<Uuid>,
+    pub trace_id: Option<String>,
     #[serde(default)]
     pub span_id: Option<String>,
     #[serde(default)]
@@ -339,10 +329,10 @@ pub struct ScoreSent {
     pub judgement: Judgement,
 }
 
-/// `POST /v1/scores` — the application's scores of runs, spans or sessions
+/// `POST /v1/scores` — the application's scores of traces, spans or sessions
 /// of the key's project, sent after they ended, each held to a score's rules
 /// and all refused for one that breaks them. Nothing is looked up, since a
-/// run's spans may land after its score.
+/// trace's spans may land after its score.
 pub async fn post_scores(
     State(state): State<Arc<AppState>>,
     key: ActingKey,
@@ -380,13 +370,13 @@ pub async fn post_scores(
             };
             let judgement = score.judgement.checked().map_err(refused)?;
             let target =
-                target_of(score.run_id, score.span_id, score.session_id).map_err(refused)?;
+                target_of(score.trace_id, score.span_id, score.session_id).map_err(refused)?;
             let version = version_of(score.version.as_deref()).ok_or_else(|| {
                 refused(TelmoniError::BadRequest(format!(
                     "a scorer's version is up to {VERSION_MAX} characters"
                 )))
             })?;
-            let (run_id, span_id, session_id) = target.ids();
+            let (trace_id, span_id, session_id) = target.ids();
             let session_id = match &storage {
                 Some(storage) if !session_id.is_empty() => storage.store(&session_id),
                 _ => session_id,
@@ -399,8 +389,7 @@ pub async fn post_scores(
                     .id
                     .map_or_else(Uuid::new_v4, |id| api_score_id(&key.project_id, id)),
                 target: target.kind(),
-                run_id,
-                trace_id: String::new(),
+                trace_id,
                 span_id,
                 session_id,
                 value: judgement.stored_value(),
@@ -469,8 +458,8 @@ pub async fn delete_score(
     // Its comment first, as the content it was: a retry finds the score
     // still there to take back, where a failure after its mark would leave
     // the comment for good.
-    if !given.run_id.is_nil() {
-        crate::content::forget_comments(&state, &project_id, given.run_id, &[score_id]).await?;
+    if !given.trace_id.is_empty() {
+        crate::content::forget_comments(&state, &project_id, &given.trace_id, &[score_id]).await?;
     }
     let taken = ScoreRow {
         received_at: Utc::now(),
@@ -493,10 +482,10 @@ pub async fn delete_score(
             Change {
                 action: AuditAction::Updated,
                 kind: TelmoniResourceKind::Trace,
-                id: if taken.run_id.is_nil() {
-                    taken.score_id
+                id: if taken.trace_id.is_empty() {
+                    taken.score_id.to_string()
                 } else {
-                    taken.run_id
+                    taken.trace_id.clone()
                 },
                 metadata: json!({ "score": {
                     "name": taken.name, "target": taken.target, "taken_back": true,
@@ -521,7 +510,7 @@ pub async fn delete_score(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `GET /internal/v1/telemetry/scores?run_id=…[&session_id=…]` — a run's
+/// `GET /internal/v1/telemetry/scores?trace_id=…[&session_id=…]` — a trace's
 /// scores, its spans' and, where named, its session's, newest first.
 pub async fn get_scores(
     State(state): State<Arc<AppState>>,
@@ -530,10 +519,11 @@ pub async fn get_scores(
 ) -> Result<Json<Scores>, TelmoniError> {
     let reader = crate::handler::traces::reader(&state, &headers).await?;
     let projects = Projects::one(reader.project_id.clone());
+    let trace_id = trace_id_of(&asked.trace_id)?;
     let rows: Vec<ScoreRow> = state
         .store
-        .read(&projects, RUN_SQL)
-        .param("run", asked.run_id)
+        .read(&projects, TRACE_SQL)
+        .param("trace", trace_id.as_str())
         .param("session", asked.session_id.unwrap_or_default())
         .fetch_all()
         .await
@@ -621,27 +611,20 @@ mod tests {
         for case in fixture()["targets"].as_array().expect("targets") {
             let label = case["case"].as_str().unwrap_or_default();
             let text = |key: &str| case[key].as_str().map(str::to_owned);
-            let run = case["run_id"].as_str().map(|run| Uuid::parse_str(run).ok());
-            // A run that is no UUID is refused by the body's own parse.
-            let target = match run {
-                Some(None) => None,
-                run => target_of(run.flatten(), text("span_id"), text("session_id")).ok(),
-            };
+            let target = target_of(text("trace_id"), text("span_id"), text("session_id")).ok();
             if case["refused"] == true {
                 assert!(target.is_none(), "{label}: taken");
                 continue;
             }
-            let (run, span, session) = target.unwrap_or_else(|| panic!("{label}: refused")).ids();
+            let (trace, span, session) = target.unwrap_or_else(|| panic!("{label}: refused")).ids();
             let kept = &case["kept"];
             let or_none = |key: &str| kept[key].as_str().unwrap_or_default().to_owned();
             assert_eq!(
-                (run, span, session),
+                (trace, span, session),
                 (
-                    kept["run_id"]
-                        .as_str()
-                        .map_or(Uuid::nil(), |r| Uuid::parse_str(r).expect("a run")),
+                    or_none("trace_id"),
                     or_none("span_id"),
-                    or_none("session_id"),
+                    or_none("session_id")
                 ),
                 "{label}"
             );

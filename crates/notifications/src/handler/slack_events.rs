@@ -225,7 +225,7 @@ async fn interaction(state: &Arc<AppState>, body: Bytes) -> Result<StatusCode, T
         Ok(SlackAction::Acknowledge) => IncidentAct::Acknowledge,
         Ok(SlackAction::MuteForAnHour) => IncidentAct::MuteForAnHour,
         // A link Slack opened itself, or a button this server never drew.
-        Ok(SlackAction::OpenRun) | Err(_) => return Ok(StatusCode::OK),
+        Ok(SlackAction::OpenTrace) | Err(_) => return Ok(StatusCode::OK),
     };
     let team_id = slack::slack_id(user.team_id.or(team.map(|team| team.id)));
     let slack_user_id = slack::slack_id(Some(user.id));

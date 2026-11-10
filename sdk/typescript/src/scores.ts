@@ -1,5 +1,5 @@
 /**
- * Scores: a judgement of a run, one of its spans or a session, as a number, a
+ * Scores: a judgement of a trace, one of its spans or a session, as a number, a
  * yes or no, or a category. On a span still open it rides as OpenTelemetry's
  * `gen_ai.evaluation.result` event; once ended, the client sends it to
  * `/v1/scores` through the export queue, so a flush and a shutdown hold it as
@@ -30,7 +30,7 @@ export const WHY = {
   version: `its version is up to ${contract.SCORE_VERSION_MAX} characters`,
   range: "a range is a number score's alone",
   value: 'its value is a number, a yes or no, or a category',
-  target: `it names a run, a run and one of its spans by 16 hex digits, or a session of up to ${contract.SESSION_ID_MAX} characters`,
+  target: `it names a trace by 32 hex digits, a trace and one of its spans by 16, or a session of up to ${contract.SESSION_ID_MAX} characters`,
   ended: "its span had ended; send it with the client's score, naming the span",
   full: `its span holds ${contract.SCORES_PER_SPAN} scores already`,
 } as const;
@@ -95,33 +95,27 @@ export function eventOf(score: Judged): Attributes {
   return attributes;
 }
 
-const UUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+const TRACE = /^[0-9a-f]{32}$/i;
 const SPAN = /^[0-9a-f]{16}$/i;
 
-/** A UUID's 32 hex digits, lowercase, or undefined where it is none. */
-export function uuidHexOf(id: unknown): string | undefined {
-  if (typeof id !== 'string' || !UUID.test(id) || ![32, 36].includes(id.length)) return undefined;
-  return id.replaceAll('-', '').toLowerCase();
-}
-
-/** 32 hex digits as a UUID is written. */
-export function hyphenated(hex: string): string {
-  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
+/** A trace id's 32 hex digits, lowercase, leading zeros kept; undefined where it is none, all zeros being no trace. */
+export function traceHexOf(id: unknown): string | undefined {
+  if (typeof id !== 'string' || !TRACE.test(id) || /^0+$/.test(id)) return undefined;
+  return id.toLowerCase();
 }
 
 /** What the target names as `/v1/scores` takes it, or undefined where it names none of the three. */
 function targetOf(target: ScoreTarget): Record<string, string> | undefined {
   const set = (value: unknown): boolean => value !== undefined && value !== null;
-  const { runId, spanId, sessionId } = target;
+  const { traceId, spanId, sessionId } = target;
   if (set(sessionId)) {
-    if (set(runId) || set(spanId)) return undefined;
+    if (set(traceId) || set(spanId)) return undefined;
     const session = trimmed(sessionId, contract.SESSION_ID_MAX);
     return session ? { session_id: session } : undefined;
   }
-  const hex = uuidHexOf(runId);
-  // The nil UUID is no run's id.
-  if (hex === undefined || /^0+$/.test(hex)) return undefined;
-  const ids: Record<string, string> = { run_id: hyphenated(hex) };
+  const hex = traceHexOf(traceId);
+  if (hex === undefined) return undefined;
+  const ids: Record<string, string> = { trace_id: hex };
   if (!set(spanId)) return ids;
   if (typeof spanId !== 'string' || !SPAN.test(spanId)) return undefined;
   ids['span_id'] = spanId.toLowerCase();

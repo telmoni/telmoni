@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 /** Whether a project keeps its spans' content, at a glance: an eye when it
  *  does, a muted struck eye when it does not; `labelled` says it in words
- *  beside the eye, as a run's summary line does. */
+ *  beside the eye, as a trace's summary line does. */
 export function ContentCue({ mode, labelled = false }: { mode: ContentMode; labelled?: boolean }) {
   const on = mode === ContentMode.On;
   const label = on ? "Content on" : "Content off";

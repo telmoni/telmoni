@@ -102,7 +102,7 @@ describe("saveAlertAction", () => {
   it("sends a score alert, a tag and an objective as the form builds them", async () => {
     const objective = {
       ...INPUT,
-      kind: "run",
+      kind: "agent",
       measure: "burn",
       aggregation: "avg",
       filters: { agent: ["support-bot"], tag: ["team:support"] },

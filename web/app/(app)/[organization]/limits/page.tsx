@@ -150,7 +150,7 @@ export default async function LimitsPage() {
           <dl className="mt-gutter grid gap-page sm:grid-cols-2 xl:grid-cols-4">
             <div className="grid content-start gap-1">
               <dt className="font-medium">Spans</dt>
-              <dd className="text-muted-foreground">One run in ten is kept, with no grace period.</dd>
+              <dd className="text-muted-foreground">One trace in ten is kept, with no grace period.</dd>
             </div>
             <div className="grid content-start gap-1">
               <dt className="font-medium">Content</dt>

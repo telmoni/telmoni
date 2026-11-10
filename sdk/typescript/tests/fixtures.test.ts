@@ -1,9 +1,9 @@
 /**
  * The golden fixtures in `sdk/fixtures`: the export every SDK must send for
- * the same run, and what each must do with the server's answers.
+ * the same trace, and what each must do with the server's answers.
  */
 
-import { trace } from '@opentelemetry/api';
+import { trace as otel } from '@opentelemetry/api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MEDIA_MAX_BYTES } from '../src/contract';
@@ -25,7 +25,6 @@ import {
   warningOf,
 } from './helpers';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
 const HEX16 = /^[0-9a-f]{16}$/;
 const VERSIONED = new Set(['telemetry.sdk.version', 'telemetry.distro.version']);
@@ -49,7 +48,7 @@ interface ModelCallSpec {
 }
 
 interface Scenario {
-  run: {
+  trace: {
     agent: string;
     user_id: string;
     session_id: string;
@@ -64,7 +63,7 @@ interface Scenario {
   release: string;
 }
 
-interface RunFixture {
+interface TraceFixture {
   scenario: Scenario;
   export: ExportBody;
 }
@@ -94,7 +93,6 @@ function normalize(body: ExportBody): ExportBody {
     expect(span.spanId).toMatch(HEX16);
     names.set(span.spanId, span.name);
   }
-  const runIds = new Set<string>();
   for (const span of spans) {
     span.traceId = '<trace>';
     span.spanId = `<span:${names.get(span.spanId)!}>`;
@@ -108,15 +106,7 @@ function normalize(body: ExportBody): ExportBody {
     span.startTimeUnixNano = '<time>';
     span.endTimeUnixNano = '<time>';
     span.attributes = [...span.attributes].sort(byKey);
-    for (const attribute of span.attributes) {
-      if (attribute.key === 'telmoni.run_id') {
-        runIds.add(String(attribute.value['stringValue']));
-        attribute.value['stringValue'] = '<uuid>';
-      }
-    }
   }
-  expect(runIds.size).toBe(1);
-  expect([...runIds][0]).toMatch(UUID);
   scopeSpans.spans = spans;
   scopeSpans.scope.version = '<version>';
   const resource = resourceSpans.resource;
@@ -129,17 +119,17 @@ function normalize(body: ExportBody): ExportBody {
 }
 
 async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
-  const spec = scenario.run;
-  await telmoni.run(
+  const spec = scenario.trace;
+  await telmoni.trace(
     spec.agent,
     {
       userId: spec.user_id,
       sessionId: spec.session_id,
       tags: spec.tags,
     },
-    async (run) => {
+    async (trace) => {
       const [stepSpec, toolSpec] = spec.inside;
-      await run.step(stepSpec.step, async (step) => {
+      await trace.step(stepSpec.step, async (step) => {
         const call = stepSpec.inside[0].model_call;
         await step.modelCall(
           call.model,
@@ -165,7 +155,7 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
           },
         );
       });
-      run.toolCall(toolSpec.tool_call.name, (tool) => {
+      trace.toolCall(toolSpec.tool_call.name, (tool) => {
         tool.fail(toolSpec.tool_call.fails_with);
       });
     },
@@ -173,9 +163,9 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
   expect(await telmoni.flush()).toBe(true);
 }
 
-describe('run.json', () => {
-  it('the run matches the golden export', async () => {
-    const fixture = loadFixture<RunFixture>('run.json');
+describe('trace.json', () => {
+  it('the trace matches the golden export', async () => {
+    const fixture = loadFixture<TraceFixture>('trace.json');
     const { telmoni, transport } = harness({
       captureContent: fixture.scenario.capture_content,
       environment: fixture.scenario.environment,
@@ -187,7 +177,7 @@ describe('run.json', () => {
       await telmoni.shutdown();
     }
     const bodies = transport.bodies();
-    expect(bodies.length, 'the run was sent').toBeGreaterThanOrEqual(1);
+    expect(bodies.length, 'the trace was sent').toBeGreaterThanOrEqual(1);
     const gathered = structuredClone(bodies[0]!);
     gathered.resourceSpans[0]!.scopeSpans[0]!.spans = bodies.flatMap(
       (body) => body.resourceSpans[0]!.scopeSpans[0]!.spans,
@@ -214,7 +204,7 @@ interface RetrievalSpec {
 
 interface RetrievalFixture {
   scenario: {
-    run: { agent: string; user_id: string; session_id: string; inside: Array<{ retrieval: RetrievalSpec }> };
+    trace: { agent: string; user_id: string; session_id: string; inside: Array<{ retrieval: RetrievalSpec }> };
   };
   cases: Array<{ capture_content: boolean; content_mode: string; sends: 'metadata' | 'content' }>;
   metadata: ExportBody;
@@ -223,16 +213,16 @@ interface RetrievalFixture {
 
 describe('retrieval.json', () => {
   const fixture = loadFixture<RetrievalFixture>('retrieval.json');
-  const spec = fixture.scenario.run;
+  const spec = fixture.scenario.trace;
 
   it.each(fixture.cases)('the retrievals match the golden export: %o', async (each) => {
     const mode = (): ReturnType<typeof answer> => answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
     const { telmoni, transport } = harness({ captureContent: each.capture_content }, {}, [mode(), mode(), mode(), mode()]);
     try {
-      telmoni.run(spec.agent, { userId: spec.user_id, sessionId: spec.session_id }, (run) => {
+      telmoni.trace(spec.agent, { userId: spec.user_id, sessionId: spec.session_id }, (trace) => {
         for (const { retrieval } of spec.inside) {
           const options = { query: retrieval.query, topK: retrieval.top_k, memory: retrieval.memory ?? false };
-          run.retrieval(retrieval.source, options, (found) => {
+          trace.retrieval(retrieval.source, options, (found) => {
             if (retrieval.documents !== undefined) found.returned(retrieval.documents);
             else found.fail(retrieval.fails_with);
           });
@@ -252,9 +242,9 @@ describe('retrieval.json', () => {
   });
 });
 
-interface RunStartFixture {
+interface TraceStartFixture {
   scenario: {
-    run: { agent: string; user_id: string; session_id: string; tags: Record<string, string> };
+    trace: { agent: string; user_id: string; session_id: string; tags: Record<string, string> };
     environment: string;
     release: string;
     schedule_delay_ms: number;
@@ -263,11 +253,11 @@ interface RunStartFixture {
   first_export: ExportBody;
 }
 
-describe('run-start.json', () => {
-  it('a run is sent from its start', async () => {
-    const fixture = loadFixture<RunStartFixture>('run-start.json');
+describe('trace-start.json', () => {
+  it('a trace is sent from its start', async () => {
+    const fixture = loadFixture<TraceStartFixture>('trace-start.json');
     const { scenario } = fixture;
-    const spec = scenario.run;
+    const spec = scenario.trace;
     const { telmoni, transport } = harness(
       { environment: scenario.environment, release: scenario.release },
       { processor: { scheduleDelaySeconds: scenario.schedule_delay_ms / 1000 } },
@@ -275,10 +265,10 @@ describe('run-start.json', () => {
     let start: JsonSpan | undefined;
     let parent: string | undefined;
     try {
-      await telmoni.run(spec.agent, { userId: spec.user_id, sessionId: spec.session_id, tags: spec.tags }, async () => {
+      await telmoni.trace(spec.agent, { userId: spec.user_id, sessionId: spec.session_id, tags: spec.tags }, async () => {
         expect(await transport.waitFor(1, scenario.sent_within_ms)).toBe(true);
         const first = structuredClone(transport.bodies());
-        expect(first, 'one body, before the run ends').toHaveLength(1);
+        expect(first, 'one body, before the trace ends').toHaveLength(1);
         const spans = first[0]!.resourceSpans[0]!.scopeSpans[0]!.spans;
         expect(spans).toHaveLength(1);
         start = structuredClone(spans[0]!);
@@ -286,29 +276,26 @@ describe('run-start.json', () => {
         parent = spans[0]!.parentSpanId;
         delete spans[0]!.parentSpanId;
         const normalized = normalize(first[0]!);
-        normalized.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.parentSpanId = '<span:run>';
+        normalized.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.parentSpanId = '<span:agent>';
         expect(normalized).toEqual(fixture.first_export);
       });
       expect(await telmoni.flush()).toBe(true);
     } finally {
       await telmoni.shutdown();
     }
-    const runs = transport.spans().filter((span) => span.name === `invoke_agent ${spec.agent}`);
-    expect(runs).toHaveLength(1);
-    const run = runs[0]!;
+    const agents = transport.spans().filter((span) => span.name === `invoke_agent ${spec.agent}`);
+    expect(agents).toHaveLength(1);
+    const agent = agents[0]!;
     expect(parent).toBeDefined();
-    expect(run.spanId).toBe(parent);
-    expect(run.startTimeUnixNano).toBe(start!.startTimeUnixNano);
-    const ids = new Set(
-      [run, start!].flatMap((span) => span.attributes.filter((a) => a.key === 'telmoni.run_id').map((a) => a.value['stringValue'])),
-    );
-    expect(ids.size).toBe(1);
+    expect(agent.spanId).toBe(parent);
+    expect(agent.traceId).toBe(start!.traceId);
+    expect(agent.startTimeUnixNano).toBe(start!.startTimeUnixNano);
   });
 });
 
-/** One empty run, sent in an export of its own. */
-async function aRun({ telmoni }: Harness): Promise<void> {
-  telmoni.run('bot', () => {});
+/** One empty trace, sent in an export of its own. */
+async function aTrace({ telmoni }: Harness): Promise<void> {
+  telmoni.trace('bot', () => {});
   expect(await telmoni.flush()).toBe(true);
 }
 
@@ -324,7 +311,7 @@ interface FailureFixture {
   withheld: Pick<JsonSpan, 'status' | 'events'>;
 }
 
-/** The run's span as `failure.json`'s README normalizes it. */
+/** The agent's span as `failure.json`'s README normalizes it. */
 function normalizeFailure(span: JsonSpan): Pick<JsonSpan, 'status' | 'events'> {
   const errorType = span.attributes.find((a) => a.key === 'error.type')?.value['stringValue'];
   expect(errorType, 'the span names its error.type, withheld or kept').toBeTruthy();
@@ -357,12 +344,12 @@ describe('failure.json', () => {
     const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
     const h = harness({ captureContent: each.capture_content }, {}, [mode]);
     try {
-      h.telmoni.run(scenario.agent, () => {});
+      h.telmoni.trace(scenario.agent, () => {});
       expect(await h.telmoni.flush()).toBe(true);
       expect(h.telmoni.contentMode).toBe(each.content_mode);
       expect(() =>
-        h.telmoni.run(scenario.agent, (run) => {
-          trace.getSpan(run.context)!.addEvent(scenario.event.name, scenario.event.attributes);
+        h.telmoni.trace(scenario.agent, (trace) => {
+          otel.getSpan(trace.context)!.addEvent(scenario.event.name, scenario.event.attributes);
           throw new RateLimited(scenario.message);
         }),
       ).toThrow(RateLimited);
@@ -408,8 +395,8 @@ describe('ask.json', () => {
     const h = harness({ apiKey: 'k', captureContent: each.capture_content }, {}, answered);
     try {
       for (let i = 0; i < 2; i++) {
-        h.telmoni.run(fixture.agent, (run) => {
-          run.modelCall(fixture.model, each.content ? { inputMessages: fixture.input_messages } : {}, () => {});
+        h.telmoni.trace(fixture.agent, (trace) => {
+          trace.modelCall(fixture.model, each.content ? { inputMessages: fixture.input_messages } : {}, () => {});
         });
         expect(await h.telmoni.flush()).toBe(true);
       }
@@ -456,11 +443,11 @@ describe('media.json', () => {
     const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
     const h = harness({ apiKey: 'k', captureContent: each.capture_content }, {}, [mode, mode, mode]);
     try {
-      await aRun(h);
+      await aTrace(h);
       // Twice, in two exports: each file is put once.
       for (let i = 0; i < 2; i++) {
-        h.telmoni.run(scenario.agent, (run) => {
-          run.modelCall(
+        h.telmoni.trace(scenario.agent, (trace) => {
+          trace.modelCall(
             scenario.model,
             {
               provider: scenario.provider,
@@ -547,13 +534,13 @@ describe('mask.json', () => {
     const mode = answer(200, { 'Telmoni-Content-Mode': each.content_mode }, '{}');
     const h = harness({ apiKey: 'k', captureContent: each.capture_content, mask }, {}, [mode, mode]);
     try {
-      await aRun(h);
+      await aTrace(h);
       expect(() =>
-        h.telmoni.run(
+        h.telmoni.trace(
           scenario.agent,
           { userId: scenario.user, sessionId: scenario.session, tags: scenario.tags },
-          (run) => {
-            run.modelCall(
+          (trace) => {
+            trace.modelCall(
               scenario.model,
               {
                 provider: scenario.provider,
@@ -562,7 +549,7 @@ describe('mask.json', () => {
               },
               (call) => call.answered({ outputMessages: scenario.output_messages }),
             );
-            trace.getSpan(run.context)!.addEvent(scenario.event.name, scenario.event.attributes);
+            otel.getSpan(trace.context)!.addEvent(scenario.event.name, scenario.event.attributes);
             throw new Declined(scenario.message);
           },
         ),
@@ -611,10 +598,10 @@ describe('mask.json', () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
     const h = harness({ apiKey: 'k', captureContent: true, mask }, {}, [on, on, on]);
     try {
-      await aRun(h);
+      await aTrace(h);
       for (let i = 0; i < 2; i++) {
-        h.telmoni.run('support-bot', (run) => {
-          run.modelCall('gpt-4o', { inputMessages: 'a secret' }, () => {});
+        h.telmoni.trace('support-bot', (trace) => {
+          trace.modelCall('gpt-4o', { inputMessages: 'a secret' }, () => {});
         });
         expect(await h.telmoni.flush()).toBe(true);
       }
@@ -631,9 +618,9 @@ describe('mask.json', () => {
     const mask = (() => Promise.resolve('masked')) as unknown as (key: string, value: string) => string;
     const h = harness({ apiKey: 'k', captureContent: true, mask }, {}, [on, on]);
     try {
-      await aRun(h);
-      h.telmoni.run('support-bot', (run) => {
-        run.modelCall('gpt-4o', { inputMessages: 'a secret' }, () => {});
+      await aTrace(h);
+      h.telmoni.trace('support-bot', (trace) => {
+        trace.modelCall('gpt-4o', { inputMessages: 'a secret' }, () => {});
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -648,9 +635,9 @@ describe('mask.json', () => {
     const mask = (_key: string, value: string): string => (value === 'true' ? 'yes' : value);
     const h = harness({ apiKey: 'k', captureContent: true, mask }, {}, [on, on]);
     try {
-      await aRun(h);
-      h.telmoni.run('support-bot', (run) => {
-        trace.getSpan(run.context)!.addEvent('checked', { count: 3, found: true });
+      await aTrace(h);
+      h.telmoni.trace('support-bot', (trace) => {
+        otel.getSpan(trace.context)!.addEvent('checked', { count: 3, found: true });
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -716,9 +703,9 @@ describe('canary.json', () => {
     const set = mode === 'sdk_default' ? {} : { scrubSecrets: switches.scrub_secrets, scrubPii: switches.scrub_pii };
     const h = harness({ apiKey: 'k', captureContent: true, ...set }, {}, [on, on]);
     try {
-      await aRun(h);
-      h.telmoni.run('support-bot', (run) => {
-        run.modelCall('gpt-4o', { inputMessages: message(whole.text) }, () => {});
+      await aTrace(h);
+      h.telmoni.trace('support-bot', (trace) => {
+        trace.modelCall('gpt-4o', { inputMessages: message(whole.text) }, () => {});
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -732,13 +719,13 @@ describe('canary.json', () => {
     }
   });
 
-  it("scrubs a recorded run's content as a live run's", async () => {
+  it("scrubs a recorded trace's content as a live trace's", async () => {
     const start = Date.parse('2026-11-05T10:00:00.000Z');
     const h = harness({ apiKey: 'k', captureContent: true }, {}, [on, on]);
     try {
-      await aRun(h);
-      h.telmoni.recordRun({
-        runId: '5f0c9a7e-3b1d-4c2a-9e8f-1a2b3c4d5e6f',
+      await aTrace(h);
+      h.telmoni.recordTrace({
+        traceId: '5f0c9a7e3b1d4c2a9e8f1a2b3c4d5e6f',
         agent: 'support-bot',
         start,
         end: start + 1000,
@@ -771,9 +758,9 @@ describe('canary.json', () => {
     const h = harness({ apiKey: 'k', captureContent: true, scrubPii: true }, {}, [on, on]);
     const blob = [{ role: 'user', parts: [{ type: 'blob', modality: 'image', mime_type: 'image/png', content: image }] }];
     try {
-      await aRun(h);
-      h.telmoni.run('support-bot', (run) => {
-        run.modelCall('gpt-4o', { inputMessages: blob }, () => {});
+      await aTrace(h);
+      h.telmoni.trace('support-bot', (trace) => {
+        trace.modelCall('gpt-4o', { inputMessages: blob }, () => {});
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -799,9 +786,9 @@ describe('canary.json', () => {
     const key = fixture.planted.cloud_key!;
     const h = harness({ apiKey: 'k', captureContent: true }, {}, [on, on]);
     try {
-      await aRun(h);
-      h.telmoni.run('support-bot', (run) => {
-        run.modelCall('gpt-4o', { inputMessages: `fails on ${key}` }, (call) => call.answered({ outputMessages: `key ${key}` }));
+      await aTrace(h);
+      h.telmoni.trace('support-bot', (trace) => {
+        trace.modelCall('gpt-4o', { inputMessages: `fails on ${key}` }, (call) => call.answered({ outputMessages: `key ${key}` }));
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -853,7 +840,7 @@ describe('answers/', () => {
     const h = harness({ apiKey: 'k' }, {}, answers('kept'));
     try {
       expect(h.telmoni.contentMode).toBeUndefined();
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -865,8 +852,8 @@ describe('answers/', () => {
   it('dropped is warned once', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('dropped', 2));
     try {
-      await aRun(h);
-      await aRun(h);
+      await aTrace(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -876,7 +863,7 @@ describe('answers/', () => {
   it('unlisted names the tag that would keep it', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('unlisted'));
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -886,7 +873,7 @@ describe('answers/', () => {
   it('a tag past the cardinality cap is warned with what keeps it', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('cardinality'));
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -896,19 +883,19 @@ describe('answers/', () => {
   it('refused is warned once and never retried', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('refused', 2));
     try {
-      await aRun(h);
-      await aRun(h);
+      await aTrace(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
     expect(h.warnings).toEqual(warningOf('refused'));
-    expect(h.transport.requests, 'one export each run, neither sent again').toHaveLength(2);
+    expect(h.transport.requests, 'one export each trace, neither sent again').toHaveLength(2);
   });
 
   it('rate limited waits Retry-After and sends the same bytes', async () => {
     const h = harness({ apiKey: 'k' }, {}, [...answers('rate-limited'), kept()]);
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -920,7 +907,7 @@ describe('answers/', () => {
   it('a Retry-After past the cap waits the cap', async () => {
     const h = harness({ apiKey: 'k' }, {}, [...answers('rate-limited-long'), kept()]);
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -937,7 +924,7 @@ describe('answers/', () => {
       ...[limited('9'.repeat(400)), kept()],
     ]);
     try {
-      for (let n = 0; n < 3; n++) await aRun(h);
+      for (let n = 0; n < 3; n++) await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -954,7 +941,7 @@ describe('answers/', () => {
     );
     const before = BigInt(Date.now()) * 1_000_000n;
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -968,21 +955,21 @@ describe('answers/', () => {
   it('unavailable is retried three times then dropped', async () => {
     const h = harness({ apiKey: 'k' }, {}, [...answers('unavailable', 3), kept()]);
     try {
-      await aRun(h);
-      await aRun(h);
+      await aTrace(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
     expect(h.sleeps).toEqual([1, 1]);
     expect(h.warnings).toEqual(warningOf('unavailable'));
-    expect(h.transport.requests, "three for the first run, then the next run's own export").toHaveLength(4);
+    expect(h.transport.requests, "three for the first trace, then the next trace's own export").toHaveLength(4);
   });
 
   it('forbidden is not retried and the next batch is still sent', async () => {
     const h = harness({ apiKey: 'k' }, {}, answers('forbidden', 2));
     try {
-      await aRun(h);
-      await aRun(h);
+      await aTrace(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -993,7 +980,7 @@ describe('answers/', () => {
   it.each(answerNames())("%s met on every attempt logs its fixture's line and fields word for word, as the plugins read them", async (name) => {
     const h = harness({ apiKey: 'k' }, {}, answers(name, 3));
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -1004,8 +991,8 @@ describe('answers/', () => {
   it('an export whose wait rejects is dropped in the words the plugins read', async () => {
     const h = harness({ apiKey: 'k' }, { sleep: () => Promise.reject(new Error('broke')) }, answers('rate-limited'));
     try {
-      await aRun(h);
-      await aRun(h);
+      await aTrace(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -1017,7 +1004,7 @@ describe('answers/', () => {
   it('a network failure is retried with backoff', async () => {
     const h = harness({ apiKey: 'k' }, {}, [new Error('refused'), new Error('refused'), kept()]);
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -1031,7 +1018,7 @@ describe('answers/', () => {
     }
     const h = harness({ apiKey: 'k' }, {}, [new Unreachable('down'), new Unreachable('down'), new Unreachable('down')]);
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }
@@ -1043,7 +1030,7 @@ describe('answers/', () => {
   it('a failure ending on a transport error hands no status, as its line names none', async () => {
     const h = harness({ apiKey: 'k' }, {}, [...answers('unavailable', 2), new Error('down')]);
     try {
-      await aRun(h);
+      await aTrace(h);
     } finally {
       await h.telmoni.shutdown();
     }

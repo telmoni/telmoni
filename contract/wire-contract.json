@@ -43,7 +43,7 @@
     "ChartMeasure": [
       "spend",
       "tokens",
-      "runs",
+      "traces",
       "latency",
       "first_token"
     ],
@@ -237,7 +237,7 @@
       "member"
     ],
     "ScoreTarget": [
-      "run",
+      "trace",
       "span",
       "session"
     ],
@@ -259,8 +259,8 @@
       "desc"
     ],
     "SpanKind": [
-      "run",
-      "run_start",
+      "agent",
+      "trace_start",
       "step",
       "model_call",
       "tool_call",
@@ -404,6 +404,17 @@
       ]
     },
     "measures": {
+      "agent": [
+        "count",
+        "failures",
+        "duration",
+        "cost",
+        "score",
+        "burn",
+        "steps",
+        "repeats",
+        "stalled"
+      ],
       "model_call": [
         "count",
         "failures",
@@ -414,17 +425,6 @@
         "count",
         "failures",
         "duration"
-      ],
-      "run": [
-        "count",
-        "failures",
-        "duration",
-        "cost",
-        "score",
-        "burn",
-        "steps",
-        "repeats",
-        "stalled"
       ],
       "step": [
         "count",

@@ -1,6 +1,7 @@
-"""The SDK beside an application's own OpenTelemetry: its spans stay in their
-traces at their own sampling rate, a run inside a trace it does not sample is
-still sent, and its ``OTEL_*`` variables change nothing of ours."""
+"""The SDK beside an application's own OpenTelemetry: a trace is a trace of its
+own, linked to the span the application had current, the application's spans
+stay in their traces at their own sampling rate, a trace the application does
+not sample is still sent, and its ``OTEL_*`` variables change nothing of ours."""
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from opentelemetry.sdk.trace.sampling import (
     Sampler,
     SamplingResult,
 )
+from opentelemetry.trace import Span
 
 from conftest import FakeTransport, SwitchableSampler, attributes_of
 from telmoni import Config, Telmoni
@@ -40,34 +42,46 @@ class EveryOther(Sampler):
         return "EveryOther"
 
 
-def our_runs(transport: FakeTransport) -> list[dict[str, object]]:
+def our_agents(transport: FakeTransport) -> list[dict[str, object]]:
     return [s for s in transport.spans() if s["name"].startswith("invoke_agent ")]
 
 
-def test_a_run_joins_the_current_trace_and_the_application_keeps_its_span(
+def link_to(span: Span) -> dict[str, str]:
+    """The link the agent's span carries to ``span``, as the export spells it."""
+    span_context = span.get_span_context()
+    return {
+        "traceId": format(span_context.trace_id, "032x"),
+        "spanId": format(span_context.span_id, "016x"),
+    }
+
+
+def test_a_trace_is_its_own_linked_to_the_applications_span(
     telmoni: Telmoni, transport: FakeTransport, app_exporter: InMemorySpanExporter
 ) -> None:
     app = trace.get_tracer("the-application")
     with (
         app.start_as_current_span("request") as request,
-        telmoni.run("bot"),
+        telmoni.trace("bot") as opened,
         app.start_as_current_span("db.query"),
     ):
         pass
     assert telmoni.flush()
-    (run,) = our_runs(transport)
-    request_context = request.get_span_context()
-    assert run["traceId"] == format(request_context.trace_id, "032x")
-    assert run["parentSpanId"] == format(request_context.span_id, "016x")
+    (agent,) = our_agents(transport)
+    assert agent["traceId"] == opened.trace_id
+    assert agent["traceId"] != link_to(request)["traceId"], "a trace of its own"
+    assert "parentSpanId" not in agent
+    assert agent["links"] == [link_to(request)]
     app_spans: Sequence[Any] = app_exporter.get_finished_spans()
     assert sorted(s.name for s in app_spans) == ["db.query", "request"]
     query = next(s for s in app_spans if s.name == "db.query")
-    assert format(query.parent.span_id, "016x") == run["spanId"], "nested under the run"
-    assert format(query.context.trace_id, "032x") == run["traceId"]
+    assert format(query.parent.span_id, "016x") == agent["spanId"], (
+        "nested under the agent's span"
+    )
+    assert format(query.context.trace_id, "032x") == agent["traceId"]
     assert not any(s["name"] in ("request", "db.query") for s in transport.spans())
 
 
-def test_the_application_keeps_its_own_sampling_rate_inside_runs(
+def test_the_application_keeps_its_own_sampling_rate_inside_traces(
     telmoni: Telmoni,
     transport: FakeTransport,
     app_exporter: InMemorySpanExporter,
@@ -76,14 +90,14 @@ def test_the_application_keeps_its_own_sampling_rate_inside_runs(
     app_sampler.target = EveryOther()
     app = trace.get_tracer("the-application")
     for _ in range(100):
-        with telmoni.run("bot"), app.start_as_current_span("inside"):
+        with telmoni.trace("bot"), app.start_as_current_span("inside"):
             pass
     assert telmoni.flush()
-    assert len(our_runs(transport)) == 100, "every run reaches Telmoni"
-    assert len(app_exporter.get_finished_spans()) == 50, "half, as outside runs"
+    assert len(our_agents(transport)) == 100, "every trace reaches Telmoni"
+    assert len(app_exporter.get_finished_spans()) == 50, "half, as outside traces"
 
 
-def test_a_run_inside_a_trace_the_application_does_not_sample_is_still_sent(
+def test_a_trace_opened_in_a_span_the_application_does_not_sample_is_still_sent(
     telmoni: Telmoni,
     transport: FakeTransport,
     app_exporter: InMemorySpanExporter,
@@ -93,25 +107,26 @@ def test_a_run_inside_a_trace_the_application_does_not_sample_is_still_sent(
     app = trace.get_tracer("the-application")
     with app.start_as_current_span("request") as request:
         assert not request.get_span_context().trace_flags.sampled
-        with telmoni.run("bot"), telmoni.step("s"):
+        with telmoni.trace("bot"), telmoni.step("s"):
             pass
     assert telmoni.flush()
-    (run,) = our_runs(transport)
-    assert run["traceId"] == format(request.get_span_context().trace_id, "032x")
+    (agent,) = our_agents(transport)
+    assert agent["traceId"] != link_to(request)["traceId"]
+    assert agent["links"] == [link_to(request)], "linked to the span all the same"
     assert any(s["name"] == "s" for s in transport.spans())
     assert app_exporter.get_finished_spans() == ()
 
 
-def test_a_configured_sampler_decides_a_root_run(transport: FakeTransport) -> None:
+def test_a_configured_sampler_decides_a_trace(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k", sampler=ALWAYS_OFF), transport=transport)
     try:
         app = trace.get_tracer("the-application")
-        with client.run("bot"), app.start_as_current_span("inside") as inside:
+        with client.trace("bot"), app.start_as_current_span("inside") as inside:
             assert not inside.get_span_context().trace_flags.sampled
         assert client.flush()
     finally:
         client.shutdown()
-    assert len(our_runs(transport)) == 1, "sent regardless of the flag"
+    assert len(our_agents(transport)) == 1, "sent regardless of the flag"
 
 
 def test_otel_variables_change_nothing_of_ours(transport: FakeTransport) -> None:
@@ -126,13 +141,13 @@ def test_otel_variables_change_nothing_of_ours(transport: FakeTransport) -> None
     with mock.patch.dict(os.environ, env):
         client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot", user_id="c", session_id="v", tags={"a": "b"}):
+        with client.trace("bot", user_id="c", session_id="v", tags={"a": "b"}):
             pass
         assert client.flush()
     finally:
         client.shutdown()
-    (run,) = our_runs(transport)
-    attributes = attributes_of(run)
+    (agent,) = our_agents(transport)
+    attributes = attributes_of(agent)
     assert attributes["telmoni.tag.a"] == "b" and attributes["user.id"] == "c"
     resource = transport.bodies()[0]["resourceSpans"][0]["resource"]["attributes"]
     assert {a["key"] for a in resource} == {
@@ -162,7 +177,7 @@ def test_our_span_metrics_never_reach_the_applications_meter(
     ):
         client = Telmoni(Config(api_key="k"), transport=transport)
         try:
-            with client.run("bot"):
+            with client.trace("bot"):
                 pass
             assert client.flush()
         finally:
@@ -170,12 +185,12 @@ def test_our_span_metrics_never_reach_the_applications_meter(
     assert asked == []
 
 
-def test_the_run_is_found_from_the_context_in_another_thread(
+def test_the_trace_is_found_from_the_context_in_another_thread(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     import threading
 
-    with telmoni.run("bot") as run:
+    with telmoni.trace("bot") as opened:
         ctx = context.get_current()
 
         def worker() -> None:
@@ -191,4 +206,4 @@ def test_the_run_is_found_from_the_context_in_another_thread(
         thread.join()
     assert telmoni.flush()
     step = next(s for s in transport.spans() if s["name"] == "threaded")
-    assert attributes_of(step)["telmoni.run_id"] == run.run_id
+    assert step["traceId"] == opened.trace_id

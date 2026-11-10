@@ -36,14 +36,14 @@ func contentOn() scripted {
 
 func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{SessionID: "conv"})
-	_, call := run.ModelCall(ctx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{SessionID: "conv"})
+	_, call := tr.ModelCall(ctx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
 	call.Answered(telmoni.Answer{
 		ResponseModel: "gpt-4o-mini-2024-07-18",
 		Usage:         &telmoni.Usage{InputTokens: 12, OutputTokens: 7, CacheReadInputTokens: 3},
 	})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := calls(t, h)
 	if len(spans) != 1 {
@@ -56,7 +56,6 @@ func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 	// Go has no None: the four counts of a given Usage travel, a zero among
 	// them.
 	want := map[string]any{
-		"telmoni.run_id":                        run.ID(),
 		"telmoni.agent":                         "bot",
 		"gen_ai.conversation.id":                "conv",
 		"gen_ai.operation.name":                 "chat",
@@ -75,14 +74,13 @@ func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 
 func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
 	call.Answered(telmoni.Answer{})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	want := map[string]any{
-		"telmoni.run_id":        run.ID(),
 		"telmoni.agent":         "bot",
 		"gen_ai.operation.name": "chat",
 		"gen_ai.request.model":  "m",
@@ -95,20 +93,19 @@ func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 // A token count below zero is left off its call, with one warning per count.
 func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for range 2 {
-		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
+		_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
 		call.Answered(telmoni.Answer{Usage: &telmoni.Usage{InputTokens: -1, OutputTokens: 7, CacheReadInputTokens: math.MinInt}})
 		call.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	spans := calls(t, h)
 	if len(spans) != 2 {
 		t.Fatalf("want two model calls, got %v", sortedNames(h.transport.spans(t)))
 	}
 	want := map[string]any{
-		"telmoni.run_id":                        run.ID(),
 		"telmoni.agent":                         "bot",
 		"gen_ai.operation.name":                 "chat",
 		"gen_ai.request.model":                  "m",
@@ -133,19 +130,19 @@ func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 // warning, and the call is still sent.
 func TestATimeToFirstTokenGoesInSecondsAndOneBelowZeroIsLeftOff(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "streamed", telmoni.ModelCallOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "streamed", telmoni.ModelCallOptions{})
 	call.Answered(telmoni.Answer{TimeToFirstToken: 350 * time.Millisecond})
 	call.End()
 	for range 2 {
-		_, call = run.ModelCall(ctx, "backwards", telmoni.ModelCallOptions{})
+		_, call = tr.ModelCall(ctx, "backwards", telmoni.ModelCallOptions{})
 		call.Answered(telmoni.Answer{TimeToFirstToken: -time.Millisecond})
 		call.End()
 	}
-	_, call = run.ModelCall(ctx, "whole", telmoni.ModelCallOptions{})
+	_, call = tr.ModelCall(ctx, "whole", telmoni.ModelCallOptions{})
 	call.Answered(telmoni.Answer{})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := calls(t, h)
 	if len(spans) != 4 {
@@ -172,12 +169,12 @@ func TestATimeToFirstTokenGoesInSecondsAndOneBelowZeroIsLeftOff(t *testing.T) {
 // be named " m" and ingest would read it as a step.
 func TestABlankOperationIsChat(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, blank := range []string{"", "  "} {
-		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Operation: blank})
+		_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{Operation: blank})
 		call.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	spans := calls(t, h)
 	if len(spans) != 2 {
@@ -195,14 +192,14 @@ func TestABlankOperationIsChat(t *testing.T) {
 
 func TestContentIsTakenOffBeforeItLeaves(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{
 		InputMessages:      []map[string]string{{"role": "user", "content": "my secret prompt"}},
 		SystemInstructions: "be brief",
 	})
 	call.Answered(telmoni.Answer{OutputMessages: []map[string]string{{"role": "assistant", "content": "the answer"}}})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	attributes := attributesOf(t, calls(t, h)[0])
 	for _, key := range []string{"gen_ai.input.messages", "gen_ai.output.messages", "gen_ai.system_instructions"} {
@@ -222,8 +219,8 @@ func TestContentIsTakenOffBeforeItLeaves(t *testing.T) {
 func TestAContentModeWithBlanksAboutItIsReadTrimmed(t *testing.T) {
 	padded := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": " on\t"}, body: []byte("{}")}
 	h := newHarness(t, testConfig(), newFakeTransport(t, padded))
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 	if mode := h.client.ContentMode(); mode != "on" {
 		t.Errorf("the content mode is %q, want on", mode)
@@ -236,17 +233,17 @@ func TestAModeIngestDoesNotSendKeepsContentHome(t *testing.T) {
 	sealed := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": "sealed"}, body: []byte("{}")}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, contentOn(), sealed, sealed))
 	for range 2 {
-		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		run.End()
+		_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		tr.End()
 		h.flush()
 	}
 	if mode := h.client.ContentMode(); mode != "" {
 		t.Fatalf("the content mode is %q after a word ingest does not send, want none", mode)
 	}
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "kept home"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "kept home"})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	if strings.Contains(h.transport.text(), "kept home") {
 		t.Error("content left with the mode unheard")
@@ -255,32 +252,32 @@ func TestAModeIngestDoesNotSendKeepsContentHome(t *testing.T) {
 
 func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 	on := contentOn()
-	// An empty run's export is answered off, the next two runs' on; each run
-	// flushed before the next opens, the mode each call is encoded under is the
-	// same on every machine.
+	// An empty trace's export is answered off, the next two traces' on; each
+	// trace flushed before the next opens, the mode each call is encoded under
+	// is the same on every machine.
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, kept(t), on, on))
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 	if mode := h.client.ContentMode(); mode != "off" {
-		t.Fatalf("the content mode is %q after the empty run, want off", mode)
+		t.Fatalf("the content mode is %q after the empty trace, want off", mode)
 	}
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "first"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "first"})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	if mode := h.client.ContentMode(); mode != "on" {
-		t.Fatalf("the content mode is %q after the first call's run, want on", mode)
+		t.Fatalf("the content mode is %q after the first call's trace, want on", mode)
 	}
-	ctx, run = h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call = run.ModelCall(ctx, "m", telmoni.ModelCallOptions{
+	ctx, tr = h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call = tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{
 		InputMessages:      "second",
 		SystemInstructions: []string{"be brief"},
 	})
 	call.Answered(telmoni.Answer{OutputMessages: map[string]any{"role": "assistant", "content": "<b>hi</b>"}})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := calls(t, h)
 	if len(spans) != 2 {
@@ -304,16 +301,16 @@ func TestContentLeavesOnlyWhenAskedAndTheProjectAllows(t *testing.T) {
 func TestContentStaysHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, on, on))
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 	if mode := h.client.ContentMode(); mode != "on" {
 		t.Fatalf("the content mode is %q, want on", mode)
 	}
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "never"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: "never"})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	if strings.Contains(h.transport.text(), "never") {
 		t.Error("content left without CaptureContent")
@@ -322,11 +319,11 @@ func TestContentStaysHomeWithoutCaptureContentEvenWhenAllowed(t *testing.T) {
 
 func TestAFailedCallRecordsTheErrorType(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{Operation: "generate_content"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{Operation: "generate_content"})
 	call.Fail(&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("provider down")})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	span := byName(h.transport.spans(t))["generate_content m"]
 	if span == nil {
@@ -346,23 +343,23 @@ func TestAFailedCallRecordsTheErrorType(t *testing.T) {
 // Ingest refuses a call over an empty model, or text past its cap.
 func TestAModelCallsTextPastIngestsCapsKeepsItsCall(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	m := func(n int) string { return strings.Repeat("m", n) }
 	for range 2 {
-		_, call := run.ModelCall(ctx, "", telmoni.ModelCallOptions{})
+		_, call := tr.ModelCall(ctx, "", telmoni.ModelCallOptions{})
 		call.End()
-		_, call = run.ModelCall(ctx, m(129), telmoni.ModelCallOptions{Provider: strings.Repeat("p", 129), Operation: "generate_content"})
+		_, call = tr.ModelCall(ctx, m(129), telmoni.ModelCallOptions{Provider: strings.Repeat("p", 129), Operation: "generate_content"})
 		call.Answered(telmoni.Answer{ResponseModel: strings.Repeat("r", 129)})
 		call.End()
-		_, call = run.ModelCall(ctx, m(128), telmoni.ModelCallOptions{Operation: strings.Repeat("o", 20)})
+		_, call = tr.ModelCall(ctx, m(128), telmoni.ModelCallOptions{Operation: strings.Repeat("o", 20)})
 		call.End()
 	}
 	// At their caps: the longest operation and a model at its cap fit.
 	smiles := strings.Repeat("😀", 128)
-	_, call := run.ModelCall(ctx, smiles, telmoni.ModelCallOptions{Operation: "generate_content"})
+	_, call := tr.ModelCall(ctx, smiles, telmoni.ModelCallOptions{Operation: "generate_content"})
 	call.Answered(telmoni.Answer{ResponseModel: smiles})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	sent := map[string]map[string]any{}
 	for _, span := range h.transport.spans(t) {
@@ -428,18 +425,18 @@ func callPrompts(t *testing.T, h *harness) []map[string]any {
 
 func TestAPromptGoesOnItsCallAloneAndARecordedCallNamesNone(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	stepCtx, step := run.Step(ctx, "plan")
-	_, call := run.ModelCall(stepCtx, "m", telmoni.ModelCallOptions{Prompt: "support-reply", PromptVersion: "3"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	stepCtx, step := tr.Step(ctx, "plan")
+	_, call := tr.ModelCall(stepCtx, "m", telmoni.ModelCallOptions{Prompt: "support-reply", PromptVersion: "3"})
 	call.End()
 	step.End()
-	run.End()
+	tr.End()
 	at := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
-	if err := h.client.RecordRun(context.Background(), telmoni.RunRecord{
-		RunID: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d", Agent: "recorder", Start: at, End: at,
+	if err := h.client.RecordTrace(context.Background(), telmoni.TraceRecord{
+		TraceID: "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d", Agent: "recorder", Start: at, End: at,
 		Inside: []telmoni.RecordItem{telmoni.ModelCallRecord{Model: "r", Start: at, End: at}},
 	}); err != nil {
-		t.Fatalf("recording the run: %v", err)
+		t.Fatalf("recording the trace: %v", err)
 	}
 	h.flush()
 	got := map[string]map[string]any{}
@@ -462,7 +459,7 @@ func TestAPromptGoesOnItsCallAloneAndARecordedCallNamesNone(t *testing.T) {
 // names no prompt.
 func TestABlankPromptIsNoneAndAVersionWithoutItsNameIsLeftOff(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, given := range []telmoni.ModelCallOptions{
 		{},
 		{Prompt: " ", PromptVersion: "\U00003000"},
@@ -470,10 +467,10 @@ func TestABlankPromptIsNoneAndAVersionWithoutItsNameIsLeftOff(t *testing.T) {
 		{PromptVersion: "3"},
 		{Prompt: "\U00002003", PromptVersion: "3"},
 	} {
-		_, call := run.ModelCall(ctx, "m", given)
+		_, call := tr.ModelCall(ctx, "m", given)
 		call.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	want := []map[string]any{{}, {}, {"gen_ai.prompt.name": "p"}, {}, {}}
 	if got := callPrompts(t, h); !reflect.DeepEqual(got, want) {
@@ -486,7 +483,7 @@ func TestABlankPromptIsNoneAndAVersionWithoutItsNameIsLeftOff(t *testing.T) {
 // Cut, a prompt or its version would name another, as a cut user would.
 func TestAPromptPastIngestsCapIsLeftOffNeverCut(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	widest := strings.Repeat("😀", 1024)
 	for range 2 {
 		for _, given := range []telmoni.ModelCallOptions{
@@ -494,11 +491,11 @@ func TestAPromptPastIngestsCapIsLeftOffNeverCut(t *testing.T) {
 			{Prompt: strings.Repeat("p", 1025), PromptVersion: "3"},
 			{Prompt: "p", PromptVersion: strings.Repeat("😀", 1025)},
 		} {
-			_, call := run.ModelCall(ctx, "m", given)
+			_, call := tr.ModelCall(ctx, "m", given)
 			call.End()
 		}
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	once := []map[string]any{{"gen_ai.prompt.name": widest, "gen_ai.prompt.version": strings.Repeat("v", 1024)}, {}, {"gen_ai.prompt.name": "p"}}
 	if got, want := callPrompts(t, h), slices.Concat(once, once); !reflect.DeepEqual(got, want) {
@@ -535,15 +532,15 @@ func TestAPromptLeavesAsGivenWhereContentDoesNeverMaskedOrScrubbed(t *testing.T)
 			return value, true
 		},
 	}, transport)
-	aRun(t, h)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{
+	aTrace(t, h)
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{
 		Prompt:        "reply-to-ada@example.com",
 		PromptVersion: "3",
 		InputMessages: "write to ada@example.com",
 	})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := calls(t, h)
 	if len(spans) != 1 {
@@ -592,7 +589,7 @@ func mediaHarness(t *testing.T) *harness {
 	t.Helper()
 	on := contentOn()
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, on, on, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
 	return h
@@ -600,12 +597,12 @@ func mediaHarness(t *testing.T) *harness {
 
 func TestAnImageIsPutOnceWithItsTypeAndKey(t *testing.T) {
 	h := mediaHarness(t)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for range 2 {
-		_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(png)})
+		_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(png)})
 		call.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	uploads := h.transport.allUploads()
 	if len(uploads) != 1 {
@@ -649,10 +646,10 @@ func TestAFailedUploadStillNamesTheFileAndWarnsOnce(t *testing.T) {
 			h := mediaHarness(t)
 			h.transport.uploadAnswers = []any{c.failure, c.failure}
 			for range 2 {
-				ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-				_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(png)})
+				ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+				_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(png)})
 				call.End()
-				run.End()
+				tr.End()
 				h.flush()
 			}
 			if got := len(h.transport.allUploads()); got != 2 {
@@ -679,10 +676,10 @@ func TestAFailedUploadStillNamesTheFileAndWarnsOnce(t *testing.T) {
 func TestAFilePastTheCapIsNamedButNeverPut(t *testing.T) {
 	big := bytes.Repeat([]byte{0x89}, 5*1024*1024+1)
 	h := mediaHarness(t)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(big)})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{InputMessages: blob(big)})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	if got := len(h.transport.allUploads()); got != 0 {
 		t.Errorf("%d files put, want none", got)

@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
         // anyone who knows it, and the seat itself is refused to them.
         if (event.type.startsWith("invite:") && ctx.person.emailVerified !== true) return;
         // The organization's channel reaches every member, seat or not; a
-        // project's nudges, and the run ids in them, go to its readers alone.
+        // project's nudges, and the trace ids in them, go to its readers alone.
         if (
           event.type === "spans:ingested" &&
           !readsProject(ctx, event.data.organizationId, event.data.projectId)

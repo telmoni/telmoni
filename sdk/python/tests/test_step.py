@@ -8,18 +8,18 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from conftest import FakeTransport, attributes_of
-from telmoni import Run, Telmoni
+from telmoni import Telmoni, Trace
 
 
 def by_name(transport: FakeTransport) -> dict[str, dict[str, object]]:
     return {str(s["name"]): s for s in transport.spans()}
 
 
-def test_a_step_nests_under_its_run_and_carries_its_ids(
+def test_a_step_nests_under_its_agents_span_and_carries_its_ids(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot", user_id="c", session_id="v") as run,
+        telmoni.trace("bot", user_id="c", session_id="v") as trace,
         telmoni.step("plan"),
         telmoni.step("plan.inner"),
     ):
@@ -29,9 +29,8 @@ def test_a_step_nests_under_its_run_and_carries_its_ids(
     plan, inner, agent = spans["plan"], spans["plan.inner"], spans["invoke_agent bot"]
     assert plan["parentSpanId"] == agent["spanId"]
     assert inner["parentSpanId"] == plan["spanId"]
-    assert plan["traceId"] == agent["traceId"] == inner["traceId"]
+    assert plan["traceId"] == agent["traceId"] == inner["traceId"] == trace.trace_id
     assert attributes_of(plan) == {
-        "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
         "user.id": "c",
         "gen_ai.conversation.id": "v",
@@ -39,39 +38,39 @@ def test_a_step_nests_under_its_run_and_carries_its_ids(
     assert plan["kind"] == 1 and "status" not in plan
 
 
-def test_a_step_opened_on_the_run_handle_is_the_same(
+def test_a_step_opened_on_the_trace_handle_is_the_same(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    with telmoni.run("bot") as run, run.step("explicit"):
+    with telmoni.trace("bot") as trace, trace.step("explicit"):
         pass
     assert telmoni.flush()
     step = by_name(transport)["explicit"]
-    assert attributes_of(step)["telmoni.run_id"] == run.run_id
+    assert step["traceId"] == trace.trace_id
 
 
-def test_a_step_or_call_from_a_worker_thread_goes_under_the_run(
+def test_a_step_or_call_from_a_worker_thread_goes_under_the_agents_span(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    def work(run: Run) -> None:
-        # A pool's thread starts with an empty context: neither the run's span
-        # nor the run is current in it.
-        with run.step("think"), telmoni.tool_call("search"):
+    def work(trace: Trace) -> None:
+        # A pool's thread starts with an empty context: neither the agent's
+        # span nor the trace is current in it.
+        with trace.step("think"), telmoni.tool_call("search"):
             pass
-        with run.model_call("m"):
+        with trace.model_call("m"):
             pass
 
-    with telmoni.run("bot") as run, ThreadPoolExecutor(max_workers=1) as pool:
-        pool.submit(work, run).result()
+    with telmoni.trace("bot") as trace, ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(work, trace).result()
     assert telmoni.flush()
     spans = by_name(transport)
     agent = spans["invoke_agent bot"]
     for name in ("think", "chat m"):
         assert spans[name]["parentSpanId"] == agent["spanId"], name
         assert spans[name]["traceId"] == agent["traceId"], name
-    # The client-level call inside the step found the run through it.
+    # The client-level call inside the step found the trace through it.
     search = spans["execute_tool search"]
     assert search["parentSpanId"] == spans["think"]["spanId"]
-    assert attributes_of(search)["telmoni.run_id"] == run.run_id
+    assert search["traceId"] == trace.trace_id
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
@@ -81,7 +80,7 @@ def test_a_failing_step_records_the_error_class_and_reraises(
     class PlanningFailed(RuntimeError):
         pass
 
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         try:
             with telmoni.step("plan"):
                 raise PlanningFailed("secret details")
@@ -91,7 +90,7 @@ def test_a_failing_step_records_the_error_class_and_reraises(
     spans = by_name(transport)
     assert spans["plan"]["status"] == {"code": 2}
     assert attributes_of(spans["plan"])["error.type"] == "PlanningFailed"
-    assert "status" not in spans["invoke_agent bot"], "the run itself went on"
+    assert "status" not in spans["invoke_agent bot"], "the trace itself went on"
     assert "secret details" not in str(transport.requests)
 
 
@@ -100,7 +99,7 @@ def test_the_step_decorator(telmoni: Telmoni, transport: FakeTransport) -> None:
     def plan(n: int) -> int:
         return n + 1
 
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         assert plan(1) == 2
     assert telmoni.flush()
     assert "plan" in by_name(transport)
@@ -116,7 +115,7 @@ def test_the_step_decorator_on_a_generator_spans_its_iteration(
             pass
         yield 2
 
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         assert list(plan()) == [1, 2]
     assert telmoni.flush()
     spans = by_name(transport)
@@ -130,15 +129,15 @@ class Kind(enum.Enum):
 def test_a_name_of_no_string_goes_as_its_text_and_keeps_the_batch(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Sent as given, it would fail the export's JSON and lose every run's spans."""
-    with telmoni.run("other"), telmoni.step("fine"):
+    """Sent as given, it would fail the export's JSON and lose every trace's spans."""
+    with telmoni.trace("other"), telmoni.step("fine"):
         pass
-    with telmoni.run(Kind.PLAN) as run:  # type: ignore[arg-type]
-        with run.step(Kind.PLAN):  # type: ignore[arg-type]
+    with telmoni.trace(Kind.PLAN) as trace:  # type: ignore[arg-type]
+        with trace.step(Kind.PLAN):  # type: ignore[arg-type]
             pass
-        with run.model_call(5):  # type: ignore[arg-type]
+        with trace.model_call(5):  # type: ignore[arg-type]
             pass
-        with run.tool_call(Kind.PLAN):  # type: ignore[arg-type]
+        with trace.tool_call(Kind.PLAN):  # type: ignore[arg-type]
             pass
     assert telmoni.flush()
     names = sorted(span["name"] for span in transport.spans())
@@ -158,9 +157,9 @@ def test_a_step_named_nothing_or_past_ingests_cap_keeps_its_span(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ingest refuses a span named nothing, or past 145 characters."""
-    with telmoni.run("bot") as run:
+    with telmoni.trace("bot") as trace:
         for name in ("", "", "n" * 146, "n" * 146, "n" * 145):
-            with run.step(name):
+            with trace.step(name):
                 pass
     assert telmoni.flush()
     steps = sorted(
@@ -182,7 +181,7 @@ def test_a_name_with_a_lone_surrogate_goes_with_the_replacement_character(
 ) -> None:
     """Escaped into the JSON, ingest would refuse the request and the batch."""
     for name in ("a\ud800b", "c\udc80d", "e\U0001f600f"):
-        with telmoni.run("bot"), telmoni.step(name):
+        with telmoni.trace("bot"), telmoni.step(name):
             pass
     assert telmoni.flush()
     names = {span["name"] for span in transport.spans()}

@@ -47,10 +47,10 @@ pub struct Config {
     /// Whether content that leaves has each email, phone, card or other PII in it sent
     /// as `[pii: <kind>]`; `None` reads `TELMONI_SCRUB_PII`, whose `1` alone turns it on.
     pub scrub_pii: Option<bool>,
-    /// The sampler whose decision a run takes when it starts a trace of its
-    /// own, so an application sampling at a tenth keeps a tenth of its own
-    /// spans inside runs as outside them; `None` samples. The run itself is
-    /// sent whatever the decision.
+    /// The sampler whose decision a trace takes as it opens, so an
+    /// application sampling at a tenth keeps a tenth of its own spans inside
+    /// traces as outside them; `None` samples. The trace itself is sent
+    /// whatever the decision.
     #[serde(skip)]
     pub sampler: Option<Box<dyn ShouldSample>>,
     /// The deployment this process runs in (`production`, `staging`;
@@ -61,7 +61,7 @@ pub struct Config {
     /// `TELMONI_RELEASE`), sent on every span's resource as
     /// `service.version`; `None` sends nothing.
     pub release: Option<String>,
-    /// The project's own prices, which a run's spend cap counts a call by
+    /// The project's own prices, which a trace's spend cap counts a call by
     /// before the table this release carries; a name given twice takes its
     /// last, and one that is no price is left out with one warning.
     pub prices: Vec<Price>,

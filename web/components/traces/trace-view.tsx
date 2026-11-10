@@ -44,7 +44,7 @@ import { isSpanId } from "@/lib/scores";
 import { subscribeNever } from "@/lib/in-browser";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
-import type { RunSpend, TraceDetail, TraceSpan } from "@/lib/server/entities/traces";
+import type { TraceDetail, TraceSpan, TraceSpend } from "@/lib/server/entities/traces";
 import {
   OPEN_ALL_UP_TO,
   branchesFrom,
@@ -68,7 +68,7 @@ import {
   retrievalSource,
   shortId,
   spanMillis,
-  sessionRunsHref,
+  sessionTracesHref,
   tracesHref,
 } from "@/lib/traces";
 import { type ContentMode, SpanKind, SpanStatus } from "@/lib/types/enums";
@@ -102,7 +102,7 @@ function MetaLink({ href, title, children }: { href: string; title?: string; chi
 
 
 /** The window of days a link to the list, a user's traces or a session's
- *  page needs to hold a run that started at `iso`: the pages open on a week.
+ *  page needs to hold a trace that started at `iso`: the pages open on a week.
  *  None on the server and in the browser's first pass, the browser's own
  *  clock after, so the two draw one link — React keeps the server's
  *  attribute where they differ, and the two clocks may sit either side of
@@ -111,9 +111,9 @@ function useWindowReaching(iso: string): number | undefined {
   return useSyncExternalStore(subscribeNever, () => windowReaching(iso), () => undefined);
 }
 
-/** What the run spent, each call priced as an alert on its cost prices it,
+/** What the trace spent, each call priced as an alert on its cost prices it,
  *  and how many of the models it called no price covers, named on hover. */
-function RunSpent({ spend }: { spend: RunSpend }) {
+function TraceSpent({ spend }: { spend: TraceSpend }) {
   const unpriced = spend.unpriced.length;
   return (
     <span
@@ -150,12 +150,12 @@ export const TraceMeta = memo(function TraceMeta({
   contentMode?: ContentMode;
 }) {
   const summary = useMemo(() => summarizeTrace(trace.spans), [trace.spans]);
-  const { run, root } = summary;
+  const { agent, root } = summary;
   const reaching = useWindowReaching(summary.startedAt);
   const tokens = summary.inputTokens + summary.outputTokens;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-gutter gap-y-1.5 text-xs text-muted-foreground">
-      <StatusMark status={run?.status ?? null} detail={run?.error_type} />
+      <StatusMark status={agent?.status ?? null} detail={agent?.error_type} />
       <LocalTime iso={summary.startedAt} />
       <span className="tabular-nums">{formatDuration(summary.durationMs)}</span>
       <span
@@ -165,12 +165,12 @@ export const TraceMeta = memo(function TraceMeta({
         {formatCount(tokens)} {tokens === 1 ? "token" : "tokens"}
       </span>
       {trace.spend && (trace.spend.spent > 0 || trace.spend.unpriced.length > 0) && (
-        <RunSpent spend={trace.spend} />
+        <TraceSpent spend={trace.spend} />
       )}
       {root.session_id && (
         <MetaLink
-          href={sessionRunsHref(organization, slug, root.session_id, reaching)}
-          title={`The runs of session ${root.session_id}, in order`}
+          href={sessionTracesHref(organization, slug, root.session_id, reaching)}
+          title={`The traces of session ${root.session_id}, in order`}
         >
           session
         </MetaLink>
@@ -196,7 +196,7 @@ export const TraceMeta = memo(function TraceMeta({
         <MetaLink
           key={incident.id}
           href={incidentHref(organization, slug, incident.id)}
-          title={`The incident of ${incident.rule_name ?? incident.agent} whose notice showed this run`}
+          title={`The incident of ${incident.rule_name ?? incident.agent} whose notice showed this trace`}
         >
           incident: {incident.rule_name ?? incident.agent}
         </MetaLink>
@@ -240,7 +240,7 @@ function SpansButton({
 }
 
 /** The trace's spans and the one chosen among them, side by side; under each
- *  other on a phone. The run's own span is chosen first, the whole tree open
+ *  other on a phone. The agent's own span is chosen first, the whole tree open
  *  but for a trace too large to draw open. Drawn again only for another trace
  *  (`memo`), as the line above it is. */
 export const TraceBody = memo(function TraceBody({
@@ -262,14 +262,14 @@ export const TraceBody = memo(function TraceBody({
     [trace.spans],
   );
   // Past OPEN_ALL_UP_TO spans a trace opens with its branches shut but the
-  // run's own, so its first rows draw at once; a search, or a branch opened,
+  // agent's own, so its first rows draw at once; a search, or a branch opened,
   // finds the rest.
   const [{ chosen, shut, parentOf: followed }, dispatch] = useReducer(treeReducer, null, () => ({
     chosen: summary.root.span_id,
     shut: trace.spans.length > OPEN_ALL_UP_TO ? branchesFrom(nodes, 1) : new Set<string>(),
     parentOf,
   }));
-  // A run still going is read again as its spans land: the tree follows them.
+  // A trace still going is read again as its spans land: the tree follows them.
   if (followed !== parentOf) dispatch({ type: "spans", parentOf });
   const [search, setSearch] = useState("");
   // How the spans are drawn: the tree, until the toggle moves.
@@ -442,7 +442,6 @@ export const TraceBody = memo(function TraceBody({
         summary={summary}
         fields={fieldsOf(trace.content, span.span_id)}
         keptContent={(trace.content ?? []).some((kept) => isSpanId(kept.span_id))}
-        runId={trace.run_id}
         organization={organization}
         slug={slug}
         spansShown={spansShown}
@@ -460,7 +459,7 @@ export const TraceBody = memo(function TraceBody({
 /** One span's row: its kind, its name, how long it ran — and its tokens, for a
  *  model call — under the spans it ran inside, a guide standing for each.
  *  Drawn again only when its own state moves (`memo`): the one `dispatch`
- *  never does, so a run's thousands of rows hold as another is chosen. */
+ *  never does, so a trace's thousands of rows hold as another is chosen. */
 const SpanRow = memo(function SpanRow({
   node,
   chosen,
@@ -573,7 +572,6 @@ function SpanDetail({
   summary,
   fields,
   keptContent,
-  runId,
   organization,
   slug,
   spansShown,
@@ -582,13 +580,12 @@ function SpanDetail({
   className,
 }: {
   span: TraceSpan;
-  /** The whole trace's sums, which the run's own span is read with. */
+  /** The whole trace's sums, which the agent's own span is read with. */
   summary: TraceSummary;
   /** What the span kept: `undefined` for nothing, `null` where it could not be read. */
   fields: Readonly<Record<string, string>> | null | undefined;
   /** Whether any span of the trace kept content: its tab then opens first. */
   keptContent: boolean;
-  runId: string;
   organization: string;
   slug: string;
   spansShown: boolean;
@@ -603,7 +600,7 @@ function SpanDetail({
   const attributes = Object.entries(span.attributes).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const reaching = useWindowReaching(span.started_at);
   const tokens = span.input_tokens + span.output_tokens;
-  const run = span.kind === SpanKind.Run;
+  const agent = span.kind === SpanKind.Agent;
   const calls = summary.modelCalls + summary.toolCalls + summary.retrievals;
   const found = span.kind === SpanKind.Retrieval ? retrievalCounts(span.attributes) : null;
   const source = found ? retrievalSource(span) : null;
@@ -648,8 +645,8 @@ function SpanDetail({
             </MetaLink>
           )}
         </div>
-        {/* A span's own scores beside it; the run's stand on the trace's line. */}
-        {!run && <SpanScores spanId={span.span_id} />}
+        {/* A span's own scores beside it; the agent's stand on the trace's line. */}
+        {!agent && <SpanScores spanId={span.span_id} />}
       </div>
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
         {/* Narrow, Formatted and Raw go under the tabs rather than past the edge. */}
@@ -707,8 +704,8 @@ function SpanDetail({
                   <Field label="Status">
                     <SpanStatusMark span={span} />
                   </Field>
-                  {run && <Field label="Agent">{span.agent}</Field>}
-                  {run && (
+                  {agent && <Field label="Agent">{span.agent}</Field>}
+                  {agent && (
                     <Field label="Calls">
                       {formatCount(summary.steps)} {summary.steps === 1 ? "step" : "steps"},{" "}
                       {formatCount(calls)} {calls === 1 ? "call" : "calls"}:{" "}
@@ -718,7 +715,7 @@ function SpanDetail({
                       </span>
                     </Field>
                   )}
-                  {run && (
+                  {agent && (
                     <Field label="Tokens">
                       {formatCount(summary.inputTokens + summary.outputTokens)}{" "}
                       <span className="text-muted-foreground">
@@ -786,7 +783,7 @@ function SpanDetail({
                   {span.time_to_first_token !== null && (
                     <Field label="Time to first token">{formatDuration(span.time_to_first_token * 1000)}</Field>
                   )}
-                  {run && span.user_id && (
+                  {agent && span.user_id && (
                     <FilterField
                       label="User"
                       href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
@@ -794,10 +791,10 @@ function SpanDetail({
                       {span.user_id}
                     </FilterField>
                   )}
-                  {run && span.session_id && (
+                  {agent && span.session_id && (
                     <FilterField
                       label="Session"
-                      href={sessionRunsHref(organization, slug, span.session_id, reaching)}
+                      href={sessionTracesHref(organization, slug, span.session_id, reaching)}
                     >
                       {span.session_id}
                     </FilterField>
@@ -815,11 +812,6 @@ function SpanDetail({
                   )}
                   {span.sample_rate !== null && span.sample_rate !== 1 && (
                     <Field label="Sample rate">{span.sample_rate}</Field>
-                  )}
-                  {run && (
-                    <Field label="Run id">
-                      {runId}
-                    </Field>
                   )}
                   <Field label="Span id">
                     {span.span_id}

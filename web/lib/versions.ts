@@ -12,15 +12,15 @@ import { ChangeKind } from "@/lib/types/enums";
 export const VERSIONS_BY = [ChangeKind.Release, ChangeKind.Model, ChangeKind.Prompt] as const;
 export type VersionsBy = (typeof VERSIONS_BY)[number];
 
-const ChoiceSchema = z.object({ value: z.string(), runs: z.number().int() });
+const ChoiceSchema = z.object({ value: z.string(), traces: z.number().int() });
 
 const VersionSchema = z.object({
-  /** Empty for the runs that carried none. */
+  /** Empty for the traces that carried none. */
   value: z.string(),
   first_at: z.string(),
-  runs: z.number().int(),
-  failed_runs: z.number().int(),
-  /** None before one of its runs has ended. */
+  traces: z.number().int(),
+  failed_traces: z.number().int(),
+  /** None before one of its traces has ended. */
   p50_ms: z.number().nullable(),
   p95_ms: z.number().nullable(),
   median_spend: z.number().nullable(),
@@ -37,7 +37,7 @@ export const VersionsSchema = z.object({
   /** The prompt the rows are versions of, where they are a prompt's. */
   prompt: z.string().nullable(),
   prompts: z.array(ChoiceSchema),
-  /** The newest first seen first, the runs that carried none last. */
+  /** The newest first seen first, the traces that carried none last. */
   versions: z.array(VersionSchema),
   /** The scores the rows show. */
   scores: z.array(z.string()),
@@ -65,9 +65,9 @@ export function versionsReadHref(projectId: string, ask: VersionsAsk): string {
   return `/api/v1/agent-versions?${params.toString()}`;
 }
 
-/** The share of a version's runs that failed, none where it has no run. */
-export function failedShare(version: Pick<Version, "runs" | "failed_runs">): number | null {
-  return version.runs > 0 ? version.failed_runs / version.runs : null;
+/** The share of a version's traces that failed, none where it has none. */
+export function failedShare(version: Pick<Version, "traces" | "failed_traces">): number | null {
+  return version.traces > 0 ? version.failed_traces / version.traces : null;
 }
 
 /** A row's change from the version before it, each in the row's own unit and
@@ -87,13 +87,13 @@ const less = (now: number | null | undefined, before: number | null | undefined)
   now == null || before == null ? null : now - before;
 
 /** Each row's change from the next row down, the version first seen before
- *  it; none for the oldest, nor for the runs that carried no version, which
+ *  it; none for the oldest, nor for the traces that carried no version, which
  *  no row is measured against either. */
 export function deltas(rows: readonly Version[]): (VersionDelta | null)[] {
   return rows.map((row, at) => {
     const before = rows[at + 1];
     if (row.value === "" || !before || before.value === "") return null;
-    // A share of runs none of which has ended is no evidence of a fall.
+    // A share of traces none of which has ended is no evidence of a fall.
     const ended = row.p50_ms !== null && before.p50_ms !== null;
     const share = ended ? less(failedShare(row), failedShare(before)) : null;
     const mean = (of: Version, name: string) => of.scores.find((score) => score.name === name)?.mean;
@@ -112,7 +112,7 @@ export function deltas(rows: readonly Version[]): (VersionDelta | null)[] {
 const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 });
 const POINTS = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
-/** A share of runs: `12.5%`. */
+/** A share of traces: `12.5%`. */
 export function formatShare(share: number): string {
   return PERCENT.format(share);
 }

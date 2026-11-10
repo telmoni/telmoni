@@ -69,7 +69,7 @@ describe("KeysActions", () => {
     });
     const shown = await screen.findByRole("dialog", { name: "Key created" });
     expect(within(shown).getByText("tm_abc123")).toBeInTheDocument();
-    // A key that sends spans comes with each SDK's first run, the key in it.
+    // A key that sends spans comes with each SDK's first trace, the key in it.
     expect(within(shown).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Python",
       "TypeScript",
@@ -80,13 +80,13 @@ describe("KeysActions", () => {
     const traces = within(shown).getByRole("link", { name: "Traces" });
     expect(traces).toHaveAttribute("href", TRACES);
     expect(traces, "the key stays on screen").toHaveAttribute("target", "_blank");
-    expect(within(shown).getByRole("tablist", { name: "First run" })).toBeInTheDocument();
+    expect(within(shown).getByRole("tablist", { name: "First trace" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "New API key" })).toBeNull();
     fireEvent.click(within(shown).getByRole("button", { name: "I've saved it" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("offers no first run with a key that only reads the API", async () => {
+  it("offers no first trace with a key that only reads the API", async () => {
     mintTokenAction.mockResolvedValue({ ok: true, token: "tm_read", id: "key_2" });
     render(<KeysActions projectId={PROJECT} tracesHref={TRACES} />);
     const panel = openPanel();

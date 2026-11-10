@@ -1,9 +1,9 @@
 //! An agent's versions side by side: its releases, its models, or one
-//! prompt's versions over a window of days, a row each of the runs that
-//! carried it, read from the spans so a run, its duration, its failure and
-//! its spend are the trace list's own ([`crate::traces`]). A run counts under
-//! each value its spans in the chosen environment carry, and is measured
-//! whole; one carrying none is the row with no value.
+//! prompt's versions over a window of days, a row each of the traces that
+//! carried it, read from the spans so a trace, its duration, its failure and
+//! its spend are the trace list's own ([`crate::traces`]). A trace counts
+//! under each value its spans in the chosen environment carry, and is
+//! measured whole; one carrying none is the row with no value.
 
 use std::collections::HashMap;
 
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use telmoni_shared::ChangeKind;
 
 use crate::store::{Projects, Read, Store};
-use crate::traces::{TraceFilter, filtered, run_carries, run_status, run_sums, window};
+use crate::traces::{TraceFilter, filtered, trace_carries, trace_status, trace_sums, window};
 
 /// The most versions one answer names, the newest first; the row with no
 /// value is beside them.
@@ -22,38 +22,38 @@ pub const VERSIONS_MAX: usize = 50;
 /// The most scores a version's row shows: those given most often.
 pub const SCORES_SHOWN: usize = 5;
 
-/// The most environments or prompts the answer offers, the most runs first.
+/// The most environments or prompts the answer offers, the most traces first.
 pub const CHOICES_MAX: u32 = 50;
 
-/// The agent's runs with a span in the environment, a row each as the trace
-/// list sums them, `members` the values those spans carry.
-macro_rules! member_runs {
+/// The agent's traces with a span in the environment, a row each as the
+/// trace list sums them, `members` the values those spans carry.
+macro_rules! member_traces {
     ($members:expr, $present:expr) => {
         concat!(
             "SELECT ",
-            run_sums!(),
+            trace_sums!(),
             ", ",
             $members,
             " AS members ",
             window!(),
-            "AND agent = {agent:String} GROUP BY run_id HAVING ",
+            "AND agent = {agent:String} GROUP BY trace_id HAVING ",
             $present
         )
     };
 }
 
-/// The runs folded by value, the newest first seen first and the row with no
-/// value last, kept beside the limit; no ended run, no duration or spend.
+/// The traces folded by value, the newest first seen first and the row with
+/// no value last, kept beside the limit; no ended trace, no duration or spend.
 macro_rules! versions_sql {
     ($members:expr, $present:expr) => {
         concat!(
-            "SELECT value, count() AS runs, countIf(run_status = 'error') AS failed_runs, ",
+            "SELECT value, count() AS traces, countIf(trace_status = 'error') AS failed_traces, ",
             "min(first_started_at) AS first_at, ",
-            "if(countIf(run_ended) > 0, quantileExactIf(0.5)(duration_ms, run_ended), NULL) AS p50_ms, ",
-            "if(countIf(run_ended) > 0, quantileExactIf(0.95)(duration_ms, run_ended), NULL) AS p95_ms, ",
-            "if(countIf(run_ended) > 0, quantileExactIf(0.5)(spent, run_ended), NULL) AS median_spend ",
+            "if(countIf(trace_ended) > 0, quantileExactIf(0.5)(duration_ms, trace_ended), NULL) AS p50_ms, ",
+            "if(countIf(trace_ended) > 0, quantileExactIf(0.95)(duration_ms, trace_ended), NULL) AS p95_ms, ",
+            "if(countIf(trace_ended) > 0, quantileExactIf(0.5)(spent, trace_ended), NULL) AS median_spend ",
             "FROM (",
-            member_runs!($members, $present),
+            member_traces!($members, $present),
             ") ARRAY JOIN if(empty(members), [''], members) AS value ",
             "GROUP BY value ORDER BY value = '', first_at DESC, value ",
             "LIMIT {max:UInt32} BY value = ''"
@@ -61,29 +61,29 @@ macro_rules! versions_sql {
     };
 }
 
-/// Each score's mean on the runs of each version named, a run's score read
-/// once a version however many of its spans carry it.
+/// Each score's mean on the traces of each version named, a trace's score
+/// read once a version however many of its spans carry it.
 macro_rules! scores_sql {
     ($members:expr, $present:expr) => {
         concat!(
             "SELECT version, name, avg(value) AS mean, count() AS given ",
-            "FROM (SELECT run_id, arrayJoin(if(empty(members), [''], members)) AS version ",
-            "FROM (SELECT run_id, ",
+            "FROM (SELECT trace_id, arrayJoin(if(empty(members), [''], members)) AS version ",
+            "FROM (SELECT trace_id, ",
             $members,
             " AS members ",
             window!(),
-            "AND agent = {agent:String} GROUP BY run_id HAVING ",
+            "AND agent = {agent:String} GROUP BY trace_id HAVING ",
             $present,
             ")) AS carried INNER JOIN (",
-            "SELECT run_id, name, value FROM telemetry.scores FINAL ",
+            "SELECT trace_id, name, value FROM telemetry.scores FINAL ",
             "WHERE project_id IN {projects:Array(String)} AND is_deleted = 0 ",
             "AND data_type IN ('number', 'boolean') ",
             "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            // The agent's runs alone, so the join holds no other's scores.
-            "AND run_id IN (SELECT run_id ",
+            // The agent's traces alone, so the join holds no other's scores.
+            "AND trace_id IN (SELECT trace_id ",
             window!(),
             "AND agent = {agent:String})",
-            ") AS scored USING (run_id) ",
+            ") AS scored USING (trace_id) ",
             "WHERE has({versions:Array(String)}, version) ",
             "GROUP BY version, name ORDER BY version, name"
         )
@@ -144,28 +144,28 @@ const fn scores_sql(by: ChangeKind) -> &'static str {
 }
 
 /// The environments the agent's spans were sent from, the one with no name
-/// among them, each with the runs holding a span of it.
+/// among them, each with the traces holding a span of it.
 const ENVIRONMENTS_SQL: &str = concat!(
-    "SELECT environment AS value, uniqExact(run_id) AS runs ",
+    "SELECT environment AS value, uniqExact(trace_id) AS traces ",
     window!(),
     "AND agent = {agent:String} ",
-    "GROUP BY value ORDER BY runs DESC, value LIMIT {max:UInt32}"
+    "GROUP BY value ORDER BY traces DESC, value LIMIT {max:UInt32}"
 );
 
-/// The prompts the agent's spans in the environment name, each with its runs.
+/// The prompts the agent's spans in the environment name, each with its traces.
 const PROMPTS_SQL: &str = concat!(
-    "SELECT attributes['gen_ai.prompt.name'] AS value, uniqExact(run_id) AS runs ",
+    "SELECT attributes['gen_ai.prompt.name'] AS value, uniqExact(trace_id) AS traces ",
     window!(),
     "AND agent = {agent:String} AND environment = {environment:String} ",
     "AND attributes['gen_ai.prompt.name'] != '' ",
-    "GROUP BY value ORDER BY runs DESC, value LIMIT {max:UInt32}"
+    "GROUP BY value ORDER BY traces DESC, value LIMIT {max:UInt32}"
 );
 
 /// Whose versions a read is of.
 #[derive(Debug, Clone, Copy)]
 pub struct Of<'a> {
     pub agent: &'a str,
-    /// What its runs are split by: the words a change is kinded by.
+    /// What its traces are split by: the words a change is kinded by.
     pub by: ChangeKind,
     pub environment: &'a str,
     /// The prompt, where the split is by one's versions; empty otherwise.
@@ -177,16 +177,16 @@ pub struct Of<'a> {
 pub struct Choice {
     /// Empty for the environment with no name.
     pub value: String,
-    /// The agent's runs holding a span of it.
-    pub runs: u64,
+    /// The agent's traces holding a span of it.
+    pub traces: u64,
 }
 
-/// One version's runs, as ClickHouse answers them.
+/// One version's traces, as ClickHouse answers them.
 #[derive(Debug, Clone, PartialEq, Row, Deserialize)]
 pub struct VersionRow {
     pub value: String,
-    pub runs: u64,
-    pub failed_runs: u64,
+    pub traces: u64,
+    pub failed_traces: u64,
     #[serde(deserialize_with = "clickhouse::serde::chrono::datetime64::micros::deserialize")]
     pub first_at: DateTime<Utc>,
     pub p50_ms: Option<i64>,
@@ -194,7 +194,7 @@ pub struct VersionRow {
     pub median_spend: Option<f64>,
 }
 
-/// One score's mean on one version's runs.
+/// One score's mean on one version's traces.
 #[derive(Debug, Clone, PartialEq, Row, Deserialize)]
 pub struct ScoreRow {
     pub version: String,
@@ -203,7 +203,7 @@ pub struct ScoreRow {
     pub given: u64,
 }
 
-/// A score's mean on a version's runs, a yes or no's 1 or 0.
+/// A score's mean on a version's traces, a yes or no's 1 or 0.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScoreMean {
     pub name: String,
@@ -215,19 +215,19 @@ pub struct ScoreMean {
 /// One version over the window.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Version {
-    /// Empty for the runs that carried none.
+    /// Empty for the traces that carried none.
     pub value: String,
-    /// When the first of its runs in the window started.
+    /// When the first of its traces in the window started.
     pub first_at: DateTime<Utc>,
-    /// Its runs, those still running among them.
-    pub runs: u64,
+    /// Its traces, those still running among them.
+    pub traces: u64,
     /// Those that ended in error.
-    pub failed_runs: u64,
-    /// Its ended runs' median duration; none before one has ended.
+    pub failed_traces: u64,
+    /// Its ended traces' median duration; none before one has ended.
     pub p50_ms: Option<i64>,
     /// And their 95th percentile.
     pub p95_ms: Option<i64>,
-    /// The median of what its ended runs cost, in US dollars.
+    /// The median of what its ended traces cost, in US dollars.
     pub median_spend: Option<f64>,
     /// Its mean of each score the answer names, in the answer's order.
     pub scores: Vec<ScoreMean>,
@@ -240,7 +240,7 @@ fn bound(read: Read, filter: &TraceFilter, of: &Of<'_>) -> Read {
         .param("prompt", of.prompt)
 }
 
-/// The agent's environments in the window, the most runs first.
+/// The agent's environments in the window, the most traces first.
 ///
 /// # Errors
 ///
@@ -258,7 +258,7 @@ pub async fn environments(
         .await
 }
 
-/// The prompts the agent's runs name in the environment, the most runs first.
+/// The prompts the agent's traces name in the environment, the most traces first.
 ///
 /// # Errors
 ///
@@ -362,8 +362,8 @@ pub fn scored(rows: Vec<VersionRow>, means: Vec<ScoreRow>) -> (Vec<Version>, Vec
             Version {
                 value: row.value,
                 first_at: row.first_at,
-                runs: row.runs,
-                failed_runs: row.failed_runs,
+                traces: row.traces,
+                failed_traces: row.failed_traces,
                 p50_ms: row.p50_ms,
                 p95_ms: row.p95_ms,
                 median_spend: row.median_spend,
@@ -381,8 +381,8 @@ mod tests {
     fn row(value: &str) -> VersionRow {
         VersionRow {
             value: value.into(),
-            runs: 1,
-            failed_runs: 0,
+            traces: 1,
+            failed_traces: 0,
             first_at: DateTime::from_timestamp(1_800_000_000, 0).unwrap_or_default(),
             p50_ms: None,
             p95_ms: None,

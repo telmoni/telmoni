@@ -84,7 +84,7 @@ export {
   fetchHistory,
   fetchIncident,
   fetchObjectives,
-  fetchRunIncidents,
+  fetchTraceIncidents,
 } from "./entities/alerts";
 export type {
   AgentHistory,

@@ -94,7 +94,7 @@ impl Projects {
             .and_then(Value::as_array)
             .expect("traces")
             .iter()
-            .map(|t| t["run_id"].as_str().expect("a run id").to_owned())
+            .map(|t| t["trace_id"].as_str().expect("a trace id").to_owned())
             .collect()
     }
 }
@@ -117,15 +117,15 @@ async fn land_in(
     };
     let rows = vec![
         SpanRow {
-            run_id: run,
+            trace_id: run.simple().to_string(),
             span_id: "00000000000000a1".into(),
             started_at: started,
             session_id: session.into(),
             tags: owned(tags),
-            ..span(project, SpanKind::Run, "nightly-report", 2_000)
+            ..span(project, SpanKind::Agent, "nightly-report", 2_000)
         },
         SpanRow {
-            run_id: run,
+            trace_id: run.simple().to_string(),
             span_id: "00000000000000a2".into(),
             parent_span_id: "00000000000000a1".into(),
             started_at: started,
@@ -151,7 +151,9 @@ async fn a_sort_by_a_tag_orders_runs_those_without_it_last(pool: PgPool) {
     let b = land_in(&ch, &p.ours, "s2", &[("repo", "a")]).await;
     let c = land_in(&ch, &p.ours, "s2", &[("repo", "c")]).await;
     let d = land_in(&ch, &p.ours, "s3", &[("team", "core")]).await;
-    let ids = |runs: &[Uuid]| -> Vec<String> { runs.iter().map(Uuid::to_string).collect() };
+    let ids = |runs: &[Uuid]| -> Vec<String> {
+        runs.iter().map(|run| run.simple().to_string()).collect()
+    };
 
     assert_eq!(p.runs("?sort=tag:repo").await, ids(&[b, a, c, d]));
     assert_eq!(p.runs("?sort=tag:repo&dir=desc").await, ids(&[c, a, b, d]));

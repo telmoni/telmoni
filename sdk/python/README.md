@@ -1,12 +1,14 @@
 # Telmoni Python SDK
 
 `telmoni`, the Python SDK for [Telmoni](https://github.com/telmoni/telmoni),
-privacy-first, open-source monitoring for AI agents: an agent's runs, steps,
+privacy-first, open-source monitoring for AI agents: an agent's traces, steps,
 model calls, tool calls and retrievals as OpenTelemetry spans, sent to Telmoni
 and nowhere else. It runs a tracer provider of its own
-beside whatever OpenTelemetry your application already has, sends nothing
-outside a run, and takes prompts, completions and tool payloads off every span
-before it leaves the process unless you ask and the project allows.
+beside whatever OpenTelemetry your application already has — a trace opened
+while an application span is current is a trace of its own, linked to that
+span, and the application's spans stay with the application's exporter — sends
+nothing outside a trace, and takes prompts, completions and tool payloads off
+every span before it leaves the process unless you ask and the project allows.
 
 ## Installation
 
@@ -33,7 +35,7 @@ from telmoni import Telmoni, Usage
 telmoni = Telmoni.from_env()
 
 
-@telmoni.run("support-bot")
+@telmoni.trace("support-bot")
 def answer(question: str) -> str:
     with telmoni.step("plan"):
         with telmoni.model_call("gpt-4o-mini", provider="openai") as call:
@@ -51,20 +53,24 @@ def answer(question: str) -> str:
     return reply.text
 
 
-with telmoni.run(
+with telmoni.trace(
     "support-bot",
     user_id="user_42",
     session_id="conv_7",
     tags={"env": "prod"},
-) as run:
+) as trace:
     ...
 
-telmoni.flush()  # before the process exits soon after a run, or a pool's task returns
+telmoni.flush()  # before the process exits soon after a trace, or a pool's task returns
 ```
 
-Each of `run`, `step`, `model_call`, `tool_call` and `retrieval` is a context
+Each of `trace`, `step`, `model_call`, `tool_call` and `retrieval` is a context
 manager, an `async with`, and a decorator; on a generator, sync or async, the
-decorator's span covers its iteration. A retrieval is a search of a vector store
+decorator's span covers its iteration. A trace is one execution of an agent:
+the span `invoke_agent <agent>` at the root of a trace of its own, whose id
+`trace.trace_id` holds as 32 hex digits, linked to whatever span the
+application had current when it opened, so a job looping over a thousand
+executions is a thousand traces, never one. A retrieval is a search of a vector store
 or an index, sent as `retrieval <source>`, or with `memory=True` of a memory
 store, sent as `search_memory`; `returned(documents)` takes the list it found,
 a list or a tuple, and sends how many it holds in every mode beside the
@@ -74,7 +80,7 @@ with the exception's class, records its message and stack trace on the span as
 an `exception` event and the status's message, content
 ([Content](#content)), and is raised again; a
 `KeyboardInterrupt` or `asyncio.CancelledError`, or a generator closed before
-its end, marks it cancelled. `fail()` and `cancel()` do the same by hand. `run` raises `ValueError` for a blank agent
+its end, marks it cancelled. `fail()` and `cancel()` do the same by hand. `trace` raises `ValueError` for a blank agent
 name or a cap that is no cap
 ([The guard](#the-guard)). A token count, or a retrieval's `top_k`, is read
 from a number or its text, its fraction cut, and `Usage`'s `cost` is what the
@@ -95,7 +101,7 @@ named nothing goes as `step`, a model call with no model and a retrieval with
 a blank source are named by their operation alone, and a model call of
 an operation ingest reads as no model call, any but `chat`, `generate_content`, `text_completion` and `embeddings`,
 goes as `chat`; each with one warning, where ingest would refuse the span,
-or the whole run for its agent, user or session, or file the call elsewhere.
+or the whole trace for its agent, user or session, or file the call elsewhere.
 
 `model_call(..., prompt="support-reply", prompt_version="3")` names the prompt
 the call used, sent on its span in every content mode, so a prompt's name names
@@ -104,19 +110,19 @@ past ingest's 1,024 characters is left off, never cut, and so is a version whose
 name is none or was left off, each with one warning; one that is no string goes
 as its text, with one warning. A recorded call names no prompt.
 
-## A run recorded after it ended
+## A trace recorded after it ended
 
 A job that keeps its own log, or a hook that runs once the turn it reports is
-over, hands the finished run to `record_run` as data:
+over, hands the finished trace to `record_trace` as data:
 
 ```python
 from datetime import datetime, timezone
 
-from telmoni import ModelCallRecord, RunRecord, StepRecord, ToolCallRecord, Usage
+from telmoni import ModelCallRecord, StepRecord, ToolCallRecord, TraceRecord, Usage
 
-telmoni.record_run(
-    RunRecord(
-        run_id="3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",  # yours, kept with the log
+telmoni.record_trace(
+    TraceRecord(
+        trace_id="3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",  # yours, kept with the log: 32 hex digits
         agent="nightly-triage",
         session_id="conv_7",
         start=datetime(2026, 10, 12, 9, 0, tzinfo=timezone.utc),
@@ -145,14 +151,14 @@ A `StepRecord` holds its `calls`, steps among them, a subagent's own subagents
 say, up to 16 deep, each under the step that holds it. A model call's
 `reasoning_effort`, how hard it was asked to reason, is sent in every content
 mode. It is sent as the live calls would have sent it, through the same exporter
-and content rules, in a trace of its own named by the run's id,
-whatever trace is current. Each span's id is derived from the run's id and the
-span's place in the record, so the same record sent again is the same bytes,
-which ingest answers once: give a run the same id each time you send it. A
-record's content is its run's messages (`input_messages`, `output_messages`),
-a model call's (`input_messages`, `output_messages`), a tool call's `arguments` and `result`,
-and a step's messages, a subagent's task and answer. A blank agent, a run id that is neither a hyphenated
-UUID nor 32 hex digits, or is the nil UUID, a time without its timezone or
+and content rules, under the trace id the record gives, whatever trace is
+current. Each span's id is derived from that id and the span's place in the
+record, so the same record sent again is the same bytes, which ingest answers
+once: give a trace the same id each time you send it. A record's content is
+the agent's messages (`input_messages`, `output_messages`), a model call's
+(`input_messages`, `output_messages`), a tool call's `arguments` and `result`,
+and a step's messages, a subagent's task and answer. A blank agent, a trace id
+that is not 32 hex digits or is all zeros, a time without its timezone or
 outside what ingest reads (after the Unix epoch, and less than 2^64 nanoseconds
 after it, in July 2554), an empty step's name or model, text longer than
 ingest keeps (a step's or a tool's name past 145 characters, the agent, a
@@ -172,20 +178,20 @@ One made once the client is shut down raises `ShutdownError`.
 ## Scores
 
 A score is a name and a number, a yes or no, or a category. On a handle still
-open, `run.score("relevance", 0.75, range=(0, 1), version="judge-2")` adds it
+open, `trace.score("relevance", 0.75, range=(0, 1), version="judge-2")` adds it
 to that span, timed now; `True` or `False` is a yes or no, and a `str` a
 category. Once it has ended, the client's `score` sends it, naming what it
-scores — a run, a run and one of its spans (`run.run_id`, `step.span_id`), or a
-session:
+scores — a trace, a trace and one of its spans (`trace.trace_id`,
+`step.span_id`), or a session:
 
 ```python
-telmoni.score("thumbs", True, run_id=run_id)
-telmoni.score("relevance", 0.5, run_id=run_id, span_id=span_id, range=(0, 1))
+telmoni.score("thumbs", True, trace_id=trace_id)
+telmoni.score("relevance", 0.5, trace_id=trace_id, span_id=span_id, range=(0, 1))
 telmoni.score("outcome", "resolved", session_id="conv_7")
 ```
 
 It goes with the next export, through the same queue, so `flush()` and
-`shutdown()` hold it. A recorded run, and each step and call in it, takes
+`shutdown()` hold it. A recorded trace, and each step and call in it, takes
 `scores=[{"name": ..., "value": ..., "range": ..., "version": ...}]`, each timed
 at that span's end. A name, a category or a version is trimmed and up to 64
 characters; a number is finite and within its range; a span holds up to 16. A
@@ -195,26 +201,26 @@ mode say, and never handed to the mask.
 
 ## The guard
 
-`telmoni.run("support-bot", max_steps=20, max_spend=0.50)` holds a run to caps
-on its steps and on what its model calls cost, in US dollars, counted in this
-process with no call to Telmoni. Past one, the next step, model call, tool
+`telmoni.trace("support-bot", max_steps=20, max_spend=0.50)` holds a trace to
+caps on its steps and on what its model calls cost, in US dollars, counted in
+this process with no call to Telmoni. Past one, the next step, model call, tool
 call or retrieval raises `CapExceededError`, a `RuntimeError` naming the `cap` (`steps` or
-`spend`), its `limit` and what the run had `used`, before it opens: a step past
-the step cap, and anything once the run spent its spend cap or more. A call
+`spend`), its `limit` and what the trace had `used`, before it opens: a step past
+the step cap, and anything once the trace spent its spend cap or more. A call
 counts its reported `cost`; else its tokens at a price handed as
 `Config(prices=[Price(provider=..., model=..., input=..., output=...)])`, which
 the SDK alone holds, so Telmoni's own reads still price that call by the
 table; else at the price table this package carries, LiteLLM's, by its
 provider and the model it answered as; else nothing. A call answered again
-counts as its span then holds it. `run.spent` reads the count; a continued run
-carries no cap.
+counts as its span then holds it. `trace.spent` reads the count; a continued
+trace carries no cap.
 
 ## Content
 
 Prompts, completions, tool arguments and results, and a retrieval's query and
 documents (`input_messages`, `output_messages`, `arguments`, `query`,
-`returned(...)`, and a run's own `run(input_messages=)` and
-`run.answered(output_messages=)`) are recorded on
+`returned(...)`, and the agent's own `trace(input_messages=)` and
+`trace.answered(output_messages=)`) are recorded on
 the span and taken off by the exporter before anything leaves the process. They are sent
 only when the client is built with `Config(capture_content=True)`, or from
 `Config.from_env()` with `TELMONI_CAPTURE_CONTENT=1`, **and** the
@@ -291,8 +297,11 @@ it off, and a `capture_content` set in code afterwards stands. Any
 configuration whose `scrub_secrets` or `scrub_pii` the code leaves unset reads
 `TELMONI_SCRUB_SECRETS` or `TELMONI_SCRUB_PII`, trimmed alike
 ([Content](#content)); a `True` or `False` set in code stands over either.
-`environment` and `release` name the deployment every span is sent from, as
-the resource's `deployment.environment.name` and `service.version`. `prices`
+`sampler` is the OpenTelemetry sampler whose decision a trace takes as it
+opens; unset, the application's own tracer provider's decides, or everything
+is sampled, and a trace is sent whatever it decides. `environment` and
+`release` name the deployment every span is sent from, as the resource's
+`deployment.environment.name` and `service.version`. `prices`
 hands [the guard](#the-guard) prices of your own, a `ValueError` for one that
 names no provider or model or is no number from 0; nothing of them is sent.
 The key never appears in `repr`,
@@ -310,16 +319,16 @@ is neither a name of letters, digits, dots, hyphens and underscores, in labels
 of 1 to 63 characters with no hyphen at either end and the last no number, nor
 an IPv4 address in four decimal parts, nor an IPv6 one in brackets.
 
-## A run across services
+## A trace across services
 
-Before a request leaves a run, `telmoni.inject(headers)` writes the W3C
-`traceparent` of the span current and the run's id and agent as `baggage`
-members into any mutable mapping of headers. In the service that answers,
-`run = telmoni.extract(request.headers)` gives the run back, continued there:
-`telmoni.step("work", run=run)` and the calls inside nest under the caller's
-span and carry the caller's run, and nothing of the run itself is sent from
-this side. Headers that name no run give `None`, and a step opened with it
-is outside a run.
+Before a request leaves a trace, `telmoni.inject(headers)` writes the W3C
+`traceparent` of the span current and the agent as a `baggage` member into any
+mutable mapping of headers. In the service that answers,
+`trace = telmoni.extract(request.headers)` gives the trace back, continued
+there: `telmoni.step("work", trace=trace)` and the calls inside nest under the
+caller's span and carry the caller's agent, and nothing of the trace itself is
+sent from this side. Headers that name no trace give `None`, and a step opened
+with it is outside a trace.
 
 The variables, the attributes each span carries, and the other SDKs are
 documented at [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).

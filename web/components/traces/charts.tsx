@@ -26,7 +26,7 @@ import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-const METRICS = ["runs", "tokens", "cost", "duration", "first_token", "score"] as const;
+const METRICS = ["traces", "tokens", "cost", "duration", "first_token", "score"] as const;
 type Metric = (typeof METRICS)[number];
 
 /** The metrics `histogram` can draw: a score's mean only where the list is
@@ -36,7 +36,7 @@ function drawn(histogram: TraceHistogram): Metric[] {
 }
 
 const METRIC_LABEL: Record<Metric, string> = {
-  runs: "Runs",
+  traces: "Traces",
   tokens: "Tokens",
   cost: "Cost",
   duration: "Duration",
@@ -44,10 +44,10 @@ const METRIC_LABEL: Record<Metric, string> = {
   score: "Score",
 };
 
-// The theme's own colours, which follow it into the dark: a run that ended
+// The theme's own colours, which follow it into the dark: a trace that ended
 // well in the muted ink, a failure in the destructive red the status badge
 // wears, a cancelled one fainter than either.
-const RUNS: ChartConfig = {
+const TRACES: ChartConfig = {
   ok: { label: "OK", color: "var(--muted-foreground)" },
   error: { label: "Error", color: "var(--destructive)" },
   cancelled: { label: "Cancelled", color: "var(--ring)" },
@@ -121,8 +121,8 @@ function MetricChart({
   const changed = new Map(marks.map((mark) => [mark.at, mark.changes]));
   const lines = metric === "duration" || metric === "first_token" || metric === "score";
   const config =
-    metric === "runs"
-      ? RUNS
+    metric === "traces"
+      ? TRACES
       : metric === "tokens"
         ? TOKENS
         : metric === "cost"
@@ -241,9 +241,9 @@ function MetricChart({
             <Bar dataKey={metric} fill={`var(--color-${metric})`} radius={2} />
           ) : (
             <>
-              <Bar dataKey="ok" stackId="runs" fill="var(--color-ok)" />
-              <Bar dataKey="cancelled" stackId="runs" fill="var(--color-cancelled)" />
-              <Bar dataKey="error" stackId="runs" fill="var(--color-error)" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="ok" stackId="traces" fill="var(--color-ok)" />
+              <Bar dataKey="cancelled" stackId="traces" fill="var(--color-cancelled)" />
+              <Bar dataKey="error" stackId="traces" fill="var(--color-error)" radius={[2, 2, 0, 0]} />
             </>
           )}
           {changeLines}
@@ -254,7 +254,7 @@ function MetricChart({
 }
 
 // The strip above the table:
-// the window's runs by when they started, or their tokens or durations,
+// the window's traces by when they started, or their tokens or durations,
 // picked beside it. A region rather than a `<section>`, which the console
 // keeps for a page's own blocks.
 export function TraceHistogramStrip({
@@ -264,9 +264,9 @@ export function TraceHistogramStrip({
   histogram: TraceHistogram;
   marks: readonly ChangeMark[];
 }) {
-  const [picked, setMetric] = useState<Metric>("runs");
-  // A score picked, then its filter cleared, falls back to the runs.
-  const metric = drawn(histogram).includes(picked) ? picked : "runs";
+  const [picked, setMetric] = useState<Metric>("traces");
+  // A score picked, then its filter cleared, falls back to the traces.
+  const metric = drawn(histogram).includes(picked) ? picked : "traces";
   return (
     <div role="region" className="grid gap-1" aria-label="Over the window">
       <div className="flex items-center gap-gutter">
@@ -294,7 +294,7 @@ export function TraceHistogramStrip({
   );
 }
 
-// The charts in the table's place, two by two: the window's runs by how they
+// The charts in the table's place, two by two: the window's traces by how they
 // ended, their tokens, how long they ran and how soon their first model call
 // began to answer — the median and the slowest twentieth — and, where the
 // list is narrowed to a score, that score's mean, each a bar of the same width.

@@ -54,10 +54,10 @@ export const Role = {
 } as const;
 export type Role = typeof Role[keyof typeof Role];
 
-/** Wire vocabulary of the Rust `SpanKind`: what one span of a run is. */
+/** Wire vocabulary of the Rust `SpanKind`: what one span of a trace is. */
 export const SpanKind = {
-  Run:       "run",
-  RunStart:  "run_start",
+  Agent:      "agent",
+  TraceStart: "trace_start",
   Step:      "step",
   ModelCall: "model_call",
   ToolCall:  "tool_call",
@@ -119,7 +119,7 @@ export type ScoreSource = typeof ScoreSource[keyof typeof ScoreSource];
 
 /** Wire vocabulary of the Rust `ScoreTarget`: what a score judges. */
 export const ScoreTarget = {
-  Run:     "run",
+  Trace:   "trace",
   Span:    "span",
   Session: "session",
 } as const;
@@ -146,7 +146,7 @@ export type MetricsGroup = typeof MetricsGroup[keyof typeof MetricsGroup];
 export const ChartMeasure = {
   Spend:      "spend",
   Tokens:     "tokens",
-  Runs:       "runs",
+  Traces:     "traces",
   Latency:    "latency",
   FirstToken: "first_token",
 } as const;

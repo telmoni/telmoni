@@ -155,7 +155,7 @@ pub async fn hold(
     }
 }
 
-/// Tags a person adds to a run in the console, held to its project's cap for
+/// Tags a person adds to a trace in the console, held to its project's cap for
 /// the day `now` falls in as an export's are, each one kept counted: the cap
 /// the first is past, or `None` where every one is kept or Redis does not
 /// answer.

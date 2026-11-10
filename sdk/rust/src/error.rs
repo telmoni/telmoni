@@ -1,36 +1,36 @@
-//! What the SDK refuses: what it cannot make a run of, and what a run opens
-//! past a cap it was opened with.
+//! What the SDK refuses: what it cannot make a trace of, and what a trace
+//! opens past a cap it was opened with.
 
 use std::fmt;
 
-/// Why a run did not open, a record was not sent, or a step or call did not
+/// Why a trace did not open, a record was not sent, or a step or call did not
 /// open. Nothing else in the SDK fails: a step, a model call, a tool call or
-/// a retrieval opens unless its run reached a cap, and an export that fails is warned
-/// about, never returned.
+/// a retrieval opens unless its trace reached a cap, and an export that fails
+/// is warned about, never returned.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The agent's name was blank; a run is counted under its agent.
+    /// The agent's name was blank; a trace is counted under its agent.
     EmptyAgent,
-    /// A run's `max_steps` was 0, a cap no step fits under.
+    /// A trace's `max_steps` was 0, a cap no step fits under.
     MaxSteps,
-    /// A run's `max_spend` was not a finite number of US dollars above 0.
+    /// A trace's `max_spend` was not a finite number of US dollars above 0.
     MaxSpend(f64),
-    /// The run reached a cap it was opened with, so what it would open next
+    /// The trace reached a cap it was opened with, so what it would open next
     /// opens nothing.
     CapExceeded {
         /// Which cap.
         cap: Cap,
         /// The cap.
         limit: f64,
-        /// What the run had used of it: its steps opened, or the US dollars
+        /// What the trace had used of it: its steps opened, or the US dollars
         /// it spent.
         used: f64,
     },
-    /// A recorded run's id was not a UUID, or was the nil UUID: its trace's id
-    /// and its spans' are derived from it, and a trace id of zeros is invalid.
-    RunId,
-    /// A recorded span — the run's own, a step's or a call's — ended before
+    /// A recorded trace's id was not 32 hex digits, or was all zeros: its
+    /// spans' ids are derived from it, and a trace id of zeros is invalid.
+    TraceId,
+    /// A recorded span — the agent's own, a step's or a call's — ended before
     /// it started.
     EndBeforeStart,
     /// A recorded time fell at or before the Unix epoch, or 2^64 nanoseconds
@@ -46,7 +46,7 @@ pub enum Error {
         /// The most characters ingest takes there.
         max: usize,
     },
-    /// A recorded step was nested more than `max` deep, a step in the run
+    /// A recorded step was nested more than `max` deep, a step in the trace
     /// itself 1 deep.
     TooDeep {
         /// The deepest a step may be nested.
@@ -66,11 +66,11 @@ pub enum Error {
     Shutdown,
 }
 
-/// A run's cap, which [`Error::CapExceeded`] names.
+/// A trace's cap, which [`Error::CapExceeded`] names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Cap {
-    /// `max_steps`: the run's steps.
+    /// `max_steps`: the trace's steps.
     Steps,
     /// `max_spend`: what its model calls cost.
     Spend,
@@ -80,14 +80,14 @@ pub enum Cap {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Text {
-    /// The run's agent.
-    RunAgent,
-    /// The run's `user_id`.
-    RunUserId,
-    /// The run's `session_id`.
-    RunSessionId,
-    /// The run's `error_type`.
-    RunErrorType,
+    /// The trace's agent.
+    TraceAgent,
+    /// The trace's `user_id`.
+    TraceUserId,
+    /// The trace's `session_id`.
+    TraceSessionId,
+    /// The trace's `error_type`.
+    TraceErrorType,
     /// A step's name.
     StepName,
     /// A step's `error_type`.
@@ -109,10 +109,10 @@ pub enum Text {
 impl fmt::Display for Text {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::RunAgent => "run's agent",
-            Self::RunUserId => "run's user_id",
-            Self::RunSessionId => "run's session_id",
-            Self::RunErrorType => "run's error_type",
+            Self::TraceAgent => "trace's agent",
+            Self::TraceUserId => "trace's user_id",
+            Self::TraceSessionId => "trace's session_id",
+            Self::TraceErrorType => "trace's error_type",
             Self::StepName => "step's name",
             Self::StepErrorType => "step's error_type",
             Self::ModelCallModel => "model call's model",
@@ -128,7 +128,7 @@ impl fmt::Display for Text {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyAgent => f.write_str("a run needs its agent's name"),
+            Self::EmptyAgent => f.write_str("a trace needs its agent's name"),
             Self::MaxSteps => f.write_str("max_steps must be a whole number above 0"),
             Self::MaxSpend(spend) => write!(
                 f,
@@ -138,17 +138,17 @@ impl fmt::Display for Error {
                 cap: Cap::Steps,
                 limit,
                 ..
-            } => write!(f, "the run reached its step cap of {limit}"),
+            } => write!(f, "the trace reached its step cap of {limit}"),
             Self::CapExceeded {
                 cap: Cap::Spend,
                 limit,
                 used,
             } => write!(
                 f,
-                "the run reached its spend cap of ${limit}, having spent ${used}"
+                "the trace reached its spend cap of ${limit}, having spent ${used}"
             ),
-            Self::RunId => {
-                f.write_str("a recorded run's id must be a UUID other than the nil UUID")
+            Self::TraceId => {
+                f.write_str("a recorded trace's id must be 32 hex digits, not all zeros")
             }
             Self::EndBeforeStart => f.write_str("a recorded span cannot end before it starts"),
             Self::RecordedTime => f.write_str(

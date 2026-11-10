@@ -7,7 +7,7 @@ import { ScoreSource, ScoreTarget, ScoreType } from "@/lib/types/enums";
 export const ScoreSchema = z.object({
   score_id: z.string(),
   target: z.enum(ScoreTarget),
-  run_id: z.string().optional(),
+  trace_id: z.string().optional(),
   span_id: z.string().optional(),
   session_id: z.string().optional(),
   name: z.string(),

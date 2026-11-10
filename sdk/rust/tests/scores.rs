@@ -14,7 +14,7 @@ use common::{
 };
 use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
-use telmoni::{Config, RunOptions, RunRecord, Score, ScoreTarget, StepRecord, Telmoni};
+use telmoni::{Config, Score, ScoreTarget, StepRecord, Telmoni, TraceOptions, TraceRecord};
 
 const SCORES: &str = "https://api.telmoni.com/v1/scores";
 
@@ -90,7 +90,7 @@ fn posted(harness: &Harness) -> Result<Vec<Value>, Failure> {
         .collect()
 }
 
-/// Each `scores` case on a run's span: kept as the event the fixture names,
+/// Each `scores` case on an agent's span: kept as the event the fixture names,
 /// or refused with one `input` warning and no event.
 #[test]
 fn a_live_score_is_kept_or_refused_as_the_fixture_says() -> Outcome {
@@ -100,12 +100,14 @@ fn a_live_score_is_kept_or_refused_as_the_fixture_says() -> Outcome {
     {
         let label = text(case, "case")?;
         let harness = Harness::new()?;
-        let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-        run.score(score_of(case)?);
-        run.end();
+        let trace = harness
+            .telmoni
+            .trace("support-bot", TraceOptions::default())?;
+        trace.score(score_of(case)?);
+        trace.end();
         harness.flush()?;
         let spans = harness.spans()?;
-        let got = events(spans.first().ok_or("the run's span")?)?;
+        let got = events(spans.first().ok_or("the agent's span")?)?;
         if case["refused"] == true {
             assert!(got.is_empty(), "{label}: {got:?}");
             assert_eq!(harness.warnings.kinds(), ["input"], "{label}");
@@ -164,13 +166,13 @@ fn a_late_scores_target_is_taken_or_refused_as_the_fixture_says() -> Outcome {
         let label = text(case, "case")?;
         let harness = Harness::new()?;
         let ids = |key: &str| case[key].as_str().map(str::to_owned);
-        let target = match (ids("run_id"), ids("span_id"), ids("session_id")) {
-            (Some(run), Some(span), None) => ScoreTarget::span(run, span),
-            (Some(run), None, None) => ScoreTarget::run(run),
+        let target = match (ids("trace_id"), ids("span_id"), ids("session_id")) {
+            (Some(trace), Some(span), None) => ScoreTarget::span(trace, span),
+            (Some(trace), None, None) => ScoreTarget::trace(trace),
             (None, None, Some(session)) => ScoreTarget::session(session),
             // The shapes the builders cannot make, refused as the rest are.
             (None, Some(span), None) => ScoreTarget::span("", span),
-            (Some(run), _, Some(_)) => ScoreTarget::span(run, "not-a-span"),
+            (Some(trace), _, Some(_)) => ScoreTarget::span(trace, "not-a-span"),
             _ => ScoreTarget::session(""),
         };
         harness
@@ -187,7 +189,7 @@ fn a_late_scores_target_is_taken_or_refused_as_the_fixture_says() -> Outcome {
             return Err(format!("{label}: {bodies:?}").into());
         };
         let item = &body["scores"][0];
-        for key in ["run_id", "span_id", "session_id"] {
+        for key in ["trace_id", "span_id", "session_id"] {
             assert_eq!(item.get(key), case["kept"].get(key), "{label}: {key}");
         }
     }
@@ -203,9 +205,9 @@ fn late_scores_leave_as_one_body_and_never_as_spans() -> Outcome {
     for score in fixture["late"]["scores"].as_array().ok_or("late")? {
         let target = &score["target"];
         let id = |key: &str| target[key].as_str().map(str::to_owned);
-        let target = match (id("run_id"), id("span_id")) {
-            (Some(run), Some(span)) => ScoreTarget::span(run, span),
-            (Some(run), None) => ScoreTarget::run(run),
+        let target = match (id("trace_id"), id("span_id")) {
+            (Some(trace), Some(span)) => ScoreTarget::span(trace, span),
+            (Some(trace), None) => ScoreTarget::trace(trace),
             _ => ScoreTarget::session(id("session_id").unwrap_or_default()),
         };
         harness.telmoni.score(&target, score_of(score)?);
@@ -236,19 +238,21 @@ fn late_scores_leave_as_one_body_and_never_as_spans() -> Outcome {
     Ok(())
 }
 
-/// `live`: three scores on one run, its span's events as the fixture sends them.
+/// `live`: three scores on one trace, its span's events as the fixture sends them.
 #[test]
 fn live_scores_ride_on_their_span_as_evaluation_events() -> Outcome {
     let fixture = load_fixture("scores.json")?;
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
     for score in fixture["live"]["scores"].as_array().ok_or("live")? {
-        run.score(score_of(score)?);
+        trace.score(score_of(score)?);
     }
-    run.end();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
-    let got = Value::Array(events(spans.first().ok_or("the run's span")?)?);
+    let got = Value::Array(events(spans.first().ok_or("the agent's span")?)?);
     assert!(same(&got, &fixture["live"]["events"]), "{got}");
     Ok(())
 }
@@ -287,15 +291,17 @@ fn a_span_holds_its_cap_of_scores() -> Outcome {
         .as_u64()
         .ok_or("per_span_max")?;
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
     for i in 0..=cap {
-        run.score(Score::number(format!("score-{i}"), 0.5));
+        trace.score(Score::number(format!("score-{i}"), 0.5));
     }
-    run.end();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
     assert_eq!(
-        events(spans.first().ok_or("the run's span")?)?.len(),
+        events(spans.first().ok_or("the agent's span")?)?.len(),
         usize::try_from(cap)?
     );
     assert_eq!(harness.warnings.kinds(), ["input"]);
@@ -309,8 +315,8 @@ fn a_records_scores_ride_on_its_spans_at_their_ends() -> Outcome {
     let harness = Harness::new()?;
     let start = UNIX_EPOCH + Duration::from_secs(1_760_000_000);
     let at = |seconds| start + Duration::from_secs(seconds);
-    let run_id = "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a";
-    harness.telmoni.record_run(RunRecord {
+    let trace_id = "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a";
+    harness.telmoni.record_trace(TraceRecord {
         scores: vec![Score::boolean("thumbs", true)],
         inside: vec![
             StepRecord {
@@ -322,7 +328,7 @@ fn a_records_scores_ride_on_its_spans_at_their_ends() -> Outcome {
             }
             .into(),
         ],
-        ..RunRecord::new(run_id, "support-bot", start, at(3))
+        ..TraceRecord::new(trace_id, "support-bot", start, at(3))
     })?;
     harness.flush()?;
     let spans = harness.spans()?;
@@ -362,18 +368,20 @@ fn a_score_is_never_handed_to_the_mask() -> Outcome {
         ..keyed()
     };
     let harness = Harness::answering(config, std::iter::repeat_n(Ok(mode_on()), 4))?;
-    // The mode learned first, so the run's content would leave.
+    // The mode learned first, so the trace's content would leave.
     harness
         .telmoni
-        .run("support-bot", RunOptions::default())?
+        .trace("support-bot", TraceOptions::default())?
         .end();
     harness.flush()?;
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-    run.score(Score::category("tone", "polite"));
-    run.end();
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
+    trace.score(Score::category("tone", "polite"));
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
-    let got = events(spans.last().ok_or("the run's span")?)?;
+    let got = events(spans.last().ok_or("the agent's span")?)?;
     assert_eq!(got.len(), 1, "{got:?}");
     assert!(
         got[0]["attributes"].to_string().contains("polite"),
@@ -395,8 +403,10 @@ fn a_score_is_never_handed_to_the_mask() -> Outcome {
 #[test]
 fn an_evaluation_events_explanation_stays_content() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-    opentelemetry::trace::TraceContextExt::span(&run.context()).add_event(
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
+    opentelemetry::trace::TraceContextExt::span(&trace.context()).add_event(
         "gen_ai.evaluation.result",
         vec![
             opentelemetry::KeyValue::new("gen_ai.evaluation.name", "relevance"),
@@ -404,10 +414,10 @@ fn an_evaluation_events_explanation_stays_content() -> Outcome {
             opentelemetry::KeyValue::new("gen_ai.evaluation.explanation", "4242 said the user"),
         ],
     );
-    run.end();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
-    let got = events(spans.first().ok_or("the run's span")?)?;
+    let got = events(spans.first().ok_or("the agent's span")?)?;
     let keys: Vec<&str> = got[0]["attributes"]
         .as_array()
         .ok_or("attributes")?
@@ -457,24 +467,26 @@ fn scores_past_a_bodys_cap_go_in_bodies_of_it() -> Outcome {
     Ok(())
 }
 
-/// Only the client's own root span carries a late score: a run's span an
+/// Only the client's own root span carries a late score: an agent's span an
 /// application sets the attribute on still leaves as a span.
 #[test]
 fn an_applications_attribute_diverts_no_span() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("support-bot", RunOptions::default())?;
-    opentelemetry::trace::TraceContextExt::span(&run.context()).set_attribute(
+    let trace = harness
+        .telmoni
+        .trace("support-bot", TraceOptions::default())?;
+    opentelemetry::trace::TraceContextExt::span(&trace.context()).set_attribute(
         opentelemetry::KeyValue::new("telmoni.score.sent", r#"{"name":"x"}"#),
     );
-    run.end();
+    trace.end();
     harness.flush()?;
-    assert_eq!(harness.spans()?.len(), 1, "the run's span left as a span");
+    assert_eq!(harness.spans()?.len(), 1, "the agent's span left as a span");
     assert!(posted(&harness)?.is_empty());
     Ok(())
 }
 
 /// A record's refused score is warned of before its hold, so a sink that
-/// records a run of its own, as a hook's may, is never held up by it.
+/// records a trace of its own, as a hook's may, is never held up by it.
 #[test]
 fn a_records_refused_score_is_warned_of_before_its_hold() -> Outcome {
     static CLIENT: OnceLock<Telmoni> = OnceLock::new();
@@ -487,28 +499,28 @@ fn a_records_refused_score_is_warned_of_before_its_hold() -> Outcome {
             && let Some(telmoni) = CLIENT.get()
         {
             let now = SystemTime::now();
-            let inner = RunRecord::new("6b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a", "inner", now, now);
-            telmoni.record_run(inner).ok();
+            let inner = TraceRecord::new("6b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a", "inner", now, now);
+            telmoni.record_trace(inner).ok();
         }
     });
     CLIENT.set(Telmoni::with_hooks(keyed(), hooks)).ok();
     let (sent, got) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let now = SystemTime::now();
-        let record = RunRecord {
+        let record = TraceRecord {
             scores: vec![Score::number("", 0.5)],
-            ..RunRecord::new("5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a", "outer", now, now)
+            ..TraceRecord::new("5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a", "outer", now, now)
         };
         sent.send(
             CLIENT
                 .get()
-                .map(|telmoni| telmoni.record_run(record).is_ok()),
+                .map(|telmoni| telmoni.record_trace(record).is_ok()),
         )
         .ok();
     });
     let recorded = got
         .recv_timeout(Duration::from_secs(10))
-        .map_err(|_| "record_run held up")?;
+        .map_err(|_| "record_trace held up")?;
     assert_eq!(recorded, Some(true));
     Ok(())
 }

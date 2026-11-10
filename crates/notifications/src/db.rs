@@ -1305,7 +1305,7 @@ pub async fn enqueue_routed<B: Binding>(
     sqlx::query_as::<_, (Uuid, Uuid)>(
         "INSERT INTO notifications.deliveries
             (id, connection_id, project_id, organization_id, kind, subject, body, route,
-             shard_key, incident_id, run_url)
+             shard_key, incident_id, trace_url)
          SELECT t.id, t.connection_id, $3::text, $4::text, $5::text, $6::text, $7::text,
                 $8::text, $9::uuid, $10::uuid, $11::text
            FROM unnest($1::uuid[], $2::uuid[]) AS t(id, connection_id)
@@ -1321,7 +1321,7 @@ pub async fn enqueue_routed<B: Binding>(
     .bind(route)
     .bind(telmoni_shared::derive_shard_key(organization_id))
     .bind(incident.map(|incident| incident.id))
-    .bind(incident.and_then(|incident| incident.run_url))
+    .bind(incident.and_then(|incident| incident.trace_url))
     .fetch_all(tx.conn())
     .await
 }
@@ -1502,12 +1502,12 @@ pub struct LeasedDelivery {
     pub attempts: i32,
     /// The incident an opening or its reminder is about.
     pub incident_id: Option<Uuid>,
-    /// The run it shows, on the console.
-    pub run_url: Option<String>,
+    /// The trace it shows, on the console.
+    pub trace_url: Option<String>,
 }
 
 const LEASED_COLUMNS: &str =
-    "d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts, d.incident_id, d.run_url";
+    "d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts, d.incident_id, d.trace_url";
 
 /// Lease up to `limit` eligible deliveries, `SKIP LOCKED`.
 ///
@@ -1992,7 +1992,7 @@ pub async fn claim_for_redelivery(
           WHERE d.id = $3 AND d.project_id = $1 AND d.connection_id = $2
             AND (d.lease_until IS NULL OR d.lease_until < now())
       RETURNING d.id, d.connection_id, d.kind, d.subject, d.body, d.attempts, d.incident_id,
-                d.run_url, d.lease_until",
+                d.trace_url, d.lease_until",
     )
     .bind(project_id)
     .bind(connection_id)

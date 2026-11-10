@@ -86,10 +86,10 @@ function draft(over: Partial<AlertDraft> = {}): AlertDraft {
 }
 
 describe("what an alert measures", () => {
-  it("measures tokens on model calls alone and cost on runs alone", () => {
+  it("measures tokens on model calls alone and cost on traces alone", () => {
     for (const kind of ALERT_KINDS) {
       expect(measuresFor(kind).includes(RuleMeasure.Tokens)).toBe(kind === SpanKind.ModelCall);
-      expect(measuresFor(kind).includes(RuleMeasure.Cost)).toBe(kind === SpanKind.Run);
+      expect(measuresFor(kind).includes(RuleMeasure.Cost)).toBe(kind === SpanKind.Agent);
     }
   });
 
@@ -110,11 +110,11 @@ describe("what an alert measures", () => {
   it("reads a metric in its notices' words", () => {
     expect(metricWords(ALERT)).toBe("The p95 duration of model calls over the last hour");
     expect(
-      metricWords({ kind: SpanKind.Run, measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg, window: RuleWindow.Day }),
-    ).toBe("The share failed of runs over the last day");
+      metricWords({ kind: SpanKind.Agent, measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg, window: RuleWindow.Day }),
+    ).toBe("The share failed of traces over the last day");
     expect(
-      metricWords({ kind: SpanKind.Run, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Max, window: RuleWindow.Week }),
-    ).toBe("The most a run spent over the last week");
+      metricWords({ kind: SpanKind.Agent, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Max, window: RuleWindow.Week }),
+    ).toBe("The most a trace spent over the last week");
     expect(
       metricWords({ kind: SpanKind.ToolCall, measure: RuleMeasure.Count, aggregation: RuleAggregation.Count, window: RuleWindow.Hour }),
     ).toBe("The count of tool calls over the last hour");
@@ -126,9 +126,9 @@ describe("what an alert measures", () => {
     expect(amount(RuleMeasure.Failures, RuleAggregation.Count, 3)).toBe("3");
     expect(amount(RuleMeasure.Cost, RuleAggregation.Max, 3.45)).toBe("$3.45");
     expect(
-      metricWords({ kind: SpanKind.Run, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Sum, window: RuleWindow.Month }),
+      metricWords({ kind: SpanKind.Agent, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Sum, window: RuleWindow.Month }),
       "a budget",
-    ).toBe("What the runs spent so far this month");
+    ).toBe("What the traces spent so far this month");
     expect(thresholdWords(ALERT)).toEqual({ alert: "> 5,000 ms", warning: "> 3,000 ms" });
   });
 });
@@ -167,7 +167,7 @@ describe("the form", () => {
   it("types a share as a percentage, and sends it as the share", () => {
     const share: Alert = {
       ...ALERT,
-      kind: SpanKind.Run,
+      kind: SpanKind.Agent,
       measure: RuleMeasure.Failures,
       aggregation: RuleAggregation.Avg,
       alert_threshold: 0.1,
@@ -181,7 +181,7 @@ describe("the form", () => {
   it("sends the filters the kind's spans carry, each value once", () => {
     const checked = inputOf(
       draft({
-        kind: SpanKind.Run,
+        kind: SpanKind.Agent,
         measure: RuleMeasure.Count,
         aggregation: RuleAggregation.Count,
         filters: { ...draftOf(ALERT).filters, agent: " triage, support , triage,", model: "gpt-4o" },
@@ -191,7 +191,7 @@ describe("the form", () => {
       agent: ["triage", "support"],
       status: [SpanStatus.Error],
     });
-    expect(filterFieldsFor(SpanKind.Run, RuleMeasure.Cost), "a budget by its tag").toEqual([
+    expect(filterFieldsFor(SpanKind.Agent, RuleMeasure.Cost), "a budget by its tag").toEqual([
       "agent",
       "model",
       "provider",
@@ -199,7 +199,7 @@ describe("the form", () => {
       "release",
       "tag",
     ]);
-    expect(filterFieldsFor(SpanKind.Run, RuleMeasure.Count)).not.toContain("tag");
+    expect(filterFieldsFor(SpanKind.Agent, RuleMeasure.Count)).not.toContain("tag");
     expect(filterFieldsFor(SpanKind.ToolCall, RuleMeasure.Count)).toEqual([
       "agent",
       "tool",
@@ -208,11 +208,11 @@ describe("the form", () => {
     ]);
   });
 
-  // A run's cost is read from its calls as they land: their model, never a status.
-  it("filters a run's cost by its calls' model and provider, never by status", () => {
+  // A trace's cost is read from its calls as they land: their model, never a status.
+  it("filters a trace's cost by its calls' model and provider, never by status", () => {
     const checked = inputOf(
       draft({
-        kind: SpanKind.Run,
+        kind: SpanKind.Agent,
         measure: RuleMeasure.Cost,
         aggregation: RuleAggregation.Max,
         alertThreshold: "5",
@@ -388,12 +388,12 @@ describe("a score alert", () => {
       alert_threshold: -20,
       warning_threshold: -10,
     });
-    expect(filterFieldsFor(SpanKind.Run, RuleMeasure.Score)).toEqual([]);
+    expect(filterFieldsFor(SpanKind.Agent, RuleMeasure.Score)).toEqual([]);
     expect(filtersStatus(RuleMeasure.Score)).toBe(false);
   });
 
   it("reads an empty window as no data, where it is no 0, and refuses a 0 there", () => {
-    const scored = withMeasure({ ...NEW_ALERT, kind: SpanKind.Run }, RuleMeasure.Score);
+    const scored = withMeasure({ ...NEW_ALERT, kind: SpanKind.Agent }, RuleMeasure.Score);
     expect(scored.missingData).toBe(MissingData.NoData);
     expect(withMeasure({ ...scored, aggregation: RuleAggregation.Count }, RuleMeasure.Score).missingData).toBe(
       MissingData.NoData,
@@ -415,7 +415,7 @@ describe("a score alert", () => {
 
   it("reads in its notices' words, and a change as a signed percentage", () => {
     const metric = {
-      kind: SpanKind.Run,
+      kind: SpanKind.Agent,
       measure: RuleMeasure.Score,
       aggregation: RuleAggregation.Avg,
       window: RuleWindow.Day,
@@ -444,18 +444,18 @@ describe("loops and stalls", () => {
   };
   const LOOPING = [RuleMeasure.Steps, RuleMeasure.Repeats, RuleMeasure.Stalled];
 
-  it("reads a run's steps, repeats and stalls on runs alone", () => {
+  it("reads a trace's steps, repeats and stalls on traces alone", () => {
     for (const kind of ALERT_KINDS) {
-      for (const measure of LOOPING) expect(measuresFor(kind).includes(measure)).toBe(kind === SpanKind.Run);
+      for (const measure of LOOPING) expect(measuresFor(kind).includes(measure)).toBe(kind === SpanKind.Agent);
     }
   });
 
-  // Read as a run's spans land, before its own status is known.
+  // Read as a trace's spans land, before the agent's own status is known.
   it("filters them by agent, environment and release, never by status", () => {
     const checked = inputOf(LOOPS);
     expect(checked.ok && checked.input).toMatchObject({ measure: RuleMeasure.Repeats, filters: { agent: ["support-agent"] } });
     for (const measure of LOOPING) {
-      expect(filterFieldsFor(SpanKind.Run, measure)).toEqual(["agent", "environment", "release"]);
+      expect(filterFieldsFor(SpanKind.Agent, measure)).toEqual(["agent", "environment", "release"]);
       expect(filtersStatus(measure)).toBe(false);
     }
   });
@@ -473,27 +473,27 @@ describe("loops and stalls", () => {
     expect(inputOf(stalled).ok).toBe(true);
     expect(inputOf({ ...stalled, window: RuleWindow.Month })).toEqual({
       ok: false,
-      error: "A stall is a run quiet past the window: the last hour, day or week.",
+      error: "A stall is a trace quiet past the window: the last hour, day or week.",
     });
   });
 
   it("reads in its notices' words", () => {
-    const run = { kind: SpanKind.Run, window: RuleWindow.Hour };
-    expect(metricWords({ ...run, measure: RuleMeasure.Repeats, aggregation: RuleAggregation.Max })).toBe(
-      "The most times a run called one tool in a row over the last hour",
+    const trace = { kind: SpanKind.Agent, window: RuleWindow.Hour };
+    expect(metricWords({ ...trace, measure: RuleMeasure.Repeats, aggregation: RuleAggregation.Max })).toBe(
+      "The most times a trace called one tool in a row over the last hour",
     );
-    expect(metricWords({ ...run, measure: RuleMeasure.Steps, aggregation: RuleAggregation.P95, window: RuleWindow.Day })).toBe(
-      "The p95 of the steps a run took over the last day",
+    expect(metricWords({ ...trace, measure: RuleMeasure.Steps, aggregation: RuleAggregation.P95, window: RuleWindow.Day })).toBe(
+      "The p95 of the steps a trace took over the last day",
     );
-    expect(metricWords({ ...run, measure: RuleMeasure.Steps, aggregation: RuleAggregation.Max })).toBe(
-      "The most steps a run took over the last hour",
+    expect(metricWords({ ...trace, measure: RuleMeasure.Steps, aggregation: RuleAggregation.Max })).toBe(
+      "The most steps a trace took over the last hour",
     );
-    expect(metricWords({ ...run, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count })).toBe(
-      "The count of runs left open and quiet for over an hour",
+    expect(metricWords({ ...trace, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count })).toBe(
+      "The count of traces left open and quiet for over an hour",
     );
     expect(
-      metricWords({ ...run, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count, window: RuleWindow.Week }),
-    ).toBe("The count of runs left open and quiet for over a week");
+      metricWords({ ...trace, measure: RuleMeasure.Stalled, aggregation: RuleAggregation.Count, window: RuleWindow.Week }),
+    ).toBe("The count of traces left open and quiet for over a week");
     expect(amount(RuleMeasure.Repeats, RuleAggregation.Max, 12)).toBe("12");
   });
 });
@@ -669,9 +669,9 @@ describe("maintenance windows", () => {
 
 describe("starterWords", () => {
   it("names the starters in a sentence", () => {
-    expect(starterWords([RuleMeasure.Stalled])).toBe("Stalled runs");
+    expect(starterWords([RuleMeasure.Stalled])).toBe("Stalled traces");
     expect(starterWords([RuleMeasure.Failures, RuleMeasure.Repeats, RuleMeasure.Stalled])).toBe(
-      "Failing runs, Looping runs and Stalled runs",
+      "Failing traces, Looping traces and Stalled traces",
     );
   });
 });
@@ -706,7 +706,7 @@ describe("suggestionFor", () => {
       },
       {
         agent: null,
-        kind: SpanKind.Run,
+        kind: SpanKind.Agent,
         spans: 400,
         hours: 200,
         duration_ms: percentiles(20_000, 60_000, 90_000),
@@ -740,18 +740,18 @@ describe("suggestionFor", () => {
   it("reads every agent's where none is named, and an hour's spend for an hour's sum", () => {
     expect(suggestionFor(draft({}), HISTORY)?.who).toBe("every agent");
     const spend = suggestionFor(
-      draft({ kind: SpanKind.Run, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Sum }),
+      draft({ kind: SpanKind.Agent, measure: RuleMeasure.Cost, aggregation: RuleAggregation.Sum }),
       HISTORY,
     );
     expect(spend?.levels[0]).toMatchObject({ level: "p50", typed: "0.2" });
   });
 
-  it("offers the share of an hour's runs that failed in whole percents, up, as a starter's is set", () => {
+  it("offers the share of an hour's traces that failed in whole percents, up, as a starter's is set", () => {
     const got = suggestionFor(
-      draft({ kind: SpanKind.Run, measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg }),
+      draft({ kind: SpanKind.Agent, measure: RuleMeasure.Failures, aggregation: RuleAggregation.Avg }),
       HISTORY,
     );
-    expect(got?.what).toBe("the share of an hour's runs that failed");
+    expect(got?.what).toBe("the share of an hour's traces that failed");
     expect(got?.levels).toEqual([
       { level: "p50", shown: "0%", typed: "0" },
       { level: "p90", shown: "4%", typed: "4" },

@@ -49,7 +49,7 @@ import { deleteTraceAction, eraseEndUserAction } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 const PROJECT = "project_1";
-const OPEN = "11111111-1111-4111-8111-111111111111";
+const OPEN = "5d4f5c68000040008000000000000001";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -61,7 +61,7 @@ describe("deleting a trace", () => {
   it("goes back to the list, its query dropped, once the lane deleted it", async () => {
     posted.path = `/acme/web/traces/${OPEN}?span=abc`;
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ run_id: OPEN, spans: 3, fields: 0 }), { status: 200 }),
+      new Response(JSON.stringify({ trace_id: OPEN, spans: 3, fields: 0 }), { status: 200 }),
     );
     await expect(deleteTraceAction(PROJECT, OPEN)).rejects.toThrow("REDIRECT:/acme/web/traces");
     expect(fetchMock).toHaveBeenCalledWith(
@@ -71,11 +71,15 @@ describe("deleting a trace", () => {
     );
   });
 
-  it("refuses what is no run's id before asking the lane, and says why the lane refused", async () => {
-    expect(await deleteTraceAction(PROJECT, "../views")).toEqual({
-      ok: false,
-      error: "Invalid trace id.",
-    });
+  it("refuses what is no trace id before asking the lane, and says why the lane refused", async () => {
+    // Only 32 lowercase hex digits reach the lane: not a path, a hyphenated
+    // id, one digit short or an upper-case one.
+    for (const given of ["../views", "11111111-1111-4111-8111-111111111111", OPEN.slice(1), OPEN.toUpperCase()]) {
+      expect(await deleteTraceAction(PROJECT, given), given).toEqual({
+        ok: false,
+        error: "Invalid trace id.",
+      });
+    }
     expect(fetchMock).not.toHaveBeenCalled();
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
     expect((await deleteTraceAction(PROJECT, OPEN)).ok).toBe(false);

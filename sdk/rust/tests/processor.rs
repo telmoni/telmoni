@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use common::{FakeTransport, Harness, Outcome, Sleeps, Warnings, client, hooks, keyed, name_of};
 use telmoni::transport::{Answer, Method, Transport, TransportError};
-use telmoni::{Batching, RunOptions, Telmoni};
+use telmoni::{Batching, Telmoni, TraceOptions};
 
 #[test]
 fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
@@ -25,14 +25,14 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
-    let run = telmoni.run("bot", RunOptions::default())?;
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
     // The run's opening goes at once; the queue is filled after it.
-    assert!(transport.wait_for(1), "the run's opening");
+    assert!(transport.wait_for(1), "the trace's opening");
     for n in 0..5 {
-        let step = run.step(&format!("s{n}"))?;
+        let step = trace.step(&format!("s{n}"))?;
         step.end();
     }
-    run.end();
+    trace.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
 
@@ -49,7 +49,7 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
     assert!(warning.contains("queue was full"), "{warning}");
     assert!(
         warning.contains("4 spans"),
-        "three steps and the run itself: {warning}"
+        "three steps and the agent's span itself: {warning}"
     );
     assert_eq!(warnings.kinds(), ["queue_full"]);
     Ok(())
@@ -68,14 +68,17 @@ fn a_delay_of_nothing_sends_at_once() -> Outcome {
         ..Batching::default()
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
-    // Each run's opening goes first, at once, whatever the delay.
-    let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening");
-    run.end();
-    assert!(transport.wait_for(2), "the run's span was not sent at once");
-    let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(3), "the run's opening");
-    run.end();
+    // Each trace's opening goes first, at once, whatever the delay.
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
+    assert!(transport.wait_for(1), "the trace's opening");
+    trace.end();
+    assert!(
+        transport.wait_for(2),
+        "the trace's span was not sent at once"
+    );
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
+    assert!(transport.wait_for(3), "the trace's opening");
+    trace.end();
     assert!(transport.wait_for(4), "an idle worker missed the next span");
     telmoni.shutdown();
     Ok(())
@@ -84,8 +87,8 @@ fn a_delay_of_nothing_sends_at_once() -> Outcome {
 #[test]
 fn shutdown_drains_what_is_queued() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    run.end();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    trace.end();
     harness.telmoni.shutdown();
     assert_eq!(
         harness.spans()?.iter().map(name_of).collect::<Vec<_>>(),
@@ -102,8 +105,8 @@ fn dropping_the_client_drains_what_is_queued() -> Outcome {
     let sleeps = Sleeps::default();
     {
         let telmoni = client(keyed(), &transport, &warnings, &sleeps);
-        let run = telmoni.run("bot", RunOptions::default())?;
-        run.end();
+        let trace = telmoni.trace("bot", TraceOptions::default())?;
+        trace.end();
     }
     assert_eq!(
         transport.spans()?.iter().map(name_of).collect::<Vec<_>>(),
@@ -125,14 +128,14 @@ fn a_batch_fills_and_goes_without_a_flush() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
-    let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening");
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
+    assert!(transport.wait_for(1), "the trace's opening");
     for n in 0..3 {
-        let step = run.step(&format!("s{n}"))?;
+        let step = trace.step(&format!("s{n}"))?;
         step.end();
     }
     assert!(transport.wait_for(2), "three steps fill a batch of three");
-    run.end();
+    trace.end();
     telmoni.shutdown();
     assert!(warnings.all().is_empty());
     Ok(())
@@ -157,22 +160,25 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
 
     // The steps overflow the queue before the worker wakes, so the batch the
     // flush takes carries a drop count and the hook panics on its warning.
-    let run = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening, out of the queue");
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
+    assert!(
+        transport.wait_for(1),
+        "the trace's opening, out of the queue"
+    );
     for n in 0..3 {
-        let step = run.step(&format!("s{n}"))?;
+        let step = trace.step(&format!("s{n}"))?;
         step.end();
     }
-    run.end();
+    trace.end();
     assert!(
         telmoni.flush(),
         "the flush waited on a worker that was gone"
     );
 
-    // The worker is alive: a run after the panic is sent.
+    // The worker is alive: a trace after the panic is sent.
     let sent = transport.count();
-    let again = telmoni.run("bot", RunOptions::default())?;
-    assert!(transport.wait_for(sent + 1), "the run's opening");
+    let again = telmoni.trace("bot", TraceOptions::default())?;
+    assert!(transport.wait_for(sent + 1), "the trace's opening");
     again.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
@@ -182,15 +188,15 @@ fn a_hook_that_panics_does_not_stop_the_exporter() -> Outcome {
         spans.iter().any(|span| name_of(span) == "s0"),
         "the batch beside the warning that panicked was not sent"
     );
-    let runs = spans
+    let agents = spans
         .iter()
         .filter(|span| name_of(span) == "invoke_agent bot")
         .count();
-    assert_eq!(runs, 1, "the run after the panic was not sent");
+    assert_eq!(agents, 1, "the trace after the panic was not sent");
     Ok(())
 }
 
-/// ⚠ A transport that panics loses that batch alone: a flush returns and the next run goes.
+/// ⚠ A transport that panics loses that batch alone: a flush returns and the next trace goes.
 #[test]
 fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
     /// Panics on its first export once armed, then hands each to the fake.
@@ -219,16 +225,16 @@ fn a_transport_that_panics_does_not_stop_the_exporter() -> Outcome {
     hooks.transport = Box::new(PanicsOnce(Arc::clone(&armed), transport.clone()));
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
-    // Armed past the run's opening, so the batch lost is the run's own.
-    let lost = telmoni.run("lost", RunOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening");
+    // Armed past the trace's opening, so the batch lost is the trace's own.
+    let lost = telmoni.trace("lost", TraceOptions::default())?;
+    assert!(transport.wait_for(1), "the trace's opening");
     armed.store(true, Ordering::SeqCst);
     lost.end();
     assert!(
         telmoni.flush(),
         "the flush waited on a worker that was gone"
     );
-    telmoni.run("sent", RunOptions::default())?.end();
+    telmoni.trace("sent", TraceOptions::default())?.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
     let spans = transport.spans()?;

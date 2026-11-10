@@ -42,8 +42,8 @@ export type TraceColumn = typeof TraceColumn[keyof typeof TraceColumn];
 const Values = z.array(z.string()).optional();
 
 /** What narrows a list as the URL carries it, in the sidebar's order: a
- *  filter is the values any of which admits a run, a key left out narrowing
- *  nothing; a session or a user is admitted by a run of theirs. The one list
+ *  filter is the values any of which admits a trace, a key left out narrowing
+ *  nothing; a session or a user is admitted by a trace of theirs. The one list
  *  of the keys: the facets and every lane's query take them from here. */
 export const ListFiltersSchema = z.object({
   agent: Values,
@@ -97,7 +97,7 @@ export const TagSortSchema = z.custom<TagSort>(
   (value) => typeof value === "string" && readTagSort(value) !== undefined,
 );
 
-// One score name of a run or a session: its mean, how many, and a
+// One score name of a trace or a session: its mean, how many, and a
 // category's values, which have no mean.
 export const ScoreSummarySchema = z.object({
   name: z.string(),
@@ -108,18 +108,22 @@ export const ScoreSummarySchema = z.object({
 });
 export type ScoreSummary = z.infer<typeof ScoreSummarySchema>;
 
-// One trace of the list: a run's spans summed by the server, which reads the
+/** A trace's id as the path and the lanes take it: OpenTelemetry's, 32
+ *  lowercase hex digits, never all zeros. */
+export const TraceIdSchema = z.string().regex(/^(?!0{32}$)[0-9a-f]{32}$/);
+
+// One trace of the list: its spans summed by the server, which reads the
 // project's spans and no other's. `user_id` is as stored, hashed, and
-// `ended` says whether the run's own span has
+// `ended` says whether the agent's own span has
 // arrived; until it has, `status` is read off the spans that have.
 export const TraceSchema = z.object({
-  run_id: z.string(),
+  trace_id: z.string(),
   agent: z.string(),
   user_id: z.string(),
   session_id: z.string(),
   ended: z.boolean(),
   status: z.enum(SpanStatus),
-  /** The class of the error the run's own span ended on, never its
+  /** The class of the error the agent's own span ended on, never its
    *  message; empty otherwise. */
   error_type: z.string(),
   started_at: z.string(),
@@ -143,7 +147,7 @@ export const TraceSchema = z.object({
   models: z.array(z.string()),
   tools: z.array(z.string()),
   /** The deployments its spans were sent from, each once: one, unless the
-   *  run crossed services deployed apart. */
+   *  trace crossed services deployed apart. */
   environments: z.array(z.string()),
   /** The releases its spans were sent from, each once. */
   releases: z.array(z.string()),
@@ -190,39 +194,39 @@ export const TraceSpanSchema = z.object({
 });
 export type TraceSpan = z.infer<typeof TraceSpanSchema>;
 
-/** What a run has spent, as an alert on its cost reads it: each call's cost
- *  as reported, else its tokens at Telmoni's price, and the models priced by
- *  neither, which it leaves out. */
-export const RunSpendSchema = z.object({
+/** What a trace has spent, as an alert on its cost reads it: each call's
+ *  cost as reported, else its tokens at Telmoni's price, and the models
+ *  priced by neither, which it leaves out. */
+export const TraceSpendSchema = z.object({
   spent: z.number(),
   unpriced: z.array(z.object({ provider: z.string(), model: z.string() })),
 });
-export type RunSpend = z.infer<typeof RunSpendSchema>;
+export type TraceSpend = z.infer<typeof TraceSpendSchema>;
 
 /** One span's content: each field its project kept, by name, as it arrived. */
 export const SpanFieldsSchema = z.object({
-  run_id: z.string(),
+  trace_id: z.string(),
   span_id: z.string(),
   fields: z.record(z.string(), z.string()),
 });
 export type SpanFields = z.infer<typeof SpanFieldsSchema>;
 
 export const TraceDetailSchema = z.object({
-  run_id: z.string(),
+  trace_id: z.string(),
   spans: z.array(TraceSpanSchema),
   truncated: z.boolean(),
   /** None where the server could not read it. */
-  spend: RunSpendSchema.nullable(),
+  spend: TraceSpendSchema.nullable(),
   /** Each span's content, its read filed in the audit log: empty where the
-   *  run kept none, null where it was not asked for or could not be opened. */
+   *  trace kept none, null where it was not asked for or could not be opened. */
   content: z.array(SpanFieldsSchema).nullable(),
 });
 export type TraceDetail = z.infer<typeof TraceDetailSchema>;
 
-/** A run as the trace list's peek reads it (`/api/v1/traces/[run]`): its
- *  trace, the incidents whose notices showed it, as its line names them, and
+/** A trace as the list's peek reads it (`/api/v1/traces/[trace]`): its
+ *  spans, the incidents whose notices showed it, as its line names them, and
  *  its scores, `null` where they could not be read. */
-export const PeekRunSchema = TraceDetailSchema.extend({
+export const PeekTraceSchema = TraceDetailSchema.extend({
   incidents: z
     // An alert's incident names no agent, a monitor's no alert.
     .array(z.object({ id: z.string(), rule_name: z.string().nullable(), agent: z.string().nullable() }))

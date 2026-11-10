@@ -46,7 +46,7 @@
   "paths": {
     "/v1/changes": {
       "get": {
-        "description": "Each first run of an agent, in one environment, to carry a release, a model or a prompt's version its runs there had not carried in the 30 days before, the newest first, 500 at most, `more` saying the window held more. An agent past 24 changes of one kind in a UTC day is marked no further that day, its last shown one `capped`.",
+        "description": "Each first trace of an agent, in one environment, to carry a release, a model or a prompt's version its traces there had not carried in the 30 days before, the newest first, 500 at most, `more` saying the window held more. An agent past 24 changes of one kind in a UTC day is marked no further that day, its last shown one `capped`.",
         "parameters": [
           {
             "description": "How many days back, 1 to 360; 7 where not given, and never more than the plan keeps.",
@@ -136,12 +136,12 @@
     },
     "/v1/incidents": {
       "get": {
-        "description": "The project's incidents, those not resolved first, then the newest, 200 at most; with `run`, those whose notices showed that run. Each names the `changes` its alert's or monitor's agents made in the 24 hours before it opened, 20 at most.",
+        "description": "The project's incidents, those not resolved first, then the newest, 200 at most; with `trace`, those whose notices showed that trace. Each names the `changes` its alert's or monitor's agents made in the 24 hours before it opened, 20 at most.",
         "parameters": [
           {
-            "description": "A run's id, a UUID.",
+            "description": "A trace's id, 32 hex characters.",
             "in": "query",
-            "name": "run",
+            "name": "trace",
             "required": false,
             "schema": {
               "type": "string"
@@ -160,7 +160,7 @@
                 }
               }
             },
-            "description": "A run that is not a UUID."
+            "description": "A trace that is not 32 hex digits."
           },
           "401": {
             "content": {
@@ -359,7 +359,7 @@
     },
     "/v1/metrics": {
       "get": {
-        "description": "The project's spans, runs, failures, tokens, spend and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release; or by a tag's values, the end user or the session, from the spans the plan keeps, the ten values that spent most each and the rest summed as one.",
+        "description": "The project's spans, traces, failures, tokens, spend and durations over the window, by the hour or the day, from the totals kept an hour at a time, and grouped, if asked, by one of agent, model, provider, tool, status, environment or release; or by a tag's values, the end user or the session, from the spans the plan keeps, the ten values that spent most each and the rest summed as one.",
         "parameters": [
           {
             "description": "The window, in days back from now: 1 to 360, 7 when left out, no further than the plan keeps spans.",
@@ -509,7 +509,7 @@
     },
     "/v1/scores": {
       "post": {
-        "description": "Up to 100 scores, as `{\"scores\": [...]}`, of runs, spans or sessions that already ended; a score on a span still open rides on it as OpenTelemetry's `gen_ai.evaluation.result` event instead. Each names a `run_id`, a `run_id` and a `span_id`, or a `session_id`; a `name` of 1 to 64 characters; a `data_type` of `number`, with a finite `value` and an optional `range_min` and `range_max`, `boolean`, with a `value` of 1 or 0, or `category`, with 1 to 10 `categories`; and optionally a `version` of what scored, up to 64 characters, and an `id`, a UUID of the caller's, under which a score sent again replaces itself. What it scores is not looked up, since a run's spans may land after its score. A score is metadata, kept in every content mode, and a request is metered as an export is.",
+        "description": "Up to 100 scores, as `{\"scores\": [...]}`, of traces, spans or sessions that already ended; a score on a span still open rides on it as OpenTelemetry's `gen_ai.evaluation.result` event instead. Each names a `trace_id`, a `trace_id` and a `span_id`, or a `session_id`; a `name` of 1 to 64 characters; a `data_type` of `number`, with a finite `value` and an optional `range_min` and `range_max`, `boolean`, with a `value` of 1 or 0, or `category`, with 1 to 10 `categories`; and optionally a `version` of what scored, up to 64 characters, and an `id`, a UUID of the caller's, under which a score sent again replaces itself. What it scores is not looked up, since a trace's spans may land after its score. A score is metadata, kept in every content mode, and a request is metered as an export is.",
         "requestBody": {
           "content": {
             "application/json": {}
@@ -572,7 +572,7 @@
             "description": "The lane is switched off, or something it needs did not answer. A switched-off lane says when to try again in `Retry-After`."
           }
         },
-        "summary": "Score runs, spans and sessions"
+        "summary": "Score traces, spans and sessions"
       }
     },
     "/v1/traces": {
@@ -683,14 +683,14 @@
         "summary": "The project's traces"
       }
     },
-    "/v1/traces/{run_id}": {
+    "/v1/traces/{trace_id}": {
       "get": {
-        "description": "One trace's spans, the run's own among them, in the order they started, and what the run spent. With `content=true`, each span's content too, where the project keeps it: every such read is filed in the organization's audit log as the key's.",
+        "description": "One trace's spans, the agent's own among them, in the order they started, and what the trace spent. With `content=true`, each span's content too, where the project keeps it: every such read is filed in the organization's audit log as the key's.",
         "parameters": [
           {
-            "description": "The run's id, a UUID.",
+            "description": "The trace's id, 32 hex digits.",
             "in": "path",
-            "name": "run_id",
+            "name": "trace_id",
             "required": true,
             "schema": {
               "type": "string"
@@ -718,7 +718,7 @@
                 }
               }
             },
-            "description": "A run id that is not a UUID."
+            "description": "A trace id that is not 32 hex digits."
           },
           "401": {
             "content": {
@@ -748,7 +748,7 @@
                 }
               }
             },
-            "description": "No such run in the project, or one older than the plan keeps."
+            "description": "No such trace in the project, or one older than the plan keeps."
           },
           "429": {
             "content": {

@@ -87,7 +87,7 @@ def test_a_deployment_named_past_ingests_cap_is_left_off_with_one_warning(
         transport=transport,
     )
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
     finally:
@@ -160,10 +160,10 @@ def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(
     assert Config(release="\x1c2026.10.18").release == "\x1c2026.10.18"
     assert Config(release="\x852026.10.18\u3000").release == "2026.10.18"
     assert Config(environment="\x85").environment is None
-    with pytest.raises(ValueError, match="agent's name"), telmoni.run("\x85"):
+    with pytest.raises(ValueError, match="agent's name"), telmoni.trace("\x85"):
         pass
-    with telmoni.run("\x1c") as run:
-        assert run.agent == "\x1c"
+    with telmoni.trace("\x1c") as trace:
+        assert trace.agent == "\x1c"
 
 
 def test_capture_content_that_is_no_bool_is_refused() -> None:
@@ -335,7 +335,7 @@ def test_a_refusal_whose_body_breaks_is_sent_once(
     client = Telmoni(Config(endpoint=answering + "/too-large", api_key="k"))
     client.exporter._sleep = sleeps.append
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
     finally:
         client.shutdown()
@@ -371,7 +371,7 @@ def test_a_head_cut_before_its_blank_line_is_no_answer_and_sent_again(
     client = Telmoni(Config(endpoint=answering + "/cut-head", api_key="k"))
     client.exporter._sleep = sleeps.append
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
     finally:
         client.shutdown()
@@ -412,7 +412,7 @@ def test_a_first_line_that_is_no_status_is_no_answer_and_sent_again(
     client = Telmoni(Config(endpoint=answering + "/no-status", api_key="k"))
     client.exporter._sleep = sleeps.append
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
     finally:
         client.shutdown()
@@ -643,7 +643,7 @@ def test_a_number_ingest_cannot_read_never_costs_its_export() -> None:
 def test_a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Rather than lost, since a run's own span carries the run's end."""
+    """Rather than lost, since the agent's own span carries the trace's end."""
     transport = FakeTransport()
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:

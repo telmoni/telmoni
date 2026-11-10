@@ -1,4 +1,4 @@
-//! Scores: a judgement of a run, one of its spans or a session, as a name and
+//! Scores: a judgement of a trace, one of its spans or a session, as a name and
 //! a number, a yes or no, or a category. On a span still open it rides as
 //! OpenTelemetry's `gen_ai.evaluation.result` event; once ended, the client
 //! sends it to `/v1/scores`, through the export queue as any span goes, so a
@@ -112,32 +112,32 @@ impl Score {
     }
 }
 
-/// What a score sent once its span ended is of: a run, one of its spans, or
-/// a session.
+/// What a score sent once its span ended is of: a trace, one of its spans,
+/// or a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScoreTarget {
-    run_id: Option<String>,
+    trace_id: Option<String>,
     span_id: Option<String>,
     session_id: Option<String>,
 }
 
 impl ScoreTarget {
-    /// A run, by its id, a UUID.
+    /// A trace, by its id, 32 hex digits.
     #[must_use]
-    pub fn run(run_id: impl Into<String>) -> Self {
+    pub fn trace(trace_id: impl Into<String>) -> Self {
         Self {
-            run_id: Some(run_id.into()),
+            trace_id: Some(trace_id.into()),
             span_id: None,
             session_id: None,
         }
     }
 
-    /// One span of a run, by the run's id and the span's 16 hex digits.
+    /// One span of a trace, by the trace's id and the span's 16 hex digits.
     #[must_use]
-    pub fn span(run_id: impl Into<String>, span_id: impl Into<String>) -> Self {
+    pub fn span(trace_id: impl Into<String>, span_id: impl Into<String>) -> Self {
         Self {
             span_id: Some(span_id.into()),
-            ..Self::run(run_id)
+            ..Self::trace(trace_id)
         }
     }
 
@@ -145,7 +145,7 @@ impl ScoreTarget {
     #[must_use]
     pub fn session(session_id: impl Into<String>) -> Self {
         Self {
-            run_id: None,
+            trace_id: None,
             span_id: None,
             session_id: Some(session_id.into()),
         }
@@ -155,10 +155,10 @@ impl ScoreTarget {
     fn checked(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
         let mut ids = serde_json::Map::new();
         let session = self.session_id.as_deref().map(str::trim);
-        match (&self.run_id, &self.span_id, session) {
-            (Some(run), span, None) => {
-                let run = Uuid::parse_str(run).ok().filter(|run| !run.is_nil())?;
-                ids.insert("run_id".into(), run.to_string().into());
+        match (&self.trace_id, &self.span_id, session) {
+            (Some(trace), span, None) => {
+                let trace = crate::ids::trace_id(trace)?;
+                ids.insert("trace_id".into(), trace.to_string().into());
                 if let Some(span) = span {
                     if span.len() != 16 || !span.bytes().all(|b| b.is_ascii_hexdigit()) {
                         return None;
@@ -266,7 +266,7 @@ pub(crate) fn sent(target: &ScoreTarget, score: &Score, warner: &Warner) -> Opti
     let Some(ids) = target.checked() else {
         refused(
             warner,
-            "it names a run, a run and one of its spans by 16 hex digits, or a session of up to 200 characters",
+            "it names a trace by 32 hex digits, a trace and one of its spans by 16, or a session of up to 200 characters",
         );
         return None;
     };

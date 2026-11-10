@@ -171,11 +171,11 @@ fn ids(list: &Value) -> Vec<Uuid> {
         .expect("traces")
         .iter()
         .map(|t| {
-            t["run_id"]
+            t["trace_id"]
                 .as_str()
-                .expect("a run id")
+                .expect("a trace id")
                 .parse()
-                .expect("a UUID")
+                .expect("a UUID's hex")
         })
         .collect()
 }
@@ -186,8 +186,8 @@ fn trace(list: &Value, run: Uuid) -> &Value {
         .as_array()
         .expect("traces")
         .iter()
-        .find(|t| t["run_id"] == run.to_string())
-        .expect("the run is listed")
+        .find(|t| t["trace_id"] == run.simple().to_string())
+        .expect("the trace is listed")
 }
 
 /// A finished span of `run`, started at `started` and lasting `millis`, its
@@ -202,7 +202,7 @@ fn span_at(
     n: u64,
 ) -> SpanRow {
     SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         span_id: format!("{n:016x}"),
         started_at: started,
         ended_at: started + Duration::milliseconds(millis),
@@ -251,7 +251,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 ..span_at(
                     &p.ours,
                     a,
-                    SpanKind::Run,
+                    SpanKind::Agent,
                     "nightly-report",
                     a_start,
                     2_000,
@@ -337,7 +337,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 error_type: "RuntimeError".into(),
                 user_id: "user-b".into(),
                 session_id: "conv-2".into(),
-                ..span_at(&p.ours, b, SpanKind::Run, "support-bot", b_start, 500, 5)
+                ..span_at(&p.ours, b, SpanKind::Agent, "support-bot", b_start, 500, 5)
             },
             "staging",
             "2026.10.18",
@@ -386,7 +386,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             )
         },
         // Run D: another project's.
-        span_at(&p.theirs, d, SpanKind::Run, "nightly-report", now, 300, 8),
+        span_at(&p.theirs, d, SpanKind::Agent, "nightly-report", now, 300, 8),
     ];
     ch.store.insert_spans(&rows).await.expect("the spans land");
     Seeded { a, b, c, d }
@@ -421,7 +421,7 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
                 } else {
                     SpanStatus::Ok
                 },
-                ..span_at(project, id, SpanKind::Run, agent, started, 1_000, 1)
+                ..span_at(project, id, SpanKind::Agent, agent, started, 1_000, 1)
             };
             (id, if ended { vec![own, call] } else { vec![call] })
         };
@@ -446,8 +446,8 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
         nightly["agent"], "nightly-report",
         "the newest last run first"
     );
-    assert_eq!(nightly["runs"], 1);
-    assert_eq!(nightly["last_run_id"], running.to_string());
+    assert_eq!(nightly["traces"], 1);
+    assert_eq!(nightly["last_trace_id"], running.simple().to_string());
     assert_eq!(nightly["last_ended"], false, "its own span has not arrived");
     assert_eq!(nightly["last_spend"], 0.05);
     assert_eq!(
@@ -456,9 +456,9 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
         "no run of it has ended"
     );
     assert_eq!(support["agent"], "support-bot");
-    assert_eq!(support["runs"], 3);
-    assert_eq!(support["failed_runs"], 1);
-    assert_eq!(support["last_run_id"], last.to_string());
+    assert_eq!(support["traces"], 3);
+    assert_eq!(support["failed_traces"], 1);
+    assert_eq!(support["last_trace_id"], last.simple().to_string());
     assert_eq!(support["last_ended"], true);
     assert_eq!(support["last_status"], "ok");
     assert_eq!(support["last_spend"], 0.2);
@@ -478,7 +478,15 @@ async fn the_list_counts_a_runs_retrievals_beside_its_tool_calls(pool: PgPool) {
     let run = Uuid::new_v4();
     let start = Utc::now().trunc_subsecs(6) - Duration::minutes(2);
     let rows = [
-        span_at(&p.ours, run, SpanKind::Run, "support-bot", start, 1_000, 1),
+        span_at(
+            &p.ours,
+            run,
+            SpanKind::Agent,
+            "support-bot",
+            start,
+            1_000,
+            1,
+        ),
         span_at(
             &p.ours,
             run,
@@ -813,7 +821,7 @@ async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
     let e = span_at(
         &p.ours,
         Uuid::new_v4(),
-        SpanKind::Run,
+        SpanKind::Agent,
         "nightly-report",
         e_start,
         1_000,
@@ -920,7 +928,8 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
     let lines: Vec<&str> = text.split("\r\n").filter(|l| !l.is_empty()).collect();
     assert_eq!(lines.len(), 4, "the header and a row a run");
     assert!(
-        lines[0].starts_with("run_id,agent,user_id,session_id,ended,status,error_type,started_at")
+        lines[0]
+            .starts_with("trace_id,agent,user_id,session_id,ended,status,error_type,started_at")
     );
     assert!(
         lines[0].ends_with(",models,tools,environments,releases,tags,content"),
@@ -928,7 +937,7 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
         lines[0]
     );
     assert!(
-        lines[1].starts_with(&format!("{c},zeta,,,false,ok,")),
+        lines[1].starts_with(&format!("{},zeta,,,false,ok,", c.simple())),
         "{}",
         lines[1]
     );
@@ -943,14 +952,14 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content_type, "application/json");
     let rows: Value = serde_json::from_slice(&body).expect("JSON");
-    let run_ids = |rows: &Value| -> Vec<String> {
+    let trace_ids = |rows: &Value| -> Vec<String> {
         rows.as_array()
             .expect("rows")
             .iter()
-            .map(|r| r["run_id"].as_str().expect("a run id").to_owned())
+            .map(|r| r["trace_id"].as_str().expect("a trace id").to_owned())
             .collect()
     };
-    assert_eq!(run_ids(&rows), [a, b, c].map(|r| r.to_string()));
+    assert_eq!(trace_ids(&rows), [a, b, c].map(|r| r.simple().to_string()));
     assert_eq!(
         rows[0]["content"],
         serde_json::json!([]),
@@ -974,10 +983,10 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     let Seeded { a, d, .. } = seed(&ch, &p).await;
 
     let (status, body) = p
-        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{a}")))
+        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{}", a.simple())))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["run_id"], a.to_string());
+    assert_eq!(body["trace_id"], a.simple().to_string());
     assert_eq!(body["truncated"], false);
     let spans = body["spans"].as_array().expect("spans");
     let kinds: Vec<&str> = spans
@@ -986,7 +995,7 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
         .collect();
     assert_eq!(
         kinds,
-        ["run", "step", "model_call", "tool_call"],
+        ["agent", "step", "model_call", "tool_call"],
         "in the order they started"
     );
     let run = &spans[0];
@@ -1054,7 +1063,7 @@ async fn a_trace_carries_what_its_run_spent_and_the_models_no_price_covers(pool:
     let run = Uuid::new_v4();
     let at = Utc::now() - Duration::seconds(30);
     let call = |model: &str, input: u64, output: u64, cost: Option<f64>| SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         provider: "openai".into(),
         model: model.into(),
         input_tokens: input,
@@ -1078,7 +1087,7 @@ async fn a_trace_carries_what_its_run_spent_and_the_models_no_price_covers(pool:
         .expect("the calls are kept");
 
     let (status, body) = p
-        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{run}")))
+        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{}", run.simple())))
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let spent = body["spend"]["spent"].as_f64().expect("what it spent");
@@ -1182,7 +1191,7 @@ async fn a_trace_of_wide_spans_is_cut_where_their_units_pass_the_cap(pool: PgPoo
 
     for (run, shown, truncated) in [(cut, 2, true), (whole, 2, false)] {
         let (status, body) = p
-            .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{run}")))
+            .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{}", run.simple())))
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["truncated"], truncated, "{run}");

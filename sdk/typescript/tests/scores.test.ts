@@ -5,11 +5,11 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { trace } from '@opentelemetry/api';
+import { trace as otel } from '@opentelemetry/api';
 import { describe, expect, it } from 'vitest';
 
 import * as contract from '../src/contract';
-import type { Run, RunRecord, ScoreOptions, ScoreTarget } from '../src/index';
+import type { ScoreOptions, ScoreTarget, Trace, TraceRecord } from '../src/index';
 import {
   type ExportBody,
   type Harness,
@@ -40,7 +40,7 @@ interface ScoreCase {
 
 interface TargetCase {
   case: string;
-  run_id?: string;
+  trace_id?: string;
   span_id?: string;
   session_id?: string;
   kept?: Record<string, string>;
@@ -83,7 +83,7 @@ function optionsOf(spec: { type: ScoreCase['type']; range?: [Given, Given]; vers
 
 function targetOf(spec: TargetCase): ScoreTarget {
   const target: ScoreTarget = {};
-  if (spec.run_id !== undefined) target.runId = spec.run_id;
+  if (spec.trace_id !== undefined) target.traceId = spec.trace_id;
   if (spec.span_id !== undefined) target.spanId = spec.span_id;
   if (spec.session_id !== undefined) target.sessionId = spec.session_id;
   return target;
@@ -103,7 +103,7 @@ function scoresIn(h: Harness): Array<Array<Record<string, unknown>>> {
     .map((request) => (JSON.parse(request.body) as { scores: Array<Record<string, unknown>> }).scores);
 }
 
-function runSpan(h: Harness): JsonSpan {
+function agentSpan(h: Harness): JsonSpan {
   return one(exportsIn(h).filter((span) => span.name.startsWith('invoke_agent ')));
 }
 
@@ -117,10 +117,10 @@ function normalized(span: JsonSpan): Fixture['live']['events'] {
   });
 }
 
-async function scored(score: (run: Run) => void, config = {}): Promise<Harness> {
+async function scored(score: (trace: Trace) => void, config = {}): Promise<Harness> {
   const h = harness(config);
   try {
-    h.telmoni.run('bot', score);
+    h.telmoni.trace('bot', score);
     expect(await h.telmoni.flush()).toBe(true);
   } finally {
     await h.telmoni.shutdown();
@@ -131,8 +131,8 @@ async function scored(score: (run: Run) => void, config = {}): Promise<Harness> 
 describe('a live score', () => {
   for (const spec of fixture.scores) {
     it(`answers the fixture: ${spec.case}`, async () => {
-      const h = await scored((run) => run.score(spec.name, valueOf(spec.type, spec.value), optionsOf(spec)));
-      const span = runSpan(h);
+      const h = await scored((trace) => trace.score(spec.name, valueOf(spec.type, spec.value), optionsOf(spec)));
+      const span = agentSpan(h);
       if (spec.refused) {
         expect(span.events).toBeUndefined();
         expect(h.warnings).toHaveLength(1);
@@ -160,10 +160,10 @@ describe('a live score', () => {
   }
 
   it("answers the fixture's live events, each timed within its span to the nanosecond", async () => {
-    const h = await scored((run) => {
-      for (const spec of fixture.live.scores) run.score(spec.name, spec.value, optionsOf(spec));
+    const h = await scored((trace) => {
+      for (const spec of fixture.live.scores) trace.score(spec.name, spec.value, optionsOf(spec));
     });
-    const span = runSpan(h);
+    const span = agentSpan(h);
     expect(normalized(span)).toEqual(fixture.live.events);
     const times = span.events!.map((event) => BigInt(event.timeUnixNano));
     // Each its own time: two on one millisecond would be one score to the server.
@@ -172,8 +172,8 @@ describe('a live score', () => {
   });
 
   it('goes on a step and on each call, each its own span', async () => {
-    const h = await scored((run) =>
-      run.step('plan', (step) => {
+    const h = await scored((trace) =>
+      trace.step('plan', (step) => {
         step.score('a', 1);
         step.modelCall('m', (call) => call.score('b', true));
         step.toolCall('t', (tool) => tool.score('c', 'ok'));
@@ -190,16 +190,16 @@ describe('a live score', () => {
   });
 
   it("is sent with its score alone where content stays home, an app's explanation and a failure staying home", async () => {
-    const h = await scored((run) => {
-      trace.getSpan(run.context)!.addEvent('gen_ai.evaluation.result', {
+    const h = await scored((trace) => {
+      otel.getSpan(trace.context)!.addEvent('gen_ai.evaluation.result', {
         'gen_ai.evaluation.name': 'judge',
         'gen_ai.evaluation.score.value': 0.5,
         'gen_ai.evaluation.explanation': 'its reasoning, which is content',
       });
-      run.score('relevance', 0.5);
-      run.fail(new RangeError('a message, which is content'));
+      trace.score('relevance', 0.5);
+      trace.fail(new RangeError('a message, which is content'));
     });
-    const span = runSpan(h);
+    const span = agentSpan(h);
     expect(span.events!.map((event) => event.name)).toEqual(['gen_ai.evaluation.result', 'gen_ai.evaluation.result']);
     expect(span.events!.map((event) => attributesOf(event))).toEqual([
       { 'gen_ai.evaluation.name': 'judge', 'gen_ai.evaluation.score.value': 0.5 },
@@ -210,7 +210,7 @@ describe('a live score', () => {
 
   it("is never the mask's, nor a reason to ask the project's mode", async () => {
     const handed: string[] = [];
-    const h = await scored((run) => run.score('relevance', 0.5, { version: 'judge-2' }), {
+    const h = await scored((trace) => trace.score('relevance', 0.5, { version: 'judge-2' }), {
       captureContent: true,
       mask: (key: string, value: string) => {
         handed.push(key);
@@ -219,7 +219,7 @@ describe('a live score', () => {
     });
     // The export alone: no ask went first.
     expect(h.transport.requests).toHaveLength(1);
-    expect(one(runSpan(h).events!).attributes).toHaveLength(3);
+    expect(one(agentSpan(h).events!).attributes).toHaveLength(3);
     expect(handed).toEqual([]);
   });
 
@@ -231,13 +231,13 @@ describe('a live score', () => {
     };
     const h = harness({ captureContent: true, mask }, {}, Array.from({ length: 4 }, () => on));
     try {
-      h.telmoni.run('warm', { inputMessages: 'asks the mode' }, () => {});
+      h.telmoni.trace('warm', { inputMessages: 'asks the mode' }, () => {});
       expect(await h.telmoni.flush()).toBe(true);
       expect(h.telmoni.contentMode).toBe('on');
       handed.length = 0;
-      h.telmoni.run('bot', { inputMessages: 'masked away' }, (run) => {
-        for (const spec of fixture.live.scores) run.score(spec.name, spec.value, optionsOf(spec));
-        trace.getSpan(run.context)!.addEvent('gen_ai.evaluation.result', {
+      h.telmoni.trace('bot', { inputMessages: 'masked away' }, (trace) => {
+        for (const spec of fixture.live.scores) trace.score(spec.name, spec.value, optionsOf(spec));
+        otel.getSpan(trace.context)!.addEvent('gen_ai.evaluation.result', {
           'gen_ai.evaluation.name': 'judge',
           'gen_ai.evaluation.explanation': 'masked away too',
         });
@@ -259,8 +259,8 @@ describe('a live score', () => {
     const on = answer(200, { 'Telmoni-Content-Mode': 'on' }, '{}');
     const h = harness({ captureContent: true }, {}, Array.from({ length: 4 }, () => on));
     try {
-      h.telmoni.run('bot', (run) => {
-        trace.getSpan(run.context)!.addEvent('gen_ai.evaluation.result', {
+      h.telmoni.trace('bot', (trace) => {
+        otel.getSpan(trace.context)!.addEvent('gen_ai.evaluation.result', {
           'gen_ai.evaluation.name': 'judge',
           'gen_ai.evaluation.explanation': 'its reasoning',
         });
@@ -271,15 +271,15 @@ describe('a live score', () => {
     }
     expect(h.transport.requests).toHaveLength(2);
     expect(h.transport.requests[0]!.body).toBe('{"resourceSpans":[]}');
-    expect(attributesOf(one(runSpan(h).events!))['gen_ai.evaluation.explanation']).toBe('its reasoning');
+    expect(attributesOf(one(agentSpan(h).events!))['gen_ai.evaluation.explanation']).toBe('its reasoning');
   });
 
   it('is kept on a span trimmed to fit an export', async () => {
-    const h = await scored((run) => {
-      trace.getSpan(run.context)!.setAttribute('app.blob', 'x'.repeat(contract.BATCH_MAX_BYTES));
-      run.score('relevance', 0.5);
+    const h = await scored((trace) => {
+      otel.getSpan(trace.context)!.setAttribute('app.blob', 'x'.repeat(contract.BATCH_MAX_BYTES));
+      trace.score('relevance', 0.5);
     });
-    const span = runSpan(h);
+    const span = agentSpan(h);
     expect(attributesOf(span)['app.blob']).toBeUndefined();
     expect(attributesOf(one(span.events!))).toEqual({
       'gen_ai.evaluation.name': 'relevance',
@@ -289,17 +289,17 @@ describe('a live score', () => {
   });
 
   it(`is refused past ${contract.SCORES_PER_SPAN} on one span, with one warning`, async () => {
-    const h = await scored((run) => {
-      for (let n = 0; n <= contract.SCORES_PER_SPAN; n++) run.score(`s${n}`, n);
+    const h = await scored((trace) => {
+      for (let n = 0; n <= contract.SCORES_PER_SPAN; n++) trace.score(`s${n}`, n);
     });
-    expect(runSpan(h).events).toHaveLength(contract.SCORES_PER_SPAN);
+    expect(agentSpan(h).events).toHaveLength(contract.SCORES_PER_SPAN);
     expect(h.warnings).toEqual([`${NOT_SENT}its span holds 16 scores already`]);
   });
 
   it('is refused once its span has ended, with one warning', async () => {
-    let ended: Run | undefined;
-    const h = await scored((run) => {
-      ended = run;
+    let ended: Trace | undefined;
+    const h = await scored((trace) => {
+      ended = trace;
     });
     ended!.score('late', 1);
     ended!.score('later', 1);
@@ -309,13 +309,13 @@ describe('a live score', () => {
   });
 
   it('is refused for a value of another type, or a range on another score, never thrown', async () => {
-    const h = await scored((run) => {
-      run.score('a', null as unknown as number);
-      run.score('b', 1n as unknown as number);
-      run.score('c', true, { range: [0, 1] });
-      run.score('d', 'label', { range: [0, 1] });
+    const h = await scored((trace) => {
+      trace.score('a', null as unknown as number);
+      trace.score('b', 1n as unknown as number);
+      trace.score('c', true, { range: [0, 1] });
+      trace.score('d', 'label', { range: [0, 1] });
     });
-    expect(runSpan(h).events).toBeUndefined();
+    expect(agentSpan(h).events).toBeUndefined();
     expect(h.warnings).toEqual([
       `${NOT_SENT}its value is a number, a yes or no, or a category`,
       `${NOT_SENT}a range is a number score's alone`,
@@ -324,10 +324,10 @@ describe('a live score', () => {
 
   it("names its span by the id the span is sent with", async () => {
     let ids: string[] = [];
-    const h = await scored((run) => {
-      ids = [run.spanId, run.step('plan', (step) => step.spanId)];
+    const h = await scored((trace) => {
+      ids = [trace.spanId, trace.step('plan', (step) => step.spanId)];
     });
-    expect(ids).toEqual([runSpan(h).spanId, exportsIn(h).find((span) => span.name === 'plan')!.spanId]);
+    expect(ids).toEqual([agentSpan(h).spanId, exportsIn(h).find((span) => span.name === 'plan')!.spanId]);
     for (const id of ids) expect(id).toMatch(/^[0-9a-f]{16}$/);
   });
 });
@@ -345,14 +345,14 @@ describe('a late score', () => {
       if (spec.refused) {
         expect(h.transport.requests).toHaveLength(0);
         expect(h.warnings).toEqual([
-          `${NOT_SENT}it names a run, a run and one of its spans by 16 hex digits, or a session of up to 200 characters`,
+          `${NOT_SENT}it names a trace by 32 hex digits, a trace and one of its spans by 16, or a session of up to 200 characters`,
         ]);
         expect(h.fields).toStrictEqual([{ kind: 'input' }]);
         return;
       }
       const item = one(one(scoresIn(h)));
       expect(h.transport.requests).toHaveLength(1);
-      const ids = Object.fromEntries(['run_id', 'span_id', 'session_id'].filter((k) => k in item).map((k) => [k, item[k]]));
+      const ids = Object.fromEntries(['trace_id', 'span_id', 'session_id'].filter((k) => k in item).map((k) => [k, item[k]]));
       expect(ids).toEqual(spec.kept);
       expect(h.warnings).toEqual([]);
     });
@@ -399,13 +399,13 @@ describe('a late score', () => {
   it('goes beside the spans of the same export, which carry none of it', async () => {
     const h = harness();
     try {
-      h.telmoni.run('bot', (run) => h.telmoni.score('thumbs', true, { runId: run.runId }));
+      h.telmoni.trace('bot', (trace) => h.telmoni.score('thumbs', true, { traceId: trace.traceId }));
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
     expect(h.transport.requests.map((request) => new URL(request.url).pathname)).toEqual(['/v1/scores', '/otlp/v1/traces']);
-    expect(exportsIn(h).map((span) => span.name), 'no carrier among them').toEqual(['telmoni.run.start', 'invoke_agent bot']);
+    expect(exportsIn(h).map((span) => span.name), 'no carrier among them').toEqual(['telmoni.trace.start', 'invoke_agent bot']);
     expect(h.transport.requests[1]!.body).not.toContain('telmoni.score');
   });
 
@@ -486,9 +486,9 @@ describe('a late score', () => {
 describe('a recorded score', () => {
   const start = Date.UTC(2026, 10, 2, 9, 0, 0);
 
-  function record(): RunRecord {
+  function record(): TraceRecord {
     return {
-      runId: randomUUID(),
+      traceId: randomUUID().replaceAll('-', ''),
       agent: 'bot',
       start,
       end: start + 3000,
@@ -509,8 +509,8 @@ describe('a recorded score', () => {
     const h = harness();
     const given = record();
     try {
-      h.telmoni.recordRun(given);
-      h.telmoni.recordRun(given);
+      h.telmoni.recordTrace(given);
+      h.telmoni.recordTrace(given);
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -518,10 +518,10 @@ describe('a recorded score', () => {
     const [first, again] = h.transport.requests;
     expect(again!.body).toBe(first!.body);
     const spans = (JSON.parse(first!.body) as ExportBody).resourceSpans[0]!.scopeSpans[0]!.spans;
-    const run = spans.find((span) => span.name === 'invoke_agent bot')!;
+    const agent = spans.find((span) => span.name === 'invoke_agent bot')!;
     const step = spans.find((span) => span.name === 'plan')!;
-    expect(one(run.events!).timeUnixNano).toBe(run.endTimeUnixNano);
-    expect(attributesOf(one(run.events!))).toEqual({
+    expect(one(agent.events!).timeUnixNano).toBe(agent.endTimeUnixNano);
+    expect(attributesOf(one(agent.events!))).toEqual({
       'gen_ai.evaluation.name': 'thumbs',
       'gen_ai.evaluation.score.value': 1,
       'telmoni.score.type': 'boolean',
@@ -541,19 +541,19 @@ describe('a recorded score', () => {
   it(`is refused past ${contract.SCORES_PER_SPAN} on one span`, async () => {
     const h = harness();
     try {
-      h.telmoni.recordRun({ ...record(), scores: Array.from({ length: 17 }, (_, n) => ({ name: `s${n}`, value: n })) });
+      h.telmoni.recordTrace({ ...record(), scores: Array.from({ length: 17 }, (_, n) => ({ name: `s${n}`, value: n })) });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
     }
-    expect(runSpan(h).events).toHaveLength(contract.SCORES_PER_SPAN);
+    expect(agentSpan(h).events).toHaveLength(contract.SCORES_PER_SPAN);
     expect(h.warnings).toEqual([`${NOT_SENT}its span holds 16 scores already`]);
   });
 
   it('throws, sending nothing, for scores that are no array', () => {
     const h = harness();
-    const given = { ...record(), scores: { name: 'thumbs', value: true } } as unknown as RunRecord;
-    expect(() => h.telmoni.recordRun(given)).toThrow("a recorded run's scores must be an array");
+    const given = { ...record(), scores: { name: 'thumbs', value: true } } as unknown as TraceRecord;
+    expect(() => h.telmoni.recordTrace(given)).toThrow("a recorded trace's scores must be an array");
   });
 });
 

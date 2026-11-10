@@ -5,19 +5,19 @@ mod common;
 
 use common::{Harness, Outcome, attributes_of, named, only, starting_with};
 use serde_json::json;
-use telmoni::{ModelCallOptions, RunOptions, ToolCallOptions};
+use telmoni::{ModelCallOptions, ToolCallOptions, TraceOptions};
 
 #[test]
 fn a_tool_call_carries_the_conventions_names() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         "bot",
-        RunOptions {
+        TraceOptions {
             user_id: Some("user".to_owned()),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let tool = run.tool_call(
+    let tool = trace.tool_call(
         "search",
         ToolCallOptions {
             arguments: Some(json!({ "q": "weather" }).into()),
@@ -25,18 +25,18 @@ fn a_tool_call_carries_the_conventions_names() -> Outcome {
     )?;
     tool.returned(json!({ "temp": 21 }));
     tool.end();
-    let run_id = run.run_id().to_owned();
-    run.end();
+    let trace_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
     let span = only(&spans, "execute_tool ")?;
     assert_eq!(span.get("name"), Some(&json!("execute_tool search")));
     assert_eq!(span.get("kind"), Some(&json!(1)));
+    assert_eq!(span.get("traceId"), Some(&json!(trace_id)));
     assert_eq!(
         attributes_of(span)?,
         json!({
-            "telmoni.run_id": run_id,
             "telmoni.agent": "bot",
             "user.id": "user",
             "gen_ai.operation.name": "execute_tool",
@@ -67,14 +67,14 @@ fn a_failing_tool_records_its_error_type() -> Outcome {
     }
 
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     let result: Result<(), Timeout> =
-        run.try_tool_call_with("search", ToolCallOptions::default(), |_tool| Err(Timeout));
+        trace.try_tool_call_with("search", ToolCallOptions::default(), |_tool| Err(Timeout));
     assert!(result.is_err());
-    let lookup = run.tool_call("lookup", ToolCallOptions::default())?;
+    let lookup = trace.tool_call("lookup", ToolCallOptions::default())?;
     lookup.fail("NotFound");
     lookup.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -96,14 +96,14 @@ fn a_failing_tool_records_its_error_type() -> Outcome {
 #[test]
 fn the_tool_call_closure_returns_its_value() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let reversed = run.tool_call_with("search", ToolCallOptions::default(), |tool| {
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let reversed = trace.tool_call_with("search", ToolCallOptions::default(), |tool| {
         let reversed: String = "abc".chars().rev().collect();
         tool.returned(reversed.as_str());
         reversed
     })?;
     assert_eq!(reversed, "cba");
-    run.end();
+    trace.end();
     harness.flush()?;
     assert_eq!(starting_with(&harness.spans()?, "execute_tool ").len(), 1);
     Ok(())
@@ -112,14 +112,14 @@ fn the_tool_call_closure_returns_its_value() -> Outcome {
 #[test]
 fn a_tool_call_opens_children_of_its_own() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let tool = run.tool_call("summarize", ToolCallOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let tool = trace.tool_call("summarize", ToolCallOptions::default())?;
     let call = tool.model_call("m", ModelCallOptions::default())?;
     call.end();
     let step = tool.step("rank")?;
     step.end();
     tool.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -139,11 +139,11 @@ fn a_tool_call_opens_children_of_its_own() -> Outcome {
 #[test]
 fn a_tool_name_past_ingests_cap_is_cut_warned_once() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     for name in ["t".repeat(146), "t".repeat(146), "t".repeat(145)] {
-        run.tool_call(&name, ToolCallOptions::default())?.end();
+        trace.tool_call(&name, ToolCallOptions::default())?.end();
     }
-    run.end();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
     let tools = starting_with(&spans, "execute_tool ");

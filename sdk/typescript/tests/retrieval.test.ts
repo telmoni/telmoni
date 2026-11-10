@@ -36,16 +36,16 @@ async function sent(kept: Harness): Promise<Array<Record<string, unknown>>> {
 
 describe('a retrieval', () => {
   it("carries the conventions' names", async () => {
-    const run = h.telmoni.run('bot', { userId: 'user' }, (run) => {
-      run.retrieval('kb-articles', { query: 'refunds', topK: 5 }, (found) => found.returned(DOCUMENTS));
-      return run;
+    const opened = h.telmoni.trace('bot', { userId: 'user' }, (trace) => {
+      trace.retrieval('kb-articles', { query: 'refunds', topK: 5 }, (found) => found.returned(DOCUMENTS));
+      return trace;
     });
     expect(await h.telmoni.flush()).toBe(true);
     const span = one(searches(h.transport));
     expect(span.name).toBe('retrieval kb-articles');
     expect(span.kind).toBe(3);
+    expect(span.traceId).toBe(opened.traceId);
     expect(attributesOf(span)).toEqual({
-      'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
       'user.id': 'user',
       'gen_ai.operation.name': 'retrieval',
@@ -58,18 +58,18 @@ describe('a retrieval', () => {
   });
 
   it("goes under the memory's names as a memory search, on a step too", async () => {
-    const run = h.telmoni.run('bot', (run) => {
-      run.step('recall', (step) =>
+    const opened = h.telmoni.trace('bot', (trace) => {
+      trace.step('recall', (step) =>
         step.retrieval('preferences', { topK: 3, memory: true }, (found) => found.returned([{ id: 'mem-41' }])),
       );
-      return run;
+      return trace;
     });
     expect(await h.telmoni.flush()).toBe(true);
     const span = one(searches(h.transport));
     expect(span.name).toBe('search_memory');
     expect(span.kind).toBe(3);
+    expect(span.traceId).toBe(opened.traceId);
     expect(attributesOf(span)).toEqual({
-      'telmoni.run_id': run.runId,
       'telmoni.agent': 'bot',
       'gen_ai.operation.name': 'search_memory',
       'gen_ai.memory.store.id': 'preferences',
@@ -79,9 +79,9 @@ describe('a retrieval', () => {
   });
 
   it('with a blank source is named by its operation alone, warned once', async () => {
-    h.telmoni.run('bot', (run) => {
-      for (const source of ['', ' 　']) run.retrieval(source, () => {});
-      run.retrieval('\u0085', { memory: true }, () => {});
+    h.telmoni.trace('bot', (trace) => {
+      for (const source of ['', ' 　']) trace.retrieval(source, () => {});
+      trace.retrieval('\u0085', { memory: true }, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = searches(h.transport);
@@ -94,9 +94,9 @@ describe('a retrieval', () => {
   });
 
   it("cuts a source past ingest's 145 characters, counted as characters, warned once", async () => {
-    h.telmoni.run('bot', (run) => {
-      for (const source of ['😀'.repeat(146), '😀'.repeat(146), '😀'.repeat(145)]) run.retrieval(source, () => {});
-      run.retrieval('😀'.repeat(146), { memory: true }, () => {});
+    h.telmoni.trace('bot', (trace) => {
+      for (const source of ['😀'.repeat(146), '😀'.repeat(146), '😀'.repeat(145)]) trace.retrieval(source, () => {});
+      trace.retrieval('😀'.repeat(146), { memory: true }, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     const spans = searches(h.transport);
@@ -111,7 +111,7 @@ describe('a retrieval', () => {
   });
 
   it('sends a source that is no string as its text, warned once', async () => {
-    h.telmoni.run('bot', (run) => run.retrieval(42 as unknown as string, () => {}));
+    h.telmoni.trace('bot', (trace) => trace.retrieval(42 as unknown as string, () => {}));
     expect(await h.telmoni.flush()).toBe(true);
     expect(attributesOf(one(searches(h.transport)))['gen_ai.data_source.id']).toBe('42');
     expect(h.warnings).toEqual(["telmoni: a retrieval's source that is no string is sent as its text"]);
@@ -119,8 +119,8 @@ describe('a retrieval', () => {
 
   it('reads its top_k as a token count is, a fraction cut, and leaves off one that is none', async () => {
     const given: unknown[] = [0, 7.9, '4', -1, true, 'many', 2 ** 63, Number.NaN];
-    h.telmoni.run('bot', (run) => {
-      for (const topK of given) run.retrieval('kb', { topK: topK as number }, () => {});
+    h.telmoni.trace('bot', (trace) => {
+      for (const topK of given) trace.retrieval('kb', { topK: topK as number }, () => {});
     });
     expect(await h.telmoni.flush()).toBe(true);
     expect(searches(h.transport).map((span) => attributesOf(span)['gen_ai.retrieval.top_k'])).toEqual([
@@ -147,7 +147,7 @@ describe('a retrieval', () => {
     ['a number', 3],
   ])('refuses %s whole as what it returned', async (_what, given) => {
     const kept = keeping();
-    kept.telmoni.run('bot', (run) => run.retrieval('kb', (found) => found.returned(given as unknown as unknown[])));
+    kept.telmoni.trace('bot', (trace) => trace.retrieval('kb', (found) => found.returned(given as unknown as unknown[])));
     const [attributes] = await sent(kept);
     expect(attributes).not.toHaveProperty(['telmoni.retrieval.returned']);
     expect(attributes).not.toHaveProperty(['gen_ai.retrieval.documents']);
@@ -158,16 +158,16 @@ describe('a retrieval', () => {
   it('keeps the last list whole, a refused one leaving the last', async () => {
     const more = [...DOCUMENTS, { id: 'kb-203', score: 0.77 }];
     const kept = keeping();
-    kept.telmoni.run('bot', (run) => {
-      run.retrieval('then-refused', (found) => {
+    kept.telmoni.trace('bot', (trace) => {
+      trace.retrieval('then-refused', (found) => {
         found.returned(DOCUMENTS);
         found.returned('kb-112' as unknown as unknown[]);
       });
-      run.retrieval('refused-then', (found) => {
+      trace.retrieval('refused-then', (found) => {
         found.returned({ id: 'kb-112' } as unknown as unknown[]);
         found.returned(DOCUMENTS);
       });
-      run.retrieval('twice', (found) => {
+      trace.retrieval('twice', (found) => {
         found.returned(more);
         found.returned(DOCUMENTS.slice(0, 1));
       });
@@ -185,9 +185,9 @@ describe('a retrieval', () => {
 
   it('counts an empty list 0 and sends it as one', async () => {
     const kept = keeping();
-    kept.telmoni.run('bot', (run) => {
-      run.retrieval('kb', (found) => found.returned([]));
-      run.retrieval('prefs', { memory: true }, (found) => found.returned([]));
+    kept.telmoni.trace('bot', (trace) => {
+      trace.retrieval('kb', (found) => found.returned([]));
+      trace.retrieval('prefs', { memory: true }, (found) => found.returned([]));
     });
     const [retrieval, memory] = await sent(kept);
     expect(retrieval).toMatchObject({ 'telmoni.retrieval.returned': 0, 'gen_ai.retrieval.documents': '[]' });
@@ -196,9 +196,9 @@ describe('a retrieval', () => {
 
   it('sends its query and documents only under both locks', async () => {
     const kept = keeping();
-    kept.telmoni.run('bot', (run) => {
-      run.retrieval('kb', { query: 'refunds' }, (found) => found.returned(DOCUMENTS));
-      run.retrieval('prefs', { query: { about: 'tone' }, memory: true }, (found) => found.returned(DOCUMENTS.slice(0, 1)));
+    kept.telmoni.trace('bot', (trace) => {
+      trace.retrieval('kb', { query: 'refunds' }, (found) => found.returned(DOCUMENTS));
+      trace.retrieval('prefs', { query: { about: 'tone' }, memory: true }, (found) => found.returned(DOCUMENTS.slice(0, 1)));
     });
     const [retrieval, memory] = await sent(kept);
     expect(retrieval!['gen_ai.retrieval.query.text']).toBe('refunds');
@@ -210,17 +210,17 @@ describe('a retrieval', () => {
 
   it('keeps its count when a mask takes documents out', async () => {
     const kept = keeping({ mask: (key, value) => (key === 'gen_ai.retrieval.documents' ? '[]' : value) });
-    kept.telmoni.run('bot', (run) => run.retrieval('kb', (found) => found.returned(DOCUMENTS)));
+    kept.telmoni.trace('bot', (trace) => trace.retrieval('kb', (found) => found.returned(DOCUMENTS)));
     const [attributes] = await sent(kept);
     expect(attributes).toMatchObject({ 'gen_ai.retrieval.documents': '[]', 'telmoni.retrieval.returned': 2 });
   });
 
   it('returns what its callback returns, and is failed by what it throws', async () => {
     class TimeoutError extends Error {}
-    await h.telmoni.run('bot', async (run) => {
-      expect(run.retrieval('kb', () => 'found')).toBe('found');
+    await h.telmoni.trace('bot', async (trace) => {
+      expect(trace.retrieval('kb', () => 'found')).toBe('found');
       await expect(
-        run.retrieval('web-index', async () => {
+        trace.retrieval('web-index', async () => {
           throw new TimeoutError('took 30 s');
         }),
       ).rejects.toBeInstanceOf(TimeoutError);

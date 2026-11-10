@@ -1,8 +1,9 @@
 package telmoni_test
 
-// The SDK beside an application's own OpenTelemetry: its spans stay in their
-// traces at their own sampling rate, a run inside a trace it does not sample
-// is still sent, and its OTEL_* variables change nothing of ours.
+// The SDK beside an application's own OpenTelemetry: each trace is its own,
+// linked to the application's span rather than inside its trace, the
+// application's spans inside a trace keep their own sampling rate, and its
+// OTEL_* variables change nothing of ours.
 
 import (
 	"context"
@@ -37,7 +38,7 @@ func (*everyOther) Description() string { return "EveryOther" }
 
 // appProvider is the application's own OpenTelemetry: a provider exporting to
 // memory, ParentBased as an application's default sampler is, so its root
-// decision is root's and a span inside a run follows the run's flag.
+// decision is root's and a span inside a trace follows the trace's flag.
 func appProvider(t *testing.T, root sdktrace.Sampler) (trace.Tracer, *tracetest.InMemoryExporter) {
 	t.Helper()
 	exporter := tracetest.NewInMemoryExporter()
@@ -49,31 +50,46 @@ func appProvider(t *testing.T, root sdktrace.Sampler) (trace.Tracer, *tracetest.
 	return provider.Tracer("the-application"), exporter
 }
 
-func ourRuns(t *testing.T, h *harness) []map[string]any {
+func ourTraces(t *testing.T, h *harness) []map[string]any {
 	t.Helper()
 	return withPrefix(h.transport.spans(t), "invoke_agent ")
 }
 
-func TestARunJoinsTheCurrentTraceAndTheApplicationKeepsItsSpan(t *testing.T) {
+// linksOf is the links a sent span carries, each as its traceId and spanId.
+func linksOf(span map[string]any) [][2]string {
+	var out [][2]string
+	links, _ := span["links"].([]any)
+	for _, raw := range links {
+		link := raw.(map[string]any)
+		out = append(out, [2]string{link["traceId"].(string), link["spanId"].(string)})
+	}
+	return out
+}
+
+func TestATraceIsItsOwnLinkedToTheApplicationsSpan(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	app, exporter := appProvider(t, sdktrace.AlwaysSample())
 	ctx, request := app.Start(context.Background(), "request")
-	runCtx, run := h.client.Run(ctx, "bot", telmoni.RunOptions{})
-	_, query := app.Start(runCtx, "db.query")
+	traceCtx, tr := h.client.Trace(ctx, "bot", telmoni.TraceOptions{})
+	_, query := app.Start(traceCtx, "db.query")
 	query.End()
-	run.End()
+	tr.End()
 	request.End()
 	h.flush()
-	runs := ourRuns(t, h)
-	if len(runs) != 1 {
-		t.Fatalf("want one run, got %d", len(runs))
+	traces := ourTraces(t, h)
+	if len(traces) != 1 {
+		t.Fatalf("want one trace, got %d", len(traces))
 	}
 	requestContext := request.SpanContext()
-	if runs[0]["traceId"] != requestContext.TraceID().String() {
-		t.Error("the run did not join the application's trace")
+	if traces[0]["traceId"] == requestContext.TraceID().String() || traces[0]["traceId"] != tr.TraceID() {
+		t.Errorf("the trace is %v, want one of its own, TraceID() %s, not the application's %s", traces[0]["traceId"], tr.TraceID(), requestContext.TraceID())
 	}
-	if runs[0]["parentSpanId"] != requestContext.SpanID().String() {
-		t.Error("the application's span is not the run's parent")
+	if _, has := traces[0]["parentSpanId"]; has {
+		t.Error("the agent's span has a parent, want a root")
+	}
+	want := [][2]string{{requestContext.TraceID().String(), requestContext.SpanID().String()}}
+	if got := linksOf(traces[0]); !reflect.DeepEqual(got, want) {
+		t.Errorf("the agent's span links %v, want the application's span %v", got, want)
 	}
 	appSpans := exporter.GetSpans()
 	appNames := make([]string, 0, len(appSpans))
@@ -88,16 +104,37 @@ func TestARunJoinsTheCurrentTraceAndTheApplicationKeepsItsSpan(t *testing.T) {
 	if !reflect.DeepEqual(appNames, []string{"db.query", "request"}) {
 		t.Fatalf("the application exported %v", appNames)
 	}
-	if querySpan.Parent.SpanID().String() != runs[0]["spanId"] {
-		t.Error("the application's span inside the run is not nested under it")
+	if querySpan.Parent.SpanID().String() != traces[0]["spanId"] {
+		t.Error("the application's span inside the trace is not nested under the agent's")
 	}
-	if querySpan.SpanContext.TraceID().String() != runs[0]["traceId"] {
-		t.Error("the application's span inside the run left the trace")
+	if querySpan.SpanContext.TraceID().String() != traces[0]["traceId"] {
+		t.Error("the application's span inside the trace is not in it")
 	}
 	for _, span := range h.transport.spans(t) {
 		if name := span["name"]; name == "request" || name == "db.query" {
 			t.Errorf("the application's span %v was sent to Telmoni", name)
 		}
+	}
+	for _, span := range h.transport.spans(t) {
+		if span["name"] != "invoke_agent bot" && len(linksOf(span)) != 0 {
+			t.Errorf("%v is linked, want the agent's span alone", span["name"])
+		}
+	}
+}
+
+// A trace opened with no span current links to nothing: the field is left
+// off, as the other SDKs leave it.
+func TestATraceOpenedOutsideAnySpanLinksToNothing(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
+	h.flush()
+	traces := ourTraces(t, h)
+	if len(traces) != 1 {
+		t.Fatalf("want one trace, got %d", len(traces))
+	}
+	if _, has := traces[0]["links"]; has {
+		t.Errorf("the agent's span carries links %v, want none", traces[0]["links"])
 	}
 }
 
@@ -108,18 +145,18 @@ func openedByInstrumentation(ctx context.Context) {
 	span.End()
 }
 
-// Inside a run, a step or a call, the current span's provider is the one the
-// run displaced, the application's, never the SDK's.
-func TestInstrumentationInsideARunOpensSpansOnTheApplicationsProvider(t *testing.T) {
+// Inside a trace, a step or a call, the current span's provider is the one
+// the trace displaced, the application's, never the SDK's.
+func TestInstrumentationInsideATraceOpensSpansOnTheApplicationsProvider(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	app, exporter := appProvider(t, sdktrace.AlwaysSample())
 	ctx, request := app.Start(context.Background(), "request")
-	runCtx, run := h.client.Run(ctx, "bot", telmoni.RunOptions{})
-	openedByInstrumentation(runCtx)
-	callCtx, call := run.ModelCall(runCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+	traceCtx, tr := h.client.Trace(ctx, "bot", telmoni.TraceOptions{})
+	openedByInstrumentation(traceCtx)
+	callCtx, call := tr.ModelCall(traceCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
 	openedByInstrumentation(callCtx)
 	call.End()
-	run.End()
+	tr.End()
 	request.End()
 	h.flush()
 	appNames := make([]string, 0, 3)
@@ -137,9 +174,9 @@ func TestInstrumentationInsideARunOpensSpansOnTheApplicationsProvider(t *testing
 	}
 }
 
-// A run opened with no span of the application's current displaces the
+// A trace opened with no span of the application's current displaces the
 // global provider.
-func TestInstrumentationInARunOpenedOutsideAnySpanUsesTheGlobalProvider(t *testing.T) {
+func TestInstrumentationInATraceOpenedOutsideAnySpanUsesTheGlobalProvider(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	exporter := tracetest.NewInMemoryExporter()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
@@ -147,81 +184,91 @@ func TestInstrumentationInARunOpenedOutsideAnySpanUsesTheGlobalProvider(t *testi
 	previous := otel.GetTracerProvider()
 	otel.SetTracerProvider(provider)
 	t.Cleanup(func() { otel.SetTracerProvider(previous) })
-	runCtx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	openedByInstrumentation(runCtx)
-	run.End()
+	traceCtx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	openedByInstrumentation(traceCtx)
+	tr.End()
 	h.flush()
 	if got := len(exporter.GetSpans()); got != 1 {
 		t.Errorf("the global provider exported %d spans, want the one", got)
 	}
 	if got := names(h.transport.spans(t)); !reflect.DeepEqual(got, []string{"invoke_agent bot"}) {
-		t.Errorf("Telmoni was sent %v, want the run alone", got)
+		t.Errorf("Telmoni was sent %v, want the agent's span alone", got)
 	}
 }
 
-func TestTheApplicationKeepsItsOwnSamplingRateInsideRuns(t *testing.T) {
+func TestTheApplicationKeepsItsOwnSamplingRateInsideTraces(t *testing.T) {
 	every := &everyOther{}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), Sampler: every}, nil)
 	app, exporter := appProvider(t, every)
 	for range 100 {
-		runCtx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		_, inside := app.Start(runCtx, "inside")
+		traceCtx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		_, inside := app.Start(traceCtx, "inside")
 		inside.End()
-		run.End()
+		tr.End()
 	}
 	h.flush()
-	if got := len(ourRuns(t, h)); got != 100 {
-		t.Errorf("%d runs reached Telmoni, want every one of 100", got)
+	if got := len(ourTraces(t, h)); got != 100 {
+		t.Errorf("%d traces reached Telmoni, want every one of 100", got)
 	}
 	if got := len(exporter.GetSpans()); got != 50 {
-		t.Errorf("the application kept %d of its spans inside runs, want half", got)
+		t.Errorf("the application kept %d of its spans inside traces, want half", got)
 	}
 }
 
-func TestARunInsideATraceTheApplicationDoesNotSampleIsStillSent(t *testing.T) {
+// A trace opened inside a span the application does not sample is still
+// sent, sampled by the configured sampler as its own trace, and linked to
+// that span all the same.
+func TestATraceInsideASpanTheApplicationDoesNotSampleIsStillSentAndLinked(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	app, exporter := appProvider(t, sdktrace.NeverSample())
 	ctx, request := app.Start(context.Background(), "request")
 	if request.SpanContext().IsSampled() {
 		t.Fatal("the application sampled a span its sampler refuses")
 	}
-	runCtx, run := h.client.Run(ctx, "bot", telmoni.RunOptions{})
-	_, step := run.Step(runCtx, "s")
+	traceCtx, tr := h.client.Trace(ctx, "bot", telmoni.TraceOptions{})
+	if !trace.SpanContextFromContext(traceCtx).IsSampled() {
+		t.Error("the trace took the application's flag, want its own sampler's")
+	}
+	_, step := tr.Step(traceCtx, "s")
 	step.End()
-	run.End()
+	tr.End()
 	request.End()
 	h.flush()
-	runs := ourRuns(t, h)
-	if len(runs) != 1 {
-		t.Fatalf("want one run, got %d", len(runs))
+	traces := ourTraces(t, h)
+	if len(traces) != 1 {
+		t.Fatalf("want one trace, got %d", len(traces))
 	}
-	if runs[0]["traceId"] != request.SpanContext().TraceID().String() {
-		t.Error("the run did not join the application's trace")
+	requestContext := request.SpanContext()
+	want := [][2]string{{requestContext.TraceID().String(), requestContext.SpanID().String()}}
+	if got := linksOf(traces[0]); !reflect.DeepEqual(got, want) {
+		t.Errorf("the agent's span links %v, want the application's unsampled span %v", got, want)
 	}
 	if _, has := byName(h.transport.spans(t))["s"]; !has {
-		t.Error("the step inside the unsampled trace was not sent")
+		t.Error("the step was not sent")
 	}
 	if got := len(exporter.GetSpans()); got != 0 {
 		t.Errorf("the application exported %d spans from a trace it does not sample", got)
 	}
 }
 
-func TestAConfiguredSamplerDecidesARootRun(t *testing.T) {
+func TestAConfiguredSamplerDecidesEachTrace(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), Sampler: sdktrace.NeverSample()}, nil)
 	app, _ := appProvider(t, sdktrace.AlwaysSample())
-	runCtx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	if trace.SpanContextFromContext(runCtx).IsSampled() {
-		t.Error("the run took a sampled flag its sampler did not give")
+	ctx, request := app.Start(context.Background(), "request")
+	traceCtx, tr := h.client.Trace(ctx, "bot", telmoni.TraceOptions{})
+	if trace.SpanContextFromContext(traceCtx).IsSampled() {
+		t.Error("the trace took a sampled flag its sampler did not give")
 	}
-	_, inside := app.Start(runCtx, "inside")
+	_, inside := app.Start(traceCtx, "inside")
 	if inside.SpanContext().IsSampled() {
-		t.Error("the application's span inside the run did not follow the run's flag")
+		t.Error("the application's span inside the trace did not follow the trace's flag")
 	}
 	inside.End()
-	run.End()
+	tr.End()
+	request.End()
 	h.flush()
-	if got := len(ourRuns(t, h)); got != 1 {
-		t.Errorf("%d runs sent, want 1 regardless of the flag", got)
+	if got := len(ourTraces(t, h)); got != 1 {
+		t.Errorf("%d traces sent, want 1 regardless of the flag", got)
 	}
 }
 
@@ -232,28 +279,35 @@ func TestOTELVariablesChangeNothingOfOurs(t *testing.T) {
 		"OTEL_RESOURCE_ATTRIBUTES":        "leaked=yes",
 		"OTEL_SERVICE_NAME":               "leaked",
 		"OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT": "1",
+		"OTEL_SPAN_LINK_COUNT_LIMIT":      "0",
 		"OTEL_BSP_MAX_QUEUE_SIZE":         "1",
 	} {
 		t.Setenv(key, value)
 	}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{
+	app, _ := appProvider(t, sdktrace.AlwaysSample())
+	ctx, request := app.Start(context.Background(), "request")
+	_, tr := h.client.Trace(ctx, "bot", telmoni.TraceOptions{
 		UserID:    "c",
 		SessionID: "v",
 		Tags:      map[string]string{"a": "b"},
 	})
-	run.End()
+	tr.End()
+	request.End()
 	h.flush()
-	runs := ourRuns(t, h)
-	if len(runs) != 1 {
-		t.Fatalf("want one run, got %d", len(runs))
+	traces := ourTraces(t, h)
+	if len(traces) != 1 {
+		t.Fatalf("want one trace, got %d", len(traces))
 	}
-	attributes := attributesOf(t, runs[0])
+	attributes := attributesOf(t, traces[0])
 	if attributes["telmoni.tag.a"] != "b" || attributes["user.id"] != "c" {
-		t.Errorf("the run lost attributes: %v", attributes)
+		t.Errorf("the trace lost attributes: %v", attributes)
 	}
-	if len(attributes) != 7 {
-		t.Errorf("the run carries %d attributes, want all 7", len(attributes))
+	if len(attributes) != 6 {
+		t.Errorf("the agent's span carries %d attributes, want all 6", len(attributes))
+	}
+	if got := len(linksOf(traces[0])); got != 1 {
+		t.Errorf("the agent's span carries %d links, want its one to the application's span", got)
 	}
 	resource := h.transport.bodies(t)[0]["resourceSpans"].([]any)[0].(map[string]any)["resource"].(map[string]any)
 	keys := map[string]bool{}
@@ -272,28 +326,28 @@ func TestOTELVariablesChangeNothingOfOurs(t *testing.T) {
 	}
 }
 
-func TestTheRunIsFoundFromTheContextInAnotherGoroutine(t *testing.T) {
+func TestTheTraceIsFoundFromTheContextInAnotherGoroutine(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, step := telmoni.RunFromContext(ctx).Step(ctx, "threaded")
+		_, step := telmoni.TraceFromContext(ctx).Step(ctx, "threaded")
 		step.End()
 	}()
 	wg.Wait()
-	run.End()
+	tr.End()
 	h.flush()
 	spans := byName(h.transport.spans(t))
 	step := spans["threaded"]
 	if step == nil {
 		t.Fatal("the step from the goroutine was not sent")
 	}
-	if got := attributesOf(t, step)["telmoni.run_id"]; got != run.ID() {
-		t.Errorf("the step carries run %v, want %s", got, run.ID())
+	if step["traceId"] != tr.TraceID() {
+		t.Errorf("the step is in trace %v, want %s", step["traceId"], tr.TraceID())
 	}
 	if step["parentSpanId"] != spans["invoke_agent bot"]["spanId"] {
-		t.Error("the step is not the run's child")
+		t.Error("the step is not the agent's child")
 	}
 }

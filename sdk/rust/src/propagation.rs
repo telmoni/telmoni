@@ -1,19 +1,17 @@
-//! A run across services: the W3C `traceparent` of the span current inside a
-//! run, and the run's id and agent as the W3C `baggage` members
-//! `telmoni.run_id` and `telmoni.agent`, written into an outgoing request's
-//! headers and read back from an incoming one's. The SDK's own helpers,
-//! never a propagator set globally: an application's propagators are its
-//! own.
+//! A trace across services: the W3C `traceparent` of the span current inside
+//! a trace, and the agent as the W3C `baggage` member `telmoni.agent`,
+//! written into an outgoing request's headers and read back from an incoming
+//! one's. The SDK's own helpers, never a propagator set globally: an
+//! application's propagators are its own.
 
 use opentelemetry::Context;
 use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::{
     SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId, TraceState,
 };
-use uuid::fmt::Hyphenated;
 
 use crate::contract;
-use crate::runs::RunInfo;
+use crate::traces::TraceInfo;
 
 /// Headers `inject` writes and `extract` reads: anything that is both an
 /// OpenTelemetry [`Injector`] and [`Extractor`], as a `HashMap<String,
@@ -24,18 +22,17 @@ pub trait Carrier: Injector + Extractor {}
 
 impl<T: Injector + Extractor + ?Sized> Carrier for T {}
 
-/// What headers name: the span to continue under, and the run.
+/// What headers name: the span to continue under, and the agent.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Continued {
     pub(crate) span_context: SpanContext,
-    pub(crate) run_id: String,
     pub(crate) agent: String,
 }
 
-/// The run and the span `cx` is inside, written into `headers`; nothing
-/// outside a run.
+/// The agent and the span `cx` is inside, written into `headers`; nothing
+/// outside a trace.
 pub(crate) fn inject(cx: &Context, headers: &mut dyn Carrier) {
-    let Some(run) = cx.get::<RunInfo>() else {
+    let Some(trace) = cx.get::<TraceInfo>() else {
         return;
     };
     let span = cx.span();
@@ -43,17 +40,12 @@ pub(crate) fn inject(cx: &Context, headers: &mut dyn Carrier) {
     if !span_context.is_valid() {
         return;
     }
-    write_headers(headers, span_context, &run.run_id, &run.agent);
+    write_headers(headers, span_context, &trace.agent);
 }
 
-/// `span` and the run as the next service reads them, beside the members
+/// `span` and the agent as the next service reads them, beside the members
 /// `headers` already hold.
-pub(crate) fn write_headers(
-    headers: &mut dyn Carrier,
-    span: &SpanContext,
-    run_id: &str,
-    agent: &str,
-) {
+pub(crate) fn write_headers(headers: &mut dyn Carrier, span: &SpanContext, agent: &str) {
     let sampled = if span.is_sampled() { "01" } else { "00" };
     headers.set(
         contract::TRACEPARENT,
@@ -66,7 +58,6 @@ pub(crate) fn write_headers(
         .filter(|member| !member.is_empty() && !is_ours(member))
         .map(str::to_owned)
         .collect();
-    members.push(format!("{}={run_id}", contract::RUN_ID));
     members.push(format!(
         "{}={}",
         contract::AGENT,
@@ -75,29 +66,24 @@ pub(crate) fn write_headers(
     headers.set(contract::BAGGAGE, members.join(","));
 }
 
-/// The run `headers` name, or `None` for headers that name none.
+/// The trace `headers` name, or `None` for headers that name none.
 pub(crate) fn read_headers(headers: &dyn Carrier) -> Option<Continued> {
     let span_context = parse_traceparent(get(headers, contract::TRACEPARENT)?)?;
     let baggage = get(headers, contract::BAGGAGE).unwrap_or_default();
-    let mut run_id = None;
     let mut agent = None;
     for member in baggage.split(',') {
         let Some((key, rest)) = member.split_once('=') else {
             continue;
         };
-        let value = decode_baggage_value(rest.split(';').next().unwrap_or("").trim());
-        match key.trim() {
-            contract::RUN_ID => run_id = Some(value),
-            contract::AGENT => agent = Some(value),
-            _ => {}
+        if key.trim() == contract::AGENT {
+            agent = Some(decode_baggage_value(
+                rest.split(';').next().unwrap_or("").trim(),
+            ));
         }
     }
-    // The hyphenated form alone, as the other SDKs read it: `parse_str` takes four.
-    let run_id = run_id.filter(|id| id.parse::<Hyphenated>().is_ok())?;
     let agent = agent.filter(|agent| !agent.is_empty())?;
     Some(Continued {
         span_context,
-        run_id: run_id.to_ascii_lowercase(),
         agent,
     })
 }
@@ -183,8 +169,7 @@ fn allowed_in_baggage(byte: u8) -> bool {
 }
 
 fn is_ours(member: &str) -> bool {
-    let key = member.split('=').next().unwrap_or("").trim();
-    key == contract::RUN_ID || key == contract::AGENT
+    member.split('=').next().unwrap_or("").trim() == contract::AGENT
 }
 
 /// Lowercase hex of exactly `len` digits.

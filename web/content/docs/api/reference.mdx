@@ -105,7 +105,7 @@ Retrieves the organization associated with the presented token.
 ## `GET /v1/traces`
 
 A page of the project's traces in the window, the same list the project's
-**Runs** page shows, with how many the filter admits. It takes the page's
+**Traces** page shows, with how many the filter admits. It takes the page's
 query, each parameter repeatable where the page lets you pick several values:
 
 - `days`: How many days back, 1 to 360; 7 when left out. A window reaches back
@@ -114,9 +114,9 @@ query, each parameter repeatable where the page lets you pick several values:
 - `agent`, `user`, `session`, `status` (`ok`, `error` or `cancelled`),
   `model`, `tool`, `environment`, `release`, `prompt`, `tag` as `key:value`,
   and `prompt_version` as `name:version`, a prompt's version under its name:
-  each narrows the list to runs that match one of its values.
+  each narrows the list to traces that match one of its values.
 - `score`: A score's name, up to 64 characters, with `score_min` and
-  `score_max`, each optional, bounding its value: narrows the list to runs
+  `score_max`, each optional, bounding its value: narrows the list to traces
   carrying a score of that name within them. A bound without `score` is a
   `400`.
 - `sort` and `dir` (`asc` or `desc`): The column and the direction, as the page
@@ -133,7 +133,7 @@ An unknown parameter, or a value that does not parse, is a `400`.
 {
   "traces": [
     {
-      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "trace_id": "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
       "agent": "nightly-report",
       "status": "ok",
       "started_at": "2026-11-01T09:00:00Z",
@@ -153,16 +153,17 @@ An unknown parameter, or a value that does not parse, is a `400`.
 }
 ```
 
-Each trace carries every column of the page's table: its run, agent, end
+Each trace carries every column of the page's table: its id, agent, end
 user and session, how it ended, when it started and ended, its spans, steps,
 model and tool calls, failures and tokens. The example shows a few. `more`
 says whether a later page holds more.
 
-## `GET /v1/traces/{run_id}`
+## `GET /v1/traces/{trace_id}`
 
-One trace's spans, the run's own among them, in the order they started, and
-what the run spent. A run the project does not hold, or one older than your
-plan keeps, is a `404`. With `content=true`, each span's content comes too,
+One trace's spans, the agent's own among them, in the order they started, and
+what the trace spent, by its id, 32 hex digits. A trace the project does not
+hold, or one older than your plan keeps, is a `404`. With `content=true`,
+each span's content comes too,
 where the project keeps it ([Content](/docs/api/field-inventory#content)); every such
 read is filed in the organization's audit log, its actor `key:` and the key's
 ID, as a person's read in the console is filed under theirs. A `HEAD` opens no
@@ -174,11 +175,11 @@ content, so it files nothing.
 
 ```json
 {
-  "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+  "trace_id": "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
   "spans": [
     {
       "span_id": "00f067aa0ba902b7",
-      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "trace_id": "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
       "kind": "model_call",
       "name": "chat claude-sonnet-5-5",
       "status": "ok",
@@ -195,15 +196,15 @@ content, so it files nothing.
 
 - `spans`: Each span's every field, as the trace's page reads it; the example
   shows a few.
-- `truncated`: Whether the run holds more spans than the answer carries.
+- `truncated`: Whether the trace holds more spans than the answer carries.
 - `spend`: What its model calls cost, in US dollars, and the models no price
   covers; `null` when it could not be read.
 - `content`: Without `content=true`, `null`. With it, a list of
-  `{ "run_id", "span_id", "fields" }`, each field by its name: empty where
+  `{ "trace_id", "span_id", "fields" }`, each field by its name: empty where
   the project kept none, `null` where it could not be opened just then.
 
 Where a trace's `content` is opened, it carries beside its spans' fields the
-run's [score comments](/docs/monitoring/scores#a-scores-comment), each under a
+trace's [score comments](/docs/monitoring/scores#a-scores-comment), each under a
 span id that no span's 16 hex digits can be: `score/` and the score's id.
 
 ## `GET /v1/metrics`
@@ -221,8 +222,8 @@ totals Telmoni keeps an hour at a time.
   or `session`, from the spans, no further back than your plan keeps them,
   which `days` in the answer then says. Only tool calls carry a `tool`; every
   other span falls under the empty value. Only a span that names a model
-  carries a `model`, which the SDKs' model calls do and their runs' own spans
-  do not: a model's points then count its calls, and the runs fall under the
+  carries a `model`, which the SDKs' model calls do and their agents' own spans
+  do not: a model's points then count its calls, and the traces fall under the
   empty value.
 - `tag`: With `group=tag`, the tag key whose values split each step, 1 to 64
   characters.
@@ -242,15 +243,15 @@ totals Telmoni keeps an hour at a time.
       "value": "claude-sonnet-5-5",
       "spans": 412,
       "failed": 3,
-      "runs": 0,
-      "failed_runs": 0,
+      "traces": 0,
+      "failed_traces": 0,
       "input_tokens": 512000,
       "output_tokens": 98000,
       "cache_read_input_tokens": 120000,
       "cache_write_input_tokens": 4000,
       "spend": 2.34,
       "duration_ms": { "avg": 1840.5, "p50": 1500, "p90": 3100, "p99": 7400 },
-      "run_duration_ms": { "p50": null, "p95": null, "p99": null }
+      "trace_duration_ms": { "p50": null, "p95": null, "p99": null }
     }
   ],
   "truncated": false
@@ -261,23 +262,23 @@ Points come oldest first, and only for an hour or a day that holds a span.
 `value` is the group's value, left out without `group`. A split by `tag`,
 `user` or `session` names the ten values that spent most over the window and
 sums the rest in points carrying `"others": true` and an empty `value`; a
-call counts for its run's value, a run that carries none under the empty
+call counts for its trace's value, a trace that carries none under the empty
 value. `failed` counts the
-spans that ended in error, `runs` and `failed_runs` the runs that ended and
+spans that ended in error, `traces` and `failed_traces` the traces that ended and
 those that failed. `spend` is what the model calls cost in US dollars, each as
 it reported, else its tokens at the project's own price or the price table's,
 priced as it is read ([What a call cost](/docs/api/ingest#what-a-call-cost)),
-and scaled by its run's [sample rate](/docs/api/ingest#what-is-dropped-at-the-door),
-so a run a plan kept one in ten of counts ten times.
-`duration_ms` is every span's, `run_duration_ms` the runs' alone. The durations
+and scaled by its trace's [sample rate](/docs/api/ingest#what-is-dropped-at-the-door),
+so a trace a plan kept one in ten of counts ten times.
+`duration_ms` is every span's, `trace_duration_ms` the traces' alone. The durations
 are in milliseconds, and a percentile is `null` where none can be read. `truncated` is `true` past 10,000
 points, the oldest left out: ask for a shorter window, or a day at a time.
 
 ## `GET /v1/incidents`
 
 The project's incidents, the same list the **Incidents** page shows: those not
-resolved first, then the newest, 200 at most. With `run`, a run's ID, only the
-incidents whose notices showed that run.
+resolved first, then the newest, 200 at most. With `trace`, a trace's id, only
+the incidents whose notices showed that trace.
 
 ### Response
 
@@ -300,7 +301,7 @@ incidents whose notices showed that run.
       "resolved_by": null,
       "reopened": 0,
       "told_to": [],
-      "runs": ["0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01"],
+      "traces": ["0191a3b47c2e7d3f8e4a5b6c7d8e9f01"],
       "changes": [
         {
           "agent": "checkout",
@@ -308,7 +309,7 @@ incidents whose notices showed that run.
           "kind": "release",
           "value": "2026.11.3",
           "changed_at": "2026-11-01T08:51:00Z",
-          "run_id": "0191a3b4-6a1d-7c2e-9d3f-4a5b6c7d8e90",
+          "trace_id": "0191a3b46a1d7c2e9d3f4a5b6c7d8e90",
           "capped": false
         }
       ],
@@ -322,8 +323,8 @@ incidents whose notices showed that run.
   `alert` or `no_data`, and `value` what the alert read when it crossed.
 - `acknowledged_by` and `resolved_by`: Who took or resolved it by hand, by
   user ID, or `null`.
-- `told_to`: The connections its notices were sent to. `runs`: The runs its
-  notices showed, oldest first.
+- `told_to`: The connections its notices were sent to. `traces`: The traces
+  its notices showed, oldest first.
 - `changes`: What the agents its alert or monitor reads
   [changed to](/docs/monitoring/alerts#what-changed-before-it) in the 24
   hours before it opened, each as [`GET /v1/changes`](#get-v1changes) answers
@@ -337,9 +338,9 @@ for an ID the project does not hold.
 
 ## `GET /v1/changes`
 
-The project's agents' changes, the ones the **Runs** page marks on its bars:
-each the first run of an agent, in one environment, to carry a release, a
-model or a prompt's version its runs there had not carried in the 30 days
+The project's agents' changes, the ones the **Traces** page marks on its bars:
+each the first trace of an agent, in one environment, to carry a release, a
+model or a prompt's version its traces there had not carried in the 30 days
 before ([Changes](/docs/monitoring/traces#changes)). The newest first, 500 at
 most. It takes:
 
@@ -366,7 +367,7 @@ An unknown parameter, or a value that does not parse, is a `400`.
       "prompt": "support-reply",
       "value": "3",
       "changed_at": "2026-11-01T09:05:00Z",
-      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "trace_id": "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
       "capped": false
     }
   ]
@@ -377,15 +378,16 @@ An unknown parameter, or a value that does not parse, is a `400`.
   or the prompt's version, and `prompt` its name, on a prompt's change alone.
 - `environment`: The environment its spans were sent from, empty where they
   named none.
-- `changed_at`: When the run that first carried it started; `run_id` that run,
-  which [`GET /v1/traces/{run_id}`](#get-v1tracesrun_id) reads while it is kept.
+- `changed_at`: When the trace that first carried it started; `trace_id` that
+  trace, which [`GET /v1/traces/{trace_id}`](#get-v1tracestrace_id) reads
+  while it is kept.
 - `capped`: `true` where an agent made more than 24 changes of one kind in a
   UTC day: on the last one listed, since the rest are not.
 - `more`: Whether the window held more than the 500 listed.
 
 ## `POST /v1/scores`
 
-Scores of runs, spans or sessions that already ended, a person's thumbs-up on
+Scores of traces, spans or sessions that already ended, a person's thumbs-up on
 an answer, say, or a check a job ran overnight, under a key holding the
 `ingest` scope. A score of a span still open rides on it instead, as the
 [evaluation event](/docs/api/ingest#scores); our [SDKs](/docs/api/sdks#scores)
@@ -397,13 +399,13 @@ scores:
   "scores": [
     {
       "id": "0b9a3f0e-6c1d-4f7a-9e2b-5d8c7a6b4e31",
-      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "trace_id": "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
       "name": "thumbs",
       "data_type": "boolean",
       "value": 1
     },
     {
-      "run_id": "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01",
+      "trace_id": "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
       "span_id": "00f067aa0ba902b7",
       "name": "relevance",
       "data_type": "number",
@@ -422,11 +424,11 @@ scores:
 }
 ```
 
-- What it scores: a `run_id`; a `run_id` and a `span_id`, 16 hex digits; or a
-  `session_id`, up to 200 characters, as the session's spans send it, kept
-  hashed as they are. It is not looked up, since a run's spans
-  may land after its score: a score of a run that never arrives shows nowhere,
-  and leaves with retention.
+- What it scores: a `trace_id`, 32 hex digits; a `trace_id` and a `span_id`,
+  16 hex digits; or a `session_id`, up to 200 characters, as the session's
+  spans send it, kept hashed as they are. It is not looked up, since a trace's
+  spans may land after its score: a score of a trace that never arrives shows
+  nowhere, and leaves with retention.
 - `name`: 1 to 64 characters. `data_type`: `number`, with a finite `value`,
   within `range_min` and `range_max` where it names them; `boolean`, with a
   `value` of 1 or 0; or `category`, with 1 to 10 distinct `categories`, each

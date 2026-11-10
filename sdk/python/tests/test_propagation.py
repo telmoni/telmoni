@@ -1,7 +1,7 @@
-"""A run across services: ``inject`` writes the W3C ``traceparent`` and our
-two ``baggage`` members as ``sdk/fixtures/headers.json`` spells them,
-``extract`` reads them back as a run continued here, and nothing of a
-continued run but its steps and calls is sent."""
+"""A trace across services: ``inject`` writes the W3C ``traceparent`` and our
+one ``baggage`` member as ``sdk/fixtures/headers.json`` spells them,
+``extract`` reads them back as a trace continued here, and nothing of a
+continued trace but its steps and calls is sent."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from opentelemetry import trace
 
 from conftest import FakeTransport, attributes_of, load_fixture
-from telmoni import Config, Run, Telmoni, current_run
+from telmoni import Config, Telmoni, Trace, current_trace
 from telmoni.propagation import (
     decode_baggage_value,
     encode_baggage_value,
@@ -30,17 +30,15 @@ def test_inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own(
     spec = FIXTURE["inject"]
     headers: dict[str, str] = {}
     beside: dict[str, str] = {"Baggage": spec["beside"]["given"]}
-    with telmoni.run(spec["agent"]) as run, telmoni.step("plan"):
+    with telmoni.trace(spec["agent"]), telmoni.step("plan"):
         telmoni.inject(headers)
         telmoni.inject(beside)
     assert telmoni.flush()
     step = by_name(transport)["plan"]
 
     def fill(template: str) -> str:
-        return (
-            template.replace("<trace>", step["traceId"])
-            .replace("<span>", step["spanId"])
-            .replace("<uuid>", run.run_id)
+        return template.replace("<trace>", step["traceId"]).replace(
+            "<span>", step["spanId"]
         )
 
     assert headers == {
@@ -53,37 +51,39 @@ def test_inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own(
     }, "the carrier's members kept, ours replaced, the header's key set once"
 
 
-def test_inject_writes_nothing_outside_a_run(telmoni: Telmoni) -> None:
+def test_inject_writes_nothing_outside_a_trace(telmoni: Telmoni) -> None:
     outside = {"baggage": "tenant=acme"}
     telmoni.inject(outside)
     assert outside == {"baggage": "tenant=acme"}
 
 
-def test_extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none(
+def test_extract_reads_the_trace_the_fixture_names_and_nothing_from_headers_naming_none(
     telmoni: Telmoni,
 ) -> None:
     for given in FIXTURE["extract"]:
-        run = telmoni.extract(given["headers"])
-        if given["run"] is None:
-            assert run is None, given["name"]
+        opened = telmoni.extract(given["headers"])
+        if given["trace"] is None:
+            assert opened is None, given["name"]
             continue
-        assert isinstance(run, Run), given["name"]
-        assert run.run_id == given["run"]["run_id"], given["name"]
-        assert run.agent == given["run"]["agent"], given["name"]
-        parent = run._span.get_span_context()
-        assert f"{parent.trace_id:032x}" == given["run"]["trace_id"], given["name"]
-        assert f"{parent.span_id:016x}" == given["run"]["parent_span_id"], given["name"]
+        assert isinstance(opened, Trace), given["name"]
+        assert opened.trace_id == given["trace"]["trace_id"], given["name"]
+        assert opened.agent == given["trace"]["agent"], given["name"]
+        parent = opened._span.get_span_context()
+        assert f"{parent.trace_id:032x}" == given["trace"]["trace_id"], given["name"]
+        assert f"{parent.span_id:016x}" == given["trace"]["parent_span_id"], given[
+            "name"
+        ]
         assert parent.is_remote, given["name"]
-        assert bool(parent.trace_flags.sampled) is given["run"]["sampled"], given[
+        assert bool(parent.trace_flags.sampled) is given["trace"]["sampled"], given[
             "name"
         ]
 
 
-def test_a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span(
+def test_a_continued_traces_steps_and_calls_carry_the_callers_agent_under_its_span(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     headers: dict[str, str] = {}
-    with telmoni.run("orchestrator") as run, telmoni.step("hand over"):
+    with telmoni.trace("orchestrator") as opened, telmoni.step("hand over"):
         telmoni.inject(headers)
     assert telmoni.flush()
     caller = by_name(transport)["hand over"]
@@ -94,9 +94,10 @@ def test_a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span(
     )
     try:
         continued = worker.extract(headers)
-        assert isinstance(continued, Run)
-        with worker.step("work", run=continued):
-            assert current_run() is continued
+        assert isinstance(continued, Trace)
+        assert continued.trace_id == opened.trace_id
+        with worker.step("work", trace=continued):
+            assert current_trace() is continued
             with worker.model_call("gpt-x", provider="openai"):
                 pass
         with continued.tool_call("search"):
@@ -110,42 +111,41 @@ def test_a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span(
         "chat gpt-x",
         "execute_tool search",
         "work",
-    ], "nothing of the run itself, whose invoke_agent the caller sends"
+    ], "nothing of the trace itself, whose invoke_agent the caller sends"
     for span in spans:
         assert span["traceId"] == caller["traceId"], span["name"]
-        attributes = attributes_of(span)
-        assert attributes["telmoni.run_id"] == run.run_id, span["name"]
-        assert attributes["telmoni.agent"] == "orchestrator", span["name"]
+        assert "links" not in span, span["name"]
+        assert attributes_of(span)["telmoni.agent"] == "orchestrator", span["name"]
     named = by_name(worker_transport)
     assert named["work"]["parentSpanId"] == caller["spanId"]
     assert named["execute_tool search"]["parentSpanId"] == caller["spanId"]
     assert named["chat gpt-x"]["parentSpanId"] == named["work"]["spanId"]
 
 
-def test_a_continued_runs_spans_carry_its_agent_cut_to_its_cap(
+def test_a_continued_traces_spans_carry_its_agent_cut_to_its_cap(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    """Uncut, ingest would refuse every span this side sends of the run."""
+    """Uncut, ingest would refuse every span this side sends of the trace."""
     given = next(
         case for case in FIXTURE["extract"] if case["name"].startswith("an agent past")
     )
     continued = telmoni.extract(given["headers"])
-    assert isinstance(continued, Run)
-    with telmoni.step("work", run=continued):
+    assert isinstance(continued, Trace)
+    with telmoni.step("work", trace=continued):
         pass
     assert telmoni.flush()
     assert (
         attributes_of(by_name(transport)["work"])["telmoni.agent"]
-        == (given["run"]["agent"])
+        == (given["trace"]["agent"])
     )
 
 
-def test_a_continued_run_hands_itself_on_again_under_the_span_current_here(
+def test_a_continued_trace_hands_itself_on_again_under_the_span_current_here(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     first = {
         "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot",
+        "baggage": "telmoni.agent=bot",
     }
     onwards: dict[str, str] = {}
     continued = telmoni.extract(first)
@@ -156,7 +156,7 @@ def test_a_continued_run_hands_itself_on_again_under_the_span_current_here(
     relay = by_name(transport)["relay"]
     assert onwards == {
         "traceparent": f"00-4bf92f3577b34da6a3ce929d0e0e4736-{relay['spanId']}-01",
-        "baggage": "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot",
+        "baggage": "telmoni.agent=bot",
     }
     assert trace.get_current_span().get_span_context().is_valid is False
 
@@ -188,16 +188,16 @@ def test_extract_reads_a_lone_surrogate_in_any_member_as_the_replacement_charact
 ) -> None:
     """A header decoded with surrogateescape holds one; read strictly, it would
     raise into the handler."""
-    assert decode_baggage_value("Z\udcfcrich") == "Z\ufffdrich"
-    run = telmoni.extract(
+    assert decode_baggage_value("Z\udcfcrich") == "Z�rich"
+    opened = telmoni.extract(
         {
             "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-            "baggage": "tenant=Z\udcfcrich,"
-            "telmoni.run_id=3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d,telmoni.agent=bot",
+            "baggage": "tenant=Z\udcfcrich,telmoni.agent=bot",
         }
     )
-    assert isinstance(run, Run)
-    assert run.run_id == "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"
+    assert isinstance(opened, Trace)
+    assert opened.agent == "bot"
+    assert opened.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736"
 
 
 def test_a_traceparent_is_parsed_as_the_grammar_asks() -> None:

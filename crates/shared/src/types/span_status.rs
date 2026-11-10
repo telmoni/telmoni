@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How a finished span ended — a run's outcome, on the run's own span. The
+/// How a finished span ended — a trace's outcome, on the agent's own span. The
 /// stable string a span's row carries. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

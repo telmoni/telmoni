@@ -12,17 +12,16 @@ from __future__ import annotations
 
 SCOPE = "telmoni"
 """The instrumentation scope every span the SDK opens is under."""
-RUN_START = "telmoni.run.start"
-"""The span of no length a run sends as it opens, exported at once, so the
-run is seen before it ends."""
+TRACE_START = "telmoni.trace.start"
+"""The span of no length a trace sends as it opens, exported at once, so the
+trace is seen before it ends."""
 DISTRO_NAME = "telemetry.distro.name"
 DISTRO = "telmoni"
-RUN_ID = "telmoni.run_id"
 AGENT = "telmoni.agent"
 USER_ID = "user.id"
 TAG_PREFIX = "telmoni.tag."
 TAGS_MAX = 32
-"""The most tags a run carries: ingest keeps no more (its ``TAGS_MAX``)."""
+"""The most tags a trace carries: ingest keeps no more (its ``TAGS_MAX``)."""
 TAG_KEY_MAX = 64
 TAG_VALUE_MAX = 256
 """A tag's longest key and value, in characters: ingest drops a tag past either."""
@@ -55,8 +54,8 @@ RELEASE_MAX = 128
 """The deployment's longest environment and release, in characters: ingest
 reads a resource naming a longer one as naming none, without a word."""
 TRACEPARENT = "traceparent"
-"""The W3C headers a run crosses services in: the span's context, and the
-run's id and agent as baggage members."""
+"""The W3C headers a trace crosses services in: the span's context, and the
+trace's agent as a baggage member."""
 BAGGAGE = "baggage"
 
 # ── The conventions' ─────────────────────────────────────────────────────────
@@ -180,8 +179,8 @@ MODEL_OPERATIONS = frozenset(
     {"chat", "generate_content", "text_completion", "embeddings"}
 )
 """The operations ingest reads as a model call; any other files one elsewhere."""
-RUN_OPERATION = "invoke_agent"
-"""A run's operation, and the first word of its span's name."""
+AGENT_OPERATION = "invoke_agent"
+"""A trace's agent span's operation, and the first word of its name."""
 DEFAULT_MODEL_OPERATION = "chat"
 """A model call's operation when it names none."""
 TOOL_OPERATION = "execute_tool"
@@ -219,4 +218,4 @@ CONTENT_MODE_HEADER = "Telmoni-Content-Mode"
 """The answer's header naming the project's content mode: off or on."""
 SENT_AT_HEADER = "Telmoni-Sent-At"
 """The request's header naming this clock as the export leaves, in nanoseconds
-since the epoch, by which ingest moves a run from a clock a zone or a date out."""
+since the epoch, by which ingest moves a trace from a clock a zone or a date out."""

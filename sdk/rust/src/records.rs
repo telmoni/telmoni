@@ -1,12 +1,12 @@
-//! Runs recorded after they ended: a run handed whole, with its times, to
-//! [`Telmoni::record_run`](crate::Telmoni::record_run), and sent as the live
-//! calls would have sent it.
+//! Traces recorded after they ended: a trace handed whole, with its times, to
+//! [`Telmoni::record_trace`](crate::Telmoni::record_trace), and sent as the
+//! live calls would have sent it.
 //!
-//! Its trace is its own, named by the run's id, whatever trace is current;
-//! each span's id is derived from that id and the span's place in the record.
-//! Its spans are queued whole once built, the run's own last, and travel in
-//! exports of their own, so the same record sent again is the same bytes,
-//! whatever else is sent meanwhile.
+//! Its trace id is the record's, whatever trace is current; each span's id is
+//! derived from that id and the span's place in the record. Its spans are
+//! queued whole once built, the agent's own last, and travel in exports of
+//! their own, so the same record sent again is the same bytes, whatever else
+//! is sent meanwhile.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, VecDeque};
@@ -15,62 +15,61 @@ use std::time::SystemTime;
 use opentelemetry::trace::{SpanKind, TraceContextExt as _, TraceId, Tracer as _};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
-use uuid::Uuid;
 
 use crate::client::Inner;
 use crate::contract;
 use crate::error::{Error, Text};
 use crate::ids;
-use crate::runs::{self, Content, Usage};
 use crate::scores::{self, Score};
+use crate::traces::{self, Content, Usage};
 use crate::warnings::Warner;
 
-/// A run that has ended, as [`Telmoni::record_run`](crate::Telmoni::record_run)
-/// sends it: its id, a UUID the caller gives, and everything in it, each with
-/// its own times. [`RunRecord::new`] takes what every record has, and the
-/// rest is filled in around it:
-/// `RunRecord { session_id: Some(..), ..RunRecord::new(..) }`.
+/// A trace that has ended, as [`Telmoni::record_trace`](crate::Telmoni::record_trace)
+/// sends it: its id, 32 hex digits the caller gives, and everything in it,
+/// each with its own times. [`TraceRecord::new`] takes what every record has,
+/// and the rest is filled in around it:
+/// `TraceRecord { session_id: Some(..), ..TraceRecord::new(..) }`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RunRecord {
-    /// The run's id, a UUID: kept with the log the record comes from, and the
-    /// same each time the run is sent. Sent hyphenated and in lowercase,
+pub struct TraceRecord {
+    /// The trace's id, 32 hex digits: kept with the log the record comes
+    /// from, and the same each time the trace is sent. Sent in lowercase,
     /// however it is written here.
-    pub run_id: String,
-    /// The agent's name; a run is counted under its agent.
+    pub trace_id: String,
+    /// The agent's name; a trace is counted under its agent.
     pub agent: String,
-    /// The end user the run was for, as the application's own id for them;
+    /// The end user the trace was for, as the application's own id for them;
     /// ingest hashes it. Empty reads as none.
     pub user_id: Option<String>,
-    /// The session the run belongs to. Empty reads as none.
+    /// The session the trace belongs to. Empty reads as none.
     pub session_id: Option<String>,
     /// Tags, sent as `telmoni.tag.<key>`.
     pub tags: BTreeMap<String, String>,
-    /// The messages the run was asked with: content, which leaves the process
-    /// only when [`Config::capture_content`](crate::Config::capture_content)
+    /// The messages the agent was asked with: content, which leaves the
+    /// process only when [`Config::capture_content`](crate::Config::capture_content)
     /// is on and the project's mode allows.
     pub input_messages: Option<Content>,
-    /// The messages the run produced: content, as above.
+    /// The messages the agent produced: content, as above.
     pub output_messages: Option<Content>,
-    /// When the run started.
+    /// When the trace started.
     pub start: SystemTime,
-    /// When the run ended.
+    /// When the trace ended.
     pub end: SystemTime,
-    /// What ran inside the run, in the order it ran: steps, each holding its
-    /// own calls, and the calls made in the run itself.
+    /// What ran inside the trace, in the order it ran: steps, each holding
+    /// its own calls, and the calls made by the agent itself.
     pub inside: Vec<RecordItem>,
-    /// The type of the error the run failed with — the exception's class or
+    /// The type of the error the agent failed with — the exception's class or
     /// the error's name, never its message; `None` when it did not fail.
     /// Empty reads as none.
     pub error_type: Option<String>,
-    /// Whether the agent cancelled the run, which is neither ok nor an error.
+    /// Whether the agent cancelled the trace, which is neither ok nor an error.
     pub cancelled: bool,
     /// Scores of the span, each sent as its live handle's `score` sends one,
     /// at the span's end.
     pub scores: Vec<Score>,
 }
 
-/// What a run record or a step record holds: a step, with what it holds, or a
-/// call.
+/// What a trace record or a step record holds: a step, with what it holds, or
+/// a call.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum RecordItem {
@@ -99,7 +98,7 @@ pub struct StepRecord {
     /// The step's name, which its span takes.
     pub name: String,
     /// The messages the step was asked with, a subagent's task say: content,
-    /// as a run's are.
+    /// as a trace's are.
     pub input_messages: Option<Content>,
     /// The messages the step produced, the subagent's answer: content, as
     /// above.
@@ -141,7 +140,7 @@ pub struct ModelCallRecord {
     pub end: SystemTime,
     /// The tokens used.
     pub usage: Option<Usage>,
-    /// The messages sent to the model: content, as a run's are.
+    /// The messages sent to the model: content, as a trace's are.
     pub input_messages: Option<Content>,
     /// The messages the call produced: content, as above.
     pub output_messages: Option<Content>,
@@ -160,7 +159,7 @@ pub struct ModelCallRecord {
 pub struct ToolCallRecord {
     /// The tool's name; the span is named `execute_tool <name>`.
     pub name: String,
-    /// The arguments the tool was called with: content, as a run's messages
+    /// The arguments the tool was called with: content, as a trace's messages
     /// are.
     pub arguments: Option<Content>,
     /// What the tool returned: content, as above.
@@ -179,19 +178,19 @@ pub struct ToolCallRecord {
     pub scores: Vec<Score>,
 }
 
-impl RunRecord {
-    /// A record of `agent`'s run `run_id` from `start` to `end`, and nothing
-    /// more: no user, session or tags, nothing inside, neither failed nor
-    /// cancelled.
+impl TraceRecord {
+    /// A record of `agent`'s trace `trace_id` from `start` to `end`, and
+    /// nothing more: no user, session or tags, nothing inside, neither failed
+    /// nor cancelled.
     #[must_use]
     pub fn new(
-        run_id: impl Into<String>,
+        trace_id: impl Into<String>,
         agent: impl Into<String>,
         start: SystemTime,
         end: SystemTime,
     ) -> Self {
         Self {
-            run_id: run_id.into(),
+            trace_id: trace_id.into(),
             agent: agent.into(),
             user_id: None,
             session_id: None,
@@ -308,22 +307,18 @@ impl From<ToolCallRecord> for CallRecord {
 }
 
 /// Sends `record` for the client, as
-/// [`Telmoni::record_run`](crate::Telmoni::record_run) says.
-pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
+/// [`Telmoni::record_trace`](crate::Telmoni::record_trace) says.
+pub(crate) fn send(inner: &Inner, record: TraceRecord) -> Result<(), Error> {
     if record.agent.trim().is_empty() {
         return Err(Error::EmptyAgent);
     }
-    let run_uuid = Uuid::parse_str(&record.run_id).map_err(|_| Error::RunId)?;
-    // The run's id is its trace's, and a trace id of zeros is no trace at all.
-    if run_uuid.is_nil() {
-        return Err(Error::RunId);
-    }
+    let trace_id = ids::trace_id(&record.trace_id).ok_or(Error::TraceId)?;
     // Checked whole before anything is queued, so a record refused sends
-    // nothing rather than half a run.
+    // nothing rather than half a trace.
     check(&record)?;
     let need = 1 + spans_in(&record.inside);
 
-    let RunRecord {
+    let TraceRecord {
         agent,
         user_id,
         session_id,
@@ -338,56 +333,53 @@ pub(crate) fn send(inner: &Inner, record: RunRecord) -> Result<(), Error> {
         scores,
         ..
     } = record;
-    let run_id = run_uuid.to_string();
-    let inherited = runs::inherited(&run_id, &agent, user_id, session_id);
-    let mut attributes = runs::run_attributes(&agent, &inherited, tags, &inner.warner);
+    let inherited = traces::inherited(&agent, user_id, session_id);
+    let mut attributes = traces::agent_attributes(&agent, &inherited, tags, &inner.warner);
     attributes.extend(content([
         (contract::INPUT_MESSAGES, input_messages),
         (contract::OUTPUT_MESSAGES, output_messages),
     ]));
-    // Before the hold: a sink is the application's, and may record a run of its own.
+    // Before the hold: a sink is the application's, and may record a trace of its own.
     for call in model_calls(&mut inside) {
         call.usage = call
             .usage
-            .map(|usage| runs::sendable_usage(usage, &inner.warner));
-        call.operation = Some(runs::model_operation(
+            .map(|usage| traces::sendable_usage(usage, &inner.warner));
+        call.operation = Some(traces::model_operation(
             call.operation.as_deref(),
             &inner.warner,
         ));
     }
 
     // Queued whole or not at all: a record that outgrows the queue's room
-    // would lose its tail, the run's own span first.
-    let trace_id = ids::trace_id(&run_uuid);
+    // would lose its tail, the agent's own span first.
     let judged = judged(&scores, &inside, &inner.warner);
     let hold = inner.processor.hold(trace_id, need)?;
     let mut spans = Spans {
         tracer: &inner.tracer,
         scores: judged,
-        run_id: run_uuid,
         trace_id,
         place: 0,
     };
     // Under an empty context rather than the current one: the record's trace
     // is its own, whatever the application has open.
-    let run = spans.open(
-        format!("{} {agent}", contract::RUN_OPERATION),
+    let agent_span = spans.open(
+        format!("{} {agent}", contract::AGENT_OPERATION),
         &Context::new(),
         SpanKind::Internal,
         attributes,
         start,
     );
-    spans.items(inside, &run, &inherited);
-    spans.close(&run, error_type, cancelled, end);
+    spans.items(inside, &agent_span, &inherited);
+    spans.close(&agent_span, error_type, cancelled, end);
     hold.queue();
     Ok(())
 }
 
 /// Each span's scores as its events, in the order [`Spans::close`] closes the
-/// spans — a step after what it holds, the run last — judged before the hold,
-/// since a refusal's warning goes to a sink of the application's, which may
-/// record a run of its own.
-fn judged(run: &[Score], inside: &[RecordItem], warner: &Warner) -> VecDeque<Vec<Vec<KeyValue>>> {
+/// spans — a step after what it holds, the agent's last — judged before the
+/// hold, since a refusal's warning goes to a sink of the application's, which
+/// may record a trace of its own.
+fn judged(own: &[Score], inside: &[RecordItem], warner: &Warner) -> VecDeque<Vec<Vec<KeyValue>>> {
     fn closing(items: &[RecordItem], warner: &Warner, judged: &mut VecDeque<Vec<Vec<KeyValue>>>) {
         for item in items {
             let scores = match item {
@@ -403,7 +395,7 @@ fn judged(run: &[Score], inside: &[RecordItem], warner: &Warner) -> VecDeque<Vec
     }
     let mut judged = VecDeque::new();
     closing(inside, warner, &mut judged);
-    judged.push_back(events(run, warner));
+    judged.push_back(events(own, warner));
     judged
 }
 
@@ -431,14 +423,14 @@ fn spans_in(items: &[RecordItem]) -> usize {
         .sum()
 }
 
-/// How deep steps nest, a run's own at 1: past any agent's subagents.
+/// How deep steps nest, a trace's own at 1: past any agent's subagents.
 const STEP_DEPTH_MAX: usize = 16;
 
 /// Refuses `record` for a step nested too deep, a span named nothing or
 /// holding text past ingest's cap, at a time ingest cannot read, or ending
 /// before it starts.
-fn check(record: &RunRecord) -> Result<(), Error> {
-    let mut spans = vec![Checked::run(record)];
+fn check(record: &TraceRecord) -> Result<(), Error> {
+    let mut spans = vec![Checked::trace(record)];
     spans_of(&record.inside, 1, &mut spans)?;
     for span in &spans {
         if span.name == Some("") {
@@ -497,27 +489,27 @@ struct Checked<'a> {
 }
 
 impl<'a> Checked<'a> {
-    fn run(record: &'a RunRecord) -> Self {
+    fn trace(record: &'a TraceRecord) -> Self {
         Self {
             name: Some(&record.agent),
             texts: vec![
                 (
-                    Text::RunAgent,
+                    Text::TraceAgent,
                     chars(Some(&record.agent)),
                     contract::AGENT_MAX,
                 ),
                 (
-                    Text::RunUserId,
+                    Text::TraceUserId,
                     chars(record.user_id.as_deref()),
                     contract::USER_ID_MAX,
                 ),
                 (
-                    Text::RunSessionId,
+                    Text::TraceSessionId,
                     chars(record.session_id.as_deref()),
                     contract::SESSION_ID_MAX,
                 ),
                 (
-                    Text::RunErrorType,
+                    Text::TraceErrorType,
                     chars(record.error_type.as_deref()),
                     contract::ERROR_TYPE_MAX,
                 ),
@@ -619,15 +611,14 @@ fn model_calls(inside: &mut [RecordItem]) -> Vec<&mut ModelCallRecord> {
 }
 
 /// Opens a record's spans in the record's order, each with the id its place
-/// derives, in the trace the run's id names.
+/// derives, in the trace the record's id names.
 struct Spans<'a> {
     tracer: &'a SdkTracer,
     /// Each span's scores as events, in the order the spans close.
     scores: VecDeque<Vec<Vec<KeyValue>>>,
-    run_id: Uuid,
     trace_id: TraceId,
-    /// The next span's place: `0` the run, then each step and call from `1`
-    /// as the record holds them, depth first, a step before what it holds.
+    /// The next span's place: `0` the agent's, then each step and call from
+    /// `1` as the record holds them, depth first, a step before what it holds.
     place: u64,
 }
 
@@ -642,7 +633,7 @@ impl Spans<'_> {
         attributes: Vec<KeyValue>,
         start: SystemTime,
     ) -> Context {
-        let span_id = ids::span_id(&self.run_id, self.place);
+        let span_id = ids::span_id(&self.trace_id, self.place);
         self.place += 1;
         let span = {
             let _given = ids::given(self.trace_id, span_id);
@@ -671,16 +662,16 @@ impl Spans<'_> {
             span.add_event_with_timestamp(contract::EVALUATION_EVENT, end, attributes);
         }
         if let Some(error_type) = error_type.filter(|error_type| !error_type.is_empty()) {
-            runs::mark_failed(&span, error_type);
+            traces::mark_failed(&span, error_type);
         }
         if cancelled {
-            runs::mark_cancelled(&span);
+            traces::mark_cancelled(&span);
         }
         span.end_with_timestamp(end);
     }
 
-    /// What a run or a step holds, under `parent`, each step's own under it,
-    /// so each closes before what holds it.
+    /// What the agent or a step holds, under `parent`, each step's own under
+    /// it, so each closes before what holds it.
     fn items(&mut self, items: Vec<RecordItem>, parent: &Context, inherited: &[KeyValue]) {
         for item in items {
             match item {
@@ -716,12 +707,12 @@ impl Spans<'_> {
             CallRecord::Model(call) => {
                 let operation = call.operation.unwrap_or_default();
                 let (name, own) =
-                    runs::model_call_opening(&call.model, operation, call.provider, None);
+                    traces::model_call_opening(&call.model, operation, call.provider, None);
                 attributes.extend(own);
                 if let Some(effort) = call.reasoning_effort.filter(|effort| !effort.is_empty()) {
                     attributes.push(KeyValue::new(contract::REQUEST_REASONING_LEVEL, effort));
                 }
-                attributes.extend(call.usage.into_iter().flat_map(runs::usage_attributes));
+                attributes.extend(call.usage.into_iter().flat_map(traces::usage_attributes));
                 attributes.extend(content([
                     (contract::INPUT_MESSAGES, call.input_messages),
                     (contract::OUTPUT_MESSAGES, call.output_messages),
@@ -730,7 +721,7 @@ impl Spans<'_> {
                 self.close(&opened, call.error_type, call.cancelled, call.end);
             }
             CallRecord::Tool(call) => {
-                let (name, own) = runs::tool_call_opening(&call.name);
+                let (name, own) = traces::tool_call_opening(&call.name);
                 attributes.extend(own);
                 attributes.extend(content([
                     (contract::TOOL_CALL_ARGUMENTS, call.arguments),

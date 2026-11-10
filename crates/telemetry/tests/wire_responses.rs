@@ -24,8 +24,8 @@ use telmoni_telemetry::handler::mutes::MuteList;
 use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
 use telmoni_telemetry::handler::traces::{
-    FacetValue, FacetValues, Facets, RunSpend, SpanFields, TraceDetail, TraceHistogram, TraceList,
-    TraceSpan, UnpricedModel,
+    FacetValue, FacetValues, Facets, SpanFields, TraceDetail, TraceHistogram, TraceList, TraceSpan,
+    TraceSpend, UnpricedModel,
 };
 use telmoni_telemetry::handler::versions::Versions;
 use telmoni_telemetry::handler::views::{DashboardChart, DashboardOptions, View, ViewList};
@@ -40,7 +40,7 @@ use telmoni_telemetry::versions::{Choice, ScoreMean, Version};
 /// the agent's answer, in the conventions' parts.
 fn turn() -> Vec<SpanFields> {
     vec![SpanFields {
-        run_id: RUN,
+        trace_id: TRACE.into(),
         span_id: "00f067aa0ba902b7".into(),
         fields: [
             (
@@ -58,7 +58,7 @@ fn turn() -> Vec<SpanFields> {
     }]
 }
 
-const RUN: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b17);
+const TRACE: &str = "0192f3a17c2e7b4d9a613c5e8f0d2b17";
 const RULE: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b18);
 const INCIDENT: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b19);
 const MONITOR: Uuid = Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b29);
@@ -83,7 +83,7 @@ fn project() -> ProjectId {
 
 fn trace() -> TraceRow {
     TraceRow {
-        run_id: RUN,
+        trace_id: TRACE.into(),
         agent: "support".into(),
         user_id: "u_1f3a".into(),
         session_id: "s_9c2e".into(),
@@ -117,7 +117,7 @@ fn incident() -> IncidentRow {
     IncidentRow {
         id: INCIDENT,
         rule_id: Some(RULE),
-        rule_name: Some("Slow support runs".into()),
+        rule_name: Some("Slow support traces".into()),
         monitor_id: None,
         agent: None,
         cause: None,
@@ -133,7 +133,7 @@ fn incident() -> IncidentRow {
         resolved_by: None,
         reopened: 1,
         told_to: vec![CONNECTION],
-        runs: vec![RUN],
+        traces: vec![TRACE.into()],
     }
 }
 
@@ -154,7 +154,7 @@ fn the_trace_list_answers_as_the_console_reads() {
                 dir: SortDirection::Desc,
             },
             scores: [(
-                RUN,
+                TRACE.to_owned(),
                 vec![telmoni_telemetry::scores::Summary {
                     name: "helpful".into(),
                     data_type: telmoni_shared::ScoreType::Number,
@@ -178,7 +178,7 @@ fn changes() -> Vec<Change> {
         prompt: prompt.map(Into::into),
         value: value.into(),
         changed_at: at(secs),
-        run_id: RUN,
+        trace_id: TRACE.into(),
         capped,
     };
     vec![
@@ -213,9 +213,9 @@ fn the_agents_answer_as_the_console_reads() {
             agents: vec![
                 AgentRow {
                     agent: "support".into(),
-                    runs: 12,
-                    failed_runs: 1,
-                    last_run_id: RUN,
+                    traces: 12,
+                    failed_traces: 1,
+                    last_trace_id: TRACE.into(),
                     last_started_at: at(0),
                     last_ended: true,
                     last_status: SpanStatus::Ok,
@@ -224,9 +224,9 @@ fn the_agents_answer_as_the_console_reads() {
                 },
                 AgentRow {
                     agent: "nightly-report".into(),
-                    runs: 1,
-                    failed_runs: 0,
-                    last_run_id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b2c),
+                    traces: 1,
+                    failed_traces: 0,
+                    last_trace_id: "0192f3a17c2e7b4d9a613c5e8f0d2b2c".into(),
                     last_started_at: at(60),
                     last_ended: false,
                     last_status: SpanStatus::Ok,
@@ -243,9 +243,9 @@ fn the_agents_answer_as_the_console_reads() {
 /// lower, one whose only run has not ended, and the runs that named none.
 #[test]
 fn the_versions_answer_as_the_console_reads() {
-    let choice = |value: &str, runs| Choice {
+    let choice = |value: &str, traces| Choice {
         value: value.into(),
-        runs,
+        traces,
     };
     let score = |mean, count| {
         vec![ScoreMean {
@@ -267,8 +267,8 @@ fn the_versions_answer_as_the_console_reads() {
                 Version {
                     value: "1.4.3".into(),
                     first_at: at(7_200),
-                    runs: 1,
-                    failed_runs: 0,
+                    traces: 1,
+                    failed_traces: 0,
                     p50_ms: None,
                     p95_ms: None,
                     median_spend: None,
@@ -277,8 +277,8 @@ fn the_versions_answer_as_the_console_reads() {
                 Version {
                     value: "1.4.2".into(),
                     first_at: at(3_600),
-                    runs: 10,
-                    failed_runs: 4,
+                    traces: 10,
+                    failed_traces: 4,
                     p50_ms: Some(2_400),
                     p95_ms: Some(9_100),
                     median_spend: Some(0.042),
@@ -287,8 +287,8 @@ fn the_versions_answer_as_the_console_reads() {
                 Version {
                     value: "1.4.1".into(),
                     first_at: at(0),
-                    runs: 10,
-                    failed_runs: 2,
+                    traces: 10,
+                    failed_traces: 2,
                     p50_ms: Some(2_100),
                     p95_ms: Some(6_000),
                     median_spend: Some(0.031),
@@ -297,8 +297,8 @@ fn the_versions_answer_as_the_console_reads() {
                 Version {
                     value: String::new(),
                     first_at: at(60),
-                    runs: 2,
-                    failed_runs: 0,
+                    traces: 2,
+                    failed_traces: 0,
                     p50_ms: Some(1_900),
                     p95_ms: Some(1_900),
                     median_spend: Some(0.0),
@@ -436,14 +436,14 @@ fn a_trace_answers_as_the_console_reads() {
     pin(
         "trace",
         &TraceDetail {
-            run_id: RUN,
+            trace_id: TRACE.into(),
             spans: vec![
-                span("00f067aa0ba902b7", SpanKind::Run, None),
+                span("00f067aa0ba902b7", SpanKind::Agent, None),
                 found,
                 span("00f067aa0ba902b8", SpanKind::ModelCall, Some(0.0012)),
             ],
             truncated: false,
-            spend: Some(RunSpend {
+            spend: Some(TraceSpend {
                 spent: 0.0012,
                 unpriced: vec![UnpricedModel {
                     provider: "acme".into(),
@@ -494,8 +494,8 @@ fn alerts_answer_as_the_console_reads() {
     let alert = Alert {
         id: RULE,
         definition: Definition {
-            name: "Slow support runs".into(),
-            kind: SpanKind::Run,
+            name: "Slow support traces".into(),
+            kind: SpanKind::Agent,
             measure: RuleMeasure::Duration,
             aggregation: RuleAggregation::P95,
             filters: RuleFilters {
@@ -570,7 +570,7 @@ fn alerts_answer_as_the_console_reads() {
     let starter = Alert {
         id: Uuid::from_u128(0x0192_f3a1_7c2e_7b4d_9a61_3c5e_8f0d_2b1f),
         definition: Definition {
-            name: "Failing runs".into(),
+            name: "Failing traces".into(),
             measure: RuleMeasure::Failures,
             aggregation: RuleAggregation::Avg,
             filters: RuleFilters::default(),
@@ -665,7 +665,7 @@ fn incidents_answer_as_the_console_reads() {
                         acknowledged_at: None,
                         acknowledged_by: None,
                         reopened: 0,
-                        runs: Vec::new(),
+                        traces: Vec::new(),
                         ..incident()
                     },
                     changes: None,
@@ -776,15 +776,15 @@ fn the_privacy_posture_answers_as_the_console_reads() {
 /// value, a run carrying none, and the rest folded.
 #[test]
 fn the_rollups_answer_as_the_console_reads() {
-    use telmoni_telemetry::rollups::{Durations, MetricPoint, Metrics, RunDurations};
+    use telmoni_telemetry::rollups::{Durations, MetricPoint, Metrics, TraceDurations};
     let point = |value: &str, others: bool, spend: f64| MetricPoint {
         at: at(0),
         value: Some(value.into()),
         others,
         spans: 12,
         failed: 1,
-        runs: 2,
-        failed_runs: 1,
+        traces: 2,
+        failed_traces: 1,
         input_tokens: 4_000,
         output_tokens: 600,
         cache_read_input_tokens: 0,
@@ -796,7 +796,7 @@ fn the_rollups_answer_as_the_console_reads() {
             p90: Some(900.0),
             p99: Some(1_400.0),
         },
-        run_duration_ms: RunDurations {
+        trace_duration_ms: TraceDurations {
             p50: Some(2_100.0),
             p95: Some(3_800.0),
             p99: None,

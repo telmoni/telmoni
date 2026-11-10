@@ -11,7 +11,7 @@ import {
   rowClass,
   rowClickTaken,
 } from "@/components/traces/list-table";
-import { usePeekedRun } from "@/components/traces/peek";
+import { usePeekedTrace } from "@/components/traces/peek";
 import { openPeek } from "@/lib/peek";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
 import {
@@ -20,7 +20,7 @@ import {
   formatCount,
   groupOf,
   nextSort,
-  sessionRunsHref,
+  sessionTracesHref,
   shortId,
   tagKeys,
   traceHref,
@@ -44,17 +44,17 @@ type Props = {
   knownTags: readonly string[];
 };
 
-// The page's rows, a run each: its id, which opens its trace, with a failed
-// run's class under it — metadata, so a redraw files no read; its message is
-// content, the peek's — and the columns the person shows
+// The page's rows, a trace each: its id, which opens it, with a failed
+// trace's class under it — metadata, so a redraw files no read; its message
+// is content, the peek's — and the columns the person shows
 // (`lib/trace-prefs.ts`), each heading that sorts a link that sorts by it. A
-// click on a row opens its trace in the peek beside the list (`peek.tsx`),
+// click on a row opens the trace in the peek beside the list (`peek.tsx`),
 // and the row stays marked while it is open. Grouped by session or user
 // (`groupOf`), each group is a body of its own under a head that opens the
-// group's runs.
+// group's traces.
 export function TraceTable({ organization, slug, query, ui, traces, knownTags }: Props) {
   const prefs = useTracePrefs();
-  const peeked = usePeekedRun();
+  const peeked = usePeekedTrace();
   const columns = TRACE_COLUMNS.filter((c) => prefs.columns.includes(c.key));
   const { sort, dir } = currentSort(query);
   const tight = compactPadding(prefs.density);
@@ -77,7 +77,7 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
         />
       </THead>
       {groupsOf(traces, group).map((rows) => (
-        <tbody key={rows[0]!.run_id}>
+        <tbody key={rows[0]!.trace_id}>
           {group && (
             <GroupHead
               group={group}
@@ -86,38 +86,38 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
               span={columns.length + 1}
               href={(value) =>
                 group === "session"
-                  ? sessionRunsHref(organization, slug, value, query.days)
+                  ? sessionTracesHref(organization, slug, value, query.days)
                   : tracesHref(organization, slug, { user: [value], days: query.days })
               }
             />
           )}
           {rows.map((trace) => (
             <tr
-              key={trace.run_id}
-              aria-current={peeked === trace.run_id ? "true" : undefined}
+              key={trace.trace_id}
+              aria-current={peeked === trace.trace_id ? "true" : undefined}
               // Anywhere on the row but what keeps its own way: the
               // keyboard's way is the id's link.
               onClick={(event) => {
                 if (rowClickTaken(event)) return;
-                openPeek(trace.run_id);
+                openPeek(trace.trace_id);
               }}
-              className={rowClass(peeked === trace.run_id)}
+              className={rowClass(peeked === trace.trace_id)}
             >
               <Td className={cn("whitespace-nowrap", tight)}>
                 <Link
-                  href={traceHref(organization, slug, trace.run_id)}
-                  data-peek-run={trace.run_id}
+                  href={traceHref(organization, slug, trace.trace_id)}
+                  data-peek-trace={trace.trace_id}
                   // A plain click opens the trace in the peek; one that asks
                   // for a new tab or window, or a copy of the link, gets the
                   // trace's own page, as the link says.
                   onClick={(event) => {
                     if (!plainClick(event)) return;
                     event.preventDefault();
-                    openPeek(trace.run_id);
+                    openPeek(trace.trace_id);
                   }}
                   className="text-xs underline-offset-4 hover:underline"
                 >
-                  {shortId(trace.run_id)}
+                  {shortId(trace.trace_id)}
                 </Link>
                 {trace.ended && trace.status === SpanStatus.Error && trace.error_type && (
                   <span className="block max-w-48 truncate text-xs text-destructive" title={trace.error_type}>
@@ -142,7 +142,7 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
   );
 }
 
-/** A run's value of `group`; empty where it named none. */
+/** A trace's value of `group`; empty where it named none. */
 function valueOf(trace: Trace, group: Group): string {
   return group === "session" ? trace.session_id : trace.user_id;
 }
@@ -159,7 +159,7 @@ function groupsOf(traces: readonly Trace[], group: Group | undefined): Trace[][]
   return groups;
 }
 
-/** A group's head: its session or user, which opens the group's runs, and how
+/** A group's head: its session or user, which opens the group's traces, and how
  *  many of them this page holds. */
 function GroupHead({
   group,
@@ -182,7 +182,7 @@ function GroupHead({
         {value ? (
           <Link
             href={href(value)}
-            title={group === "session" ? `The runs of session ${value}, in order` : `Every run of user ${value}`}
+            title={group === "session" ? `The traces of session ${value}, in order` : `Every trace of user ${value}`}
             className="font-medium underline-offset-4 hover:underline"
           >
             {group === "user" ? shortId(value) : value}
@@ -191,7 +191,7 @@ function GroupHead({
           <span className="text-muted-foreground">none</span>
         )}
         <span className="ml-gutter text-muted-foreground tabular-nums">
-          {formatCount(count)} {count === 1 ? "run" : "runs"} on this page
+          {formatCount(count)} {count === 1 ? "trace" : "traces"} on this page
         </span>
       </th>
     </tr>

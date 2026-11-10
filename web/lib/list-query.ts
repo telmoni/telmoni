@@ -35,9 +35,9 @@ export function windowsOffered(days: number, windows: readonly number[] = WINDOW
 export const OPENING_DAYS = 7;
 
 /** The narrowest window a page offers that reaches back to `iso`, or none
- *  where the week a list opens on already does: a link from a run to its
- *  user's traces or its session then finds the run it came from, and
- *  the runs beside it, however old it is. */
+ *  where the week a list opens on already does: a link from a trace to its
+ *  user's traces or its session then finds the trace it came from, and
+ *  the traces beside it, however old it is. */
 export function windowReaching(iso: string, now: number = Date.now()): number | undefined {
   const age = Math.ceil((now - Date.parse(iso)) / 86_400_000);
   if (age <= OPENING_DAYS) return undefined;

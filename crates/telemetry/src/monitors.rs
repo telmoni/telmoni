@@ -1,10 +1,10 @@
 //! Monitors: each one agent's expected schedule ([`crate::schedule`]) and
-//! the grace a run due has to start in, kept in `telemetry.monitors`, made,
+//! the grace a trace due has to start in, kept in `telemetry.monitors`, made,
 //! edited, paused and deleted by any member of the project
 //! ([`crate::handler::monitors`]). Each minute the replica that wins the
-//! lock reads every running monitor's agent's latest run start and end from
-//! the spans, and judges it ([`judge`]): a run not started a minute past its
-//! due time is `late`, and past its grace `down` (`missed`); a run that ended
+//! lock reads every running monitor's agent's latest trace start and end from
+//! the spans, and judges it ([`judge`]): a trace not started a minute past its
+//! due time is `late`, and past its grace `down` (`missed`); a trace that ended
 //! in error makes it `down` (`failed`). Each move opens, raises or resolves
 //! its incident as an alert's does, told after its commit.
 
@@ -38,8 +38,8 @@ pub const HEARTBEAT: &str = "monitors";
 /// How often the loop judges every monitor.
 pub const EVERY: Duration = Duration::from_secs(60);
 
-/// How long past its due time a run's start may take to arrive before the
-/// monitor is `late`: one tick, so a run started on the minute never is.
+/// How long past its due time a trace's start may take to arrive before the
+/// monitor is `late`: one tick, so a trace started on the minute never is.
 pub const LATE_AFTER: TimeDelta = TimeDelta::minutes(1);
 
 /// How far back each read reaches past the last: an insert's flush, and
@@ -49,7 +49,7 @@ const OVERLAP: TimeDelta = TimeDelta::minutes(10);
 /// The furthest a read reaches back, on a replica that has read none.
 const CATCH_UP: TimeDelta = TimeDelta::hours(1);
 
-/// How far past its receipt a run's start is believed, so a clock ahead
+/// How far past its receipt a trace's start is believed, so a clock ahead
 /// cannot push its monitor's next due time out.
 const SKEW_MAX_SECS: u32 = 300;
 
@@ -162,12 +162,12 @@ pub struct MonitorRow {
     pub state: MonitorState,
     pub cause: Option<MonitorCause>,
     pub state_since: DateTime<Utc>,
-    /// When its next run is due; none while it is `new` or paused.
+    /// When its next trace is due; none while it is `new` or paused.
     pub next_due_at: Option<DateTime<Utc>>,
     pub last_started_at: Option<DateTime<Utc>>,
     pub last_ended_at: Option<DateTime<Utc>>,
     pub last_status: Option<SpanStatus>,
-    pub last_run_id: Option<Uuid>,
+    pub last_trace_id: Option<String>,
     #[serde(skip)]
     pub told_at: Option<DateTime<Utc>>,
     #[serde(skip)]
@@ -196,7 +196,7 @@ impl MonitorRow {
 /// The columns a [`MonitorRow`] is read from, in its order.
 const MONITOR_COLUMNS: &str = "id, project_id, organization_id, agent, every_seconds, cron, \
     time_zone, grace_seconds, state, cause, state_since, next_due_at, last_started_at, \
-    last_ended_at, last_status, last_run_id, told_at, told_to, created_at, updated_at";
+    last_ended_at, last_status, last_trace_id, told_at, told_to, created_at, updated_at";
 
 /// The project's monitors, by agent.
 pub async fn monitors<B: HasProject>(
@@ -423,23 +423,23 @@ impl MonitorLinkRow {
     }
 }
 
-/// What one read found of an agent's runs: the latest start of a run, and
-/// the run that ended last.
+/// What one read found of an agent's traces: the latest start of a trace,
+/// and the trace that ended last.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Fact {
     pub started: Option<DateTime<Utc>>,
     pub ended: Option<Ended>,
 }
 
-/// A run that ended: when, how, and which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A trace that ended: when, how, and which.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ended {
     pub at: DateTime<Utc>,
     pub status: SpanStatus,
-    pub run_id: Uuid,
+    pub trace_id: String,
 }
 
-/// Where a monitor stands after a judgement, and the last run it knows.
+/// Where a monitor stands after a judgement, and the last trace it knows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Judged {
     pub state: MonitorState,
@@ -452,8 +452,12 @@ pub struct Judged {
 impl Judged {
     /// Where `row` stood before.
     fn of(row: &MonitorRow) -> Self {
-        let last_ended = match (row.last_ended_at, row.last_status, row.last_run_id) {
-            (Some(at), Some(status), Some(run_id)) => Some(Ended { at, status, run_id }),
+        let last_ended = match (row.last_ended_at, row.last_status, &row.last_trace_id) {
+            (Some(at), Some(status), Some(trace_id)) => Some(Ended {
+                at,
+                status,
+                trace_id: trace_id.clone(),
+            }),
             _ => None,
         };
         Self {
@@ -472,7 +476,7 @@ impl Judged {
 /// (`failed`), and one that ended well ends a `failed`; a cancelled run is
 /// neither. Then the clock: past its due time and [`LATE_AFTER`] it is
 /// `late`, past its grace `down`, and back inside them, its schedule edited,
-/// `up` again. A `failed` stands until a run ends well.
+/// `up` again. A `failed` stands until a trace ends well.
 pub fn judge(
     row: &MonitorRow,
     schedule: &Schedule,
@@ -493,11 +497,12 @@ pub fn judge(
             (judged.state, judged.cause) = (MonitorState::Up, None);
         }
     }
-    if let Some(ended) = fact
-        .ended
-        .filter(|ended| judged.last_ended.is_none_or(|last| ended.at > last.at))
-    {
-        judged.last_ended = Some(ended);
+    if let Some(ended) = fact.ended.as_ref().filter(|ended| {
+        judged
+            .last_ended
+            .as_ref()
+            .is_none_or(|last| ended.at > last.at)
+    }) {
         match ended.status {
             SpanStatus::Error => {
                 (judged.state, judged.cause) = (MonitorState::Down, Some(MonitorCause::Failed));
@@ -507,6 +512,7 @@ pub fn judge(
             }
             SpanStatus::Ok | SpanStatus::Cancelled => {}
         }
+        judged.last_ended = Some(ended.clone());
     }
     if let (Some(due), true) = (
         judged.next_due_at,
@@ -727,11 +733,11 @@ async fn settle(
     } else {
         now
     };
-    let ended = judged.last_ended;
+    let ended = judged.last_ended.as_ref();
     let settled = sqlx::query(
         "UPDATE telemetry.monitors
             SET state = $4, cause = $5, state_since = $6, next_due_at = $7,
-                last_started_at = $8, last_ended_at = $9, last_status = $10, last_run_id = $11,
+                last_started_at = $8, last_ended_at = $9, last_status = $10, last_trace_id = $11,
                 told_at = $12
           WHERE id = $1 AND updated_at = $2 AND organization_id = $3 AND state <> 'paused'",
     )
@@ -745,7 +751,7 @@ async fn settle(
     .bind(judged.last_started_at)
     .bind(ended.map(|ended| ended.at))
     .bind(ended.map(|ended| ended.status))
-    .bind(ended.map(|ended| ended.run_id))
+    .bind(ended.map(|ended| ended.trace_id.as_str()))
     .bind(told_at)
     .execute(tx.conn())
     .await?
@@ -763,7 +769,7 @@ async fn settle(
     Ok(Some(written))
 }
 
-/// What a read finds of one agent's runs.
+/// What a read finds of one agent's traces.
 #[derive(Debug, Clone, Row, Deserialize)]
 struct FactRow {
     project_id: String,
@@ -775,21 +781,20 @@ struct FactRow {
     )]
     ended: Option<DateTime<Utc>>,
     status: String,
-    #[serde(deserialize_with = "clickhouse::serde::uuid::option::deserialize")]
-    run_id: Option<Uuid>,
+    trace_id: Option<String>,
 }
 
-/// The latest start of a run of each agent read, believed no further than
-/// [`SKEW_MAX_SECS`] past its receipt, and the run that ended last.
+/// The latest start of a trace of each agent read, believed no further than
+/// [`SKEW_MAX_SECS`] past its receipt, and the trace that ended last.
 const FACTS_SQL: &str = concat!(
     "SELECT project_id, agent, ",
     "max(least(started_at, received_at + toIntervalSecond({skew:UInt32}))) AS started, ",
-    "if(countIf(kind = 'run') > 0, maxIf(ended_at, kind = 'run'), NULL) AS ended, ",
-    "argMaxIf(status, ended_at, kind = 'run') AS status, ",
-    "if(countIf(kind = 'run') > 0, argMaxIf(run_id, ended_at, kind = 'run'), NULL) AS run_id ",
+    "if(countIf(kind = 'agent') > 0, maxIf(ended_at, kind = 'agent'), NULL) AS ended, ",
+    "argMaxIf(status, ended_at, kind = 'agent') AS status, ",
+    "if(countIf(kind = 'agent') > 0, argMaxIf(trace_id, ended_at, kind = 'agent'), NULL) AS trace_id ",
     "FROM telemetry.spans ",
     "WHERE project_id IN {projects:Array(String)} AND agent IN {agents:Array(String)} ",
-    "AND kind IN ('run_start', 'run') AND received_at >= {from:DateTime64(6, 'UTC')} ",
+    "AND kind IN ('trace_start', 'agent') AND received_at >= {from:DateTime64(6, 'UTC')} ",
     "GROUP BY project_id, agent"
 );
 
@@ -816,13 +821,17 @@ async fn facts(
         .fetch_all()
         .await
         .map_err(|error| {
-            crate::store::failed(&error, "the monitors' runs", "the next tick reads them")
+            crate::store::failed(&error, "the monitors' traces", "the next tick reads them")
         })?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let ended = match (row.ended, row.status.parse::<SpanStatus>(), row.run_id) {
-                (Some(at), Ok(status), Some(run_id)) => Some(Ended { at, status, run_id }),
+            let ended = match (row.ended, row.status.parse::<SpanStatus>(), row.trace_id) {
+                (Some(at), Ok(status), Some(trace_id)) => Some(Ended {
+                    at,
+                    status,
+                    trace_id,
+                }),
                 _ => None,
             };
             (
@@ -865,7 +874,7 @@ mod tests {
             last_started_at: Some(at("2026-11-05T02:00:03Z")),
             last_ended_at: None,
             last_status: None,
-            last_run_id: None,
+            last_trace_id: None,
             told_at: None,
             told_to: Vec::new(),
             created_at: at("2026-11-01T00:00:00Z"),
@@ -888,7 +897,7 @@ mod tests {
             ended: Some(Ended {
                 at: at(when),
                 status,
-                run_id: Uuid::from_u128(7),
+                trace_id: "07".repeat(16),
             }),
         }
     }
@@ -959,9 +968,12 @@ mod tests {
             cause: failed.cause,
             next_due_at: failed.next_due_at,
             last_started_at: failed.last_started_at,
-            last_ended_at: failed.last_ended.map(|ended| ended.at),
-            last_status: failed.last_ended.map(|ended| ended.status),
-            last_run_id: failed.last_ended.map(|ended| ended.run_id),
+            last_ended_at: failed.last_ended.as_ref().map(|ended| ended.at),
+            last_status: failed.last_ended.as_ref().map(|ended| ended.status),
+            last_trace_id: failed
+                .last_ended
+                .as_ref()
+                .map(|ended| ended.trace_id.clone()),
             ..row
         };
         let still = judge(
@@ -1002,7 +1014,7 @@ mod tests {
         let row = MonitorRow {
             last_ended_at: Some(at("2026-11-06T02:10:00Z")),
             last_status: Some(SpanStatus::Ok),
-            last_run_id: Some(Uuid::from_u128(8)),
+            last_trace_id: Some("08".repeat(16)),
             ..row
         };
         let old = judge(

@@ -40,15 +40,15 @@ def test_a_retrieval_carries_the_conventions_names(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot", user_id="user") as run,
+        telmoni.trace("bot", user_id="user") as trace,
         telmoni.retrieval("kb-articles", query="refunds", top_k=5) as found,
     ):
         found.returned(DOCUMENTS)
     assert telmoni.flush()
     (span,) = searches(transport)
     assert span["name"] == "retrieval kb-articles" and span["kind"] == 3
+    assert span["traceId"] == trace.trace_id
     assert attributes_of(span) == {
-        "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
         "user.id": "user",
         "gen_ai.operation.name": "retrieval",
@@ -64,15 +64,15 @@ def test_a_memory_search_goes_under_the_memory_names(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot") as run,
-        run.retrieval("preferences", top_k=3, memory=True) as found,
+        telmoni.trace("bot") as trace,
+        trace.retrieval("preferences", top_k=3, memory=True) as found,
     ):
         found.returned([{"id": "mem-41"}])
     assert telmoni.flush()
     (span,) = searches(transport)
     assert span["name"] == "search_memory" and span["kind"] == 3
+    assert span["traceId"] == trace.trace_id
     assert attributes_of(span) == {
-        "telmoni.run_id": run.run_id,
         "telmoni.agent": "bot",
         "gen_ai.operation.name": "search_memory",
         "gen_ai.memory.store.id": "preferences",
@@ -81,7 +81,7 @@ def test_a_memory_search_goes_under_the_memory_names(
     }
 
 
-def test_outside_a_run_a_retrieval_sends_nothing_with_one_warning(
+def test_outside_a_trace_a_retrieval_sends_nothing_with_one_warning(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     with telmoni.retrieval("kb", query="q", top_k=5) as found:
@@ -93,7 +93,7 @@ def test_outside_a_run_a_retrieval_sends_nothing_with_one_warning(
     assert telmoni.flush()
     assert transport.requests == []
     assert warnings_in(caplog) == [
-        "telmoni: retrieval opened outside a run; nothing is sent outside a run"
+        "telmoni: retrieval opened outside a trace; nothing is sent outside a trace"
     ]
     assert infos_in(caplog) == [WarningInfo("input")]
 
@@ -102,7 +102,7 @@ def test_a_blank_source_is_named_by_its_operation_alone_with_one_warning(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Unicode's White_Space alone is blank, as it is for an agent."""
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         for source in ("", " 　"):
             with telmoni.retrieval(source):
                 pass
@@ -127,7 +127,7 @@ def test_a_source_past_ingests_cap_is_cut_warned_once(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ingest names a retrieval by its source, and refuses a name past 145."""
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         for source in ("😀" * 146, "😀" * 146, "😀" * 145):
             with telmoni.retrieval(source):
                 pass
@@ -153,7 +153,7 @@ def test_a_source_past_ingests_cap_is_cut_warned_once(
 def test_a_source_of_no_string_goes_as_its_text_with_one_warning(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with telmoni.run("bot"), telmoni.retrieval(42):  # type: ignore[arg-type]
+    with telmoni.trace("bot"), telmoni.retrieval(42):  # type: ignore[arg-type]
         pass
     assert telmoni.flush()
     (span,) = searches(transport)
@@ -168,7 +168,7 @@ def test_a_top_k_is_read_as_a_token_count_is(
 ) -> None:
     """A whole number from 0 within 64 bits, a fraction cut; else left off."""
     given: list[Any] = [0, 7.9, "4", -1, True, "many", 2**63, float("nan")]
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         for top_k in given:
             with telmoni.retrieval("kb", top_k=top_k):
                 pass
@@ -194,7 +194,7 @@ def test_returned_refuses_anything_but_a_list_whole(
     transport: FakeTransport,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with keeping.run("bot"), keeping.retrieval("kb") as found:
+    with keeping.trace("bot"), keeping.retrieval("kb") as found:
         found.returned(given)  # type: ignore[arg-type]
     assert keeping.flush()
     (span,) = searches(transport)
@@ -211,7 +211,7 @@ def test_returned_refuses_anything_but_a_list_whole(
 
 
 def test_a_tuple_is_a_list(keeping: Telmoni, transport: FakeTransport) -> None:
-    with keeping.run("bot"), keeping.retrieval("kb") as found:
+    with keeping.trace("bot"), keeping.retrieval("kb") as found:
         found.returned(tuple(DOCUMENTS))
     assert keeping.flush()
     sent = attributes_of(searches(transport)[0])
@@ -223,7 +223,7 @@ def test_the_last_list_wins_whole_and_a_refused_one_leaves_the_last(
     keeping: Telmoni, transport: FakeTransport
 ) -> None:
     more = [*DOCUMENTS, {"id": "kb-203", "score": 0.77}]
-    with keeping.run("bot"):
+    with keeping.trace("bot"):
         with keeping.retrieval("then-refused") as found:
             found.returned(DOCUMENTS)
             found.returned("kb-112")  # type: ignore[arg-type]
@@ -251,7 +251,7 @@ def test_the_last_list_wins_whole_and_a_refused_one_leaves_the_last(
 def test_an_empty_list_is_counted_0_and_sent_as_one(
     keeping: Telmoni, transport: FakeTransport
 ) -> None:
-    with keeping.run("bot"):
+    with keeping.trace("bot"):
         with keeping.retrieval("kb") as found:
             found.returned([])
         with keeping.retrieval("prefs", memory=True) as found:
@@ -267,7 +267,7 @@ def test_an_empty_list_is_counted_0_and_sent_as_one(
 def test_the_query_and_documents_leave_only_under_both_locks(
     keeping: Telmoni, transport: FakeTransport
 ) -> None:
-    with keeping.run("bot"):
+    with keeping.trace("bot"):
         with keeping.retrieval("kb", query="refunds") as found:
             found.returned(DOCUMENTS)
         with keeping.retrieval("prefs", query={"about": "tone"}, memory=True) as found:
@@ -294,7 +294,7 @@ def test_a_mask_that_takes_documents_out_leaves_the_count(
         Config(api_key="k", capture_content=True, mask=mask), transport=transport
     )
     try:
-        with client.run("bot"), client.retrieval("kb") as found:
+        with client.trace("bot"), client.retrieval("kb") as found:
             found.returned(DOCUMENTS)
         assert client.flush()
     finally:
@@ -308,7 +308,7 @@ def test_a_call_inside_a_retrieval_nests_under_it(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     with (
-        telmoni.run("bot"),
+        telmoni.trace("bot"),
         telmoni.retrieval("kb"),
         telmoni.model_call("embed-small", operation="embeddings"),
     ):
@@ -330,7 +330,7 @@ def test_the_retrieval_decorator_and_async_with(
         async with telmoni.retrieval("prefs", memory=True) as found:
             found.returned(["tone"])
 
-    with telmoni.run("bot"):
+    with telmoni.trace("bot"):
         assert search("refunds") == ["refunds"]
         asyncio.run(remember())
     assert telmoni.flush()

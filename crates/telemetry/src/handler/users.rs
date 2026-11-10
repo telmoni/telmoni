@@ -65,7 +65,7 @@ pub async fn erase_user(
         .await?
         .store(raw);
     let found = erasure::find(&state, project_id, Erase::EndUser(&hash)).await?;
-    let traces = found.runs.len() as u64;
+    let traces = found.traces.len() as u64;
     chain::write(
         &state.db,
         &acting,

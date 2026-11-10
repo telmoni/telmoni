@@ -1165,7 +1165,7 @@ async fn a_dead_installation_retires_the_connection_and_fails_its_queue(pool: Pg
 }
 
 /// ⚠ An incident's delivery reaches Slack with its buttons, each naming the
-/// connection's project and the incident, and the link to its run.
+/// connection's project and the incident, and the link to its trace.
 #[sqlx::test]
 async fn an_incidents_delivery_reaches_slack_with_its_buttons(pool: PgPool) {
     apply_audit_migrations(&pool).await;
@@ -1182,14 +1182,16 @@ async fn an_incidents_delivery_reaches_slack_with_its_buttons(pool: PgPool) {
     .await;
     let id = seed_delivery(&pool, ORGANIZATION, connection).await;
     let incident = Uuid::now_v7();
-    let run = "https://app.example/org_conn_1/project_org_conn_1/traces/0190";
-    sqlx::query("UPDATE notifications.deliveries SET incident_id = $2, run_url = $3 WHERE id = $1")
-        .bind(id)
-        .bind(incident)
-        .bind(run)
-        .execute(&pool)
-        .await
-        .unwrap();
+    let trace = "https://app.example/org_conn_1/project_org_conn_1/traces/0190";
+    sqlx::query(
+        "UPDATE notifications.deliveries SET incident_id = $2, trace_url = $3 WHERE id = $1",
+    )
+    .bind(id)
+    .bind(incident)
+    .bind(trace)
+    .execute(&pool)
+    .await
+    .unwrap();
     Mock::given(method("POST"))
         .and(path("/services/T0001/B0HOOK/buttons"))
         .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
@@ -1212,7 +1214,7 @@ async fn an_incidents_delivery_reaches_slack_with_its_buttons(pool: PgPool) {
         slack::button_value(&pid(ORGANIZATION), incident)
     );
     assert_eq!(buttons[1]["action_id"], "mute_for_an_hour");
-    assert_eq!(buttons[2]["url"], run);
+    assert_eq!(buttons[2]["url"], trace);
 }
 
 /// An archived channel is the target's fault: `errored`, not `revoked`.
@@ -1967,7 +1969,7 @@ async fn each_button_acts_as_the_member_its_slack_account_is_linked_to(pool: PgP
         ]
     );
 
-    let body = pressed(&mocks, PRESSER, "open_run", "", "open");
+    let body = pressed(&mocks, PRESSER, "open_trace", "", "open");
     let resp = app(&st)
         .oneshot(slack_press(&body, now, None))
         .await

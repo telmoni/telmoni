@@ -636,7 +636,9 @@ async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: P
         .expect("an incident");
 
     let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-    let runs: Vec<Uuid> = (0..25).map(|_| Uuid::new_v4()).collect();
+    let traces: Vec<String> = (0..25)
+        .map(|_| Uuid::new_v4().simple().to_string())
+        .collect();
     let mut tx = project_scope(&project.state.db, &project.project)
         .await
         .expect("the project's scope")
@@ -647,15 +649,15 @@ async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: P
     incidents::told(&mut tx, told, id, &[b, a], None)
         .await
         .expect("kept");
-    incidents::told(&mut tx, told, id, &[a], Some(runs[0]))
+    incidents::told(&mut tx, told, id, &[a], Some(&traces[0]))
         .await
         .expect("kept");
-    for run in &runs[1..] {
-        incidents::told(&mut tx, told, id, &[], Some(*run))
+    for trace in &traces[1..] {
+        incidents::told(&mut tx, told, id, &[], Some(trace))
             .await
             .expect("kept");
     }
-    incidents::told(&mut tx, told, id, &[], Some(runs[10]))
+    incidents::told(&mut tx, told, id, &[], Some(&traces[10]))
         .await
         .expect("kept");
     // Another project's incident of that id is none of this one's to write.
@@ -668,14 +670,14 @@ async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: P
     let mut connections = vec![a, b];
     connections.sort_unstable();
     assert_eq!(kept["told_to"], json!(connections), "each once");
-    let mut last: Vec<Uuid> = runs[5..]
+    let mut last: Vec<String> = traces[5..]
         .iter()
-        .copied()
-        .filter(|run| *run != runs[10])
+        .filter(|trace| **trace != traces[10])
+        .cloned()
         .collect();
-    last.push(runs[10]);
+    last.push(traces[10].clone());
     assert_eq!(
-        kept["runs"],
+        kept["traces"],
         json!(last),
         "the last twenty, the one shown again moved last"
     );
@@ -937,7 +939,7 @@ async fn a_budget_counts_the_hours_whose_spans_are_gone(pool: PgPool) {
         .await
         .expect("the hour's spans purged");
     let body = json!({
-        "name": "Daily budget", "kind": "run", "measure": "cost", "aggregation": "sum",
+        "name": "Daily budget", "kind": "agent", "measure": "cost", "aggregation": "sum",
         "window": "day", "operator": "gt", "alert_threshold": 5,
     });
     let (status, made) = project

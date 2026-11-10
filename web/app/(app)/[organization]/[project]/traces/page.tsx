@@ -28,13 +28,13 @@ import { MAX_DAYS } from "@/lib/list-query";
 import { DEFAULT_ROWS, activeFilters, marksOn, parseTraceQuery, parseTraceUi } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
-export const metadata = { title: "Runs" };
+export const metadata = { title: "Traces" };
 
-// The trace list: a toolbar, the filters beside the list, the runs over the
+// The trace list: a toolbar, the filters beside the list, the traces over the
 // window above a page of rows, and the way through the pages below. A row
-// per run of this project's agents in a window of days, every column a sort
+// per trace of this project's agents in a window of days, every column a sort
 // and most a filter, all of it carried in the URL so a link holds the view.
-// Every pixel is rendered from metadata: the server sums each run's spans
+// Every pixel is rendered from metadata: the server sums each trace's spans
 // and never reads a prompt.
 export default async function TracesPage({
   params,
@@ -55,7 +55,7 @@ export default async function TracesPage({
     fetchTraceHistogram(project.id, query, utcOffset),
     // By agent and environment alone: a change explains the bars whatever else narrows them.
     fetchChanges(project.id, query.days, query.agent ?? [], query.environment ?? []),
-    // Said on an opened run's line, the peek's.
+    // Said on an opened trace's line, the peek's.
     fetchContentMode(project.id),
   ]);
   const marks =
@@ -69,7 +69,7 @@ export default async function TracesPage({
   );
   // The rows this render drew, as one token: the table is keyed by it, and
   // the new-traces bar reads a change in it as the list drawn again.
-  const drawn = access.kind === "ok" ? access.list.traces.map((t) => t.run_id).join() : "";
+  const drawn = access.kind === "ok" ? access.list.traces.map((t) => t.trace_id).join() : "";
   const knownTags = facets.kind === "ok" ? facets.facets.tag.values.map((v) => v.value) : [];
   // An empty, unfiltered window is a first run only where all the plan keeps is empty too.
   const ever =
@@ -85,8 +85,8 @@ export default async function TracesPage({
       <UtcOffsetCookie drawnWith={utcOffset} />
       <ListPage
         list="traces"
-        title="Runs"
-        info="Every run of this project's agents, newest first, with its steps, model and tool calls. Click a value to narrow the list to it, a heading to sort by it."
+        title="Traces"
+        info="Every trace of this project's agents, newest first, with its steps, model and tool calls. Click a value to narrow the list to it, a heading to sort by it."
         organization={organization}
         slug={slug}
         gate={gate}
@@ -108,16 +108,16 @@ export default async function TracesPage({
         firstRun={
           firstRun ? (
             <FirstRun
-              status={<Listening>Listening for this project&rsquo;s first run</Listening>}
+              status={<Listening>Listening for this project&rsquo;s first trace</Listening>}
               title="Send your first trace"
-              lead="Three steps, a few minutes. The first run lists here by itself as it lands, with no reload."
+              lead="Three steps, a few minutes. The first trace lists here by itself as it lands, with no reload."
             >
               <FirstRunStep
                 n={1}
                 title="Mint an API key"
                 note={
                   canMint
-                    ? "One with Send spans comes with a first run to paste, for each SDK."
+                    ? "One with Send spans comes with a first trace to paste, for each SDK."
                     : "The project's owners and admins mint its keys; ask one for a key with Send spans."
                 }
               >
@@ -154,7 +154,7 @@ export default async function TracesPage({
               <FirstRunStep
                 n={3}
                 title="Run your agent"
-                note="Each run lists here within a minute of ending, with its steps, model calls, tokens and spend."
+                note="Each trace lists here within a minute of ending, with its steps, model calls, tokens and spend."
               />
             </FirstRun>
           ) : undefined
@@ -165,11 +165,11 @@ export default async function TracesPage({
             <Link href="/docs/api/sdks" className="underline underline-offset-4">
               SDK
             </Link>{" "}
-            and wrap one function as a run, or add the{" "}
+            and wrap one function as a trace, or add the{" "}
             <Link href="/docs/api/coding-agents" className="underline underline-offset-4">
               coding-agent plugin
             </Link>{" "}
-            for Claude Code or Antigravity, and each run&rsquo;s trace lists here
+            for Claude Code or Antigravity, and each trace lists here
             within a minute of ending. A key minted on{" "}
             <Link
               href={`${projectPath(organization, slug)}/api-keys`}
@@ -177,7 +177,7 @@ export default async function TracesPage({
             >
               API keys
             </Link>{" "}
-            to send spans comes with a first run to paste. Runs from the last {days}{" "}
+            to send spans comes with a first trace to paste. Traces from the last {days}{" "}
             {days === 1 ? "day" : "days"} are shown.
           </>
         )}
@@ -233,7 +233,7 @@ export default async function TracesPage({
             organization={organization}
             slug={slug}
             projectId={project.id}
-            runs={access.list.traces.map((t) => t.run_id)}
+            traces={access.list.traces.map((t) => t.trace_id)}
             contentMode={mode?.content_mode}
             me={gate.person.userId}
             administers={administers(project.role)}

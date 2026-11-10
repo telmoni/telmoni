@@ -111,14 +111,14 @@ export function KeysActions({
 }
 
 /** A key that sends spans, a paste away from its first trace: each SDK's
- *  smallest run with the key in it. */
+ *  smallest trace with the key in it. */
 function FirstTrace({ token, tracesHref }: { token: string; tracesHref: string }) {
   return (
     <DialogSection
       title="Send a first trace"
       note={
         <>
-          Paste one into a terminal; its run lists on the{" "}
+          Paste one into a terminal; its trace lists on the{" "}
           {/* A tab of its own: leaving the page would take the key off the screen. */}
           <Link href={tracesHref} target="_blank" rel="noopener" className="underline underline-offset-4">
             Traces
@@ -127,7 +127,7 @@ function FirstTrace({ token, tracesHref }: { token: string; tracesHref: string }
         </>
       }
     >
-      <InstallTabs name="First run" tabs={firstTraceSnippets(token)} compact />
+      <InstallTabs name="First trace" tabs={firstTraceSnippets(token)} compact />
     </DialogSection>
   );
 }

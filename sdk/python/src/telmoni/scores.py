@@ -1,4 +1,4 @@
-"""Scores: a name and a value, of a run, one of its spans or a session.
+"""Scores: a name and a value, of a trace, one of its spans or a session.
 
 A live score is a ``gen_ai.evaluation.result`` event on its handle's span; a
 late one, of what has ended, travels the queue as a ``telmoni.score`` span,
@@ -28,7 +28,7 @@ VERSION = "its version is up to 64 characters"
 RANGE = "a range is a number score's alone"
 VALUE = "its value is a number, a yes or no, or a category"
 TARGET = (
-    "it names a run, a run and one of its spans by 16 hex digits, "
+    "it names a trace by 32 hex digits, a trace and one of its spans by 16, "
     "or a session of up to 200 characters"
 )
 ENDED = "its span had ended; send it with the client's score, naming the span"
@@ -138,31 +138,34 @@ def _judge(
 
 
 def target(
-    run_id: object, span_id: object, session_id: object, warn_once: Warn
+    trace_id: object, span_id: object, session_id: object, warn_once: Warn
 ) -> dict[str, str] | None:
     """What a late score names, its ids as ingest reads them; None with one
     warning for anything else."""
-    named = _target(run_id, span_id, session_id)
+    named = _target(trace_id, span_id, session_id)
     if named is None:
         refused(TARGET, warn_once)
     return named
 
 
 def _target(
-    run_id: object, span_id: object, session_id: object
+    trace_id: object, span_id: object, session_id: object
 ) -> dict[str, str] | None:
     if session_id is not None:
-        if run_id is not None or span_id is not None or not isinstance(session_id, str):
+        if (
+            trace_id is not None
+            or span_id is not None
+            or not isinstance(session_id, str)
+        ):
             return None
         session = _trimmed(session_id)
         if not 0 < len(session) <= contract.SESSION_ID_MAX:
             return None
         return {"session_id": session}
-    run = ids.run_uuid(run_id) if isinstance(run_id, str) else None
-    # The nil run is no run's.
-    if run is None or run.int == 0:
+    trace = ids.trace_id(trace_id)
+    if trace is None:
         return None
-    named = {"run_id": str(run)}
+    named = {"trace_id": f"{trace:032x}"}
     if span_id is not None:
         if not isinstance(span_id, str) or not _SPAN_ID.fullmatch(span_id):
             return None

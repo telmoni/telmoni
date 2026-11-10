@@ -94,7 +94,6 @@ async fn export(app: &Router, key: &str) {
         "startTimeUnixNano": nanos(started),
         "endTimeUnixNano": nanos(started + TimeDelta::seconds(2)),
         "attributes": [
-            { "key": contract::RUN_ID, "value": { "stringValue": Uuid::now_v7().to_string() } },
             { "key": contract::AGENT, "value": { "stringValue": "triage" } },
             { "key": contract::OPERATION, "value": { "stringValue": "invoke_agent" } }
         ]
@@ -210,13 +209,18 @@ async fn a_projects_first_run_makes_its_three_starters_once(pool: PgPool) {
         starters_of(&pool, &project).await,
         vec![
             (
-                "Failing runs".to_owned(),
+                "Failing traces".to_owned(),
                 "failures".to_owned(),
                 0.1,
                 Some(0.05)
             ),
-            ("Looping runs".to_owned(), "repeats".to_owned(), 10.0, None),
-            ("Stalled runs".to_owned(), "stalled".to_owned(), 1.0, None),
+            (
+                "Looping traces".to_owned(),
+                "repeats".to_owned(),
+                10.0,
+                None
+            ),
+            ("Stalled traces".to_owned(), "stalled".to_owned(), 1.0, None),
         ]
     );
     let filed: Vec<(String, String, String)> = sqlx::query_as(
@@ -244,7 +248,7 @@ async fn a_projects_first_run_makes_its_three_starters_once(pool: PgPool) {
     assert!(
         feed[0]
             .body
-            .contains("Failing runs, Looping runs and Stalled runs now watch its runs"),
+            .contains("Failing traces, Looping traces and Stalled traces now watch its traces"),
         "{}",
         feed[0].body
     );
@@ -261,7 +265,7 @@ async fn a_projects_first_run_makes_its_three_starters_once(pool: PgPool) {
 
     let looping = rules
         .iter()
-        .find(|rule| rule["name"] == "Looping runs")
+        .find(|rule| rule["name"] == "Looping traces")
         .expect("the looping starter");
     let gone = format!("{RULES}/{}", looping["id"].as_str().expect("an id"));
     let (status, _) = ask(&app, "DELETE", &gone, (&organization, &project), None).await;
@@ -307,12 +311,12 @@ async fn an_organizations_two_projects_are_watched_with_four_alerts_still_to_mak
         .await;
     }
     for n in 1..=4 {
-        let body = json!({ "name": format!("Our alert {n}"), "kind": "run", "measure": "count",
+        let body = json!({ "name": format!("Our alert {n}"), "kind": "agent", "measure": "count",
             "aggregation": "count", "window": "hour", "operator": "gt", "alert_threshold": 100 });
         let (status, made) = ask(&app, "POST", RULES, (&organization, &first), Some(&body)).await;
         assert_eq!(status, StatusCode::CREATED, "alert {n} of its own: {made}");
     }
-    let body = json!({ "name": "One too many", "kind": "run", "measure": "count",
+    let body = json!({ "name": "One too many", "kind": "agent", "measure": "count",
         "aggregation": "count", "window": "hour", "operator": "gt", "alert_threshold": 100 });
     let (status, refused) = ask(&app, "POST", RULES, (&organization, &second), Some(&body)).await;
     assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{refused}");
@@ -343,14 +347,14 @@ async fn a_project_past_the_plans_number_is_made_without_its_starters_and_says_s
         .into_iter()
         .map(|(name, ..)| name)
         .collect();
-    assert_eq!(made, vec!["Failing runs", "Looping runs"]);
+    assert_eq!(made, vec!["Failing traces", "Looping traces"]);
     let (_, list) = ask(&app, "GET", RULES, (&organization, &first), None).await;
     assert_eq!(list["starters_withheld"], json!(["stalled"]), "{list}");
     assert_eq!(list["starters_detail"], DETAIL);
     eventually("the feed is told", || async { !told(&notices).is_empty() }).await;
     let first_told = &told(&notices)[0];
     assert!(
-        first_told.body.contains("Not made: Stalled runs.") && first_told.body.contains(DETAIL),
+        first_told.body.contains("Not made: Stalled traces.") && first_told.body.contains(DETAIL),
         "{}",
         first_told.body
     );
@@ -379,7 +383,7 @@ async fn a_project_past_the_plans_number_is_made_without_its_starters_and_says_s
     assert!(
         second_told
             .body
-            .contains("Not made: Failing runs, Looping runs and Stalled runs."),
+            .contains("Not made: Failing traces, Looping traces and Stalled traces."),
         "{}",
         second_told.body
     );
@@ -418,7 +422,7 @@ async fn a_projects_own_alerts_cap_withholds_its_starters_past_it(pool: PgPool) 
         .into_iter()
         .map(|(name, ..)| name)
         .collect();
-    assert_eq!(made, vec!["Failing runs"]);
+    assert_eq!(made, vec!["Failing traces"]);
     let (_, list) = ask(&app, "GET", RULES, (&organization, &first), None).await;
     assert_eq!(
         list["starters_withheld"],
@@ -438,7 +442,7 @@ async fn a_starter_is_read_every_five_minutes(pool: PgPool) {
     let (auth, organization, [project, ..]) = seated();
     let state = common::state(&pool, auth);
     let app = router(state.clone());
-    let body = json!({ "name": "Ours", "kind": "run", "measure": "count",
+    let body = json!({ "name": "Ours", "kind": "agent", "measure": "count",
         "aggregation": "count", "window": "hour", "operator": "gt", "alert_threshold": 100 });
     let (status, ours) = ask(&app, "POST", RULES, (&organization, &project), Some(&body)).await;
     assert_eq!(status, StatusCode::CREATED, "{ours}");
@@ -512,9 +516,9 @@ async fn the_failing_runs_starter_takes_its_projects_history_once_fourteen_days_
         .as_array()
         .expect("the alerts")
         .iter()
-        .find(|rule| rule["name"] == "Failing runs")
+        .find(|rule| rule["name"] == "Failing traces")
         .expect("the failing starter");
-    let chosen = json!({ "name": "Failing runs", "kind": "run", "measure": "failures",
+    let chosen = json!({ "name": "Failing traces", "kind": "agent", "measure": "failures",
         "aggregation": "avg", "window": "hour", "operator": "gt", "alert_threshold": 0.3,
         "warning_threshold": 0.05, "missing_data": "zero" });
     let at = format!("{RULES}/{}", failing["id"].as_str().expect("an id"));
@@ -534,7 +538,7 @@ async fn the_failing_runs_starter_takes_its_projects_history_once_fourteen_days_
         for n in 0..4 {
             let mut run = common::received(
                 &busy,
-                SpanKind::Run,
+                SpanKind::Agent,
                 "triage",
                 1_000,
                 today - TimeDelta::hours(hour) + TimeDelta::minutes(n),
@@ -559,7 +563,7 @@ async fn the_failing_runs_starter_takes_its_projects_history_once_fourteen_days_
             starters_of(&pool, &project)
                 .await
                 .into_iter()
-                .find(|(name, ..)| name == "Failing runs")
+                .find(|(name, ..)| name == "Failing traces")
                 .map(|(_, _, alert, warning)| (alert, warning))
                 .expect("the failing starter")
         }

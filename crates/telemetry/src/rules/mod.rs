@@ -1,6 +1,6 @@
 //! Alerts, built as Langfuse's are: each a metric — a measure of the
 //! project's spans of one kind, filtered by the fields the hourly totals
-//! keep, folded over the last hour, day or week, a run's cost over the month —
+//! keep, folded over the last hour, day or week, a trace's cost over the month —
 //! against an alert threshold and an optional warning one under one operator. Kept in `telemetry.rules`
 //! ([`db`]), made, edited, paused and deleted by any member of the project
 //! ([`crate::handler::rules`]), and each evaluated a minute after the last by
@@ -64,11 +64,11 @@ pub const OBJECTIVE_DAYS: [u16; 3] = [7, 28, 30];
 /// budget is too small for any window to read.
 pub const TARGET_RANGE: std::ops::RangeInclusive<f64> = 0.5..=0.9999;
 
-/// The longest a latency objective's runs are given, in milliseconds: an hour.
+/// The longest a latency objective's traces are given, in milliseconds: an hour.
 pub const LATENCY_MAX_MS: u32 = 3_600_000;
 
-/// What one agent's runs promise: that `target` of them, a share, succeed,
-/// or with `latency_ms`, end inside it, over the last `days`. A run that
+/// What one agent's traces promise: that `target` of them, a share, succeed,
+/// or with `latency_ms`, end inside it, over the last `days`. A trace that
 /// does not spends its error budget, `1 - target` of them.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,7 +85,7 @@ impl Objective {
         let bad = |why: String| TelmoniError::BadRequest(why);
         if !TARGET_RANGE.contains(&self.target) {
             return Err(bad(format!(
-                "an objective promises {}% to {}% of its runs",
+                "an objective promises {}% to {}% of its traces",
                 TARGET_RANGE.start() * 100.0,
                 TARGET_RANGE.end() * 100.0
             )));
@@ -95,7 +95,7 @@ impl Objective {
             .is_some_and(|ms| !(1..=LATENCY_MAX_MS).contains(&ms))
         {
             return Err(bad(format!(
-                "a latency objective's runs end inside 1 to {LATENCY_MAX_MS} ms"
+                "a latency objective's traces end inside 1 to {LATENCY_MAX_MS} ms"
             )));
         }
         if !OBJECTIVE_DAYS.contains(&self.days) {
@@ -104,24 +104,24 @@ impl Objective {
         Ok(self)
     }
 
-    /// The share of runs it lets miss: its error budget.
+    /// The share of traces it lets miss: its error budget.
     #[must_use]
     pub fn budget(&self) -> f64 {
         1.0 - self.target
     }
 
-    /// How fast `bad` of `runs` spend the budget: 1 spends it in exactly its
-    /// days; none spent where there was no run.
+    /// How fast `bad` of `traces` spend the budget: 1 spends it in exactly
+    /// its days; none spent where there was no trace.
     #[must_use]
-    pub fn burn(&self, runs: u64, bad: u64) -> f64 {
-        if runs == 0 {
+    pub fn burn(&self, traces: u64, bad: u64) -> f64 {
+        if traces == 0 {
             return 0.0;
         }
         #[expect(
             clippy::cast_precision_loss,
-            reason = "a count past 2^53 runs is no objective's"
+            reason = "a count past 2^53 traces is no objective's"
         )]
-        let share = bad as f64 / runs as f64;
+        let share = bad as f64 / traces as f64;
         share / self.budget()
     }
 }
@@ -285,13 +285,13 @@ pub struct RuleFilters {
     pub environment: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub release: Vec<String>,
-    /// Tags, each `key:value`, that a run carries where any of its spans
+    /// Tags, each `key:value`, that a trace carries where any of its spans
     /// does: a cost alert's alone, read from the spans that keep them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tag: Vec<String>,
 }
 
-/// The filters on `telemetry.spans` a run's cost takes too: all but its
+/// The filters on `telemetry.spans` a trace's cost takes too: all but its
 /// tools and statuses. Bound by [`RuleFilters::bind_calls`].
 macro_rules! calls_admitted {
     () => {
@@ -376,7 +376,7 @@ impl RuleFilters {
 #[serde(deny_unknown_fields)]
 pub struct RuleInput {
     pub name: String,
-    /// The spans it reads: runs, steps, model calls, tool calls or retrievals.
+    /// The spans it reads: agents, steps, model calls, tool calls or retrievals.
     pub kind: SpanKind,
     pub measure: RuleMeasure,
     pub aggregation: RuleAggregation,
@@ -411,7 +411,7 @@ pub struct RuleInput {
 #[derive(Debug, Clone, PartialEq, Serialize, sqlx::FromRow)]
 pub struct Definition {
     pub name: String,
-    /// The spans it reads: runs, steps, model calls, tool calls or retrievals.
+    /// The spans it reads: agents, steps, model calls, tool calls or retrievals.
     pub kind: SpanKind,
     pub measure: RuleMeasure,
     pub aggregation: RuleAggregation,
@@ -449,7 +449,7 @@ impl RuleInput {
     /// characters; a kind of span ours names; an aggregation its measure
     /// folds ([`RuleMeasure::folds`](telmoni_shared::RuleMeasure::folds)); finite thresholds, a warning one met before the
     /// alert's as the operator reads them; and re-notification from a minute
-    /// to a week. A burn alert is its objective's: one agent's runs, and
+    /// to a week. A burn alert is its objective's: one agent's traces, and
     /// its thresholds and windows [`FAST_BURN`] and [`SLOW_BURN`]'s.
     pub fn checked(mut self) -> Result<Rule, TelmoniError> {
         let bad = |why: &str| TelmoniError::BadRequest(why.to_owned());
@@ -466,7 +466,7 @@ impl RuleInput {
                     ));
                 }
                 self = Self {
-                    kind: SpanKind::Run,
+                    kind: SpanKind::Agent,
                     aggregation: RuleAggregation::Avg,
                     window: RuleWindow::Hour,
                     operator: RuleOperator::Gte,
@@ -491,7 +491,7 @@ impl RuleInput {
         }
         if !self.kind.alertable() {
             return Err(bad(
-                "an alert reads runs, steps, model calls, tool calls or retrievals",
+                "an alert reads agents, steps, model calls, tool calls or retrievals",
             ));
         }
         if !self.measure.folds(self.aggregation) {
@@ -506,12 +506,14 @@ impl RuleInput {
         if !self.measure.measured_on(self.kind) {
             return Err(bad(match self.measure {
                 RuleMeasure::Tokens => "tokens are counted on model calls alone",
-                RuleMeasure::Score => "a score alert is a run's: it reads every score of its name",
-                RuleMeasure::Burn => "an objective is a run's",
-                RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled => {
-                    "a run's steps, its repeats and a stall are read run by run"
+                RuleMeasure::Score => {
+                    "a score alert is a trace's: it reads every score of its name"
                 }
-                _ => "cost is counted per run, from its model calls",
+                RuleMeasure::Burn => "an objective is a trace's",
+                RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled => {
+                    "a trace's steps, its repeats and a stall are read trace by trace"
+                }
+                _ => "cost is counted per trace, from its model calls",
             }));
         }
         let filters = self.filters.checked()?;
@@ -556,25 +558,25 @@ impl RuleInput {
         }
         if self.measure == RuleMeasure::Stalled && self.window == RuleWindow::Month {
             return Err(bad(
-                "a stall is a run quiet past the window: an hour, a day or a week",
+                "a stall is a trace quiet past the window: an hour, a day or a week",
             ));
         }
-        let run_by_run = matches!(
+        let trace_by_trace = matches!(
             self.measure,
             RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled
         );
-        // Read as its spans land, before the run's own status is known.
-        if run_by_run && !filters.status.is_empty() {
+        // Read as its spans land, before the agent's own status is known.
+        if trace_by_trace && !filters.status.is_empty() {
             return Err(bad(
-                "a run's steps, its repeats and a stall are read as its spans land: filter \
+                "a trace's steps, its repeats and a stall are read as its spans land: filter \
                  them by agent, environment or release",
             ));
         }
         if self.measure == RuleMeasure::Cost {
-            // Read from the calls as they land, before the run's own status is known.
+            // Read from the calls as they land, before the agent's own status is known.
             if !(filters.status.is_empty() && filters.tool.is_empty()) {
                 return Err(bad(
-                    "a run's cost is read from its model calls as they land: filter it by \
+                    "a trace's cost is read from its model calls as they land: filter it by \
                      agent, model, provider, environment, release or tag",
                 ));
             }
@@ -586,7 +588,7 @@ impl RuleInput {
         let calls = self.kind == SpanKind::ModelCall || self.measure == RuleMeasure::Cost;
         if !calls && !(filters.model.is_empty() && filters.provider.is_empty()) {
             return Err(bad(
-                "model and provider filter model calls, or a run's cost by its calls",
+                "model and provider filter model calls, or a trace's cost by its calls",
             ));
         }
         if self.kind != SpanKind::ToolCall && !filters.tool.is_empty() {
@@ -726,7 +728,7 @@ mod tests {
         let definition = &kept.definition;
         assert_eq!(
             (definition.kind, definition.window, definition.operator),
-            (SpanKind::Run, RuleWindow::Hour, RuleOperator::Gte)
+            (SpanKind::Agent, RuleWindow::Hour, RuleOperator::Gte)
         );
         assert_eq!(
             (definition.alert_threshold, definition.warning_threshold),
@@ -779,7 +781,7 @@ mod tests {
         assert!(given.checked().is_err(), "a burn alert's alone");
     }
 
-    /// A burn is the share missed over the share allowed, none without runs.
+    /// A burn is the share missed over the share allowed, none without traces.
     #[test]
     fn a_burn_is_the_share_missed_over_the_budget() {
         let objective = Objective {
@@ -792,12 +794,12 @@ mod tests {
         assert!(objective.burn(0, 0).abs() < f64::EPSILON);
     }
 
-    /// A score alert names its score and takes no filter, a run's; a name
+    /// A score alert names its score and takes no filter, a trace's; a name
     /// is a score alert's alone; and a month has no window before it.
     #[test]
     fn a_score_alert_names_its_score_and_a_baseline_a_trailing_window() {
         let score = |name: Option<&str>| RuleInput {
-            kind: SpanKind::Run,
+            kind: SpanKind::Agent,
             measure: RuleMeasure::Score,
             aggregation: RuleAggregation::Avg,
             filters: RuleFilters::default(),
@@ -829,7 +831,7 @@ mod tests {
             kind: SpanKind::ModelCall,
             ..score(Some("relevance"))
         };
-        assert!(of_calls.checked().is_err(), "a run's");
+        assert!(of_calls.checked().is_err(), "a trace's");
         let summed = RuleInput {
             aggregation: RuleAggregation::Sum,
             ..score(Some("relevance"))
@@ -1058,7 +1060,7 @@ mod tests {
                 ..input()
             },
             RuleInput {
-                kind: SpanKind::Run,
+                kind: SpanKind::Agent,
                 measure: RuleMeasure::Tokens,
                 aggregation: RuleAggregation::Sum,
                 warning_threshold: None,
@@ -1075,11 +1077,11 @@ mod tests {
         }
     }
 
-    /// The cost cap reads each run's calls as they land, so it filters as they do.
+    /// The cost cap reads each trace's calls as they land, so it filters as they do.
     #[test]
     fn the_cost_cap_is_a_runs_cost_filtered_as_its_calls_are() {
         let cap = || RuleInput {
-            kind: SpanKind::Run,
+            kind: SpanKind::Agent,
             measure: RuleMeasure::Cost,
             aggregation: RuleAggregation::Max,
             filters: RuleFilters {
@@ -1113,12 +1115,12 @@ mod tests {
         }
     }
 
-    /// A run's steps, repeats and stalls are a run's, read as its spans land,
-    /// and a stall over a window of a fixed length.
+    /// A trace's steps, repeats and stalls are a trace's, read as its spans
+    /// land, and a stall over a window of a fixed length.
     #[test]
-    fn steps_repeats_and_stalls_are_read_run_by_run() {
+    fn steps_repeats_and_stalls_are_read_trace_by_trace() {
         let of = |measure, aggregation| RuleInput {
-            kind: SpanKind::Run,
+            kind: SpanKind::Agent,
             measure,
             aggregation,
             filters: RuleFilters {
@@ -1186,7 +1188,7 @@ mod tests {
                 kind: SpanKind::Step,
                 ..of(measure, aggregation)
             };
-            assert!(of_steps.checked().is_err(), "{measure} is a run's");
+            assert!(of_steps.checked().is_err(), "{measure} is a trace's");
         }
     }
 
@@ -1227,7 +1229,7 @@ mod tests {
                 ..input()
             },
             RuleInput {
-                kind: SpanKind::Run,
+                kind: SpanKind::Agent,
                 filters: sources(),
                 ..input()
             },
@@ -1249,7 +1251,7 @@ mod tests {
                 ..input()
             },
             RuleInput {
-                kind: SpanKind::Run,
+                kind: SpanKind::Agent,
                 ..input()
             },
             RuleInput {
@@ -1265,7 +1267,7 @@ mod tests {
                 ..input()
             },
             RuleInput {
-                kind: SpanKind::Run,
+                kind: SpanKind::Agent,
                 filters: tools(),
                 ..input()
             },

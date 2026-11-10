@@ -1,11 +1,12 @@
 """Trace and span ids: random, as OpenTelemetry's own generator makes them,
-except for the spans of a recorded run, whose ids are derived from the run's
-id, so that a record sent twice is the same bytes and ingest's claim on the
-body answers it once.
+except for the spans of a recorded trace, whose ids are derived from the
+trace's id, so that a record sent twice is the same bytes and ingest's claim
+on the body answers it once.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ from opentelemetry.sdk.trace.id_generator import IdGenerator, RandomIdGenerator
 # In a context variable rather than on the generator: another thread opening
 # a span of its own while a record is built must never take its ids.
 _GIVEN: ContextVar[tuple[int, int] | None] = ContextVar("telmoni.ids", default=None)
+_TRACE_ID = re.compile(r"[0-9a-fA-F]{32}")
 
 
 class Ids(IdGenerator):
@@ -41,19 +43,19 @@ def given(trace_id: int, span_id: int) -> Iterator[None]:
         _GIVEN.reset(token)
 
 
-def span_id(run_id: uuid.UUID, place: int) -> int:
-    """The id of a recorded run's span at ``place``: the first eight bytes of
+def span_id(trace_id: int, place: int) -> int:
+    """The id of a recorded trace's span at ``place``: the first eight bytes of
     the version 5 UUID (RFC 9562) named by the place, in decimal, under the
-    run's id. Its version's bits are among those eight, so it is never zero."""
-    return int.from_bytes(uuid.uuid5(run_id, str(place)).bytes[:8], "big")
+    trace's 16 bytes. Its version's bits are among those eight, so it is never
+    zero."""
+    namespace = uuid.UUID(int=trace_id)
+    return int.from_bytes(uuid.uuid5(namespace, str(place)).bytes[:8], "big")
 
 
-def run_uuid(text: str) -> uuid.UUID | None:
-    """A run's id as a UUID, written out or as 32 hex digits, any case; None for
-    anything else."""
-    try:
-        read = uuid.UUID(text)
-    except ValueError:
+def trace_id(text: object) -> int | None:
+    """A trace's id as OpenTelemetry's number: 32 hex digits, any case, other
+    than all zeros; None for anything else."""
+    if not isinstance(text, str) or _TRACE_ID.fullmatch(text) is None:
         return None
-    # uuid also takes int()'s signs, underscores and spaces: another id.
-    return read if text.lower() in (str(read), read.hex) else None
+    read = int(text, 16)
+    return read if read != 0 else None

@@ -1,5 +1,5 @@
 //! What a turn reports: each model call and tool call, timed as the loop
-//! makes them, and how the question ended — sent, as the turn ends, as a run
+//! makes them, and how the question ended — sent, as the turn ends, as a trace
 //! of the operator's own project with the SDK, the way any agent reports its
 //! runs ([`crate::report`]). The model and the tools are wrapped rather than
 //! the loop changed, so the loop runs as it did whether anything reports it
@@ -102,7 +102,7 @@ pub(crate) struct TurnRecord {
     pub(crate) trace_id: Uuid,
     /// The conversation it was asked in.
     pub(crate) conversation_id: Uuid,
-    /// The asker's organization, which the run names as its user.
+    /// The asker's organization, which the trace names as its user.
     pub(crate) organization_id: OrganizationId,
     /// The project it was asked about.
     pub(crate) project_id: Option<ProjectId>,
@@ -582,8 +582,8 @@ mod tests {
         })
         .await;
 
-        // Reported once the recorder dropped: one export, the run's spans
-        // with the tool among them and the run's own last.
+        // Reported once the recorder dropped: one export, the trace's spans
+        // with the tool among them and the agent's own last.
         let (_, _, body) = capture.first().await;
         assert_eq!(capture.exports().len(), 1);
         let names: Vec<String> = spans(&body)

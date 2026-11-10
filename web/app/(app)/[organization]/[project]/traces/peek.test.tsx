@@ -20,12 +20,12 @@ import { TracePeek } from "@/components/traces/peek";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
 
-const RUN_A = "5d4f5c68-0000-4000-8000-00000000000a";
-const RUN_B = "5d4f5c68-0000-4000-8000-00000000000b";
+const TRACE_A = "5d4f5c6800004000800000000000000a";
+const TRACE_B = "5d4f5c6800004000800000000000000b";
 
-function trace(run: string, tags: Record<string, string> = {}) {
+function trace(traceId: string, tags: Record<string, string> = {}) {
   return {
-    run_id: run,
+    trace_id: traceId,
     truncated: false,
     spend: null,
     content: [],
@@ -33,9 +33,9 @@ function trace(run: string, tags: Record<string, string> = {}) {
       {
         span_id: "0000000000000001",
         parent_span_id: "",
-        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
-        agent: `agent-${run.slice(-1)}`,
-        kind: "run",
+        trace_id: traceId,
+        agent: `agent-${traceId.slice(-1)}`,
+        kind: "agent",
         name: "nightly-report",
         started_at: "2026-10-11T03:00:00.000Z",
         ended_at: "2026-10-11T03:00:02.000Z",
@@ -63,16 +63,16 @@ function trace(run: string, tags: Record<string, string> = {}) {
   };
 }
 
-/** The server's answers, by the run each read names. */
+/** The server's answers, by the trace each read names. */
 let answers: Record<string, () => Response>;
 const fetchMock = vi.fn(async (url: string) => {
-  const run = new URL(url, "http://localhost").pathname.split("/").pop()!;
-  return answers[run]?.() ?? new Response("{}", { status: 404 });
+  const traceId = new URL(url, "http://localhost").pathname.split("/").pop()!;
+  return answers[traceId]?.() ?? new Response("{}", { status: 404 });
 });
 
-function open(run: string) {
-  mockSearch = new URLSearchParams(`days=30&peek=${run}`);
-  window.history.replaceState(null, "", `/acme/web/traces?days=30&peek=${run}`);
+function open(traceId: string) {
+  mockSearch = new URLSearchParams(`days=30&peek=${traceId}`);
+  window.history.replaceState(null, "", `/acme/web/traces?days=30&peek=${traceId}`);
 }
 
 function peek() {
@@ -82,7 +82,7 @@ function peek() {
         organization="acme"
         slug="web"
         projectId="project_1"
-        runs={[RUN_A, RUN_B]}
+        traces={[TRACE_A, TRACE_B]}
         me="user_1"
         administers={false}
       />
@@ -98,8 +98,8 @@ describe("TracePeek", () => {
     mockShell = document.body;
     window.localStorage.removeItem(TRACE_PREFS_KEY);
     answers = {
-      [RUN_A]: () => Response.json(trace(RUN_A)),
-      [RUN_B]: () => Response.json(trace(RUN_B)),
+      [TRACE_A]: () => Response.json(trace(TRACE_A)),
+      [TRACE_B]: () => Response.json(trace(TRACE_B)),
     };
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -109,44 +109,44 @@ describe("TracePeek", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("stands shut while the URL names no run", () => {
+  it("stands shut while the URL names no trace", () => {
     mockSearch = new URLSearchParams("days=30");
     peek();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("opens beside the list, the page left in reach, and reads the run's spans by the project's id", async () => {
-    open(RUN_A);
+  it("opens beside the list, the page left in reach, and reads the trace's spans by the project's id", async () => {
+    open(TRACE_A);
     peek();
     const panel = screen.getByRole("dialog");
     expect(panel).toHaveAttribute("aria-modal", "false");
     expect(document.activeElement).toBe(panel);
     expect(await within(panel).findByRole("tree", { name: "Spans" })).toBeInTheDocument();
     expect(within(panel).getByRole("heading", { level: 2 })).toHaveTextContent("agent-a");
-    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/traces/${RUN_A}?project=project_1`, expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/traces/${TRACE_A}?project=project_1`, expect.anything());
     expect(cover).not.toHaveBeenCalled();
   });
 
-  it("steps to the next run in place, and holds still at the list's start", async () => {
-    open(RUN_A);
+  it("steps to the next trace in place, and holds still at the list's start", async () => {
+    open(TRACE_A);
     peek();
     const panel = screen.getByRole("dialog");
     await within(panel).findByRole("tree");
-    const previous = within(panel).getByRole("button", { name: "Previous run" });
+    const previous = within(panel).getByRole("button", { name: "Previous trace" });
     expect(previous).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(previous);
-    expect(peeked()).toBe(RUN_A);
+    expect(peeked()).toBe(TRACE_A);
 
     const length = window.history.length;
-    fireEvent.click(within(panel).getByRole("button", { name: "Next run" }));
-    expect(peeked()).toBe(RUN_B);
+    fireEvent.click(within(panel).getByRole("button", { name: "Next trace" }));
+    expect(peeked()).toBe(TRACE_B);
     expect(window.history.length, "a step is the same entry").toBe(length);
     expect(new URLSearchParams(window.location.search).get("days")).toBe("30");
   });
 
   it("fills the content area at a press, the list then out of reach", async () => {
-    open(RUN_A);
+    open(TRACE_A);
     peek();
     const panel = screen.getByRole("dialog");
     fireEvent.click(within(panel).getByRole("button", { name: "Full size" }));
@@ -156,8 +156,8 @@ describe("TracePeek", () => {
     expect(within(panel).getByRole("button", { name: "Exit full size" })).toBeInTheDocument();
   });
 
-  it("shuts on Escape from inside, rewriting a link's URL without the run", async () => {
-    open(RUN_A);
+  it("shuts on Escape from inside, rewriting a link's URL without the trace", async () => {
+    open(TRACE_A);
     peek();
     const panel = screen.getByRole("dialog");
     await within(panel).findByRole("tree");
@@ -166,25 +166,25 @@ describe("TracePeek", () => {
     expect(window.location.search).toBe("?days=30");
   });
 
-  it("says when the run is not there, and when the session has ended, keeping the list's query", async () => {
-    answers[RUN_A] = () => new Response("{}", { status: 404 });
-    open(RUN_A);
+  it("says when the trace is not there, and when the session has ended, keeping the list's query", async () => {
+    answers[TRACE_A] = () => new Response("{}", { status: 404 });
+    open(TRACE_A);
     const { unmount } = peek();
-    expect(await screen.findByText("No run with this id in this project.")).toBeInTheDocument();
+    expect(await screen.findByText("No trace with this id in this project.")).toBeInTheDocument();
     unmount();
 
-    answers[RUN_A] = () => new Response("{}", { status: 401 });
+    answers[TRACE_A] = () => new Response("{}", { status: 401 });
     peek();
     const again = await screen.findByRole("link", { name: "Sign in again" });
     expect(again).toHaveAttribute(
       "href",
-      `/auth/login?returnTo=${encodeURIComponent(`/acme/web/traces?days=30&peek=${RUN_A}`)}`,
+      `/auth/login?returnTo=${encodeURIComponent(`/acme/web/traces?days=30&peek=${TRACE_A}`)}`,
     );
   });
 
-  it("shows the run's tags, each a link to the traces that carry it", async () => {
-    answers[RUN_A] = () => Response.json(trace(RUN_A, { team: "search" }));
-    open(RUN_A);
+  it("shows the trace's tags, each a link to the traces that carry it", async () => {
+    answers[TRACE_A] = () => Response.json(trace(TRACE_A, { team: "search" }));
+    open(TRACE_A);
     peek();
     const panel = screen.getByRole("dialog");
     const tag = await within(panel).findByRole("link", { name: "team:search" });
@@ -192,8 +192,8 @@ describe("TracePeek", () => {
   });
 
   it("offers a retry when the trace could not be read", async () => {
-    answers[RUN_A] = () => new Response("{}", { status: 503 });
-    open(RUN_A);
+    answers[TRACE_A] = () => new Response("{}", { status: 503 });
+    open(TRACE_A);
     peek();
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     expect(fetchMock).toHaveBeenCalledTimes(2);

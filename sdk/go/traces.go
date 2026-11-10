@@ -22,18 +22,18 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// RunOptions is what a run is opened with; each field is optional.
-type RunOptions struct {
-	// UserID is the end user the run is for, as the application's own id for
-	// them, sent as given for ingest to hash.
+// TraceOptions is what a trace is opened with; each field is optional.
+type TraceOptions struct {
+	// UserID is the end user the trace is for, as the application's own id
+	// for them, sent as given for ingest to hash.
 	UserID string
-	// SessionID is the session the run belongs to, as the application's own
+	// SessionID is the session the trace belongs to, as the application's own
 	// id for it.
 	SessionID string
 	// Tags travel as telmoni.tag.<key>.
 	Tags map[string]string
 	// MaxSteps and MaxSpend, in US dollars, are the guard's caps, 0 for none:
-	// once the run reaches one, what it opens next opens nothing, and the
+	// once the trace reaches one, what it opens next opens nothing, and the
 	// context it returns is cancelled with a *CapExceededError as its cause.
 	MaxSteps int
 	MaxSpend float64
@@ -42,8 +42,8 @@ type RunOptions struct {
 	InputMessages any
 }
 
-// RunAnswer is what a run answered: its messages.
-type RunAnswer struct {
+// TraceReply is what a trace answered: its messages.
+type TraceReply struct {
 	// OutputMessages are content: recorded as JSON, sent only when
 	// CaptureContent is on and the project's mode allows.
 	OutputMessages any
@@ -58,7 +58,7 @@ type ModelCallOptions struct {
 	// blank means chat, and any other goes as chat with one warning.
 	Operation string
 	// Prompt and PromptVersion name the prompt it used, sent in every content
-	// mode: a prompt, never a person, who goes in RunOptions.UserID.
+	// mode: a prompt, never a person, who goes in TraceOptions.UserID.
 	Prompt        string
 	PromptVersion string
 	// InputMessages and SystemInstructions are content: recorded as JSON,
@@ -100,7 +100,7 @@ type Answer struct {
 }
 
 // handle is a span the SDK opened, until its End. A handle opened outside a
-// run has no span and does nothing.
+// trace has no span and does nothing.
 type handle struct {
 	span   trace.Span
 	client *Client
@@ -159,7 +159,7 @@ func (h *handle) FailWith(errorType string) {
 
 // errorType sets error.type, cut to ingest's cap, and returns what it set.
 func (h *handle) errorType(errorType string) string {
-	// Ingest refuses the span over an empty one, and with a run's, the run.
+	// Ingest refuses the span over an empty one, and with the agent's, the trace.
 	if errorType == "" {
 		return ""
 	}
@@ -183,25 +183,26 @@ func errorTypeName(err error) string {
 	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
 }
 
-// Run is a run of an agent: a span of its own in whatever trace was current.
-// Every span inside it carries the run's id, agent, user and session, so
-// ingest knows each span's run without waiting for the trace's tree.
-type Run struct {
+// Trace is one trace of an agent: a trace of its own, its agent's span at the
+// root, linked to whatever span the application had current. Every span
+// inside it carries the agent, user and session, so ingest knows each span's
+// trace without waiting for the trace's tree.
+type Trace struct {
 	handle
-	id        string
 	agent     string
 	inherited []attribute.KeyValue
-	// guard is held by every run with a span, a continued run's with no caps.
+	// guard is held by every trace with a span, a continued trace's with no
+	// caps.
 	guard *guard
-	// displaced is the provider instrumentation opened spans on where the run
-	// was opened, which its contexts hand out in place of the SDK's.
+	// displaced is the provider instrumentation opened spans on where the
+	// trace was opened, which its contexts hand out in place of the SDK's.
 	displaced trace.TracerProvider
 	// ended is whether End was called, under the guard's lock.
 	ended bool
 }
 
 // inContext is a span of the SDK's as the contexts it returns carry it: its
-// TracerProvider the one the run displaced, so instrumentation that opens
+// TracerProvider the one the trace displaced, so instrumentation that opens
 // spans on the current span's provider, as otelhttp does unless given one,
 // stays on the application's.
 type inContext struct {
@@ -220,18 +221,18 @@ func providerOf(ctx context.Context) trace.TracerProvider {
 	return otel.GetTracerProvider()
 }
 
-// Step is a step of a run.
+// Step is a step of a trace.
 type Step struct {
 	handle
-	run *Run
+	trace *Trace
 }
 
-// ModelCall is a call to a model inside a run.
+// ModelCall is a call to a model inside a trace.
 type ModelCall struct {
 	handle
-	run *Run
+	trace *Trace
 	// What it is priced by and what its span holds, as sent; what it last
-	// counted to its run's spend; and whether End was called.
+	// counted to its trace's spend; and whether End was called.
 	provider, model string
 	held            tokens
 	reported        *float64
@@ -239,103 +240,106 @@ type ModelCall struct {
 	ended           bool
 }
 
-// ToolCall is a call to a tool inside a run.
+// ToolCall is a call to a tool inside a trace.
 type ToolCall struct {
 	handle
-	run *Run
+	trace *Trace
 }
 
-// Retrieval is a search inside a run, of a vector store or an index, or of a
-// memory store.
+// Retrieval is a search inside a trace, of a vector store or an index, or of
+// a memory store.
 type Retrieval struct {
 	handle
-	run *Run
+	trace *Trace
 	// memory is whether it searched a memory, whose names its finds go under.
 	memory bool
 }
 
-type runKey struct{}
+type traceKey struct{}
 
-func contextWithRun(ctx context.Context, r *Run) context.Context {
-	return context.WithValue(ctx, runKey{}, r)
+func contextWithTrace(ctx context.Context, tr *Trace) context.Context {
+	return context.WithValue(ctx, traceKey{}, tr)
 }
 
-// RunFromContext is the run open in ctx, or nil outside one. A nil Run opens
-// handles that do nothing, and its own End, Fail, FailWith and Cancel do
-// nothing, so nothing is sent outside a run and nothing panics.
-func RunFromContext(ctx context.Context) *Run {
+// TraceFromContext is the trace open in ctx, or nil outside one. A nil Trace
+// opens handles that do nothing, and its own End, Fail, FailWith and Cancel
+// do nothing, so nothing is sent outside a trace and nothing panics.
+func TraceFromContext(ctx context.Context) *Trace {
 	if ctx == nil {
 		return nil
 	}
-	r, _ := ctx.Value(runKey{}).(*Run)
-	return r
+	tr, _ := ctx.Value(traceKey{}).(*Trace)
+	return tr
 }
 
-// Run opens a run of agent: the span "invoke_agent <agent>", under the span in
-// ctx or at the root of a trace of its own. The context returned carries the
-// run and its span, so spans the application opens with it nest under the
-// run. End it with run.End, usually deferred.
+// Trace opens a trace of agent: the span "invoke_agent <agent>" at the root
+// of a trace of its own, linked to the span in ctx where there is one. The
+// context returned carries the trace and its span, so spans the application
+// opens with it nest under the agent's span. End it with trace.End, usually
+// deferred.
 //
-// A blank agent name opens no run: its handle does nothing, and the client
+// A blank agent name opens no trace: its handle does nothing, and the client
 // warns once. An agent past 128 characters is cut to them, and a user or
 // session id past its cap, or a tag ingest drops or past the 32nd by key, is
 // left off, each with one warning. None panics: telemetry never takes the
 // agent down, where Python and TypeScript raise for a blank agent.
-func (c *Client) Run(ctx context.Context, agent string, opts RunOptions) (context.Context, *Run) {
+func (c *Client) Trace(ctx context.Context, agent string, opts TraceOptions) (context.Context, *Trace) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if !c.built() {
-		return ctx, &Run{}
+		return ctx, &Trace{}
 	}
 	if strings.TrimSpace(agent) == "" {
-		c.exporter.warnOnce("run:agent", WarningInput, "telmoni: a run needs its agent's name; nothing is sent for one without")
-		return ctx, &Run{handle: handle{client: c}}
+		c.exporter.warnOnce("trace:agent", WarningInput, "telmoni: a trace needs its agent's name; nothing is sent for one without")
+		return ctx, &Trace{handle: handle{client: c}}
 	}
-	agent = c.cut(agent, agentMax, "run's agent")
+	agent = c.cut(agent, agentMax, "trace's agent")
 	caps := &guard{}
 	if opts.MaxSteps > 0 {
 		caps.maxSteps = opts.MaxSteps
 	} else if opts.MaxSteps < 0 {
-		c.exporter.warnOnce("run:steps", WarningInput, "telmoni: a run's MaxSteps must be above 0; the run has no step cap")
+		c.exporter.warnOnce("trace:steps", WarningInput, "telmoni: a trace's MaxSteps must be above 0; the trace has no step cap")
 	}
 	if opts.MaxSpend > 0 && dollars(opts.MaxSpend) {
 		caps.maxSpend = opts.MaxSpend
 	} else if opts.MaxSpend != 0 {
-		c.exporter.warnOnce("run:spend", WarningInput, "telmoni: a run's MaxSpend must be a finite number of US dollars above 0; the run has no spend cap")
+		c.exporter.warnOnce("trace:spend", WarningInput, "telmoni: a trace's MaxSpend must be a finite number of US dollars above 0; the trace has no spend cap")
 	}
-	runID := newUUID()
 	userID, sessionID := opts.UserID, opts.SessionID
-	if userID != "" && !c.fits(userID, userIDMax, "user id", "run") {
+	if userID != "" && !c.fits(userID, userIDMax, "user id", "trace") {
 		userID = ""
 	}
-	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id", "run") {
+	if sessionID != "" && !c.fits(sessionID, sessionIDMax, "session id", "trace") {
 		sessionID = ""
 	}
-	inherited := inheritedAttributes(runID, agent, userID, sessionID)
-	name, attrs := c.runOpening(agent, inherited, opts.Tags)
+	inherited := inheritedAttributes(agent, userID, sessionID)
+	name, attrs := c.agentOpening(agent, inherited, opts.Tags)
 	if opts.InputMessages != nil {
 		attrs = append(attrs, attribute.String(attrInputMessages, asJSON(opts.InputMessages)))
 	}
 	displaced := providerOf(ctx)
-	ctx, span := c.tracer.Start(ctx, name,
-		trace.WithSpanKind(trace.SpanKindInternal),
-		trace.WithAttributes(attrs...),
-	)
-	// The run's opening, under it and at its start: the processor sends it at
-	// once, so the run is seen open before it ends.
+	starts := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(attrs...)}
+	// A root of its own trace, linked to the application's span rather than
+	// under it: the trace is the unit, and the application's trace stays its own.
+	if current := trace.SpanContextFromContext(ctx); current.IsValid() {
+		starts = append(starts, trace.WithLinks(trace.Link{SpanContext: current}))
+	}
+	spanCtx, span := c.tracer.Start(trace.ContextWithSpanContext(ctx, trace.SpanContext{}), name, starts...)
+	// The trace's opening, under its span and at its start: the processor
+	// sends it at once, so the trace is seen open before it ends.
 	if opened, ok := span.(sdktrace.ReadOnlySpan); ok {
 		at := trace.WithTimestamp(opened.StartTime())
-		_, start := c.tracer.Start(ctx, runStart, trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(inherited...), at)
+		_, start := c.tracer.Start(spanCtx, traceStart, trace.WithSpanKind(trace.SpanKindInternal), trace.WithAttributes(inherited...), at)
 		start.End(at)
 	}
-	run := &Run{handle: handle{span: span, client: c}, id: runID, agent: agent, inherited: inherited, guard: caps, displaced: displaced}
-	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, displaced}), run), run
+	tr := &Trace{handle: handle{span: span, client: c}, agent: agent, inherited: inherited, guard: caps, displaced: displaced}
+	return contextWithTrace(trace.ContextWithSpan(ctx, inContext{span, displaced}), tr), tr
 }
 
-// Spent is what the run's model calls have cost so far in US dollars,
+// Spent is what the trace's model calls have cost so far in US dollars,
 // counted as its spend cap counts them, in this process.
-func (r *Run) Spent() float64 {
+func (r *Trace) Spent() float64 {
 	if r == nil || r.guard == nil {
 		return 0
 	}
@@ -344,9 +348,9 @@ func (r *Run) Spent() float64 {
 	return r.guard.spent
 }
 
-// Err is the *CapExceededError the run's last refused opening was cancelled
+// Err is the *CapExceededError the trace's last refused opening was cancelled
 // with, nil while nothing was refused.
-func (r *Run) Err() error {
+func (r *Trace) Err() error {
 	if r == nil || r.guard == nil {
 		return nil
 	}
@@ -355,9 +359,9 @@ func (r *Run) Err() error {
 	return r.guard.refused
 }
 
-// opens is nil where the run may open what it asks, else why not: a cap it
+// opens is nil where the trace may open what it asks, else why not: a cap it
 // reached, or the refusal ctx carries, a refused opening's context handed on.
-func (r *Run) opens(ctx context.Context, step bool) error {
+func (r *Trace) opens(ctx context.Context, step bool) error {
 	var refusal *CapExceededError
 	if ctx != nil && errors.As(context.Cause(ctx), &refusal) {
 		return refusal
@@ -365,26 +369,27 @@ func (r *Run) opens(ctx context.Context, step bool) error {
 	return r.guard.opens(step)
 }
 
-// ID is the run's id, a UUID, carried by every span inside it.
-func (r *Run) ID() string {
-	if r == nil {
+// TraceID is the trace's id, 32 lowercase hex digits, which every span inside
+// it is in; "" for a handle that does nothing.
+func (r *Trace) TraceID() string {
+	if r == nil || r.span == nil {
 		return ""
 	}
-	return r.id
+	return r.span.SpanContext().TraceID().String()
 }
 
-// Agent is the agent's name as the run sends it, cut to 128 characters.
-func (r *Run) Agent() string {
+// Agent is the agent's name as the trace sends it, cut to 128 characters.
+func (r *Trace) Agent() string {
 	if r == nil {
 		return ""
 	}
 	return r.agent
 }
 
-// End ends the run's span; a second End does nothing. End, Fail, FailWith and
-// Cancel are the handle's, declared again on each handle so a nil one does
+// End ends the agent's span; a second End does nothing. End, Fail, FailWith
+// and Cancel are the handle's, declared again on each handle so a nil one does
 // nothing: reached through the embedded handle, it would be dereferenced.
-func (r *Run) End() {
+func (r *Trace) End() {
 	if r == nil {
 		return
 	}
@@ -397,9 +402,9 @@ func (r *Run) End() {
 	r.handle.End()
 }
 
-// Answered records what the run answered: its messages; one given after End
-// is not sent.
-func (r *Run) Answered(a RunAnswer) {
+// Answered records what the trace answered: its messages; one given after
+// End is not sent.
+func (r *Trace) Answered(a TraceReply) {
 	if r == nil || r.span == nil {
 		return
 	}
@@ -415,59 +420,59 @@ func (r *Run) Answered(a RunAnswer) {
 	r.guard.mu.Unlock()
 	// Given once the lock is released: the logger is the application's.
 	if ended {
-		r.client.exporter.warnOnce("run:late", WarningInput, "telmoni: a run must be answered before it ends; an answer given after is not sent")
+		r.client.exporter.warnOnce("trace:late", WarningInput, "telmoni: a trace must be answered before it ends; an answer given after is not sent")
 	}
 }
 
-// Fail marks the run failed with err's Go type and its message, or
+// Fail marks the trace failed with err's Go type and its message, or
 // cancelled for an error that is or wraps context.Canceled, as a step's Fail
-// does; once the run was refused, such an error fails it as the refusal.
-func (r *Run) Fail(err error) {
+// does; once the trace was refused, such an error fails it as the refusal.
+func (r *Trace) Fail(err error) {
 	if r == nil {
 		return
 	}
 	r.handle.Fail(r.failure(err))
 }
 
-// failure is err, but the run's refusal for a cancellation once it was
+// failure is err, but the trace's refusal for a cancellation once it was
 // refused: the cancellation a refused opening's context ended a request with.
-func (r *Run) failure(err error) error {
+func (r *Trace) failure(err error) error {
 	if refusal := r.Err(); refusal != nil && errors.Is(err, context.Canceled) {
 		return refusal
 	}
 	return err
 }
 
-// Fail marks the step failed as its run's Fail would.
+// Fail marks the step failed as its trace's Fail would.
 func (s *Step) Fail(err error) {
 	if s == nil {
 		return
 	}
-	s.handle.Fail(s.run.failure(err))
+	s.handle.Fail(s.trace.failure(err))
 }
 
-// Fail marks the call failed as its run's Fail would.
+// Fail marks the call failed as its trace's Fail would.
 func (m *ModelCall) Fail(err error) {
 	if m == nil {
 		return
 	}
-	m.handle.Fail(m.run.failure(err))
+	m.handle.Fail(m.trace.failure(err))
 }
 
-// Fail marks the call failed as its run's Fail would.
+// Fail marks the call failed as its trace's Fail would.
 func (t *ToolCall) Fail(err error) {
 	if t == nil {
 		return
 	}
-	t.handle.Fail(t.run.failure(err))
+	t.handle.Fail(t.trace.failure(err))
 }
 
-// Fail marks the retrieval failed as its run's Fail would.
+// Fail marks the retrieval failed as its trace's Fail would.
 func (r *Retrieval) Fail(err error) {
 	if r == nil {
 		return
 	}
-	r.handle.Fail(r.run.failure(err))
+	r.handle.Fail(r.trace.failure(err))
 }
 
 // End ends the step's span; a second End does nothing.
@@ -494,7 +499,7 @@ func (r *Retrieval) End() {
 	r.handle.End()
 }
 
-// FailWith marks the step failed as its run's FailWith would.
+// FailWith marks the step failed as its trace's FailWith would.
 func (s *Step) FailWith(errorType string) {
 	if s == nil {
 		return
@@ -502,7 +507,7 @@ func (s *Step) FailWith(errorType string) {
 	s.handle.FailWith(errorType)
 }
 
-// FailWith marks the call failed as its run's FailWith would.
+// FailWith marks the call failed as its trace's FailWith would.
 func (m *ModelCall) FailWith(errorType string) {
 	if m == nil {
 		return
@@ -510,7 +515,7 @@ func (m *ModelCall) FailWith(errorType string) {
 	m.handle.FailWith(errorType)
 }
 
-// FailWith marks the call failed as its run's FailWith would.
+// FailWith marks the call failed as its trace's FailWith would.
 func (t *ToolCall) FailWith(errorType string) {
 	if t == nil {
 		return
@@ -518,7 +523,7 @@ func (t *ToolCall) FailWith(errorType string) {
 	t.handle.FailWith(errorType)
 }
 
-// FailWith marks the retrieval failed as its run's FailWith would.
+// FailWith marks the retrieval failed as its trace's FailWith would.
 func (r *Retrieval) FailWith(errorType string) {
 	if r == nil {
 		return
@@ -526,7 +531,7 @@ func (r *Retrieval) FailWith(errorType string) {
 	r.handle.FailWith(errorType)
 }
 
-// Cancel marks the step cancelled as its run's Cancel would.
+// Cancel marks the step cancelled as its trace's Cancel would.
 func (s *Step) Cancel() {
 	if s == nil {
 		return
@@ -534,7 +539,7 @@ func (s *Step) Cancel() {
 	s.handle.Cancel()
 }
 
-// Cancel marks the call cancelled as its run's Cancel would.
+// Cancel marks the call cancelled as its trace's Cancel would.
 func (m *ModelCall) Cancel() {
 	if m == nil {
 		return
@@ -542,7 +547,7 @@ func (m *ModelCall) Cancel() {
 	m.handle.Cancel()
 }
 
-// Cancel marks the call cancelled as its run's Cancel would.
+// Cancel marks the call cancelled as its trace's Cancel would.
 func (t *ToolCall) Cancel() {
 	if t == nil {
 		return
@@ -550,7 +555,7 @@ func (t *ToolCall) Cancel() {
 	t.handle.Cancel()
 }
 
-// Cancel marks the retrieval cancelled as its run's Cancel would.
+// Cancel marks the retrieval cancelled as its trace's Cancel would.
 func (r *Retrieval) Cancel() {
 	if r == nil {
 		return
@@ -558,18 +563,18 @@ func (r *Retrieval) Cancel() {
 	r.handle.Cancel()
 }
 
-// FailWith marks the run failed with errorType as its error.type, none if
+// FailWith marks the trace failed with errorType as its error.type, none if
 // empty, and status ERROR with no message.
-func (r *Run) FailWith(errorType string) {
+func (r *Trace) FailWith(errorType string) {
 	if r == nil {
 		return
 	}
 	r.handle.FailWith(errorType)
 }
 
-// Cancel marks the run cancelled by the agent, which is neither ok nor an
+// Cancel marks the trace cancelled by the agent, which is neither ok nor an
 // error.
-func (r *Run) Cancel() {
+func (r *Trace) Cancel() {
 	if r == nil {
 		return
 	}
@@ -577,16 +582,16 @@ func (r *Run) Cancel() {
 }
 
 // Step opens a step named name under the span in ctx when ctx carries the
-// run, a step's to nest under it, else under the run. The context returned
-// carries the step's span. Past a cap, or under a refused opening's context,
-// it opens nothing, and the context returned is cancelled, its cause the
-// *CapExceededError.
-func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
+// trace, a step's to nest under it, else under the agent's span. The context
+// returned carries the step's span. Past a cap, or under a refused opening's
+// context, it opens nothing, and the context returned is cancelled, its cause
+// the *CapExceededError.
+func (r *Trace) Step(ctx context.Context, name string) (context.Context, *Step) {
 	if r == nil || r.span == nil {
 		return ctx, &Step{}
 	}
 	if err := r.opens(ctx, true); err != nil {
-		return contextWithRun(refused(ctx, err), r), &Step{}
+		return contextWithTrace(refused(ctx, err), r), &Step{}
 	}
 	// Ingest refuses a span named nothing.
 	if name == "" {
@@ -594,17 +599,17 @@ func (r *Run) Step(ctx context.Context, name string) (context.Context, *Step) {
 		name = "step"
 	}
 	ctx, span := r.child(ctx, r.client.cut(name, nameMax, "step's name"), trace.SpanKindInternal, nil)
-	return ctx, &Step{handle: handle{span: span, client: r.client}, run: r}
+	return ctx, &Step{handle: handle{span: span, client: r.client}, trace: r}
 }
 
 // ModelCall opens a call to model where Step opens a step; Answered records
 // what the model answered. Past a cap it opens nothing, as Step does.
-func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions) (context.Context, *ModelCall) {
+func (r *Trace) ModelCall(ctx context.Context, model string, opts ModelCallOptions) (context.Context, *ModelCall) {
 	if r == nil || r.span == nil {
 		return ctx, &ModelCall{}
 	}
 	if err := r.opens(ctx, false); err != nil {
-		return contextWithRun(refused(ctx, err), r), &ModelCall{}
+		return contextWithTrace(refused(ctx, err), r), &ModelCall{}
 	}
 	c := r.client
 	// Ingest refuses a call over an empty model, but keeps one with none.
@@ -630,34 +635,34 @@ func (r *Run) ModelCall(ctx context.Context, model string, opts ModelCallOptions
 		attrs = append(attrs, attribute.String(attrSystemInstructions, asJSON(opts.SystemInstructions)))
 	}
 	ctx, span := r.child(ctx, name, trace.SpanKindClient, attrs)
-	return ctx, &ModelCall{handle: handle{span: span, client: c}, run: r, provider: provider, model: model}
+	return ctx, &ModelCall{handle: handle{span: span, client: c}, trace: r, provider: provider, model: model}
 }
 
 // ToolCall opens a call to the tool named name where Step opens a step;
 // Returned records what the tool returned.
-func (r *Run) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (context.Context, *ToolCall) {
+func (r *Trace) ToolCall(ctx context.Context, name string, opts ToolCallOptions) (context.Context, *ToolCall) {
 	if r == nil || r.span == nil {
 		return ctx, &ToolCall{}
 	}
 	if err := r.opens(ctx, false); err != nil {
-		return contextWithRun(refused(ctx, err), r), &ToolCall{}
+		return contextWithTrace(refused(ctx, err), r), &ToolCall{}
 	}
 	spanName, attrs := toolCallOpening(r.client.cut(name, nameMax, "tool's name"))
 	if opts.Arguments != nil {
 		attrs = append(attrs, attribute.String(attrToolCallArguments, asJSON(opts.Arguments)))
 	}
 	ctx, span := r.child(ctx, spanName, trace.SpanKindInternal, attrs)
-	return ctx, &ToolCall{handle: handle{span: span, client: r.client}, run: r}
+	return ctx, &ToolCall{handle: handle{span: span, client: r.client}, trace: r}
 }
 
 // Retrieval opens a search of source, or with opts.Memory of a memory store,
 // where Step opens a step; Returned records what it found.
-func (r *Run) Retrieval(ctx context.Context, source string, opts RetrievalOptions) (context.Context, *Retrieval) {
+func (r *Trace) Retrieval(ctx context.Context, source string, opts RetrievalOptions) (context.Context, *Retrieval) {
 	if r == nil || r.span == nil {
 		return ctx, &Retrieval{}
 	}
 	if err := r.opens(ctx, false); err != nil {
-		return contextWithRun(refused(ctx, err), r), &Retrieval{}
+		return contextWithTrace(refused(ctx, err), r), &Retrieval{}
 	}
 	c := r.client
 	operation, sourceKey, queryKey := retrievalOperation, attrDataSourceID, attrRetrievalQueryText
@@ -685,16 +690,13 @@ func (r *Run) Retrieval(ctx context.Context, source string, opts RetrievalOption
 		attrs = append(attrs, attribute.String(queryKey, asJSON(opts.Query)))
 	}
 	ctx, span := r.child(ctx, name, trace.SpanKindClient, attrs)
-	return ctx, &Retrieval{handle: handle{span: span, client: c}, run: r, memory: opts.Memory}
+	return ctx, &Retrieval{handle: handle{span: span, client: c}, trace: r, memory: opts.Memory}
 }
 
-// inheritedAttributes is what every span of a run carries, live or recorded:
-// its id and agent, and its user and session where it has them.
-func inheritedAttributes(runID, agent, userID, sessionID string) []attribute.KeyValue {
-	inherited := []attribute.KeyValue{
-		attribute.String(attrRunID, runID),
-		attribute.String(attrAgent, agent),
-	}
+// inheritedAttributes is what every span of a trace carries, live or
+// recorded: its agent, and its user and session where it has them.
+func inheritedAttributes(agent, userID, sessionID string) []attribute.KeyValue {
+	inherited := []attribute.KeyValue{attribute.String(attrAgent, agent)}
 	if userID != "" {
 		inherited = append(inherited, attribute.String(attrUserID, userID))
 	}
@@ -704,15 +706,15 @@ func inheritedAttributes(runID, agent, userID, sessionID string) []attribute.Key
 	return inherited
 }
 
-// runOpening is a run's span name and attributes, live or recorded, its tags
-// by key: a map ranges in a new order each time, and the same record must be
-// the same bytes.
-func (c *Client) runOpening(agent string, inherited []attribute.KeyValue, tags map[string]string) (string, []attribute.KeyValue) {
+// agentOpening is the agent's span name and attributes, live or recorded,
+// its tags by key: a map ranges in a new order each time, and the same record
+// must be the same bytes.
+func (c *Client) agentOpening(agent string, inherited []attribute.KeyValue, tags map[string]string) (string, []attribute.KeyValue) {
 	kept := c.tagAttributes(tags)
 	attrs := make([]attribute.KeyValue, 0, 2+len(inherited)+len(kept))
-	attrs = append(attrs, attribute.String(attrOperation, runOperation), attribute.String(attrAgentName, agent))
+	attrs = append(attrs, attribute.String(attrOperation, agentOperation), attribute.String(attrAgentName, agent))
 	attrs = append(attrs, inherited...)
-	return runOperation + " " + agent, append(attrs, kept...)
+	return agentOperation + " " + agent, append(attrs, kept...)
 }
 
 // modelCallOpening is a model call's span name and own attributes, live or
@@ -763,20 +765,20 @@ func toolCallOpening(name string) (string, []attribute.KeyValue) {
 	}
 }
 
-func (r *Run) child(ctx context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue) (context.Context, trace.Span) {
+func (r *Trace) child(ctx context.Context, name string, kind trace.SpanKind, attrs []attribute.KeyValue) (context.Context, trace.Span) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// A context the run is not in, a fresh goroutine's or the one the run was
-	// opened from, puts the span under the run, in its trace.
-	if RunFromContext(ctx) != r || !trace.SpanContextFromContext(ctx).IsValid() {
+	// A context the trace is not in, a fresh goroutine's or the one the trace
+	// was opened from, puts the span under the agent's, in its trace.
+	if TraceFromContext(ctx) != r || !trace.SpanContextFromContext(ctx).IsValid() {
 		ctx = trace.ContextWithSpan(ctx, r.span)
 	}
 	all := make([]attribute.KeyValue, 0, len(r.inherited)+len(attrs))
 	all = append(all, r.inherited...)
 	all = append(all, attrs...)
 	ctx, span := r.client.tracer.Start(ctx, name, trace.WithSpanKind(kind), trace.WithAttributes(all...))
-	return contextWithRun(trace.ContextWithSpan(ctx, inContext{span, r.displaced}), r), span
+	return contextWithTrace(trace.ContextWithSpan(ctx, inContext{span, r.displaced}), r), span
 }
 
 // Answered records what the model answered: its name, its tokens, and its
@@ -802,7 +804,7 @@ func (m *ModelCall) Answered(a Answer) {
 	} else if a.TimeToFirstToken < 0 {
 		m.client.exporter.warnOnce("answer:"+attrTimeToFirstChunk, WarningInput, "telmoni: "+attrTimeToFirstChunk+" must be a duration from 0; the call is sent without it")
 	}
-	// Given once the run's lock is released: the logger is the application's.
+	// Given once the trace's lock is released: the logger is the application's.
 	if w := m.hold(attrs, answeredAs, usage); w.key != "" {
 		m.client.exporter.warnOnce(w.key, WarningInput, w.text)
 	}
@@ -817,21 +819,22 @@ func (m *ModelCall) End() {
 		return
 	}
 	// Under the lock its answers are held under, so none lands past the end.
-	g := m.run.guard
+	g := m.trace.guard
 	g.mu.Lock()
 	m.ended = true
 	g.mu.Unlock()
 	m.handle.End()
 }
 
-// hold sets an answer on the span and counts its cost under the run's lock, so
-// answers count one at a time and none after End; it is the warning it calls for.
+// hold sets an answer on the span and counts its cost under the trace's lock,
+// so answers count one at a time and none after End; it is the warning it
+// calls for.
 func (m *ModelCall) hold(attrs []attribute.KeyValue, answeredAs string, usage []attribute.KeyValue) warning {
-	g := m.run.guard
+	g := m.trace.guard
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if m.ended {
-		return warning{"call:late", "telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the run's spend"}
+		return warning{"call:late", "telmoni: a model call must be answered before it ends; an answer given after is not sent and counts nothing toward the trace's spend"}
 	}
 	if len(attrs) > 0 {
 		m.span.SetAttributes(attrs...)
@@ -873,7 +876,7 @@ func (m *ModelCall) hold(attrs []attribute.KeyValue, answeredAs string, usage []
 			provider = "no provider"
 		}
 		w = warning{"unpriced:" + m.provider + ":" + m.model,
-			"telmoni: no price for " + model + " (" + provider + "), which reported no cost; it counts nothing toward the run's spend cap"}
+			"telmoni: no price for " + model + " (" + provider + "), which reported no cost; it counts nothing toward the trace's spend cap"}
 	}
 	g.spent += cost - m.counted
 	m.counted = cost
@@ -917,7 +920,7 @@ func (r *Retrieval) Returned(documents any) {
 }
 
 // modelOperation is a model call's operation as ingest reads one: chat for a
-// blank one, and for one ingest would file as a step, a run or a tool call,
+// blank one, and for one ingest would file as a step, an agent or a tool call,
 // which setAside reports for the caller to warn of (warnOperation).
 func modelOperation(operation string) (read string, setAside bool) {
 	if strings.TrimSpace(operation) == "" {
@@ -997,7 +1000,7 @@ func (c *Client) cut(text string, most int, what string) string {
 }
 
 // fits reports whether an id is within ingest's cap; one past it is left off
-// its run or call with one warning, since cut it would name another.
+// its trace or call with one warning, since cut it would name another.
 func (c *Client) fits(id string, most int, what, span string) bool {
 	if len(id) <= most || utf8.RuneCountInString(id) <= most {
 		return true
@@ -1008,20 +1011,20 @@ func (c *Client) fits(id string, most int, what, span string) bool {
 	return false
 }
 
-// tagAttributes is a run's first 32 tags by key within ingest's caps; more
-// would crowd the marks a run ends with out of the span's 128 attributes.
+// tagAttributes is a trace's first 32 tags by key within ingest's caps; more
+// would crowd the marks a trace ends with out of the span's 128 attributes.
 func (c *Client) tagAttributes(tags map[string]string) []attribute.KeyValue {
 	var keys []string
 	for _, key := range slices.Sorted(maps.Keys(tags)) {
 		// Ingest drops it before counting, so it takes no place among the 32.
 		if key == "" || utf8.RuneCountInString(key) > tagKeyMax || utf8.RuneCountInString(tags[key]) > tagValueMax {
-			c.exporter.warnOnce("run:tag", WarningInput, "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent")
+			c.exporter.warnOnce("trace:tag", WarningInput, "telmoni: a tag's key must be 1 to 64 characters and its value up to 256; the tag is not sent")
 			continue
 		}
 		keys = append(keys, key)
 	}
 	if len(keys) > tagsMax {
-		c.exporter.warnOnce("run:tags", WarningInput, "telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent")
+		c.exporter.warnOnce("trace:tags", WarningInput, "telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent")
 		keys = keys[:tagsMax]
 	}
 	out := make([]attribute.KeyValue, 0, len(keys))
@@ -1048,7 +1051,8 @@ func asJSON(value any) string {
 	return strings.TrimSuffix(buf.String(), "\n")
 }
 
-// newUUID is a version 4 UUID in its lowercase 8-4-4-4-12 form.
+// newUUID is a version 4 UUID in its lowercase 8-4-4-4-12 form: a late
+// score's id.
 func newUUID() string {
 	var b [16]byte
 	// crypto/rand.Read never returns an error since Go 1.24; it crashes the

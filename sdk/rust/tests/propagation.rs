@@ -1,7 +1,7 @@
-//! A run across services: `inject` writes the W3C `traceparent` and our two
-//! `baggage` members as `sdk/fixtures/headers.json` spells them, `extract`
-//! reads them back as a run continued here, and nothing of a continued run
-//! but its steps and calls is sent.
+//! A trace across services: `inject` writes the W3C `traceparent` and our
+//! `baggage` member as `sdk/fixtures/headers.json` spells them, `extract`
+//! reads them back as a trace continued here, and nothing of a continued
+//! trace but its steps and calls is sent.
 
 mod common;
 
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use common::{Harness, Outcome, attributes_of, field, load_fixture, name_of, named, text};
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::Value;
-use telmoni::{ModelCallOptions, RunOptions, ToolCallOptions};
+use telmoni::{ModelCallOptions, ToolCallOptions, TraceOptions};
 
 type Headers = HashMap<String, String>;
 
@@ -35,10 +35,10 @@ fn inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own() -> Out
     let fixture = load_fixture("headers.json")?;
     let spec = field(&fixture, "inject")?;
     let harness = Harness::new()?;
-    let run = harness
+    let trace = harness
         .telmoni
-        .run(text(spec, "agent")?, RunOptions::default())?;
-    let step = run.step("plan")?;
+        .trace(text(spec, "agent")?, TraceOptions::default())?;
+    let step = trace.step("plan")?;
     let mut given: Headers = HashMap::new();
     harness.telmoni.inject_from(&step.context(), &mut given);
     let mut attached: Headers = HashMap::new();
@@ -53,9 +53,8 @@ fn inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own() -> Out
     .into_iter()
     .collect();
     harness.telmoni.inject_from(&step.context(), &mut beside);
-    let run_id = run.run_id().to_owned();
     step.end();
-    run.end();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
@@ -64,7 +63,6 @@ fn inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own() -> Out
         template
             .replace("<trace>", text(plan, "traceId").unwrap_or(""))
             .replace("<span>", text(plan, "spanId").unwrap_or(""))
-            .replace("<uuid>", &run_id)
     };
     let expected: Headers = [
         ("traceparent".to_owned(), fill(text(spec, "traceparent")?)),
@@ -84,7 +82,7 @@ fn inject_writes_the_headers_the_fixture_spells_beside_the_carriers_own() -> Out
 }
 
 #[test]
-fn inject_writes_nothing_outside_a_run() -> Outcome {
+fn inject_writes_nothing_outside_a_trace() -> Outcome {
     let harness = Harness::new()?;
     let mut outside: Headers = [("baggage".to_owned(), "tenant=acme".to_owned())]
         .into_iter()
@@ -99,22 +97,22 @@ fn inject_writes_nothing_outside_a_run() -> Outcome {
 }
 
 #[test]
-fn extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none() -> Outcome {
+fn extract_reads_the_trace_the_fixture_names_and_nothing_from_headers_naming_none() -> Outcome {
     let fixture = load_fixture("headers.json")?;
     let harness = Harness::new()?;
     for given in field(&fixture, "extract")?.as_array().ok_or("extract")? {
         let name = text(given, "name")?;
         let headers = headers_of(field(given, "headers")?)?;
-        let run = harness.telmoni.extract(&headers);
-        let expected = field(given, "run")?;
+        let trace = harness.telmoni.extract(&headers);
+        let expected = field(given, "trace")?;
         if expected.is_null() {
-            assert!(run.is_none(), "{name}: a run was read");
+            assert!(trace.is_none(), "{name}: a trace was read");
             continue;
         }
-        let run = run.ok_or_else(|| format!("{name}: no run was read"))?;
-        assert_eq!(run.run_id(), text(expected, "run_id")?, "{name}");
-        assert_eq!(run.agent(), text(expected, "agent")?, "{name}");
-        let cx = run.context();
+        let trace = trace.ok_or_else(|| format!("{name}: no trace was read"))?;
+        assert_eq!(trace.trace_id(), text(expected, "trace_id")?, "{name}");
+        assert_eq!(trace.agent(), text(expected, "agent")?, "{name}");
+        let cx = trace.context();
         let span = cx.span();
         let parent = span.span_context();
         assert_eq!(
@@ -138,15 +136,16 @@ fn extract_reads_the_run_the_fixture_names_and_nothing_from_headers_naming_none(
 }
 
 #[test]
-fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Outcome {
+fn a_continued_traces_steps_and_calls_carry_the_callers_agent_under_its_span() -> Outcome {
     let caller = Harness::new()?;
-    let run = caller.telmoni.run("orchestrator", RunOptions::default())?;
-    let step = run.step("hand over")?;
+    let trace = caller
+        .telmoni
+        .trace("orchestrator", TraceOptions::default())?;
+    let step = trace.step("hand over")?;
     let mut headers: Headers = HashMap::new();
     caller.telmoni.inject_from(&step.context(), &mut headers);
-    let run_id = run.run_id().to_owned();
     step.end();
-    run.end();
+    trace.end();
     caller.flush()?;
     let caller_spans = caller.spans()?;
     let handed = named(&caller_spans, "hand over")?;
@@ -156,7 +155,7 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
     let continued = worker
         .telmoni
         .extract(&headers)
-        .ok_or("the worker read no run")?;
+        .ok_or("the worker read no trace")?;
     {
         let work = continued.step("work")?;
         let call = work.model_call(
@@ -181,12 +180,11 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
     assert_eq!(
         names,
         ["chat gpt-x", "execute_tool search", "work"],
-        "nothing of the run itself, whose invoke_agent the caller sends"
+        "nothing of the agent's span itself, which the caller sends"
     );
     for span in &spans {
         assert_eq!(text(span, "traceId")?, caller_trace, "{}", name_of(span));
         let attributes = attributes_of(span)?;
-        assert_eq!(attributes["telmoni.run_id"], run_id, "{}", name_of(span));
         assert_eq!(
             attributes["telmoni.agent"],
             "orchestrator",
@@ -206,9 +204,9 @@ fn a_continued_runs_steps_and_calls_carry_the_callers_run_under_its_span() -> Ou
     Ok(())
 }
 
-/// Uncut, ingest would refuse every span this side sends of the run.
+/// Uncut, ingest would refuse every span this side sends of the trace.
 #[test]
-fn a_continued_runs_spans_carry_its_agent_cut_to_its_cap() -> Outcome {
+fn a_continued_traces_spans_carry_its_agent_cut_to_its_cap() -> Outcome {
     let fixture = load_fixture("headers.json")?;
     let given = field(&fixture, "extract")?
         .as_array()
@@ -220,11 +218,11 @@ fn a_continued_runs_spans_carry_its_agent_cut_to_its_cap() -> Outcome {
     let continued = harness
         .telmoni
         .extract(&headers_of(field(given, "headers")?)?)
-        .ok_or("no run was read")?;
+        .ok_or("no trace was read")?;
     continued.step("work")?.end();
     harness.flush()?;
     let spans = harness.spans()?;
-    let agent = text(field(given, "run")?, "agent")?;
+    let agent = text(field(given, "trace")?, "agent")?;
     assert_eq!(
         attributes_of(named(&spans, "work")?)?.get("telmoni.agent"),
         Some(&Value::from(agent))
@@ -233,21 +231,18 @@ fn a_continued_runs_spans_carry_its_agent_cut_to_its_cap() -> Outcome {
 }
 
 #[test]
-fn a_continued_run_hands_itself_on_again_under_the_span_current_here() -> Outcome {
+fn a_continued_trace_hands_itself_on_again_under_the_span_current_here() -> Outcome {
     let harness = Harness::new()?;
     let first: Headers = [
         (
             "traceparent".to_owned(),
             "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned(),
         ),
-        (
-            "baggage".to_owned(),
-            "telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot".to_owned(),
-        ),
+        ("baggage".to_owned(), "telmoni.agent=bot".to_owned()),
     ]
     .into_iter()
     .collect();
-    let continued = harness.telmoni.extract(&first).ok_or("a run")?;
+    let continued = harness.telmoni.extract(&first).ok_or("a trace")?;
     let relay = continued.step("relay")?;
     let mut onwards: Headers = HashMap::new();
     harness.telmoni.inject_from(&relay.context(), &mut onwards);
@@ -261,7 +256,7 @@ fn a_continued_run_hands_itself_on_again_under_the_span_current_here() -> Outcom
     );
     assert_eq!(
         onwards.get("baggage").map(String::as_str),
-        Some("telmoni.run_id=0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01,telmoni.agent=bot")
+        Some("telmoni.agent=bot")
     );
     Ok(())
 }

@@ -15,8 +15,8 @@ import {
 const version = (value: string, patch: Partial<Version> = {}): Version => ({
   value,
   first_at: "2026-11-05T09:00:00Z",
-  runs: 10,
-  failed_runs: 0,
+  traces: 10,
+  failed_traces: 0,
   p50_ms: 1_000,
   p95_ms: 2_000,
   median_spend: 0.01,
@@ -28,14 +28,14 @@ describe("deltas", () => {
   it("measures each row against the row below, in the row's own unit", () => {
     const [newer, older] = deltas([
       version("1.4.2", {
-        failed_runs: 4,
+        failed_traces: 4,
         p50_ms: 2_400,
         p95_ms: 9_100,
         median_spend: 0.042,
         scores: [{ name: "helpful", mean: 0.6, count: 5 }],
       }),
       version("1.4.1", {
-        failed_runs: 2,
+        failed_traces: 2,
         p50_ms: 2_100,
         p95_ms: 6_000,
         median_spend: 0.031,
@@ -58,7 +58,7 @@ describe("deltas", () => {
   it("has none where either side has no value, and a zero is a value", () => {
     const [newer] = deltas([
       version("b", { p50_ms: null, p95_ms: 500, median_spend: 0, scores: [{ name: "kept", mean: 1, count: 1 }] }),
-      version("a", { p50_ms: 900, p95_ms: null, median_spend: 0, failed_runs: 0, scores: [] }),
+      version("a", { p50_ms: 900, p95_ms: null, median_spend: 0, failed_traces: 0, scores: [] }),
     ]);
     expect(newer).toEqual({
       failed: null,
@@ -71,14 +71,14 @@ describe("deltas", () => {
 
   it("measures against a zero before it by its difference, never a ratio", () => {
     const [newer] = deltas([
-      version("b", { failed_runs: 5, median_spend: 0.2 }),
-      version("a", { failed_runs: 0, median_spend: 0 }),
+      version("b", { failed_traces: 5, median_spend: 0.2 }),
+      version("a", { failed_traces: 0, median_spend: 0 }),
     ]);
     expect(newer?.failed).toBe(50);
     expect(newer?.median_spend).toBe(0.2);
   });
 
-  it("measures no row against the runs that carried none, nor those runs against any", () => {
+  it("measures no row against the traces that carried none, nor those traces against any", () => {
     expect(deltas([version("b"), version("a"), version("")])).toEqual([
       expect.objectContaining({ p50_ms: 0 }),
       null,
@@ -87,19 +87,19 @@ describe("deltas", () => {
     expect(deltas([version("")])).toEqual([null]);
   });
 
-  it("draws no change in the failed share where either side has no ended run", () => {
-    const running = version("b", { runs: 1, failed_runs: 0, p50_ms: null, p95_ms: null, median_spend: null });
-    const ended = version("a", { failed_runs: 4 });
-    // Its share is still its own to show: none of its one run has failed yet.
+  it("draws no change in the failed share where either side has no ended trace", () => {
+    const running = version("b", { traces: 1, failed_traces: 0, p50_ms: null, p95_ms: null, median_spend: null });
+    const ended = version("a", { failed_traces: 4 });
+    // Its share is still its own to show: none of its one trace has failed yet.
     expect(failedShare(running)).toBe(0);
     expect(deltas([running, ended])[0]?.failed).toBeNull();
     expect(deltas([ended, running, version("0")])[0]?.failed).toBeNull();
     expect(deltas([ended, version("0")])[0]?.failed).toBeCloseTo(40, 9);
   });
 
-  it("has no share of no runs", () => {
-    expect(failedShare({ runs: 0, failed_runs: 0 })).toBeNull();
-    expect(deltas([version("b", { runs: 0 }), version("a")])[0]?.failed).toBeNull();
+  it("has no share of no traces", () => {
+    expect(failedShare({ traces: 0, failed_traces: 0 })).toBeNull();
+    expect(deltas([version("b", { traces: 0 }), version("a")])[0]?.failed).toBeNull();
   });
 });
 
@@ -160,7 +160,7 @@ describe("VersionsSchema", () => {
     days: 14,
     by: "release",
     environment: "",
-    environments: [{ value: "", runs: 1 }],
+    environments: [{ value: "", traces: 1 }],
     prompt: null,
     prompts: [],
     versions: [{ ...version("1.0.0"), p50_ms: null, p95_ms: null, median_spend: null }],
@@ -168,11 +168,11 @@ describe("VersionsSchema", () => {
     more: false,
   };
 
-  it("reads an answer, a version with no ended run among it", () => {
+  it("reads an answer, a version with no ended trace among it", () => {
     expect(VersionsSchema.safeParse(answer).success).toBe(true);
   });
 
-  it("refuses a split it does not know, a count that is none and a row without its runs", () => {
+  it("refuses a split it does not know, a count that is none and a row without its traces", () => {
     expect(VersionsSchema.safeParse({ ...answer, by: "tool" }).success).toBe(false);
     expect(VersionsSchema.safeParse({ ...answer, days: "14" }).success).toBe(false);
     expect(VersionsSchema.safeParse({ ...answer, versions: [{ value: "1.0.0" }] }).success).toBe(false);

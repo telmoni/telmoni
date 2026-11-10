@@ -87,7 +87,7 @@ pub struct Parts {
     /// Notifications' pool, opened as the `notifications` role.
     pub notifications_pool: PgPool,
     /// Telemetry's configuration. Required, as its pool is: a binary without
-    /// telemetry is not one that can keep a run.
+    /// telemetry is not one that can keep a trace.
     pub telemetry_config: telmoni_telemetry::Config,
     /// Telemetry's pool, opened as the `telemetry` role.
     pub telemetry_pool: PgPool,

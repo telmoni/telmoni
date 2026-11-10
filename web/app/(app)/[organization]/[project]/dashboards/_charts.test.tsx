@@ -33,13 +33,13 @@ describe("DashboardCharts", () => {
     expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
       "Spend",
       "Tokens",
-      "Runs",
+      "Traces",
       "Latency",
       "Time to first token",
     ]);
     expect(screen.getByText("$4.00 over the window.")).toBeInTheDocument();
     expect(screen.getByText("200 input and 20 output over the window.")).toBeInTheDocument();
-    expect(screen.getByText("7 runs, 1 failed, over the window.")).toBeInTheDocument();
+    expect(screen.getByText("7 traces, 1 failed, over the window.")).toBeInTheDocument();
   });
 
   it("says a latency chart holds nothing where no bar read one", () => {

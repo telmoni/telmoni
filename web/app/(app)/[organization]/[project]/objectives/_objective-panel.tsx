@@ -27,7 +27,7 @@ import {
   SLOW_BURN,
   agentsOf,
   objectiveInputOf,
-  runDurationsOf,
+  traceDurationsOf,
   type ObjectiveDraft,
   type Promised,
 } from "@/lib/objectives";
@@ -42,7 +42,7 @@ import { saveAlertAction } from "../alerts/actions";
 
 // An objective is made and edited in the console's side panel, full over the
 // content area, as an alert is: its agent, what it promises of the agent's
-// runs and over how many days, how often a held breach is told again, and
+// traces and over how many days, how often a held breach is told again, and
 // the connectors its notices go to. It is saved as the burn alert it is.
 
 type PanelProps = {
@@ -51,7 +51,7 @@ type PanelProps = {
   ruleId: string | null;
   initial: ObjectiveDraft;
   connections: ConnectionChoice[] | null;
-  /** Its agents' history: their names, and their runs' durations a latency may start from. */
+  /** Its agents' history: their names, and their traces' durations a latency may start from. */
   history: History | null;
 };
 
@@ -133,7 +133,7 @@ function ObjectivePanel({
     setError(null);
   };
   const agents = agentsOf(history);
-  const durations = draft.promise === "latency" ? runDurationsOf(history, draft.agent) : null;
+  const durations = draft.promise === "latency" ? traceDurationsOf(history, draft.agent) : null;
   const levels = durations
     ? (["p50", "p90", "p99"] as const).flatMap((level) => {
         const value = durations[level];
@@ -172,8 +172,8 @@ function ObjectivePanel({
           onClose={onClose}
         >
           <p className="text-sm text-muted-foreground">
-            A share of one agent&rsquo;s runs promised to succeed, or to end inside a time, over its
-            days; the runs that miss it spend its error budget. It pages when its last hour spends
+            A share of one agent&rsquo;s traces promised to succeed, or to end inside a time, over its
+            days; the traces that miss it spend its error budget. It pages when its last hour spends
             the budget {FAST_BURN}&times; as fast as it lasts, and warns at {SLOW_BURN}&times; over its
             last six hours, through the project&rsquo;s feed and the connectors it links.
           </p>
@@ -211,7 +211,7 @@ function ObjectivePanel({
               </datalist>
             )}
           </SidePanelRow>
-          <SidePanelRow label="Its runs" labelId={`${id}-promise`}>
+          <SidePanelRow label="Its traces" labelId={`${id}-promise`}>
             <ChoiceGroup
               labelledBy={`${id}-promise`}
               value={draft.promise}
@@ -243,7 +243,7 @@ function ObjectivePanel({
               {levels.length > 0 && (
                 <div className="mt-1.5 grid gap-1.5">
                   <p id={`${id}-history`} className="text-muted-foreground">
-                    Its runs&rsquo; durations over the last {history ? historyDays(history) : 0} days:
+                    Its traces&rsquo; durations over the last {history ? historyDays(history) : 0} days:
                   </p>
                   <div className="flex flex-wrap gap-gutter">
                     {levels.map(({ level, ms }) => (
@@ -280,7 +280,7 @@ function ObjectivePanel({
                 className="w-28"
               />
               <span id={`${id}-target-unit`} className="text-muted-foreground">
-                % of its runs
+                % of its traces
               </span>
             </div>
           </SidePanelRow>

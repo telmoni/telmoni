@@ -1,5 +1,5 @@
-//! A run: its span and attributes, what fails and cancels it, the closures,
-//! and what it refuses.
+//! A trace: the agent's span and attributes, what fails and cancels it, the
+//! closures, and what it refuses.
 
 mod common;
 
@@ -8,16 +8,16 @@ use std::fmt;
 use std::panic::AssertUnwindSafe;
 
 use common::{
-    FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, hooks, is_uuid_v4, keyed,
-    mode_on, name_of, named, only, run_span, starting_with, tags,
+    FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, hooks, is_hex, keyed,
+    mode_on, name_of, named, only, starting_with, tags, trace_span,
 };
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TraceContextExt as _;
 use serde_json::{Value, json};
-use telmoni::{Config, Error, ModelCall, Run, RunOptions, RunReply, Step, Telmoni, ToolCall};
+use telmoni::{Config, Error, ModelCall, Step, Telmoni, ToolCall, Trace, TraceOptions, TraceReply};
 
 /// An application's error, with the SDK's own among its causes so
-/// `try_run_with` can hand a run that did not open back as one of these.
+/// `try_trace_with` can hand a trace that did not open back as one of these.
 #[derive(Debug)]
 enum Failed {
     Timeout(String),
@@ -42,11 +42,11 @@ impl From<Error> for Failed {
 }
 
 #[test]
-fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
+fn a_trace_is_a_span_with_the_contract_attributes() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         "support-bot",
-        RunOptions {
+        TraceOptions {
             user_id: Some("user_1".to_owned()),
             session_id: Some("conv_1".to_owned()),
             tags: tags(&[("env", "test"), ("team", "a")]),
@@ -55,15 +55,16 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
             input_messages: None,
         },
     )?;
-    assert!(is_uuid_v4(run.run_id()), "{}", run.run_id());
-    assert_eq!(run.agent(), "support-bot");
-    let run_id = run.run_id().to_owned();
-    run.end();
+    assert!(is_hex(trace.trace_id(), 32), "{}", trace.trace_id());
+    assert_eq!(trace.agent(), "support-bot");
+    let trace_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
     let span = only(&spans, "invoke_agent ")?;
     assert_eq!(span.get("kind"), Some(&json!(1)));
+    assert_eq!(span.get("traceId"), Some(&json!(trace_id)));
     assert!(span.get("parentSpanId").is_none());
     assert!(span.get("status").is_none());
     assert_eq!(
@@ -71,7 +72,6 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
         json!({
             "gen_ai.operation.name": "invoke_agent",
             "gen_ai.agent.name": "support-bot",
-            "telmoni.run_id": run_id,
             "telmoni.agent": "support-bot",
             "user.id": "user_1",
             "gen_ai.conversation.id": "conv_1",
@@ -83,12 +83,12 @@ fn a_run_is_a_span_with_the_contract_attributes() -> Outcome {
 }
 
 #[test]
-fn an_err_from_the_closure_fails_the_run_with_its_type_alone() -> Outcome {
+fn an_err_from_the_closure_fails_the_trace_with_its_type_alone() -> Outcome {
     let harness = Harness::new()?;
     let result: Result<(), Failed> =
         harness
             .telmoni
-            .try_run_with("bot", RunOptions::default(), |_run| {
+            .try_trace_with("bot", TraceOptions::default(), |_trace| {
                 Err(Failed::Timeout(
                     "the message, which is content and never sent".to_owned(),
                 ))
@@ -108,26 +108,26 @@ fn an_err_from_the_closure_fails_the_run_with_its_type_alone() -> Outcome {
 }
 
 #[test]
-fn fail_and_cancel_mark_the_run() -> Outcome {
+fn fail_and_cancel_mark_the_trace() -> Outcome {
     let harness = Harness::new()?;
-    let failed = harness.telmoni.run("bot", RunOptions::default())?;
-    let failed_id = failed.run_id().to_owned();
+    let failed = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let failed_id = failed.trace_id().to_owned();
     failed.fail("RateLimit");
     failed.end();
-    let cancelled = harness.telmoni.run("bot", RunOptions::default())?;
-    let cancelled_id = cancelled.run_id().to_owned();
+    let cancelled = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let cancelled_id = cancelled.trace_id().to_owned();
     cancelled.cancel();
     cancelled.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let failed = run_span(&spans, &failed_id)?;
+    let failed = trace_span(&spans, &failed_id)?;
     assert_eq!(
         attributes_of(failed)?.get("error.type"),
         Some(&json!("RateLimit"))
     );
     assert_eq!(failed.get("status"), Some(&json!({ "code": 2 })));
-    let cancelled = run_span(&spans, &cancelled_id)?;
+    let cancelled = trace_span(&spans, &cancelled_id)?;
     assert_eq!(
         attributes_of(cancelled)?.get("telmoni.cancelled"),
         Some(&json!(true))
@@ -136,19 +136,19 @@ fn fail_and_cancel_mark_the_run() -> Outcome {
     Ok(())
 }
 
-/// Failed with an empty type, a run is failed with none, since ingest
-/// refuses a span whose `error.type` is empty, and the run with it.
+/// Failed with an empty type, a trace is failed with none, since ingest
+/// refuses a span whose `error.type` is empty, and the trace with it.
 #[test]
-fn a_fail_with_an_empty_type_fails_the_run_with_none() -> Outcome {
+fn a_fail_with_an_empty_type_fails_the_trace_with_none() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let id = run.run_id().to_owned();
-    run.fail("");
-    run.end();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let id = trace.trace_id().to_owned();
+    trace.fail("");
+    trace.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let failed = run_span(&spans, &id)?;
+    let failed = trace_span(&spans, &id)?;
     assert_eq!(attributes_of(failed)?.get("error.type"), None);
     assert_eq!(failed.get("status"), Some(&json!({ "code": 2 })));
     Ok(())
@@ -157,16 +157,16 @@ fn a_fail_with_an_empty_type_fails_the_run_with_none() -> Outcome {
 #[test]
 fn a_panic_unwinding_through_the_guard_fails_it_as_a_panic() -> Outcome {
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
-    let run_id = run.run_id().to_owned();
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let trace_id = trace.trace_id().to_owned();
     let unwound = std::panic::catch_unwind(AssertUnwindSafe(move || {
-        let _run = run;
+        let _trace = trace;
         panic!("the message, which is content and never sent");
     }));
     assert!(unwound.is_err());
     harness.flush()?;
     let spans = harness.spans()?;
-    let span = run_span(&spans, &run_id)?;
+    let span = trace_span(&spans, &trace_id)?;
     assert_eq!(span.get("status"), Some(&json!({ "code": 2 })));
     assert_eq!(
         attributes_of(span)?.get("error.type"),
@@ -177,14 +177,14 @@ fn a_panic_unwinding_through_the_guard_fails_it_as_a_panic() -> Outcome {
 }
 
 #[test]
-fn the_closure_opens_a_run_per_call_and_returns_its_value() -> Outcome {
+fn the_closure_opens_a_trace_per_call_and_returns_its_value() -> Outcome {
     let harness = Harness::new()?;
     let mut seen = Vec::new();
     for question in ["a", "b"] {
         let answer = harness
             .telmoni
-            .run_with("bot", RunOptions::default(), |run| {
-                seen.push(run.run_id().to_owned());
+            .trace_with("bot", TraceOptions::default(), |trace| {
+                seen.push(trace.trace_id().to_owned());
                 question.to_uppercase()
             })?;
         assert_eq!(answer, question.to_uppercase());
@@ -197,22 +197,22 @@ fn the_closure_opens_a_run_per_call_and_returns_its_value() -> Outcome {
 }
 
 #[test]
-fn a_run_needs_an_agent() -> Outcome {
+fn a_trace_needs_an_agent() -> Outcome {
     let harness = Harness::new()?;
     assert!(matches!(
-        harness.telmoni.run(" ", RunOptions::default()),
+        harness.telmoni.trace(" ", TraceOptions::default()),
         Err(Error::EmptyAgent)
     ));
     assert!(matches!(
         harness
             .telmoni
-            .run_with(" ", RunOptions::default(), |_run| ()),
+            .trace_with(" ", TraceOptions::default(), |_trace| ()),
         Err(Error::EmptyAgent)
     ));
     let result: Result<(), Failed> =
         harness
             .telmoni
-            .try_run_with(" ", RunOptions::default(), |_run| Ok(()));
+            .try_trace_with(" ", TraceOptions::default(), |_trace| Ok(()));
     assert!(matches!(result, Err(Failed::Sdk(Error::EmptyAgent))));
 
     harness.flush()?;
@@ -220,36 +220,36 @@ fn a_run_needs_an_agent() -> Outcome {
     Ok(())
 }
 
-/// Only a run's first 32 tags by key are sent, warned of once, so what its end sets still fits.
+/// Only a trace's first 32 tags by key are sent, warned of once, so what its end sets still fits.
 #[test]
-fn a_run_sends_its_first_32_tags_and_warns_once_of_the_rest() -> Outcome {
+fn a_trace_sends_its_first_32_tags_and_warns_once_of_the_rest() -> Outcome {
     let harness = Harness::new()?;
     let many: BTreeMap<String, String> =
         (0..200).map(|n| (format!("k{n}"), n.to_string())).collect();
-    let mut run_ids = Vec::new();
+    let mut trace_ids = Vec::new();
     for _ in 0..2 {
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             "bot",
-            RunOptions {
+            TraceOptions {
                 tags: many.clone(),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
-        run.fail("Overrun");
-        run.cancel();
-        run_ids.push(run.run_id().to_owned());
-        run.end();
+        trace.fail("Overrun");
+        trace.cancel();
+        trace_ids.push(trace.trace_id().to_owned());
+        trace.end();
     }
     let exact = Harness::new()?;
-    let run = exact.telmoni.run(
+    let trace = exact.telmoni.trace(
         "bot",
-        RunOptions {
+        TraceOptions {
             tags: many.clone().into_iter().take(32).collect(),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let exact_id = run.run_id().to_owned();
-    run.end();
+    let exact_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
     exact.flush()?;
 
@@ -268,8 +268,8 @@ fn a_run_sends_its_first_32_tags_and_warns_once_of_the_rest() -> Outcome {
         .map(|key| format!("telmoni.tag.{key}"))
         .collect();
     let spans = harness.spans()?;
-    for run_id in &run_ids {
-        let span = run_span(&spans, run_id)?;
+    for trace_id in &trace_ids {
+        let span = trace_span(&spans, trace_id)?;
         let attributes = attributes_of(span)?;
         assert_eq!(attributes.get("error.type"), Some(&json!("Overrun")));
         assert_eq!(tags_of(span)?, first);
@@ -277,9 +277,9 @@ fn a_run_sends_its_first_32_tags_and_warns_once_of_the_rest() -> Outcome {
     }
     assert_eq!(
         harness.warnings.all(),
-        ["telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent"]
+        ["telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent"]
     );
-    assert_eq!(tags_of(run_span(&exact.spans()?, &exact_id)?)?, first);
+    assert_eq!(tags_of(trace_span(&exact.spans()?, &exact_id)?)?, first);
     assert!(
         exact.warnings.all().is_empty(),
         "{:?}",
@@ -302,17 +302,17 @@ fn a_tag_ingest_would_drop_takes_no_place_among_the_32() -> Outcome {
     given.insert(String::new(), "v".to_owned());
     given.insert("k15a".to_owned(), "v".repeat(257));
     given.insert("y".repeat(65), "v".to_owned());
-    let mut run_ids = Vec::new();
+    let mut trace_ids = Vec::new();
     for _ in 0..2 {
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             "bot",
-            RunOptions {
+            TraceOptions {
                 tags: given.clone(),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
-        run_ids.push(run.run_id().to_owned());
-        run.end();
+        trace_ids.push(trace.trace_id().to_owned());
+        trace.end();
     }
     harness.flush()?;
 
@@ -321,8 +321,8 @@ fn a_tag_ingest_would_drop_takes_no_place_among_the_32() -> Outcome {
         .map(|(key, value)| (key, json!(value)))
         .collect();
     let spans = harness.spans()?;
-    for run_id in &run_ids {
-        let sent: BTreeMap<String, Value> = attributes_of(run_span(&spans, run_id)?)?
+    for trace_id in &trace_ids {
+        let sent: BTreeMap<String, Value> = attributes_of(trace_span(&spans, trace_id)?)?
             .as_object()
             .ok_or("attributes")?
             .iter()
@@ -341,7 +341,7 @@ fn a_tag_ingest_would_drop_takes_no_place_among_the_32() -> Outcome {
     Ok(())
 }
 
-/// A warning sink that panics never reaches the agent's call: the run and its step still go.
+/// A warning sink that panics never reaches the agent's call: the trace and its step still go.
 #[test]
 fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
     let transport = FakeTransport::new([])?;
@@ -350,42 +350,42 @@ fn a_warning_sink_that_panics_never_reaches_the_agent() -> Outcome {
     let mut hooks = hooks(&transport, &warnings, &sleeps);
     hooks.warn = Box::new(|text, _| std::panic::panic_any(text.to_owned()));
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
-    let run = telmoni.run(
+    let trace = telmoni.trace(
         "bot",
-        RunOptions {
+        TraceOptions {
             tags: (0..40).map(|n| (format!("k{n}"), n.to_string())).collect(),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let run_id = run.run_id().to_owned();
-    run.step("s")?.end();
-    run.end();
+    let trace_id = trace.trace_id().to_owned();
+    trace.step("s")?.end();
+    trace.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
 
     let spans = transport.spans()?;
-    assert_eq!(name_of(run_span(&spans, &run_id)?), "invoke_agent bot");
+    assert_eq!(name_of(trace_span(&spans, &trace_id)?), "invoke_agent bot");
     assert!(named(&spans, "s").is_ok(), "the step was not sent");
     Ok(())
 }
 
-/// On every span of the run, any of these past its cap cost ingest the run whole.
+/// On every span of the trace, any of these past its cap cost ingest the trace whole.
 #[test]
-fn a_runs_text_past_ingests_caps_is_cut_or_left_off_warned_once() -> Outcome {
+fn a_traces_text_past_ingests_caps_is_cut_or_left_off_warned_once() -> Outcome {
     let harness = Harness::new()?;
     let smiles = |n: usize| "😀".repeat(n);
     for _ in 0..2 {
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             &smiles(129),
-            RunOptions {
+            TraceOptions {
                 user_id: Some("u".repeat(129)),
                 session_id: Some("s".repeat(201)),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
-        assert_eq!(run.agent(), smiles(128));
-        run.fail(&"E".repeat(129));
-        run.end();
+        assert_eq!(trace.agent(), smiles(128));
+        trace.fail(&"E".repeat(129));
+        trace.end();
     }
     harness.flush()?;
     let spans = harness.spans()?;
@@ -395,9 +395,9 @@ fn a_runs_text_past_ingests_caps_is_cut_or_left_off_warned_once() -> Outcome {
         assert_eq!(attributes.get("user.id"), None);
         assert_eq!(attributes.get("gen_ai.conversation.id"), None);
     }
-    let runs = starting_with(&spans, "invoke_agent ");
-    assert_eq!(runs.len(), 2);
-    for span in runs {
+    let agents = starting_with(&spans, "invoke_agent ");
+    assert_eq!(agents.len(), 2);
+    for span in agents {
         assert_eq!(name_of(span), format!("invoke_agent {}", smiles(128)));
         let attributes = attributes_of(span)?;
         assert_eq!(
@@ -411,10 +411,10 @@ fn a_runs_text_past_ingests_caps_is_cut_or_left_off_warned_once() -> Outcome {
     assert_eq!(
         warnings,
         [
-            "telmoni: a run's agent must be up to 128 characters; it is sent cut to its first 128",
-            "telmoni: a session id must be up to 200 characters; the run is sent without it",
+            "telmoni: a session id must be up to 200 characters; the trace is sent without it",
             "telmoni: a span's error type must be up to 128 characters; it is sent cut to its first 128",
-            "telmoni: a user id must be up to 128 characters; the run is sent without it",
+            "telmoni: a trace's agent must be up to 128 characters; it is sent cut to its first 128",
+            "telmoni: a user id must be up to 128 characters; the trace is sent without it",
         ]
     );
     Ok(())
@@ -422,23 +422,23 @@ fn a_runs_text_past_ingests_caps_is_cut_or_left_off_warned_once() -> Outcome {
 
 /// Counted in characters, as ingest counts them, never in UTF-8's bytes.
 #[test]
-fn a_runs_text_at_ingests_caps_is_sent_whole() -> Outcome {
+fn a_traces_text_at_ingests_caps_is_sent_whole() -> Outcome {
     let harness = Harness::new()?;
     let smiles = |n: usize| "😀".repeat(n);
-    let run = harness.telmoni.run(
+    let trace = harness.telmoni.trace(
         &smiles(128),
-        RunOptions {
+        TraceOptions {
             user_id: Some(smiles(128)),
             session_id: Some(smiles(200)),
-            ..RunOptions::default()
+            ..TraceOptions::default()
         },
     )?;
-    let id = run.run_id().to_owned();
-    run.fail(&smiles(128));
-    run.end();
+    let id = trace.trace_id().to_owned();
+    trace.fail(&smiles(128));
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
-    let attributes = attributes_of(run_span(&spans, &id)?)?;
+    let attributes = attributes_of(trace_span(&spans, &id)?)?;
     for (key, want) in [
         ("telmoni.agent", smiles(128)),
         ("user.id", smiles(128)),
@@ -452,31 +452,28 @@ fn a_runs_text_at_ingests_caps_is_sent_whole() -> Outcome {
 }
 
 #[test]
-fn a_run_is_shared_across_threads() -> Outcome {
+fn a_trace_is_shared_across_threads() -> Outcome {
     fn send_and_sync<T: Send + Sync>() {}
     send_and_sync::<Telmoni>();
-    send_and_sync::<Run>();
+    send_and_sync::<Trace>();
     send_and_sync::<Step>();
     send_and_sync::<ModelCall>();
     send_and_sync::<ToolCall>();
 
     let harness = Harness::new()?;
-    let run = harness.telmoni.run("bot", RunOptions::default())?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
     let opened =
-        std::thread::scope(|scope| scope.spawn(|| run.step("threaded").map(Step::end)).join());
+        std::thread::scope(|scope| scope.spawn(|| trace.step("threaded").map(Step::end)).join());
     assert!(
         matches!(opened, Ok(Ok(()))),
         "the step opened on its thread"
     );
-    let run_id = run.run_id().to_owned();
-    run.end();
+    let trace_id = trace.trace_id().to_owned();
+    trace.end();
     harness.flush()?;
     let spans = harness.spans()?;
     let step = named(&spans, "threaded")?;
-    assert_eq!(
-        attributes_of(step)?.get("telmoni.run_id"),
-        Some(&json!(run_id))
-    );
+    assert_eq!(step.get("traceId"), Some(&json!(trace_id)));
     assert_eq!(
         step.get("parentSpanId"),
         only(&spans, "invoke_agent ")?.get("spanId")
@@ -493,17 +490,20 @@ fn a_failure_leaves_with_its_message_only_when_asked_and_the_project_allows() ->
                 capture_content,
                 ..keyed()
             },
-            // On to each export, a run's opening its own among them.
+            // On to each export, a trace's opening its own among them.
             std::iter::repeat_n(Ok(mode_on()), 4),
         )?;
-        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness
+            .telmoni
+            .trace("warm", TraceOptions::default())?
+            .end();
         harness.flush()?;
-        let run = harness.telmoni.run("bot", RunOptions::default())?;
+        let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
         let stepped: Result<(), Failed> =
-            run.try_step_with("plan", |_step| Err(Failed::Timeout("bad plan".to_owned())));
+            trace.try_step_with("plan", |_step| Err(Failed::Timeout("bad plan".to_owned())));
         assert!(stepped.is_err());
-        run.fail("RateLimit");
-        run.end();
+        trace.fail("RateLimit");
+        trace.end();
         harness.flush()?;
         let spans = harness.spans()?;
         let plan = named(&spans, "plan")?;
@@ -550,16 +550,20 @@ fn an_applications_event_leaves_only_when_asked_and_the_project_allows() -> Outc
                 capture_content,
                 ..keyed()
             },
-            // On to each export, a run's opening its own among them.
+            // On to each export, a trace's opening its own among them.
             std::iter::repeat_n(Ok(mode_on()), 4),
         )?;
-        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness
+            .telmoni
+            .trace("warm", TraceOptions::default())?
+            .end();
         harness.flush()?;
-        let run = harness.telmoni.run("bot", RunOptions::default())?;
-        run.context()
+        let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+        trace
+            .context()
             .span()
             .add_event("cache miss", vec![KeyValue::new("key", "k1")]);
-        run.end();
+        trace.end();
         harness.flush()?;
         let spans = harness.spans()?;
         let sent = named(&spans, "invoke_agent bot")?.get("events").is_some();
@@ -572,31 +576,34 @@ fn an_applications_event_leaves_only_when_asked_and_the_project_allows() -> Outc
     Ok(())
 }
 
-/// A run's own messages leave only with `capture_content` and the mode `on`.
+/// A trace's own messages leave only with `capture_content` and the mode `on`.
 #[test]
-fn a_runs_own_messages_leave_only_when_asked_and_the_project_allows() -> Outcome {
+fn a_traces_own_messages_leave_only_when_asked_and_the_project_allows() -> Outcome {
     for capture_content in [true, false] {
         let harness = Harness::answering(
             Config {
                 capture_content,
                 ..keyed()
             },
-            // On to each export, a run's opening its own among them.
+            // On to each export, a trace's opening its own among them.
             std::iter::repeat_n(Ok(mode_on()), 4),
         )?;
-        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness
+            .telmoni
+            .trace("warm", TraceOptions::default())?
+            .end();
         harness.flush()?;
-        let run = harness.telmoni.run(
+        let trace = harness.telmoni.trace(
             "bot",
-            RunOptions {
+            TraceOptions {
                 input_messages: Some(json!([{ "role": "user", "content": "hi" }]).into()),
-                ..RunOptions::default()
+                ..TraceOptions::default()
             },
         )?;
-        run.answered(RunReply {
+        trace.answered(TraceReply {
             output_messages: Some("hello".into()),
         });
-        run.end();
+        trace.end();
         harness.flush()?;
         let spans = harness.spans()?;
         let sent = attributes_of(named(&spans, "invoke_agent bot")?)?;

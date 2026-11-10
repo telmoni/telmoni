@@ -1,4 +1,4 @@
-"""A run recorded after it ended: ``record_run`` and ``sdk/fixtures/recorded.json``."""
+"""A trace recorded after it ended: ``record_trace`` and ``sdk/fixtures/recorded.json``."""
 
 from __future__ import annotations
 
@@ -25,16 +25,16 @@ from telmoni import (
     Config,
     ModelCallRecord,
     QueueFullError,
-    RunRecord,
     ShutdownError,
     StepRecord,
     Telmoni,
     ToolCallRecord,
+    TraceRecord,
     Usage,
     WarningInfo,
-    current_run,
+    current_trace,
     ids,
-    runs,
+    traces,
 )
 from telmoni.exporter import Answer, Exporter
 from telmoni.processor import Batching, Processor
@@ -81,10 +81,10 @@ def item_from(spec: dict[str, Any]) -> StepRecord | ModelCallRecord | ToolCallRe
     )
 
 
-def record_from(spec: dict[str, Any]) -> RunRecord:
+def record_from(spec: dict[str, Any]) -> TraceRecord:
     inside = [item_from(item) for item in spec["inside"]]
-    return RunRecord(
-        run_id=spec["run_id"],
+    return TraceRecord(
+        trace_id=spec["trace_id"],
         agent=spec["agent"],
         user_id=spec.get("user_id"),
         session_id=spec.get("session_id"),
@@ -97,7 +97,7 @@ def record_from(spec: dict[str, Any]) -> RunRecord:
     )
 
 
-def the_record() -> RunRecord:
+def the_record() -> TraceRecord:
     return record_from(load_fixture("recorded.json")["scenario"]["record"])
 
 
@@ -125,7 +125,7 @@ def test_the_record_matches_the_golden_export(
     telmoni: Telmoni, transport: FakeTransport, caplog: pytest.LogCaptureFixture
 ) -> None:
     fixture = load_fixture("recorded.json")
-    telmoni.record_run(record_from(fixture["scenario"]["record"]))
+    telmoni.record_trace(record_from(fixture["scenario"]["record"]))
     assert telmoni.flush()
     bodies = transport.bodies()
     assert len(bodies) == 1, "a record travels in one export"
@@ -154,17 +154,13 @@ def test_the_same_record_sent_again_is_the_same_bytes() -> None:
         transport = FakeTransport()
         client = Telmoni(Config(api_key="k"), transport=transport)
         try:
-            client.record_run(record)
+            client.record_trace(record)
             assert client.flush()
         finally:
             client.shutdown()
         sent.append([body for _url, _headers, body in transport.requests])
     assert all(bodies == sent[0] for bodies in sent)
     assert len(sent[0]) == 1
-
-
-def trace_of(record: RunRecord) -> str:
-    return record.run_id.replace("-", "")
 
 
 def traces_in(body: bytes) -> set[str]:
@@ -191,25 +187,25 @@ def test_a_record_travels_in_exports_of_its_own(transport: FakeTransport) -> Non
     """A span queued before it or ending after it, and a record beside it, go
     in other exports, so it is the same bytes as when sent alone."""
     record = the_record()
-    beside = dataclasses.replace(record, run_id=str(uuid.uuid4()))
+    beside = dataclasses.replace(record, trace_id=uuid.uuid4().hex)
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("live"):
+        with client.trace("live"):
             with client.step("live step"):
                 pass
-            client.record_run(record)
-            client.record_run(beside)
+            client.record_trace(record)
+            client.record_trace(beside)
         assert client.flush()
         sent = len(transport.requests)
-        client.record_run(record)
+        client.record_trace(record)
         assert client.flush()
     finally:
         client.shutdown()
     bodies = [body for _url, _headers, body in transport.requests]
     assert all(len(traces_in(body)) == 1 for body in bodies)
-    alone = [body for body in bodies[:sent] if traces_in(body) == {trace_of(record)}]
+    alone = [body for body in bodies[:sent] if traces_in(body) == {record.trace_id}]
     assert alone == bodies[sent:]
-    assert any(traces_in(body) == {trace_of(beside)} for body in bodies[:sent])
+    assert any(traces_in(body) == {beside.trace_id} for body in bodies[:sent])
 
 
 def test_a_record_larger_than_a_batch_is_cut_from_its_own_start(
@@ -221,12 +217,12 @@ def test_a_record_larger_than_a_batch_is_cut_from_its_own_start(
     call = ToolCallRecord(name="t", start=golden.start, end=golden.start)
     record = dataclasses.replace(golden, inside=[call, call, call])
     try:
-        with client.run("bot"):
-            assert transport.wait_for_openings(1), "the run's opening, at once"
+        with client.trace("bot"):
+            assert transport.wait_for_openings(1), "the trace's opening, at once"
             for n in range(2):
                 with client.step(f"s{n}"):
                     pass
-            client.record_run(record)
+            client.record_trace(record)
         assert client.flush()
     finally:
         processor.shutdown()
@@ -251,11 +247,11 @@ def spans_in(body: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def record_beside_live_steps(transport: FakeTransport) -> None:
-    """The record sent while another thread ends a live run's steps."""
+    """The record sent while another thread ends a live trace's steps."""
     client = Telmoni(Config(api_key="k"), transport=transport)
     stop = threading.Event()
     try:
-        with client.run("live") as live:
+        with client.trace("live") as live:
 
             def ending() -> None:
                 while not stop.is_set():
@@ -265,7 +261,7 @@ def record_beside_live_steps(transport: FakeTransport) -> None:
             thread = threading.Thread(target=ending)
             thread.start()
             try:
-                client.record_run(the_record())
+                client.record_trace(the_record())
             finally:
                 stop.set()
                 thread.join()
@@ -289,11 +285,11 @@ def test_a_span_ending_while_a_record_is_built_travels_apart(
     assert all(len(traces_in(body)) == 1 for _url, _headers, body in transport.requests)
 
 
-def test_a_handler_may_record_a_run_while_a_record_warns(
+def test_a_handler_may_record_a_trace_while_a_record_warns(
     transport: FakeTransport,
 ) -> None:
     """A record's warning is given before it is built, so a handler recording
-    a run from inside another thread's warning waits on nothing of the SDK's."""
+    a trace from inside another thread's warning waits on nothing of the SDK's."""
     golden = the_record()
     call = ModelCallRecord(
         model="m",
@@ -302,7 +298,7 @@ def test_a_handler_may_record_a_run_while_a_record_warns(
         usage=Usage(input_tokens=float("nan")),  # type: ignore[arg-type]
     )
     warned = dataclasses.replace(golden, inside=[call])
-    inner = dataclasses.replace(golden, run_id=str(uuid.uuid4()), inside=[])
+    inner = dataclasses.replace(golden, trace_id=uuid.uuid4().hex, inside=[])
     client = Telmoni(Config(api_key="k"), transport=transport)
     gate = threading.Lock()
     entered, warning, stuck = threading.Event(), threading.Event(), threading.Event()
@@ -318,7 +314,7 @@ def test_a_handler_may_record_a_run_while_a_record_warns(
                 if threading.current_thread() is other:
                     entered.set()
                     warning.wait(5)
-                    client.record_run(inner)
+                    client.record_trace(inner)
             finally:
                 gate.release()
             return True
@@ -338,7 +334,7 @@ def test_a_handler_may_record_a_run_while_a_record_warns(
     try:
         other.start()
         assert entered.wait(5)
-        client.record_run(warned)
+        client.record_trace(warned)
         other.join(5)
         assert not stuck.is_set(), "the warning waited on a record's lock"
         assert client.flush()
@@ -347,7 +343,7 @@ def test_a_handler_may_record_a_run_while_a_record_warns(
         client.shutdown()
     bodies = [body for _url, _headers, body in transport.requests]
     assert sorted(min(traces_in(body)) for body in bodies) == sorted(
-        [trace_of(warned), trace_of(inner)]
+        [warned.trace_id, inner.trace_id]
     )
     assert all(len(traces_in(body)) == 1 for body in bodies)
 
@@ -382,8 +378,10 @@ def test_a_records_room_is_kept_while_it_is_built(
     golden = the_record()
     call = ToolCallRecord(name="t", start=golden.start, end=golden.start)
     try:
-        with client.run("live") as live:
-            assert transport.wait_for_openings(1), "the run's opening, out of the queue"
+        with client.trace("live") as live:
+            assert transport.wait_for_openings(1), (
+                "the trace's opening, out of the queue"
+            )
 
             def steps() -> None:
                 for n in range(2):
@@ -392,7 +390,7 @@ def test_a_records_room_is_kept_while_it_is_built(
 
             # Room for one step beside the record's three spans.
             sampler.hook = steps
-            client.record_run(dataclasses.replace(golden, inside=[call, call]))
+            client.record_trace(dataclasses.replace(golden, inside=[call, call]))
             assert client.flush()
         assert client.flush()
     finally:
@@ -416,10 +414,10 @@ def test_a_record_goes_at_once(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
     processor = with_limits(client, transport, schedule_delay_s=60)
     try:
-        with client.run("live"):
+        with client.trace("live"):
             with client.step("live step"):
                 pass
-            client.record_run(the_record())
+            client.record_trace(the_record())
             assert transport.wait_for(2), "the record waited for the delay"
     finally:
         processor.shutdown()
@@ -432,13 +430,13 @@ def test_a_record_cut_short_sends_nothing(transport: FakeTransport) -> None:
     try:
         with (
             mock.patch(
-                "telmoni.runs._close",
-                wraps=runs._close,
+                "telmoni.traces._close",
+                wraps=traces._close,
                 side_effect=[mock.DEFAULT, RuntimeError("cut")],
             ),
             pytest.raises(RuntimeError, match="cut"),
         ):
-            client.record_run(the_record())
+            client.record_trace(the_record())
         assert client.flush()
     finally:
         client.shutdown()
@@ -449,34 +447,35 @@ def test_a_record_takes_a_trace_of_its_own_and_leaves_the_context_alone(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     record = the_record()
-    with telmoni.run("live") as live:
+    with telmoni.trace("live") as live:
         current = trace.get_current_span()
-        telmoni.record_run(record)
+        telmoni.record_trace(record)
         assert trace.get_current_span() is current
-        assert current_run() is live
+        assert current_trace() is live
     assert telmoni.flush()
-    recorded = [
-        span
-        for span in transport.spans()
-        if attributes_of(span)["telmoni.run_id"] == record.run_id
-    ]
-    assert {span["traceId"] for span in recorded} == {record.run_id.replace("-", "")}
+    assert {span["traceId"] for span in transport.spans()} == {
+        record.trace_id,
+        live.trace_id,
+    }
+    recorded = [s for s in transport.spans() if s["traceId"] == record.trace_id]
     root = next(s for s in recorded if s["name"] == "invoke_agent claude-code")
-    assert "parentSpanId" not in root
+    assert "parentSpanId" not in root and "links" not in root
 
 
-def test_a_failed_run_is_marked_on_its_own_span(
+def test_a_failed_trace_is_marked_on_its_agents_span(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     record = dataclasses.replace(
         the_record(), error_type="RateLimitError", cancelled=False, inside=()
     )
-    telmoni.record_run(record)
+    telmoni.record_trace(record)
     assert telmoni.flush()
-    run = next(s for s in transport.spans() if s["name"] == "invoke_agent claude-code")
-    assert run["status"] == {"code": 2}
-    assert attributes_of(run)["error.type"] == "RateLimitError"
-    assert "telmoni.cancelled" not in attributes_of(run)
+    agent = next(
+        s for s in transport.spans() if s["name"] == "invoke_agent claude-code"
+    )
+    assert agent["status"] == {"code": 2}
+    assert attributes_of(agent)["error.type"] == "RateLimitError"
+    assert "telmoni.cancelled" not in attributes_of(agent)
 
 
 @pytest.mark.parametrize(
@@ -529,10 +528,10 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
         ),
     )
     try:
-        with client.run("warm"):
+        with client.trace("warm"):
             pass
         assert client.flush()
-        client.record_run(record)
+        client.record_trace(record)
         assert client.flush()
     finally:
         client.shutdown()
@@ -569,7 +568,7 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
 
 
 START = at("2026-10-12T09:00:00.000Z")
-RUN = RunRecord(run_id=str(uuid.UUID(int=1)), agent="a", start=START, end=START)
+TRACE = TraceRecord(trace_id=f"{1:032x}", agent="a", start=START, end=START)
 STEP = StepRecord(name="s", start=START, end=START)
 TOOL = ToolCallRecord(name="t", start=START, end=START)
 MODEL = ModelCallRecord(model="m", start=START, end=START)
@@ -583,7 +582,7 @@ def nested(depth: int) -> StepRecord:
     return step
 
 
-def looped(record: RunRecord) -> RunRecord:
+def looped(record: TraceRecord) -> TraceRecord:
     """``record`` holding one step that holds itself."""
     calls: list[StepRecord | ModelCallRecord | ToolCallRecord] = []
     step = dataclasses.replace(STEP, calls=calls)
@@ -611,8 +610,8 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
 @pytest.mark.parametrize(
     ("change", "kind", "message"),
     [
-        (lambda record: None, TypeError, "must be a RunRecord"),
-        (lambda record: SimpleNamespace(**vars(record)), TypeError, "a RunRecord"),
+        (lambda record: None, TypeError, "must be a TraceRecord"),
+        (lambda record: SimpleNamespace(**vars(record)), TypeError, "a TraceRecord"),
         (
             lambda record: dataclasses.replace(
                 record,
@@ -622,13 +621,17 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
             "step's name must be str",
         ),
         ({"agent": " "}, ValueError, "agent's name"),
-        ({"agent": None}, TypeError, "run's agent must be str"),
-        ({"run_id": "run-1"}, ValueError, "must be a UUID"),
-        ({"run_id": uuid.UUID(int=1)}, TypeError, "run_id must be str"),
-        ({"run_id": "3d6f_a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"}, ValueError, "a UUID"),
-        ({"run_id": "{3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"}, ValueError, "a UUID"),
-        ({"run_id": "00000000-0000-0000-0000-000000000000"}, ValueError, "nil UUID"),
-        ({"user_id": 42}, TypeError, "run's user_id must be str or None"),
+        ({"agent": None}, TypeError, "trace's agent must be str"),
+        ({"trace_id": "run-1"}, ValueError, "32 hex digits"),
+        ({"trace_id": uuid.UUID(int=1)}, TypeError, "trace_id must be str"),
+        ({"trace_id": "3d6f_a1c5b2e4f7a9c0d8e1f2a3b4c5d"}, ValueError, "32 hex digits"),
+        (
+            {"trace_id": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"},
+            ValueError,
+            "32 hex digits",
+        ),
+        ({"trace_id": "0" * 32}, ValueError, "not all zeros"),
+        ({"user_id": 42}, TypeError, "trace's user_id must be str or None"),
         ({"session_id": 7}, TypeError, "session_id must be str or None"),
         ({"tags": ["team"]}, TypeError, "tags must be Mapping or None"),
         ({"tags": {"team": 1}}, TypeError, "tags must map str to str"),
@@ -690,10 +693,14 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
             ValueError,
             "model call's model cannot be empty",
         ),
-        ({"agent": "a" * 129}, ValueError, "run's agent must be up to 128 characters"),
-        ({"user_id": "u" * 129}, ValueError, "run's user_id must be up to 128"),
-        ({"session_id": "s" * 201}, ValueError, "run's session_id must be up to 200"),
-        ({"error_type": "E" * 129}, ValueError, "run's error_type must be up to 128"),
+        (
+            {"agent": "a" * 129},
+            ValueError,
+            "trace's agent must be up to 128 characters",
+        ),
+        ({"user_id": "u" * 129}, ValueError, "trace's user_id must be up to 128"),
+        ({"session_id": "s" * 201}, ValueError, "trace's session_id must be up to 200"),
+        ({"error_type": "E" * 129}, ValueError, "trace's error_type must be up to 128"),
         (
             {"inside": [dataclasses.replace(STEP, name="n" * 146)]},
             ValueError,
@@ -739,7 +746,7 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
         ),
         ({"start": "2026-10-12T09:00:00Z"}, TypeError, "must be a datetime"),
         ({"end": START - timedelta(seconds=1)}, ValueError, "end before it starts"),
-        ({"inside": [RUN]}, TypeError, "item must be"),
+        ({"inside": [TRACE]}, TypeError, "item must be"),
         ({"inside": [None]}, TypeError, "item must be"),
         (
             {"inside": [nested(17)]},
@@ -748,7 +755,7 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
         ),
         (looped, ValueError, "nested at most 16 deep"),
         (
-            {"inside": [dataclasses.replace(STEP, calls=[nested(2), RUN])]},  # type: ignore[list-item]
+            {"inside": [dataclasses.replace(STEP, calls=[nested(2), TRACE])]},  # type: ignore[list-item]
             TypeError,
             "item must be",
         ),
@@ -781,7 +788,7 @@ class Shifting(Sequence[StepRecord | ModelCallRecord | ToolCallRecord]):
 )
 def test_a_record_refused_opens_and_sends_nothing(
     transport: FakeTransport,
-    change: dict[str, Any] | Callable[[RunRecord], Any],
+    change: dict[str, Any] | Callable[[TraceRecord], Any],
     kind: type[Exception],
     message: str,
 ) -> None:
@@ -797,7 +804,7 @@ def test_a_record_refused_opens_and_sends_nothing(
     )
     try:
         with pytest.raises(kind, match=message):
-            client.record_run(record)
+            client.record_trace(record)
         assert client.flush()
     finally:
         client.shutdown()
@@ -822,7 +829,7 @@ def test_a_step_inside_a_step_goes_under_its_span(transport: FakeTransport) -> N
         call("d"),
     ]
     try:
-        client.record_run(dataclasses.replace(record, agent="bot", inside=inside))
+        client.record_trace(dataclasses.replace(record, agent="bot", inside=inside))
         assert client.flush()
     finally:
         client.shutdown()
@@ -849,7 +856,7 @@ def test_a_step_inside_a_step_goes_under_its_span(transport: FakeTransport) -> N
     ]
 
     def id_of(name: str) -> str:
-        return f"{ids.span_id(uuid.UUID(record.run_id), places.index(name)):016x}"
+        return f"{ids.span_id(int(record.trace_id, 16), places.index(name)):016x}"
 
     parents = {
         "outer": "invoke_agent bot",
@@ -871,7 +878,7 @@ def test_steps_nested_16_deep_are_sent(transport: FakeTransport) -> None:
     """The deepest a record takes, each step under the next."""
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        client.record_run(dataclasses.replace(the_record(), inside=[nested(16)]))
+        client.record_trace(dataclasses.replace(the_record(), inside=[nested(16)]))
         assert client.flush()
     finally:
         client.shutdown()
@@ -886,7 +893,7 @@ def test_a_record_after_shutdown_is_refused(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
     client.shutdown()
     with pytest.raises(ShutdownError, match="shut down"):
-        client.record_run(the_record())
+        client.record_trace(the_record())
     assert transport.requests == []
 
 
@@ -906,14 +913,14 @@ def test_a_record_past_the_default_queue_goes_once_the_queue_is_raised(
     with pytest.raises(
         QueueFullError, match="the queue holds 2048, so raise its size to record it$"
     ):
-        Telmoni(Config(api_key="k"), transport=transport).record_run(record)
+        Telmoni(Config(api_key="k"), transport=transport).record_trace(record)
     client = Telmoni(
         Config(api_key="k"),
         transport=transport,
         batching=Batching(max_queue_size=3_000),
     )
     try:
-        client.record_run(record)
+        client.record_trace(record)
         assert client.flush()
     finally:
         client.shutdown()
@@ -938,8 +945,10 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
         ],
     )
     try:
-        with client.run("bot"):
-            assert transport.wait_for_openings(1), "the run's opening, out of the queue"
+        with client.trace("bot"):
+            assert transport.wait_for_openings(1), (
+                "the trace's opening, out of the queue"
+            )
             # Two steps hold two of the four slots.
             for n in range(2):
                 with client.step(f"s{n}"):
@@ -947,9 +956,9 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
             with pytest.raises(
                 QueueFullError, match="3 spans; flush or wait, then record it again$"
             ):
-                client.record_run(record)
+                client.record_trace(record)
         assert client.flush()
-        client.record_run(record)
+        client.record_trace(record)
         assert client.flush()
     finally:
         processor.shutdown()
@@ -958,17 +967,15 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
     assert names.count("execute_tool t") == 2 and len(names) == 6, names
 
 
-@pytest.mark.parametrize(
-    "run_id",
-    ["3D6F8A1C-5B2E-4F7A-9C0D-8E1F2A3B4C5D", "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d"],
-)
-def test_a_run_id_in_capitals_or_without_hyphens_is_sent_written_out(
-    telmoni: Telmoni, transport: FakeTransport, run_id: str
+def test_a_trace_id_in_capitals_is_sent_lowercase(
+    telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    telmoni.record_run(dataclasses.replace(the_record(), run_id=run_id))
+    telmoni.record_trace(
+        dataclasses.replace(the_record(), trace_id="3D6F8A1C5B2E4F7A9C0D8E1F2A3B4C5D")
+    )
     assert telmoni.flush()
-    sent = {attributes_of(span)["telmoni.run_id"] for span in transport.spans()}
-    assert sent == {"3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d"}
+    sent = {span["traceId"] for span in transport.spans()}
+    assert sent == {"3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d"}
 
 
 def test_a_model_call_with_no_operation_is_a_chat(
@@ -976,7 +983,7 @@ def test_a_model_call_with_no_operation_is_a_chat(
 ) -> None:
     """As the live call takes it."""
     call = dataclasses.replace(MODEL, operation=None)  # type: ignore[arg-type]
-    telmoni.record_run(dataclasses.replace(RUN, inside=[call]))
+    telmoni.record_trace(dataclasses.replace(TRACE, inside=[call]))
     assert telmoni.flush()
     assert "chat m" in [span["name"] for span in transport.spans()]
 
@@ -985,8 +992,8 @@ def test_a_tool_call_with_an_empty_name_is_sent(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     """Ingest reads a tool's empty name as none, keeping the call."""
-    telmoni.record_run(
-        dataclasses.replace(RUN, inside=[dataclasses.replace(TOOL, name="")])
+    telmoni.record_trace(
+        dataclasses.replace(TRACE, inside=[dataclasses.replace(TOOL, name="")])
     )
     assert telmoni.flush()
     assert "execute_tool " in [span["name"] for span in transport.spans()]
@@ -1001,13 +1008,13 @@ def test_a_record_at_ingests_text_caps_is_sent_whole(
         MODEL, operation="generate_content", model="m" * 128, provider="p" * 128
     )
     record = dataclasses.replace(
-        RUN,
+        TRACE,
         agent="\u00e9" * 128,
         user_id="u" * 128,
         session_id="s" * 200,
         inside=[dataclasses.replace(STEP, name="n" * 145, calls=[tool]), model],
     )
-    telmoni.record_run(record)
+    telmoni.record_trace(record)
     assert telmoni.flush()
     names = {span["name"] for span in transport.spans()}
     widest_call = "generate_content " + "m" * 128
@@ -1017,23 +1024,26 @@ def test_a_record_at_ingests_text_caps_is_sent_whole(
 def test_a_record_sends_its_first_32_tags_and_its_own_attributes(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
-    """Past the span's room, its tags would crowd out its id and how it ended."""
+    """Past the span's room, its tags would crowd out its own and how it ended."""
     tags = {f"t{n:03}": "v" for n in range(130)}
     record = dataclasses.replace(
         the_record(), tags=tags, error_type="Boom", cancelled=True
     )
-    telmoni.record_run(record)
+    telmoni.record_trace(record)
     assert telmoni.flush()
-    run = next(s for s in transport.spans() if s["name"] == "invoke_agent claude-code")
-    attributes = attributes_of(run)
+    agent = next(
+        s for s in transport.spans() if s["name"] == "invoke_agent claude-code"
+    )
+    attributes = attributes_of(agent)
     sent = [k for k in attributes if k.startswith("telmoni.tag.")]
     assert sent == [f"telmoni.tag.t{n:03}" for n in range(32)]
-    assert attributes["telmoni.run_id"] == record.run_id
+    assert agent["traceId"] == record.trace_id
+    assert attributes["telmoni.agent"] == record.agent
     assert attributes["error.type"] == "Boom"
     assert attributes["telmoni.cancelled"] is True
 
 
-def test_a_runs_tags_are_those_checked(
+def test_a_traces_tags_are_those_checked(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
     """Read before its items, though reading those changes them."""
@@ -1049,10 +1059,12 @@ def test_a_runs_tags_are_those_checked(
             tags["rows"] = object()  # type: ignore[assignment]
             return TOOL
 
-    telmoni.record_run(dataclasses.replace(RUN, tags=tags, inside=Noting()))
+    telmoni.record_trace(dataclasses.replace(TRACE, tags=tags, inside=Noting()))
     assert telmoni.flush()
-    run = next(s for s in transport.spans() if s["name"] == "invoke_agent a")
-    sent = {k: v for k, v in attributes_of(run).items() if k.startswith("telmoni.tag.")}
+    agent = next(s for s in transport.spans() if s["name"] == "invoke_agent a")
+    sent = {
+        k: v for k, v in attributes_of(agent).items() if k.startswith("telmoni.tag.")
+    }
     assert sent == {"telmoni.tag.team": "x"}
 
 
@@ -1080,7 +1092,7 @@ def test_a_record_is_read_once(
     inside: Sequence[StepRecord | ModelCallRecord],
 ) -> None:
     """Each call's tokens on its own span, however its items are built."""
-    telmoni.record_run(dataclasses.replace(RUN, inside=inside))
+    telmoni.record_trace(dataclasses.replace(TRACE, inside=inside))
     assert telmoni.flush()
     tokens = {
         span["name"]: attributes_of(span)["gen_ai.usage.input_tokens"]

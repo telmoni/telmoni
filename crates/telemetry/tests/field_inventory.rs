@@ -146,7 +146,7 @@ async fn every_role_on_the_project_reads_the_inventory_the_code_holds(pool: PgPo
         assert_eq!(body["conventions_commit"], CONVENTIONS_COMMIT);
         let rows = body["rows"].as_array().expect("rows");
         assert_eq!(rows.len(), INVENTORY.len(), "{user} read another list");
-        assert_eq!(rows[0]["attribute"], "telmoni.run_id");
+        assert_eq!(rows[0]["attribute"], "telmoni.agent");
         assert_eq!(rows[0]["on"], "every span");
         assert_eq!(rows[0]["needs"], "any");
         assert!(

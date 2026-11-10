@@ -50,8 +50,8 @@ export interface Config {
   scrubPii?: boolean | undefined;
 
   /**
-   * The sampler whose root decision a run takes when it starts a trace of its
-   * own; without one, every run samples.
+   * The sampler whose root decision each trace takes as it opens; without
+   * one, every trace samples.
    */
   sampler?: Sampler | undefined;
 
@@ -68,7 +68,7 @@ export interface Config {
   release?: string | undefined;
 
   /**
-   * The project's own prices, which a run's spend cap counts a call by before
+   * The project's own prices, which a trace's spend cap counts a call by before
    * the table this release carries; a name given twice takes its last.
    */
   prices?: readonly Price[] | undefined;
@@ -133,21 +133,21 @@ export interface Usage {
   cost?: number | undefined;
 }
 
-export interface RunOptions {
-  /** The end user the run is for, as your own id for them; ingest hashes it. */
+export interface TraceOptions {
+  /** The end user the trace is for, as your own id for them; ingest hashes it. */
   userId?: string | undefined;
   sessionId?: string | undefined;
   tags?: Readonly<Record<string, string | number | boolean>> | undefined;
-  /** The guard's cap on the run's steps: its next step past it throws `CapExceededError`. */
+  /** The guard's cap on the trace's steps: its next step past it throws `CapExceededError`. */
   maxSteps?: number | undefined;
-  /** The guard's cap on the run's spend, in US dollars: reached, what it opens next throws. */
+  /** The guard's cap on the trace's spend, in US dollars: reached, what it opens next throws. */
   maxSpend?: number | undefined;
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   inputMessages?: unknown;
 }
 
-/** What the run answered: its messages. */
-export interface RunAnswer {
+/** What the agent answered: its messages. */
+export interface TraceAnswer {
   /** Content: sent only with `captureContent` and the project's mode `on`. */
   outputMessages?: unknown;
 }
@@ -156,7 +156,7 @@ export interface ModelCallOptions {
   provider?: string | undefined;
   /** `chat` (default, and what a blank one means), `generate_content`, `text_completion` or `embeddings`; any other goes as `chat`, with one warning. */
   operation?: string | undefined;
-  /** The prompt it used, by name: sent in every content mode, so a prompt, never a person, who goes in the run's `userId`. */
+  /** The prompt it used, by name: sent in every content mode, so a prompt, never a person, who goes in the trace's `userId`. */
   prompt?: string | undefined;
   /** The prompt's version, sent only beside its name. */
   promptVersion?: string | undefined;
@@ -213,9 +213,10 @@ export interface ScoreOptions {
   version?: string | undefined;
 }
 
-/** What a score of something ended scores: a run, a run and one of its spans, or a session. */
+/** What a score of something ended scores: a trace, a trace and one of its spans, or a session. */
 export interface ScoreTarget {
-  runId?: string | undefined;
+  /** 32 hex digits, either case, sent lowercase. */
+  traceId?: string | undefined;
   spanId?: string | undefined;
   sessionId?: string | undefined;
 }
@@ -272,14 +273,14 @@ export interface StepRecord extends RecordOutcome {
 }
 
 /**
- * A run that has ended, as `recordRun` sends it: its id, a UUID the caller
- * gives and gives again whenever the same run is sent, and everything in it,
- * each with its own times.
+ * A trace that has ended, as `recordTrace` sends it: its id, 32 hex digits
+ * the caller gives and gives again whenever the same trace is sent, and
+ * everything in it, each with its own times.
  */
-export interface RunRecord extends RecordOutcome {
-  runId: string;
+export interface TraceRecord extends RecordOutcome {
+  traceId: string;
   agent: string;
-  /** The end user the run was for, as your own id for them; ingest hashes it. */
+  /** The end user the trace was for, as your own id for them; ingest hashes it. */
   userId?: string | undefined;
   sessionId?: string | undefined;
   tags?: Readonly<Record<string, string>> | undefined;

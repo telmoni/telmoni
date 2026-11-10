@@ -99,7 +99,7 @@ fn of_run(
     status: SpanStatus,
 ) -> SpanRow {
     SpanRow {
-        run_id: run,
+        trace_id: run.simple().to_string(),
         agent: AGENT.into(),
         span_id: format!("{:016x}", started.timestamp_micros()),
         started_at: started,
@@ -110,12 +110,12 @@ fn of_run(
     }
 }
 
-/// A run's start, sent as it opens.
+/// A trace's start, sent as it opens.
 fn opening(project: &ProjectId, started: DateTime<Utc>) -> SpanRow {
     of_run(
         project,
         Uuid::new_v4(),
-        SpanKind::RunStart,
+        SpanKind::TraceStart,
         started,
         started,
         SpanStatus::Ok,
@@ -380,7 +380,7 @@ async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
         .insert_spans(&[of_run(
             &project,
             failed,
-            SpanKind::Run,
+            SpanKind::Agent,
             at("2026-11-10T09:00:00Z"),
             at("2026-11-10T09:00:40Z"),
             SpanStatus::Error,
@@ -395,9 +395,9 @@ async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
     );
     let opened = notices.notices().into_iter().next().expect("told");
     assert_eq!(
-        opened.metadata["run"],
-        json!(failed),
-        "the notice names the run"
+        opened.metadata["trace"],
+        json!(failed.simple().to_string()),
+        "the notice names the trace"
     );
 
     ch.store
@@ -415,7 +415,7 @@ async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
         .insert_spans(&[of_run(
             &project,
             Uuid::new_v4(),
-            SpanKind::Run,
+            SpanKind::Agent,
             at("2026-11-10T10:00:00Z"),
             at("2026-11-10T10:00:50Z"),
             SpanStatus::Ok,

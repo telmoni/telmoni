@@ -1,8 +1,7 @@
 /**
- * A run across services: the W3C `traceparent`, and the run's id and agent as
- * the `baggage` members `telmoni.run_id` and `telmoni.agent`. The SDK's own
- * helpers, never a propagator set globally: an application's propagators are
- * its own.
+ * A trace across services: the W3C `traceparent`, and the agent as the
+ * `baggage` member `telmoni.agent`. The SDK's own helpers, never a propagator
+ * set globally: an application's propagators are its own.
  */
 
 import { TraceFlags } from '@opentelemetry/api';
@@ -11,39 +10,35 @@ import type { SpanContext } from '@opentelemetry/api';
 import * as contract from './contract.js';
 import type { HeaderCarrier, HeaderMethods } from './types.js';
 
-/** What headers name: the span to continue under, and the run. */
+/** What headers name: the span to continue under, and the agent. */
 export interface Continued {
   spanContext: SpanContext;
-  runId: string;
   agent: string;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX = /^[0-9a-f]+$/;
 
-/** `span` and the run as the next service reads them, beside the members `headers` already hold. */
-export function writeHeaders(headers: HeaderCarrier, span: SpanContext, runId: string, agent: string): void {
+/** `span` and the agent as the next service reads them, beside the members `headers` already hold. */
+export function writeHeaders(headers: HeaderCarrier, span: SpanContext, agent: string): void {
   const sampled = (span.traceFlags & TraceFlags.SAMPLED) !== 0 ? '01' : '00';
   setHeader(headers, contract.TRACEPARENT, `00-${span.traceId}-${span.spanId}-${sampled}`);
   const members = (getHeader(headers, contract.BAGGAGE) ?? '')
     .split(',')
     .map((member) => member.trim())
     .filter((member) => member !== '' && !isOurs(member));
-  members.push(`${contract.RUN_ID}=${runId}`, `${contract.AGENT}=${encodeBaggageValue(agent)}`);
+  members.push(`${contract.AGENT}=${encodeBaggageValue(agent)}`);
   setHeader(headers, contract.BAGGAGE, members.join(','));
 }
 
-/** The run `headers` name, or undefined for headers that name none. */
+/** The trace `headers` name, or undefined for headers that name none. */
 export function readHeaders(headers: HeaderCarrier): Continued | undefined {
   const traceparent = getHeader(headers, contract.TRACEPARENT);
   if (traceparent === undefined) return undefined;
   const spanContext = parseTraceparent(traceparent);
   if (spanContext === undefined) return undefined;
-  const members = baggageMembers(getHeader(headers, contract.BAGGAGE) ?? '');
-  const runId = members.get(contract.RUN_ID);
-  const agent = members.get(contract.AGENT);
-  if (runId === undefined || !UUID.test(runId) || agent === undefined || agent === '') return undefined;
-  return { spanContext, runId: runId.toLowerCase(), agent };
+  const agent = baggageMembers(getHeader(headers, contract.BAGGAGE) ?? '').get(contract.AGENT);
+  if (agent === undefined || agent === '') return undefined;
+  return { spanContext, agent };
 }
 
 /**
@@ -77,8 +72,7 @@ function baggageMembers(header: string): Map<string, string> {
 }
 
 function isOurs(member: string): boolean {
-  const key = member.split('=', 1)[0]!.trim();
-  return key === contract.RUN_ID || key === contract.AGENT;
+  return member.split('=', 1)[0]!.trim() === contract.AGENT;
 }
 
 function isHex(text: string, length: number): boolean {

@@ -1,6 +1,6 @@
-//! The guard: a run's opt-in caps on its steps and its spend, counted in this
-//! process with no call to Telmoni, refused at the step, model call or tool
-//! call the run would open past one.
+//! The guard: a trace's opt-in caps on its steps and its spend, counted in
+//! this process with no call to Telmoni, refused at the step, model call or
+//! tool call the trace would open past one.
 //!
 //! A call's cost is counted as the server counts it: as reported, else its
 //! tokens at its price in the table this release carries (`model_prices.json`,
@@ -151,14 +151,14 @@ pub(crate) fn priced(own: &OwnRates, provider: &str, model: &str, tokens: Tokens
         .map(|rate| rate.cost(tokens))
 }
 
-/// What opens under a run: a step, which its step cap counts, or a call.
+/// What opens under a trace: a step, which its step cap counts, or a call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Opening {
     Step,
     Call,
 }
 
-/// One run's caps, and what it has used of them.
+/// One trace's caps, and what it has used of them.
 #[derive(Debug, Default)]
 pub(crate) struct Guard {
     max_steps: Option<u64>,
@@ -181,18 +181,18 @@ impl Guard {
         }
     }
 
-    /// What the run's calls have cost so far, in US dollars.
+    /// What the trace's calls have cost so far, in US dollars.
     pub(crate) fn spent(&self) -> f64 {
         lock(&self.used).spent
     }
 
-    /// Whether the run has a spend cap, which a call priced at nothing never
-    /// reaches.
+    /// Whether the trace has a spend cap, which a call priced at nothing
+    /// never reaches.
     pub(crate) fn capped(&self) -> bool {
         self.max_spend.is_some()
     }
 
-    /// Counts an opening, or refuses where the run reached a cap: its spend
+    /// Counts an opening, or refuses where the trace reached a cap: its spend
     /// for whatever opens, its steps for a step.
     pub(crate) fn opens(&self, opening: Opening) -> Result<(), Error> {
         let mut used = lock(&self.used);

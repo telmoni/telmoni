@@ -1,9 +1,9 @@
 ---
 title: "Content"
-description: "What a run said, kept in full when both locks are on: the project's content mode and the SDK's capture switch. What is kept — messages, tool payloads, images and files, failures and metadata — where it is read and recorded, and how long it stays."
+description: "What a trace said, kept in full when both locks are on: the project's content mode and the SDK's capture switch. What is kept — messages, tool payloads, images and files, failures and metadata — where it is read and recorded, and how long it stays."
 ---
 
-**Content** is what a person or a model wrote during a run: the prompts and
+**Content** is what a person or a model wrote during a trace: the prompts and
 completions of its model calls, the model's thinking, the inputs and outputs of its tool calls, the
 images and files a message carried, a failure's message and stack trace, the
 name or email address a span gives a person, and any text, list or map your
@@ -50,7 +50,7 @@ out of those in your own code.
 After your mask, the SDK's scrubbers replace what has a shape of its own:
 secrets, on wherever content is sent, and personal data, where you turn it on,
 each by a marker such as `[secret: aws_key]` or `[pii: email]`, counted on the
-run's page ([SDKs](/docs/api/sdks#scrubbing-secrets-and-personal-data)). No
+trace's page ([SDKs](/docs/api/sdks#scrubbing-secrets-and-personal-data)). No
 pattern finds a name, a street address or text inside an image: what only your
 application knows is the mask's to keep home.
 
@@ -61,7 +61,7 @@ characters an attribute is otherwise held to, sealed under a key of the
 project's own, in Postgres alone, never in the span store:
 
 - **Messages**: a model call's system instructions, the tools it was offered,
-  and its input and output messages; a prompt's variables; and a run's own
+  and its input and output messages; a prompt's variables; and the agent's own
   input and output, its turn of a conversation.
 - **Tool payloads**: a tool call's arguments and result; a retrieval's query
   and documents; a memory's query and records.
@@ -86,9 +86,9 @@ A field an SDK cut to fit an export is not kept, and the trace says so.
 
 - **The trace's page** and its view beside the list show each span's content
   in full ([Traces](/docs/monitoring/traces#content)).
-- **A download** of the trace list carries every run's content.
+- **A download** of the trace list carries every trace's content.
 - **The API** answers a trace's content with `content=true`
-  ([API reference](/docs/api/reference#get-v1tracesrun_id)).
+  ([API reference](/docs/api/reference#get-v1tracestrace_id)).
 
 Each read is recorded in the organization's
 [audit log](/docs/workspace/audit-log) as `viewed` before the content is sent,

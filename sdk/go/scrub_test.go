@@ -122,8 +122,8 @@ func TestAKeywordsValueIsCountedInCharacters(t *testing.T) {
 }
 
 // Each hostile text, a unit repeated past 256 KiB, is scrubbed in either
-// default mode within 2 seconds, where reading a run again from each start in
-// it takes minutes.
+// default mode within 2 seconds, where reading a stretch again from each start
+// in it takes minutes.
 func TestTheScrubbersReadHostileTextsInLinearTime(t *testing.T) {
 	for _, hostile := range []struct{ unit, tail string }{
 		{"eyJ-", ""}, {"eyJ", ""}, {"token=", ""}, {"password=", ""}, {"atm_", ""}, {"xsk-ant-", ""},
@@ -162,15 +162,15 @@ func TestContentLeavesScrubbedWithWhatWentCountedOnItsSpan(t *testing.T) {
 	} {
 		cfg.APIKey, cfg.CaptureContent = telmoni.NewSecret("k"), true
 		h := newHarness(t, cfg, newFakeTransport(t, contentOn(), contentOn()))
-		aRun(t, h)
-		ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
-		_, call := run.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: message.Text})
+		aTrace(t, h)
+		ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
+		_, call := tr.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: message.Text})
 		call.End()
-		_, tool := run.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{})
+		_, tool := tr.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{})
 		tool.Returned(prose.Text)
 		tool.End()
-		run.Fail(errors.New("denied for " + key))
-		run.End()
+		tr.Fail(errors.New("denied for " + key))
+		tr.End()
 		h.flush()
 
 		spans := byName(h.transport.spans(t))
@@ -211,7 +211,7 @@ func TestContentLeavesScrubbedWithWhatWentCountedOnItsSpan(t *testing.T) {
 				}
 			}
 		}
-		expectScrubbed(t, mode+": the run", span, counted)
+		expectScrubbed(t, mode+": the agent's span", span, counted)
 	}
 }
 
@@ -225,12 +225,12 @@ func TestTheScrubbersRunOnWhatTheMaskKept(t *testing.T) {
 		return value + " AKIAIOSFODNN7EXAMPLE", true
 	}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true, Mask: mask}, newFakeTransport(t, contentOn(), contentOn()))
-	aRun(t, h)
-	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
-	_, tool := run.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{Arguments: "key ASIAIOSFODNN7EXAMPLE"})
+	aTrace(t, h)
+	ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
+	_, tool := tr.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{Arguments: "key ASIAIOSFODNN7EXAMPLE"})
 	tool.Returned("done")
 	tool.End()
-	run.End()
+	tr.End()
 	h.flush()
 	span := tools(t, h)[0]
 	attributes := attributesOf(t, span)
@@ -250,9 +250,9 @@ func TestAnImagesBase64IsLiftedAndNeverScrubbed(t *testing.T) {
 	// Valid base64, and a key's shape the AWS rule would replace.
 	const key = "AKIAIOSFODNN7EXAMPLE"
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, contentOn(), contentOn()))
-	aRun(t, h)
-	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
-	_, call := run.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: []map[string]any{{
+	aTrace(t, h)
+	ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: []map[string]any{{
 		"role": "user",
 		"parts": []map[string]any{
 			{"type": "blob", "modality": "image", "mime_type": "image/png", "content": key},
@@ -260,7 +260,7 @@ func TestAnImagesBase64IsLiftedAndNeverScrubbed(t *testing.T) {
 		},
 	}}})
 	call.End()
-	run.End()
+	tr.End()
 	h.flush()
 	image, err := base64.StdEncoding.DecodeString(key)
 	if err != nil {
@@ -285,15 +285,15 @@ func TestAnImagesBase64IsLiftedAndNeverScrubbed(t *testing.T) {
 	expectScrubbed(t, "the call", span, map[string]int{"secret:aws_key": 1})
 }
 
-// A recorded run's content is scrubbed as a live run's is.
-func TestARecordedRunsContentLeavesScrubbed(t *testing.T) {
+// A recorded trace's content is scrubbed as a live trace's is.
+func TestARecordedTracesContentLeavesScrubbed(t *testing.T) {
 	unsetScrubbing(t)
 	prose := loadCanary(t).named(t, "every planted value in one prose text")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, contentOn(), contentOn()))
-	aRun(t, h)
+	aTrace(t, h)
 	at := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
-	recordRun(t, h, telmoni.RunRecord{
-		RunID: "2f0b7c4e-9d1a-4e6b-8c3f-5a7d9e1b2c40", Agent: "claude-code", Start: at, End: at,
+	recordTrace(t, h, telmoni.TraceRecord{
+		TraceID: "2f0b7c4e9d1a4e6b8c3f5a7d9e1b2c40", Agent: "claude-code", Start: at, End: at,
 		Inside: []telmoni.RecordItem{telmoni.ToolCallRecord{Name: "read_file", Start: at, End: at, Result: prose.Text}},
 	})
 	span := tools(t, h)[0]
@@ -346,12 +346,12 @@ func TestTheScrubbersSwitchesAreReadFromTheEnvironmentUnlessSetInCode(t *testing
 	t.Setenv("TELMONI_SCRUB_SECRETS", "0")
 	t.Setenv("TELMONI_SCRUB_PII", "1")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, contentOn(), contentOn()))
-	aRun(t, h)
-	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
-	_, tool := run.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{})
+	aTrace(t, h)
+	ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
+	_, tool := tr.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{})
 	tool.Returned("mail dana.whitfield@example.com, key AKIAIOSFODNN7EXAMPLE")
 	tool.End()
-	run.End()
+	tr.End()
 	h.flush()
 	span := tools(t, h)[0]
 	if got := attributesOf(t, span)["gen_ai.tool.call.result"]; got != "mail [pii: email], key AKIAIOSFODNN7EXAMPLE" {
@@ -365,12 +365,12 @@ func TestAFieldTheScrubbersFailOnIsDroppedAndNamed(t *testing.T) {
 	telmoni.FailScrubbing(t)
 	unsetScrubbing(t)
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true}, newFakeTransport(t, contentOn(), contentOn()))
-	aRun(t, h)
-	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
-	_, tool := run.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{})
+	aTrace(t, h)
+	ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
+	_, tool := tr.ToolCall(ctx, "read_file", telmoni.ToolCallOptions{})
 	tool.Returned("key AKIAIOSFODNN7EXAMPLE")
 	tool.End()
-	run.End()
+	tr.End()
 	h.flush()
 	span := tools(t, h)[0]
 	if got, sent := attributesOf(t, span)["gen_ai.tool.call.result"]; sent {

@@ -54,7 +54,7 @@ export const COMMENT_MAX = 4_000;
 export const SCORE_CATEGORIES_MAX = 10;
 export const SCORE_CATEGORY_MAX = 64;
 
-/** Where a score's comment is kept: under its run's content, as a span the
+/** Where a score's comment is kept: under its trace's content, as a span the
  *  score's id names, which no span's 16 hex digits can be. */
 const COMMENT_SPAN = "score/";
 const COMMENT_FIELD = "telmoni.score.comment";
@@ -74,7 +74,7 @@ export function commentsOf(
 }
 
 /** Whether `id` is a span's own, 16 hex digits: not a score's comment, which
- *  the run's content keeps under an id of its own. */
+ *  the trace's content keeps under an id of its own. */
 export function isSpanId(id: string): boolean {
   return /^[0-9a-f]{16}$/.test(id);
 }

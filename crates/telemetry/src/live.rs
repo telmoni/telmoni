@@ -1,6 +1,6 @@
 //! What telemetry tells the console's open pages, so one draws itself again
 //! rather than polls: a project's spans arrived (`spans:ingested`, naming the
-//! batch's runs and nothing a span holds). Sent on the organization's channel, which
+//! batch's traces and nothing a span holds). Sent on the organization's channel, which
 //! the console's stream passes on to the project's readers alone
 //! (`web/app/api/v1/events/route.ts`); on a task of its own, never waited on,
 //! and lost while Redis stands in, the page's Refresh being there for that.
@@ -8,7 +8,6 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use uuid::Uuid;
 
 use crate::AppState;
 
@@ -21,10 +20,10 @@ fn channel(organization_id: &str) -> String {
     format!("{ORGANIZATION_CHANNEL}{organization_id}")
 }
 
-/// How many run ids a nudge carries. A trace's page needs its own among
-/// them, and an export is most often one run or a few, so the cap is rarely
-/// met; past it `more` tells the page its run may be among the rest.
-const RUNS_MAX: usize = 32;
+/// How many trace ids a nudge carries. A trace's page needs its own among
+/// them, and an export is most often one trace or a few, so the cap is
+/// rarely met; past it `more` tells the page its trace may be among the rest.
+const TRACES_MAX: usize = 32;
 
 /// The event's name, as the console's `RealtimeEventSchema` knows it from the
 /// wire contract.
@@ -43,51 +42,51 @@ struct Event<D> {
 struct Spans<'a> {
     organization_id: &'a str,
     project_id: &'a str,
-    runs: Vec<String>,
+    traces: Vec<String>,
     more: bool,
 }
 
-/// The batch's runs as the nudge names them: each once, in the order the
+/// The batch's traces as the nudge names them: each once, in the order the
 /// batch first held it, up to the cap; and whether the batch held more.
-fn runs(run_ids: impl IntoIterator<Item = Uuid>) -> (Vec<Uuid>, bool) {
-    let mut runs: Vec<Uuid> = Vec::with_capacity(RUNS_MAX);
-    for run in run_ids {
-        if runs.contains(&run) {
+fn traces(trace_ids: impl IntoIterator<Item = String>) -> (Vec<String>, bool) {
+    let mut traces: Vec<String> = Vec::with_capacity(TRACES_MAX);
+    for trace in trace_ids {
+        if traces.contains(&trace) {
             continue;
         }
-        if runs.len() == RUNS_MAX {
-            return (runs, true);
+        if traces.len() == TRACES_MAX {
+            return (traces, true);
         }
-        runs.push(run);
+        traces.push(trace);
     }
-    (runs, false)
+    (traces, false)
 }
 
-/// The nudge for a batch whose kept rows belong to `run_ids`, in the batch's
-/// order with its repeats: the JSON the console reads. Plain strings and a
-/// bool encode without fail; the error is kept so the caller skips the
+/// The nudge for a batch whose kept rows belong to `trace_ids`, in the
+/// batch's order with its repeats: the JSON the console reads. Plain strings
+/// and a bool encode without fail; the error is kept so the caller skips the
 /// publish rather than sending a message of nothing.
 fn spans_message(
     organization_id: &str,
     project_id: &str,
-    run_ids: impl IntoIterator<Item = Uuid>,
+    trace_ids: impl IntoIterator<Item = String>,
 ) -> serde_json::Result<String> {
-    message(SPANS_INGESTED, organization_id, project_id, run_ids)
+    message(SPANS_INGESTED, organization_id, project_id, trace_ids)
 }
 
 fn message(
     kind: &'static str,
     organization_id: &str,
     project_id: &str,
-    run_ids: impl IntoIterator<Item = Uuid>,
+    trace_ids: impl IntoIterator<Item = String>,
 ) -> serde_json::Result<String> {
-    let (runs, more) = runs(run_ids);
+    let (traces, more) = traces(trace_ids);
     serde_json::to_string(&Event {
         kind,
         data: Spans {
             organization_id,
             project_id,
-            runs: runs.iter().map(Uuid::to_string).collect(),
+            traces,
             more,
         },
     })
@@ -101,9 +100,9 @@ pub fn spans_ingested(
     state: Arc<AppState>,
     organization_id: &str,
     project_id: &str,
-    run_ids: impl IntoIterator<Item = Uuid>,
+    trace_ids: impl IntoIterator<Item = String>,
 ) {
-    match spans_message(organization_id, project_id, run_ids) {
+    match spans_message(organization_id, project_id, trace_ids) {
         Ok(message) => publish(
             state,
             organization_id,
@@ -155,18 +154,21 @@ mod tests {
         );
     }
 
+    /// A trace id as a test mints one: 32 hex digits.
+    fn trace(n: usize) -> String {
+        format!("{n:032x}")
+    }
+
     #[test]
-    fn a_nudge_names_each_run_once_and_nothing_else() {
-        let run = Uuid::new_v4();
-        let other = Uuid::new_v4();
-        let parsed: Value = serde_json::from_str(&message_of(&[run, other, run])).expect("json");
+    fn a_nudge_names_each_trace_once_and_nothing_else() {
+        let (one, other) = (trace(1), trace(2));
+        let parsed: Value =
+            serde_json::from_str(&message_of(&[one.clone(), other.clone(), one.clone()]))
+                .expect("json");
         assert_eq!(parsed["type"], "spans:ingested");
         assert_eq!(parsed["data"]["organizationId"], "org_1");
         assert_eq!(parsed["data"]["projectId"], "project_1");
-        assert_eq!(
-            parsed["data"]["runs"],
-            Value::from(vec![run.to_string(), other.to_string()])
-        );
+        assert_eq!(parsed["data"]["traces"], Value::from(vec![one, other]));
         assert_eq!(parsed["data"]["more"], false);
         assert_eq!(
             parsed["data"].as_object().map(serde_json::Map::len),
@@ -177,15 +179,15 @@ mod tests {
 
     #[test]
     fn past_the_cap_the_rest_is_a_flag() {
-        let runs: Vec<Uuid> = (0..RUNS_MAX + 5).map(|_| Uuid::new_v4()).collect();
-        let parsed: Value = serde_json::from_str(&message_of(&runs)).expect("json");
+        let traces: Vec<String> = (0..TRACES_MAX + 5).map(trace).collect();
+        let parsed: Value = serde_json::from_str(&message_of(&traces)).expect("json");
         assert_eq!(
-            parsed["data"]["runs"].as_array().map(Vec::len),
-            Some(RUNS_MAX)
+            parsed["data"]["traces"].as_array().map(Vec::len),
+            Some(TRACES_MAX)
         );
         assert_eq!(parsed["data"]["more"], true);
 
-        let exact: Vec<Uuid> = (0..RUNS_MAX).map(|_| Uuid::new_v4()).collect();
+        let exact: Vec<String> = (0..TRACES_MAX).map(trace).collect();
         let parsed: Value = serde_json::from_str(&message_of(&exact)).expect("json");
         assert_eq!(
             parsed["data"]["more"], false,
@@ -193,8 +195,8 @@ mod tests {
         );
     }
 
-    /// The nudge for `runs`, which plain ids and a bool always encode.
-    fn message_of(runs: &[Uuid]) -> String {
-        spans_message("org_1", "project_1", runs.iter().copied()).expect("encodes")
+    /// The nudge for `traces`, which plain ids and a bool always encode.
+    fn message_of(traces: &[String]) -> String {
+        spans_message("org_1", "project_1", traces.iter().cloned()).expect("encodes")
     }
 }

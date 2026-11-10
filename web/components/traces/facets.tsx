@@ -73,7 +73,7 @@ type Props = {
   facets: Facets | null;
 };
 
-// The filters beside a list: each the values the window's runs carry, with
+// The filters beside a list: each the values the window's traces carry, with
 // how many of the list's rows carry each under every other filter, ticked to
 // narrow the list. Ids can be typed in as well, since the fifty a facet names
 // are rarely the one a person is after.
@@ -230,15 +230,15 @@ function FacetSection({
   const label = FILTER_LABEL[filter];
   const typed = TYPED_FILTERS.includes(filter);
   // Open only where there is activity: a value ticked, or values among the
-  // window's runs to pick from, but never an id's fifty alone. Open and
+  // window's traces to pick from, but never an id's fifty alone. Open and
   // empty, a section only says so, and pushes the ones that hold something
   // down the panel. Read from the data until the reader opens or shuts it
-  // themselves, since the page stays mounted as runs land and the window
+  // themselves, since the page stays mounted as traces land and the window
   // moves, and a section shut while it was empty would stay shut.
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? (ticked.length > 0 || (!typed && facet.values.length > 0));
   const [mode, setMode] = useState<"select" | "text">("select");
-  // A ticked value the window's runs no longer carry stays on the list, at
+  // A ticked value the window's traces no longer carry stays on the list, at
   // nought, so it can be unticked where it was ticked.
   const values = [
     ...facet.values,
@@ -310,7 +310,7 @@ function FacetSection({
           <TypedValue filter={filter} label={label} onAdd={onToggle} />
         ) : values.length === 0 ? (
           <p className="px-gutter text-xs text-muted-foreground">
-            No {label.toLowerCase()} among the window&rsquo;s runs.
+            No {label.toLowerCase()} among the window&rsquo;s traces.
           </p>
         ) : (
           <Command className="group/facet bg-transparent" defaultValue={NONE_CHOSEN}>

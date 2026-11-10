@@ -1,12 +1,13 @@
-//! A question as the SDK reports it: a run of the operator's own project,
-//! sent with `record_run` the way any agent reports a run that has ended, so
-//! it meets every check a customer's export does — the key, the rate limit,
-//! the claim on its digest, the organization's grants — and ingest hashes the
-//! asking organization as it hashes every user id. The SDK's own thread sends
-//! it, and a flush on a blocking task sends it now; what the door refuses the
-//! SDK logs once per kind, and the question is lost to the record, not to the
-//! asker. A record's span ids derive from the question's id, so one sent
-//! twice is the same bytes, which ingest answers once.
+//! A question as the SDK reports it: a trace of the operator's own project,
+//! sent with `record_trace` the way any agent reports a trace that has
+//! ended, so it meets every check a customer's export does — the key, the
+//! rate limit, the claim on its digest, the organization's grants — and
+//! ingest hashes the asking organization as it hashes every user id. The
+//! SDK's own thread sends it, and a flush on a blocking task sends it now;
+//! what the door refuses the SDK logs once per kind, and the question is
+//! lost to the record, not to the asker. A record's span ids derive from the
+//! question's id, so one sent twice is the same bytes, which ingest answers
+//! once.
 //!
 //! The SDK is configured as a customer configures it, by `TELMONI_API_KEY`
 //! and `TELMONI_ENDPOINT` ([`crate::config::Config::telmoni`]); the record
@@ -16,11 +17,11 @@ use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
-use telmoni::{ModelCallRecord, RunRecord, Telmoni, ToolCallRecord, Usage};
+use telmoni::{ModelCallRecord, Telmoni, ToolCallRecord, TraceRecord, Usage};
 
 use crate::observe::{Generation, Step, ToolUse, TurnEnding, TurnRecord};
 
-/// The agent every question is a run of: the console agent's own name.
+/// The agent every question is a trace of: the console agent's own name.
 pub(crate) const AGENT: &str = "console-agent";
 
 /// How a tool call that answered the model with an error, or was given up,
@@ -42,10 +43,10 @@ pub(crate) const ASKED_ABOUT_TAG: &str = "asked_about";
 /// blocking task, since the flush waits on the SDK's thread. Without a
 /// runtime to spawn on, the SDK's own batch sends it within its delay.
 pub(crate) fn send(telmoni: &Telmoni, record: &TurnRecord) {
-    let run_id = record.trace_id;
-    if let Err(error) = telmoni.record_run(run_record(record)) {
+    let trace_id = record.trace_id;
+    if let Err(error) = telmoni.record_trace(trace_record(record)) {
         tracing::warn!(
-            run_id = %run_id,
+            trace_id = %trace_id,
             error = %error,
             "the SDK refused a question's record"
         );
@@ -58,18 +59,18 @@ pub(crate) fn send(telmoni: &Telmoni, record: &TurnRecord) {
     handle.spawn_blocking(move || {
         if !telmoni.flush() {
             tracing::warn!(
-                run_id = %run_id,
+                trace_id = %trace_id,
                 "a question's record was not sent within the wait"
             );
         }
     });
 }
 
-/// A question as the SDK records a run: the question itself, each model call
-/// and tool call under it in the order they happened, the asking
+/// A question as the SDK records a trace: the question itself, each model
+/// call and tool call under it in the order they happened, the asking
 /// organization's id as its user, and the agent's conversation as its
 /// session.
-pub(crate) fn run_record(record: &TurnRecord) -> RunRecord {
+pub(crate) fn trace_record(record: &TurnRecord) -> TraceRecord {
     let (error_type, cancelled) = match &record.ending {
         TurnEnding::Answered { .. } => (None, false),
         TurnEnding::Failed { problem_type } => (Some(problem_type.clone()), false),
@@ -92,7 +93,7 @@ pub(crate) fn run_record(record: &TurnRecord) -> RunRecord {
         },
     );
     let (start, end) = span(record.started_at, record.ended_at);
-    RunRecord {
+    TraceRecord {
         user_id: Some(record.organization_id.to_string()),
         session_id: Some(record.conversation_id.to_string()),
         tags,
@@ -106,7 +107,7 @@ pub(crate) fn run_record(record: &TurnRecord) -> RunRecord {
             .collect(),
         error_type,
         cancelled,
-        ..RunRecord::new(record.trace_id.to_string(), AGENT, start, end)
+        ..TraceRecord::new(record.trace_id.simple().to_string(), AGENT, start, end)
     }
 }
 
@@ -322,36 +323,36 @@ mod tests {
         }
     }
 
-    /// The question is the run; each call a record under it, in order; the
+    /// The question is the trace; each call a record under it, in order; the
     /// asking organization its user and the conversation its session.
     #[test]
-    fn a_question_is_a_run_and_its_calls_are_records_under_it() {
+    fn a_question_is_a_trace_and_its_calls_are_records_under_it() {
         let turn = record(TurnEnding::Answered {
             stopped_short: Some(StoppedShort::Capped),
         });
-        let run = run_record(&turn);
-        assert_eq!(run.run_id, turn.trace_id.to_string());
-        assert_eq!(run.agent, AGENT);
+        let trace = trace_record(&turn);
+        assert_eq!(trace.trace_id, turn.trace_id.simple().to_string());
+        assert_eq!(trace.agent, AGENT);
         assert_eq!(
-            run.user_id.as_deref(),
+            trace.user_id.as_deref(),
             Some(turn.organization_id.as_str()),
             "the asking organization is the user, never the person"
         );
-        assert_eq!(run.session_id, Some(turn.conversation_id.to_string()));
+        assert_eq!(trace.session_id, Some(turn.conversation_id.to_string()));
         assert_eq!(
-            run.tags,
+            trace.tags,
             BTreeMap::from([
                 (ASKED_ABOUT_TAG.to_owned(), "organization".to_owned()),
                 (STOPPED_SHORT_TAG.to_owned(), "capped".to_owned()),
             ])
         );
-        assert_eq!(run.start, SystemTime::from(turn.started_at));
-        assert_eq!(run.end, SystemTime::from(turn.ended_at));
-        assert_eq!(run.error_type, None);
-        assert!(!run.cancelled);
-        assert_eq!(run.inside.len(), 3);
+        assert_eq!(trace.start, SystemTime::from(turn.started_at));
+        assert_eq!(trace.end, SystemTime::from(turn.ended_at));
+        assert_eq!(trace.error_type, None);
+        assert!(!trace.cancelled);
+        assert_eq!(trace.inside.len(), 3);
 
-        let first = model_call_of(&run.inside[0]);
+        let first = model_call_of(&trace.inside[0]);
         assert_eq!(first.model, "claude-sonnet-5-5");
         assert_eq!(first.provider.as_deref(), Some("anthropic"));
         assert_eq!(first.operation, None, "a chat, as the SDK names one");
@@ -368,11 +369,11 @@ mod tests {
         assert_eq!(first.error_type, None);
         assert_eq!(first.start, SystemTime::from(turn.started_at));
 
-        let tool = tool_call_of(&run.inside[1]);
+        let tool = tool_call_of(&trace.inside[1]);
         assert_eq!(tool.name, "list_members");
         assert_eq!(tool.error_type.as_deref(), Some(TOOL_ERROR_TYPE));
 
-        let failed = model_call_of(&run.inside[2]);
+        let failed = model_call_of(&trace.inside[2]);
         assert_eq!(failed.usage, None, "no usage, no tokens");
         assert_eq!(
             failed.error_type.as_deref(),
@@ -383,8 +384,8 @@ mod tests {
     #[test]
     fn each_ending_is_an_error_type_or_a_cancel() {
         let ending = |ending| {
-            let run = run_record(&record(ending));
-            (run.error_type, run.cancelled, run.tags)
+            let trace = trace_record(&record(ending));
+            (trace.error_type, trace.cancelled, trace.tags)
         };
         let (none, cancelled, tags) = ending(TurnEnding::Answered {
             stopped_short: None,
@@ -412,7 +413,7 @@ mod tests {
         let mut about_project = record(TurnEnding::Cancelled);
         about_project.project_id = Some(ProjectId::new());
         assert_eq!(
-            run_record(&about_project)
+            trace_record(&about_project)
                 .tags
                 .get(ASKED_ABOUT_TAG)
                 .map(String::as_str),
@@ -430,8 +431,8 @@ mod tests {
         if let Step::Tool(call) = &mut turn.steps[1] {
             call.ended_at = call.started_at - chrono::Duration::seconds(1);
         }
-        let run = run_record(&turn);
-        let tool = tool_call_of(&run.inside[1]);
+        let trace = trace_record(&turn);
+        let tool = tool_call_of(&trace.inside[1]);
         assert_eq!(tool.end, tool.start);
     }
 
@@ -444,8 +445,8 @@ mod tests {
         if let Step::Generation(generation) = &mut turn.steps[0] {
             generation.model.clear();
         }
-        let run = run_record(&turn);
-        assert_eq!(model_call_of(&run.inside[0]).model, UNNAMED_MODEL);
+        let trace = trace_record(&turn);
+        assert_eq!(model_call_of(&trace.inside[0]).model, UNNAMED_MODEL);
     }
 
     /// The export is OTLP's JSON to the door under the key, its spans named
@@ -484,38 +485,38 @@ mod tests {
                 "chat claude-sonnet-5-5",
                 "invoke_agent console-agent",
             ],
-            "the run's own span last, as a record is sent"
+            "the agent's own span last, as a record is sent"
         );
-        let run = &spans[3];
+        let agent = &spans[3];
+        assert_eq!(agent["traceId"], turn.trace_id.simple().to_string());
+        assert_eq!(attribute(agent, "telmoni.agent"), Some(Value::from(AGENT)));
         assert_eq!(
-            attribute(run, "telmoni.run_id"),
-            Some(Value::from(turn.trace_id.to_string()))
-        );
-        assert_eq!(attribute(run, "telmoni.agent"), Some(Value::from(AGENT)));
-        assert_eq!(
-            attribute(run, "gen_ai.agent.name"),
+            attribute(agent, "gen_ai.agent.name"),
             Some(Value::from(AGENT))
         );
         assert_eq!(
-            attribute(run, "user.id"),
+            attribute(agent, "user.id"),
             Some(Value::from(turn.organization_id.as_str())),
             "the asking organization, for ingest to hash"
         );
         assert_eq!(
-            attribute(run, "gen_ai.conversation.id"),
+            attribute(agent, "gen_ai.conversation.id"),
             Some(Value::from(turn.conversation_id.to_string()))
         );
         assert_eq!(
-            attribute(run, "telmoni.tag.asked_about"),
+            attribute(agent, "telmoni.tag.asked_about"),
             Some(Value::from("organization"))
         );
         assert_eq!(
-            attribute(run, "error.type"),
+            attribute(agent, "error.type"),
             Some(Value::from("/errors/agent/model-unavailable"))
         );
-        assert_eq!(run["status"]["code"], 2);
+        assert_eq!(agent["status"]["code"], 2);
         for span in &spans {
-            assert_eq!(span["traceId"], run["traceId"], "one trace, the question's");
+            assert_eq!(
+                span["traceId"], agent["traceId"],
+                "one trace, the question's"
+            );
         }
 
         let first = &spans[0];

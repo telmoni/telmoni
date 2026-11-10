@@ -30,10 +30,10 @@ export function barsOf(points: readonly RollupPoint[]): Bar[] {
     spend: point.spend,
     input: point.input_tokens,
     output: point.output_tokens,
-    ok: point.runs - point.failed_runs,
-    failed: point.failed_runs,
-    p50: point.run_duration_ms.p50,
-    p95: point.run_duration_ms.p95,
-    p99: point.run_duration_ms.p99,
+    ok: point.traces - point.failed_traces,
+    failed: point.failed_traces,
+    p50: point.trace_duration_ms.p50,
+    p95: point.trace_duration_ms.p95,
+    p99: point.trace_duration_ms.p99,
   }));
 }

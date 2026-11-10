@@ -14,12 +14,12 @@ vi.mock("./identity-context", () => ({
     "x-project-id": projectId,
   }),
 }));
-import { fetchAlerts, fetchIncident, fetchRunIncidents } from "./alerts";
+import { fetchAlerts, fetchIncident, fetchTraceIncidents } from "./alerts";
 
 const PROJECT = "project_1";
 const INCIDENT = "5d4f5c68-0000-4000-8000-000000000001";
 const RULE = "7a1c0e52-0000-4000-8000-000000000002";
-const RUN = "9b2d1f63-0000-4000-8000-000000000003";
+const TRACE = "9b2d1f63000040008000000000000003";
 const CONNECTION = "3c4e2a74-0000-4000-8000-000000000004";
 
 const INCIDENT_ROW = {
@@ -39,7 +39,7 @@ const INCIDENT_ROW = {
   resolved_by: null,
   reopened: 0,
   told_to: [CONNECTION],
-  runs: [RUN],
+  traces: [TRACE],
   changes: [],
   changes_more: false,
 };
@@ -49,7 +49,7 @@ const CHANGE = {
   kind: "release",
   value: "1.4.2",
   changed_at: "2026-10-26T02:46:00Z",
-  run_id: RUN,
+  trace_id: TRACE,
   capped: true,
 };
 const ALERT = {
@@ -125,7 +125,7 @@ describe("fetchAlerts", () => {
       alerts: [{ name: "Slow calls", connectors: [{ connection_id: CONNECTION }], starter: false }],
       startersWithheld: ["stalled"],
       startersDetail: "The plan holds ten alerts.",
-      incidents: [{ id: INCIDENT, told_to: [CONNECTION], runs: [RUN] }],
+      incidents: [{ id: INCIDENT, told_to: [CONNECTION], traces: [TRACE] }],
       mutes: [{ rule_id: null }],
     });
     const asked = fetchWithTimeout.mock.calls.map(([url]) => url).sort();
@@ -156,23 +156,24 @@ describe("fetchAlerts", () => {
   });
 });
 
-describe("fetchRunIncidents", () => {
-  it("asks for the incidents whose notices showed the run", async () => {
+describe("fetchTraceIncidents", () => {
+  it("asks for the incidents whose notices showed the trace", async () => {
     answer(200, { incidents: [INCIDENT_ROW] });
-    expect(await fetchRunIncidents(PROJECT, RUN)).toMatchObject([{ id: INCIDENT }]);
+    expect(await fetchTraceIncidents(PROJECT, TRACE)).toMatchObject([{ id: INCIDENT }]);
     expect(fetchWithTimeout.mock.calls[0]![0]).toBe(
-      `http://server/internal/v1/telemetry/incidents?run=${RUN}`,
+      `http://server/internal/v1/telemetry/incidents?trace=${TRACE}`,
     );
   });
 
   // The trace's page goes on without them.
-  it("answers none for anything it cannot read, and asks nothing for no run's id", async () => {
-    expect(await fetchRunIncidents(PROJECT, "a&run=b")).toEqual([]);
+  it("answers none for anything it cannot read, and asks nothing for no trace's id", async () => {
+    expect(await fetchTraceIncidents(PROJECT, "a&trace=b")).toEqual([]);
+    expect(await fetchTraceIncidents(PROJECT, "9b2d1f63-0000-4000-8000-000000000003")).toEqual([]);
     expect(fetchWithTimeout).not.toHaveBeenCalled();
     answer(403, {});
-    expect(await fetchRunIncidents(PROJECT, RUN)).toEqual([]);
+    expect(await fetchTraceIncidents(PROJECT, TRACE)).toEqual([]);
     fetchWithTimeout.mockRejectedValue(new Error("timed out"));
-    expect(await fetchRunIncidents(PROJECT, RUN)).toEqual([]);
+    expect(await fetchTraceIncidents(PROJECT, TRACE)).toEqual([]);
   });
 });
 
@@ -183,7 +184,7 @@ describe("fetchIncident", () => {
     const access = await fetchIncident(PROJECT, INCIDENT);
     expect(access).toMatchObject({
       kind: "ok",
-      incident: { id: INCIDENT, rule_name: "Slow calls", runs: [RUN] },
+      incident: { id: INCIDENT, rule_name: "Slow calls", traces: [TRACE] },
     });
     const [url, init] = fetchWithTimeout.mock.calls[0]!;
     expect(url).toBe(`http://server/internal/v1/telemetry/incidents/${INCIDENT}`);

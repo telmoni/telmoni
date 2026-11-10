@@ -29,8 +29,8 @@ export {
   filtersIn,
   type FilterKey,
   type ListFilters,
-  type RunSpend,
   type SpanFields,
+  type TraceSpend,
   type Trace,
   type TraceDetail,
   type TraceSpan,
@@ -51,16 +51,16 @@ export const TraceListSchema = z
     more: z.boolean(),
     sort: TraceSortSchema,
     dir: z.enum(SortDirection),
-    /** Each run's own scores by name, keyed by its id: put on its trace. */
+    /** Each trace's own scores by name, keyed by its id: put on it. */
     scores: z.record(z.string(), z.array(ScoreSummarySchema)).default({}),
   })
   .transform(({ scores, ...list }) => ({
     ...list,
-    traces: list.traces.map((trace) => ({ ...trace, scores: scores[trace.run_id] ?? [] })),
+    traces: list.traces.map((trace) => ({ ...trace, scores: scores[trace.trace_id] ?? [] })),
   }));
 export type TraceList = z.infer<typeof TraceListSchema>;
 
-// One filter's values among the window's runs, each with how many of the
+// One filter's values among the window's traces, each with how many of the
 // list's rows carry it under every other filter: the ticked first.
 const FacetSchema = z.object({
   values: z.array(z.object({ value: z.string(), count: z.number() })),
@@ -77,16 +77,16 @@ export const FacetsSchema = z.object({ days: z.number(), ...facetShape });
 export type Facets = z.infer<typeof FacetsSchema>;
 
 // The window in bars of equal width, each starting on the reader's clock:
-// the runs that started in it by how they ended, their tokens, and the
+// the traces that started in it by how they ended, their tokens, and the
 // median and 95th percentile of their durations and of their times to first
-// token, none where no run started or reported one.
+// token, none where no trace started or reported one.
 const HistogramBarSchema = z.object({
   at: z.string(),
   ok: z.number(),
   error: z.number(),
   cancelled: z.number(),
   tokens: z.number(),
-  /** What its runs' model calls cost, each run its own. */
+  /** What its traces' model calls cost, each trace its own. */
   spend: z.number(),
   duration_p50_ms: z.number().nullable(),
   duration_p95_ms: z.number().nullable(),
@@ -134,7 +134,7 @@ export const DashboardViewListSchema = z.object({ views: z.array(DashboardViewSc
  *  carries it, `S` the sorts it takes. The server checks every value; the
  *  page drops what it cannot read before asking (`lib/traces.ts`). */
 export type ListQuery<S extends string> = ListFilters & {
-  /** A score the runs carry, by its name, and its value's least and most. */
+  /** A score the traces carry, by its name, and its value's least and most. */
   score?: string;
   score_min?: number;
   score_max?: number;
@@ -187,7 +187,7 @@ export type DownloadAccess =
 
 export type TraceAccess =
   | { kind: "ok"; trace: TraceDetail }
-  /** No run with that id in this project. */
+  /** No trace with that id in this project. */
   | { kind: "missing" }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
@@ -236,7 +236,7 @@ export async function fetchMedia(projectId: string, sha256: string): Promise<Med
   return readBytes("fetchMedia", ...request, MISSING);
 }
 
-/** A path the server cannot read as a run, or one it has none of: the page
+/** A path the server cannot read as a trace, or one it has none of: the page
  *  says it is not there. */
 export const MISSING = { 400: "missing", 404: "missing" } as const;
 
@@ -305,16 +305,16 @@ export async function traceDownload(
   return readDownload("traceDownload", projectId, `/traces/export${lane}`);
 }
 
-/** One trace's spans, by the run's id, and its content where `content` asks,
- *  which the server files as the reader's read: every caller says which. A
- *  run id the path cannot be — not a UUID — is read as missing, as the server
- *  would answer a run that is not the project's. */
+/** One trace's spans, by its id, and its content where `content` asks, which
+ *  the server files as the reader's read: every caller says which. An id the
+ *  path cannot be — not 32 hex digits — is read as missing, as the server
+ *  would answer a trace that is not the project's. */
 export const fetchTrace = cache(
-  async (projectId: string, runId: string, content: boolean): Promise<TraceAccess> => {
+  async (projectId: string, traceId: string, content: boolean): Promise<TraceAccess> => {
     const read = await readLane(
       "fetchTrace",
       projectId,
-      `/traces/${encodeURIComponent(runId)}${content ? "?content=true" : ""}`,
+      `/traces/${encodeURIComponent(traceId)}${content ? "?content=true" : ""}`,
       TraceDetailSchema,
       MISSING,
     );

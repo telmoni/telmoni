@@ -28,15 +28,15 @@ func Example() {
 	}
 	defer client.Shutdown(context.Background())
 
-	ctx, run := client.Run(context.Background(), "support-bot", telmoni.RunOptions{
+	ctx, tr := client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{
 		UserID:    "user_42",
 		SessionID: "conv_7",
 		Tags:      map[string]string{"env": "prod"},
 	})
-	defer run.End()
+	defer tr.End()
 
-	stepCtx, step := run.Step(ctx, "plan")
-	_, call := run.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
+	stepCtx, step := tr.Step(ctx, "plan")
+	_, call := tr.ModelCall(stepCtx, "gpt-4o-mini", telmoni.ModelCallOptions{Provider: "openai"})
 	// The provider's call goes here. Its reply is recorded without its text
 	// unless CaptureContent is on and the project's content mode allows.
 	call.Answered(telmoni.Answer{
@@ -46,7 +46,7 @@ func Example() {
 	call.End()
 	step.End()
 
-	_, tool := run.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
+	_, tool := tr.ToolCall(ctx, "search", telmoni.ToolCallOptions{Arguments: map[string]string{"q": "weather"}})
 	result, err := lookUp(ctx, "weather")
 	if err != nil {
 		tool.Fail(err) // its message sent only as content is
@@ -55,23 +55,23 @@ func Example() {
 	}
 	tool.End()
 
-	_, found := run.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: "weather", TopK: 5})
+	_, found := tr.Retrieval(ctx, "kb-articles", telmoni.RetrievalOptions{Query: "weather", TopK: 5})
 	found.Returned(searchIndex(ctx, "weather", 5)) // counted in every mode, its documents content
 	found.End()
 }
 
-func ExampleClient_RecordRun() {
+func ExampleClient_RecordTrace() {
 	client, err := telmoni.NewFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer client.Shutdown(context.Background())
 
-	// A run read back from the agent's own log, under the id kept with it:
+	// A trace read back from the agent's own log, under the id kept with it:
 	// sent again, it is the same bytes, which ingest answers once.
 	start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
-	err = client.RecordRun(context.Background(), telmoni.RunRecord{
-		RunID:     "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+	err = client.RecordTrace(context.Background(), telmoni.TraceRecord{
+		TraceID:   "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
 		Agent:     "nightly-triage",
 		SessionID: "conv_7",
 		Start:     start,
@@ -104,11 +104,11 @@ func ExampleClient_RecordRun() {
 	}
 }
 
-func ExampleRunFromContext() {
-	// Deep in a call stack that has only the context, the run is found from
-	// it; outside a run, the handle opened does nothing.
+func ExampleTraceFromContext() {
+	// Deep in a call stack that has only the context, the trace is found from
+	// it; outside a trace, the handle opened does nothing.
 	search := func(ctx context.Context, q string) (string, error) {
-		_, tool := telmoni.RunFromContext(ctx).ToolCall(ctx, "search", telmoni.ToolCallOptions{})
+		_, tool := telmoni.TraceFromContext(ctx).ToolCall(ctx, "search", telmoni.ToolCallOptions{})
 		defer tool.End()
 		result, err := lookUp(ctx, q)
 		if err != nil {

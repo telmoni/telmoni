@@ -1,9 +1,9 @@
-//! A project's starter alerts: made once, when its first run lands, so a new
-//! project is watched before anybody chooses a threshold — the share of its
-//! runs that failed, a run looping on one tool, and a run left open — each
-//! counted in the plan's alerts as any alert is. One past the plan's number
-//! is not made, and the alerts page names it; one deleted is never made
-//! again, since the settings row remembers the starters were made.
+//! A project's starter alerts: made once, when its first trace lands, so a
+//! new project is watched before anybody chooses a threshold — the share of
+//! its traces that failed, a trace looping on one tool, and a trace left
+//! open — each counted in the plan's alerts as any alert is. One past the
+//! plan's number is not made, and the alerts page names it; one deleted is
+//! never made again, since the settings row remembers the starters were made.
 
 use std::sync::Arc;
 
@@ -31,17 +31,17 @@ use crate::rules::{RuleFilters, RuleInput};
 pub const ACTOR: &str = "starter-alerts";
 
 /// The failure share's starting numbers, the book's: an alert past 10% of
-/// the last hour's runs, a warning past 5%.
+/// the last hour's traces, a warning past 5%.
 pub const FAILURES_ALERT: f64 = 0.10;
 pub const FAILURES_WARNING: f64 = 0.05;
 
-/// The three, in the order they are made and withheld. A run's cost and
-/// duration wait for its agent's own normal, so no run pages twice.
+/// The three, in the order they are made and withheld. A trace's cost and
+/// duration wait for its agent's own normal, so no trace pages twice.
 #[must_use]
 pub fn starters() -> [RuleInput; 3] {
     let starter = |name: &str, measure, aggregation, operator, alert, warning| RuleInput {
         name: name.to_owned(),
-        kind: SpanKind::Run,
+        kind: SpanKind::Agent,
         measure,
         aggregation,
         filters: RuleFilters::default(),
@@ -58,7 +58,7 @@ pub fn starters() -> [RuleInput; 3] {
     };
     [
         starter(
-            "Failing runs",
+            "Failing traces",
             RuleMeasure::Failures,
             RuleAggregation::Avg,
             RuleOperator::Gt,
@@ -66,7 +66,7 @@ pub fn starters() -> [RuleInput; 3] {
             Some(FAILURES_WARNING),
         ),
         starter(
-            "Looping runs",
+            "Looping traces",
             RuleMeasure::Repeats,
             RuleAggregation::Max,
             RuleOperator::Gte,
@@ -74,7 +74,7 @@ pub fn starters() -> [RuleInput; 3] {
             None,
         ),
         starter(
-            "Stalled runs",
+            "Stalled traces",
             RuleMeasure::Stalled,
             RuleAggregation::Count,
             RuleOperator::Gte,
@@ -290,12 +290,12 @@ fn whole_percent(share: f64) -> f64 {
 /// project has run fourteen days, set once to the suggestion an alert's form
 /// offers from its history — the 99th percentile of its hours for the alert,
 /// the 90th for the warning — unless a member settled it first. A project
-/// with no run in those days keeps the starting number. One that fails is
+/// with no trace in those days keeps the starting number. One that fails is
 /// logged and tried again by the next pass.
 pub async fn tuned(state: &AppState, rule: RuleRow, now: DateTime<Utc>) -> RuleRow {
     let due = rule.starter
         && rule.tuned_at.is_none()
-        && rule.definition.kind == SpanKind::Run
+        && rule.definition.kind == SpanKind::Agent
         && rule.definition.measure == RuleMeasure::Failures
         && rule.definition.aggregation == RuleAggregation::Avg
         && rule.created_at <= now - TimeDelta::days(HISTORY_DAYS);
@@ -327,8 +327,8 @@ async fn tune(
     let share = history
         .agents
         .iter()
-        .find(|row| row.agent.is_none() && row.kind == SpanKind::Run)
-        .map(|runs| runs.failure_share);
+        .find(|row| row.agent.is_none() && row.kind == SpanKind::Agent)
+        .map(|traces| traces.failure_share);
     let (alert, warning) = match share.and_then(|share| share.p99.map(|p99| (p99, share.p90))) {
         Some((p99, p90)) => {
             let alert = whole_percent(p99);
@@ -436,9 +436,9 @@ mod tests {
     fn names_read_as_a_sentence() {
         let names =
             |given: &[&str]| words(&given.iter().map(|&n| n.to_owned()).collect::<Vec<_>>());
-        assert_eq!(names(&["Failing runs"]), "Failing runs");
+        assert_eq!(names(&["Failing traces"]), "Failing traces");
         assert_eq!(names(&["A", "B"]), "A and B");
         assert_eq!(names(&["A", "B", "C"]), "A, B and C");
-        assert_eq!(name_of(RuleMeasure::Stalled), "Stalled runs");
+        assert_eq!(name_of(RuleMeasure::Stalled), "Stalled traces");
     }
 }

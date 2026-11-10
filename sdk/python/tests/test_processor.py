@@ -27,8 +27,8 @@ def test_the_queue_is_bounded_and_drops_are_counted_once(
     )
     processor = client.processor
     try:
-        with client.run("bot"):
-            # The run's opening goes at once; the queue is filled after it.
+        with client.trace("bot"):
+            # The trace's opening goes at once; the queue is filled after it.
             assert transport.wait_for_openings(1)
             for n in range(5):
                 with client.step(f"s{n}"):
@@ -66,12 +66,12 @@ def test_a_warning_whose_handler_raises_never_ends_the_worker(
     handler = Raising()
     logging.getLogger("telmoni").addHandler(handler)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             for n in range(5):
                 with client.step(f"s{n}"):
                     pass
         assert client.flush(timeout_s=5)
-        with client.run("later"):
+        with client.trace("later"):
             pass
         assert client.flush(timeout_s=5)
     finally:
@@ -83,7 +83,7 @@ def test_a_warning_whose_handler_raises_never_ends_the_worker(
 
 def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
-    with client.run("bot"):
+    with client.trace("bot"):
         pass
     client.shutdown()
     assert [s["name"] for s in transport.spans()] == ["invoke_agent bot"]
@@ -96,7 +96,7 @@ def test_a_flush_past_its_cap_waits_rather_than_raising(
 ) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush(timeout_s=timeout_s)
     finally:
@@ -106,7 +106,7 @@ def test_a_flush_past_its_cap_waits_rather_than_raising(
 def test_a_flush_of_nan_waits_not_at_all(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert not client.flush(timeout_s=math.nan)
     finally:
@@ -118,7 +118,7 @@ def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
 ) -> None:
     monkeypatch.setattr("telmoni.processor.SHUTDOWN_TIMEOUT_S", 0.2)
     # Every answer asks for 2 s, past the deadline, through the exporter's own
-    # wait; a batch of one leaves the run's own span queued behind its step.
+    # wait; a batch of one leaves the agent's own span queued behind its step.
     rate_limited = answer_from(load_fixture("answers/rate-limited.json"))
     transport = FakeTransport([rate_limited] * 10)
     client = Telmoni(
@@ -127,7 +127,7 @@ def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
         batching=Batching(max_batch_size=1, schedule_delay_s=60),
     )
     processor = client.processor
-    with client.run("bot"), client.step("s"):
+    with client.trace("bot"), client.step("s"):
         pass
     assert not client.flush(timeout_s=0.01)
     assert transport.wait_for(1), "the step's first attempt"
@@ -148,7 +148,7 @@ def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> Non
     )
     processor = client.processor
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             for n in range(3):
                 with client.step(f"s{n}"):
                     pass
@@ -164,7 +164,7 @@ def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> Non
 def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> None:
     client = Telmoni(Config(api_key="k"), transport=transport)
     try:
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
         assert client.flush()
         before = len(transport.requests)
@@ -174,7 +174,7 @@ def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> No
             # new one must have, or nothing from here is ever sent.
             sent = False
             try:
-                with client.run("child"):
+                with client.trace("child"):
                     pass
                 # The flush returns once the new worker has exported, so the
                 # child's own copy of the transport has taken its requests.
@@ -198,7 +198,7 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
     def transport(
         method: str, url: str, headers: Mapping[str, str], body: bytes
     ) -> Answer:
-        # The child's exports, seen by the parent through a file; its run's
+        # The child's exports, seen by the parent through a file; its trace's
         # opening may leave in one of its own.
         with sent.open("ab") as file:
             file.write(body)
@@ -212,7 +212,7 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
             if built_in == "the parent"
             else Telmoni(Config(api_key="k"), transport=transport)
         )
-        with client.run("bot"):
+        with client.trace("bot"):
             pass
 
     try:

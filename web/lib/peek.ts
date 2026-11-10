@@ -1,9 +1,9 @@
-import { isUuid } from "@/lib/list-query";
 import { draggedPanelWidth } from "@/lib/panel-width";
 import { PEEK_PARAM } from "@/lib/traces";
+import { TraceIdSchema } from "@/lib/types/traces";
 
 // The trace list's peek and the browser's history (`components/traces/peek.tsx`):
-// the run it holds is the list's `?peek=`, moved with `pushState` and
+// the trace it holds is the list's `?peek=`, moved with `pushState` and
 // `replaceState`, which Next's router follows without reading the list again
 // (`linking-and-navigating.md`, Native History API). Opened from a shut peek
 // it is an entry of its own, so Back shuts it; stepped or switched while open
@@ -15,15 +15,15 @@ import { PEEK_PARAM } from "@/lib/traces";
  *  over it. */
 export const PEEKED = "telmoniPeek";
 
-/** The run a `?peek=` value names, or `null` for a value that names none. */
-export function peekedRun(value: string | null): string | null {
-  return value && isUuid(value) ? value : null;
+/** The trace a `?peek=` value names, or `null` for a value that names none. */
+export function peekedTrace(value: string | null): string | null {
+  return value && TraceIdSchema.safeParse(value).success ? value : null;
 }
 
-/** The page's own URL with `run` peeked, or with the peek shut. */
-export function peekUrl(run: string | null): string {
+/** The page's own URL with `trace` peeked, or with the peek shut. */
+export function peekUrl(trace: string | null): string {
   const params = new URLSearchParams(window.location.search);
-  if (run) params.set(PEEK_PARAM, run);
+  if (trace) params.set(PEEK_PARAM, trace);
   else params.delete(PEEK_PARAM);
   const query = params.toString();
   return `${window.location.pathname}${query ? `?${query}` : ""}`;
@@ -34,10 +34,10 @@ export function pushedHere(): boolean {
   return (window.history.state as Record<string, unknown> | null)?.[PEEKED] === true;
 }
 
-/** Opens `run` in the peek: pushed from a shut peek, put in place of the
+/** Opens `trace` in the peek: pushed from a shut peek, put in place of the
  *  one open otherwise. */
-export function openPeek(run: string): void {
-  const url = peekUrl(run);
+export function openPeek(trace: string): void {
+  const url = peekUrl(trace);
   if (new URLSearchParams(window.location.search).has(PEEK_PARAM)) {
     window.history.replaceState({ [PEEKED]: pushedHere() }, "", url);
   } else {
@@ -112,9 +112,9 @@ export function keepRead<R extends Read>(
 }
 
 /** What the panel shows of the last read while `url` at `version` is the
- *  one asked for: that read once it is the one asked for; another run's
- *  trace, marked stale, while the next run is on its way, so stepping does
- *  not blank the panel between two traces; the same run read again stands
+ *  one asked for: that read once it is the one asked for; another trace,
+ *  marked stale, while the next is on its way, so stepping does not blank
+ *  the panel between two traces; the same trace read again stands
  *  until the new answer comes, unless it was a failure, which says it is
  *  trying again. `null` while there is nothing to show. */
 export function shownRead<R extends Read>(

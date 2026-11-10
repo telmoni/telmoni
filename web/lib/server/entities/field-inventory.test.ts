@@ -21,11 +21,11 @@ const INVENTORY = {
   conventions_commit: "6fd0d763a092db245a54104fc1124031eb3c51d2",
   rows: [
     {
-      attribute: "telmoni.run_id",
+      attribute: "telmoni.agent",
       on: "every span",
-      kept: "the column run_id",
+      kept: "the column agent",
       needs: "any",
-      rule: "a UUID, the same on every span of a run",
+      rule: "the agent's name, held for its trace's tree",
       person: "no",
     },
   ],
@@ -60,7 +60,7 @@ describe("fetchFieldInventory", () => {
     answer(200, { rows: [] });
     expect(await fetchFieldInventory(PROJECT)).toBeNull();
 
-    answer(200, { conventions_commit: "abc", rows: [{ attribute: "telmoni.run_id" }] });
+    answer(200, { conventions_commit: "abc", rows: [{ attribute: "telmoni.agent" }] });
     expect(await fetchFieldInventory(PROJECT)).toBeNull();
   });
 

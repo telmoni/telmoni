@@ -66,7 +66,7 @@ describe('configuration', () => {
   it("leaves off a deployment named past ingest's cap, with one warning", async () => {
     // Ingest would read the resource as naming none, without a word.
     const h = harness({ environment: 'e'.repeat(129), release: 'r'.repeat(128) });
-    h.telmoni.run('bot', () => {});
+    h.telmoni.trace('bot', () => {});
     expect(await h.telmoni.flush()).toBe(true);
     const keys = h.transport.bodies()[0]!.resourceSpans[0]!.resource.attributes.map((attribute) => attribute.key);
     expect(keys).not.toContain('deployment.environment.name');
@@ -81,8 +81,8 @@ describe('configuration', () => {
     expect(new Telmoni({ apiKey: 'k', release: '\u00852026.10.18\u3000' }).config.release).toBe('2026.10.18');
     expect(new Telmoni({ apiKey: 'k', environment: '\u0085' }).config.environment).toBeUndefined();
     const h = harness();
-    expect(() => h.telmoni.run('\u0085', () => {})).toThrow("a run needs its agent's name");
-    expect(() => h.telmoni.run('\ufeff', () => {})).not.toThrow();
+    expect(() => h.telmoni.trace('\u0085', () => {})).toThrow("a trace needs its agent's name");
+    expect(() => h.telmoni.trace('\ufeff', () => {})).not.toThrow();
   });
 
   it('refuses a captureContent that is no boolean, given or set later', () => {
@@ -418,7 +418,7 @@ describe('the exporter, sending to this machine', () => {
           warn: (message) => warnings.push(message),
         },
       );
-      telmoni.run('bot', () => undefined);
+      telmoni.trace('bot', () => undefined);
       await telmoni.shutdown();
     } finally {
       await server.close();
@@ -444,7 +444,7 @@ describe('the exporter, sending to this machine', () => {
           warn: (message) => warnings.push(message),
         },
       );
-      telmoni.run('bot', () => undefined);
+      telmoni.trace('bot', () => undefined);
       await telmoni.shutdown();
     } finally {
       await server.close();
@@ -509,7 +509,7 @@ describe('the exporter, sending to this machine', () => {
         await new Promise((resolve) => http.request(${JSON.stringify(`${at}/http`)}, { method: 'POST' }, (answer) => answer.resume().on('end', resolve)).on('error', resolve).end('{}'));
         const { Telmoni } = await import(${JSON.stringify(built)});
         const telmoni = new Telmoni({ endpoint: ${JSON.stringify(at)}, apiKey: 'k' });
-        telmoni.run('bot', () => undefined);
+        telmoni.trace('bot', () => undefined);
         await telmoni.shutdown();
       `;
       const env = { ...process.env, NODE_USE_ENV_PROXY: '1', HTTP_PROXY: named, http_proxy: named, NO_PROXY: '', no_proxy: '' };
@@ -546,6 +546,7 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
           endTime: [2, 0],
           attributes: { 'telmoni.tag.big': char.repeat(size), 'app.kept': 'yes' },
           events: [],
+          links: [],
           status: { code: SpanStatusCode.UNSET },
         }) as unknown as ReadableSpan,
     );
@@ -701,6 +702,7 @@ describe('a number ingest cannot read', () => {
         endTime: [2, 0],
         attributes,
         events: [],
+        links: [],
         status: { code: SpanStatusCode.UNSET },
       }) as unknown as ReadableSpan;
     await exporter.export([
@@ -748,6 +750,7 @@ describe('a span time', () => {
         endTime: startTime,
         attributes: {},
         events: [],
+        links: [],
         status: { code: SpanStatusCode.UNSET },
       }) as unknown as ReadableSpan;
     const encoded = exporter.encode(

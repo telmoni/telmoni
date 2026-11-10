@@ -1,4 +1,4 @@
-//! A run recorded after it ended: `record_run` and
+//! A trace recorded after it ended: `record_trace` and
 //! `sdk/fixtures/recorded.json`.
 
 mod common;
@@ -10,15 +10,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::{
     Collected, Failure, FakeTransport, Harness, Outcome, Sleeps, Warnings, attributes_of, field,
-    hooks, int, keyed, load_fixture, lock, mode_on, name_of, run_span, spans_of, text,
+    hooks, int, keyed, load_fixture, lock, mode_on, name_of, spans_of, text, trace_span,
 };
 use opentelemetry::trace::{Link, SpanKind, TraceContextExt as _, TraceId};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{SamplingDecision, SamplingResult, ShouldSample};
 use serde_json::{Value, json};
 use telmoni::{
-    Batching, Config, Content, Error, ModelCallRecord, RecordItem, RunOptions, RunRecord,
-    StepRecord, Telmoni, Text, ToolCallRecord, Usage,
+    Batching, Config, Content, Error, ModelCallRecord, RecordItem, StepRecord, Telmoni, Text,
+    ToolCallRecord, TraceOptions, TraceRecord, Usage,
 };
 use uuid::Uuid;
 
@@ -139,7 +139,7 @@ fn item_from(spec: &Value) -> Result<RecordItem, Failure> {
 }
 
 /// The scenario's record, field by field.
-fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
+fn record_from(spec: &Value) -> Result<TraceRecord, Failure> {
     let inside = field(spec, "inside")?
         .as_array()
         .ok_or("inside")?
@@ -153,8 +153,8 @@ fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
         .flatten()
         .map(|(key, value)| Ok((key.clone(), value.as_str().ok_or("a tag")?.to_owned())))
         .collect::<Result<BTreeMap<_, _>, Failure>>()?;
-    Ok(RunRecord {
-        run_id: text(spec, "run_id")?.to_owned(),
+    Ok(TraceRecord {
+        trace_id: text(spec, "trace_id")?.to_owned(),
         agent: text(spec, "agent")?.to_owned(),
         user_id: optional_text(spec, "user_id")?,
         session_id: optional_text(spec, "session_id")?,
@@ -170,7 +170,7 @@ fn record_from(spec: &Value) -> Result<RunRecord, Failure> {
     })
 }
 
-fn the_record() -> Result<RunRecord, Failure> {
+fn the_record() -> Result<TraceRecord, Failure> {
     record_from(field(
         field(&load_fixture("recorded.json")?, "scenario")?,
         "record",
@@ -233,16 +233,11 @@ fn key_of(attribute: &Value) -> &str {
     attribute.get("key").and_then(Value::as_str).unwrap_or("")
 }
 
-/// The spans carrying `run_id`, in the order they were sent.
-fn of_run<'a>(spans: &'a [Value], run_id: &str) -> Vec<&'a Value> {
+/// The spans of the trace `trace_id`, in the order they were sent.
+fn of_trace<'a>(spans: &'a [Value], trace_id: &str) -> Vec<&'a Value> {
     spans
         .iter()
-        .filter(|span| {
-            attributes_of(span)
-                .ok()
-                .and_then(|attributes| attributes.get("telmoni.run_id").cloned())
-                == Some(json!(run_id))
-        })
+        .filter(|span| span.get("traceId") == Some(&json!(trace_id)))
         .collect()
 }
 
@@ -252,7 +247,7 @@ fn the_record_matches_the_golden_export() -> Outcome {
     let harness = Harness::new()?;
     harness
         .telmoni
-        .record_run(record_from(field(field(&fixture, "scenario")?, "record")?)?)?;
+        .record_trace(record_from(field(field(&fixture, "scenario")?, "record")?)?)?;
     harness.flush()?;
 
     let bodies = harness.transport.bodies()?;
@@ -296,7 +291,7 @@ fn the_same_record_sent_again_is_the_same_bytes() -> Outcome {
     // it only now and then.
     for _ in 0..20 {
         let harness = Harness::new()?;
-        harness.telmoni.record_run(record.clone())?;
+        harness.telmoni.record_trace(record.clone())?;
         harness.flush()?;
         harness.telmoni.shutdown();
         let bodies: Vec<Vec<u8>> = harness
@@ -317,61 +312,57 @@ fn the_same_record_sent_again_is_the_same_bytes() -> Outcome {
 fn a_record_takes_a_trace_of_its_own_and_leaves_the_context_alone() -> Outcome {
     let harness = Harness::new()?;
     let record = the_record()?;
-    let live = harness.telmoni.run("live", RunOptions::default())?;
-    let live_id = live.run_id().to_owned();
+    let live = harness.telmoni.trace("live", TraceOptions::default())?;
+    let live_id = live.trace_id().to_owned();
     let live_span = live.context().span().span_context().clone();
     {
         let _current = live.attach();
-        // Written in capitals, the id is still the run's.
-        harness.telmoni.record_run(RunRecord {
-            run_id: record.run_id.to_uppercase(),
+        // Written in capitals, the id is still the trace's.
+        harness.telmoni.record_trace(TraceRecord {
+            trace_id: record.trace_id.to_uppercase(),
             ..record.clone()
         })?;
         assert_eq!(
             Context::current().span().span_context(),
             &live_span,
-            "the live run is still the current span"
+            "the live trace is still the current span"
         );
     }
     live.end();
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let recorded = of_run(&spans, &record.run_id);
+    let recorded = of_trace(&spans, &record.trace_id);
     assert_eq!(recorded.len(), 10, "every span of the record, by its id");
-    let trace = json!(record.run_id.replace('-', ""));
     assert!(
-        recorded
-            .iter()
-            .all(|span| span.get("traceId") == Some(&trace)),
-        "{recorded:?}"
-    );
-    assert!(
-        run_span(&spans, &record.run_id)?
+        trace_span(&spans, &record.trace_id)?
             .get("parentSpanId")
             .is_none(),
-        "the record's run is the root of its trace"
+        "the record's agent span is the root of its trace"
     );
-    assert_ne!(run_span(&spans, &live_id)?.get("traceId"), Some(&trace));
+    assert_ne!(
+        trace_span(&spans, &live_id)?.get("traceId"),
+        Some(&json!(record.trace_id))
+    );
     Ok(())
 }
 
 #[test]
-fn a_failed_run_is_marked_on_its_own_span() -> Outcome {
+fn a_failed_trace_is_marked_on_its_own_span() -> Outcome {
     let harness = Harness::new()?;
-    let record = RunRecord {
+    let record = TraceRecord {
         error_type: Some("RateLimitError".to_owned()),
         cancelled: false,
         inside: Vec::new(),
         ..the_record()?
     };
-    harness.telmoni.record_run(record.clone())?;
+    harness.telmoni.record_trace(record.clone())?;
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let run = run_span(&spans, &record.run_id)?;
-    assert_eq!(run.get("status"), Some(&json!({ "code": 2 })));
-    let attributes = attributes_of(run)?;
+    let trace = trace_span(&spans, &record.trace_id)?;
+    assert_eq!(trace.get("status"), Some(&json!({ "code": 2 })));
+    let attributes = attributes_of(trace)?;
     assert_eq!(attributes.get("error.type"), Some(&json!("RateLimitError")));
     assert!(attributes.get("telmoni.cancelled").is_none());
     assert_eq!(
@@ -432,10 +423,13 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
             },
             std::iter::repeat_n(Ok(mode_on()), answers),
         )?;
-        harness.telmoni.run("warm", RunOptions::default())?.end();
+        harness
+            .telmoni
+            .trace("warm", TraceOptions::default())?
+            .end();
         harness.flush()?;
         let at = the_record()?.start;
-        let record = RunRecord {
+        let record = TraceRecord {
             input_messages: Some(json!(["asked"]).into()),
             output_messages: Some(json!({ "said": "answered" }).into()),
             inside: vec![
@@ -471,7 +465,7 @@ fn a_records_content_leaves_only_when_asked_and_the_project_allows() -> Outcome 
             ],
             ..the_record()?
         };
-        harness.telmoni.record_run(record)?;
+        harness.telmoni.record_trace(record)?;
         harness.flush()?;
         let spans = harness.spans()?;
         let sends = capture_content && answers > 0;
@@ -509,42 +503,49 @@ fn a_record_refused_sends_nothing() -> Outcome {
     let second = Duration::from_secs(1);
     let refused = [
         (
-            RunRecord {
+            TraceRecord {
                 agent: " ".to_owned(),
                 ..record.clone()
             },
             Error::EmptyAgent,
         ),
         (
-            RunRecord {
-                run_id: "run-1".to_owned(),
+            TraceRecord {
+                trace_id: "trace-1".to_owned(),
                 ..record.clone()
             },
-            Error::RunId,
+            Error::TraceId,
         ),
         (
-            RunRecord {
-                run_id: "00000000-0000-0000-0000-000000000000".to_owned(),
+            TraceRecord {
+                trace_id: "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d".to_owned(),
                 ..record.clone()
             },
-            Error::RunId,
+            Error::TraceId,
         ),
         (
-            RunRecord {
+            TraceRecord {
+                trace_id: "00000000000000000000000000000000".to_owned(),
+                ..record.clone()
+            },
+            Error::TraceId,
+        ),
+        (
+            TraceRecord {
                 end: start - second,
                 ..record.clone()
             },
             Error::EndBeforeStart,
         ),
         (
-            RunRecord {
+            TraceRecord {
                 inside: vec![StepRecord::new("s", start + second, start).into()],
                 ..record.clone()
             },
             Error::EndBeforeStart,
         ),
         (
-            RunRecord {
+            TraceRecord {
                 inside: vec![
                     StepRecord {
                         calls: vec![ToolCallRecord::new("t", start + second, start).into()],
@@ -558,7 +559,7 @@ fn a_record_refused_sends_nothing() -> Outcome {
         ),
     ];
     for (refused, error) in refused {
-        assert_eq!(harness.telmoni.record_run(refused), Err(error));
+        assert_eq!(harness.telmoni.record_trace(refused), Err(error));
     }
     harness.flush()?;
     assert_eq!(harness.transport.count(), 0, "nothing of a refused record");
@@ -582,19 +583,19 @@ fn a_record_timed_where_ingest_cannot_read_is_refused() -> Outcome {
         .ok_or("2554")?;
     let past = last.checked_add(Duration::from_nanos(1)).ok_or("2554")?;
     let refused = [
-        RunRecord {
+        TraceRecord {
             start: epoch,
             ..golden.clone()
         },
-        RunRecord {
+        TraceRecord {
             end: past,
             ..golden.clone()
         },
-        RunRecord {
+        TraceRecord {
             inside: vec![StepRecord::new("s", before, at).into()],
             ..golden.clone()
         },
-        RunRecord {
+        TraceRecord {
             inside: vec![
                 StepRecord {
                     calls: vec![ToolCallRecord::new("t", at, past).into()],
@@ -604,19 +605,22 @@ fn a_record_timed_where_ingest_cannot_read_is_refused() -> Outcome {
             ],
             ..golden.clone()
         },
-        RunRecord {
+        TraceRecord {
             inside: vec![ModelCallRecord::new("m", epoch, at).into()],
             ..golden.clone()
         },
     ];
     for record in refused {
-        assert_eq!(harness.telmoni.record_run(record), Err(Error::RecordedTime));
+        assert_eq!(
+            harness.telmoni.record_trace(record),
+            Err(Error::RecordedTime)
+        );
     }
     harness.flush()?;
     assert_eq!(harness.transport.count(), 0, "nothing of a refused record");
 
     let first = epoch.checked_add(Duration::from_nanos(1)).ok_or("1970")?;
-    harness.telmoni.record_run(RunRecord {
+    harness.telmoni.record_trace(TraceRecord {
         start: first,
         end: last,
         inside: Vec::new(),
@@ -624,9 +628,9 @@ fn a_record_timed_where_ingest_cannot_read_is_refused() -> Outcome {
     })?;
     harness.flush()?;
     let spans = harness.spans()?;
-    let run = run_span(&spans, &golden.run_id)?;
-    assert_eq!(text(run, "startTimeUnixNano")?, "1");
-    assert_eq!(text(run, "endTimeUnixNano")?, u64::MAX.to_string());
+    let trace = trace_span(&spans, &golden.trace_id)?;
+    assert_eq!(text(trace, "startTimeUnixNano")?, "1");
+    assert_eq!(text(trace, "endTimeUnixNano")?, u64::MAX.to_string());
     Ok(())
 }
 
@@ -654,17 +658,17 @@ fn a_record_with_an_empty_name_is_refused() -> Outcome {
         step("s", vec![step("", Vec::new())]),
     ];
     for item in refused {
-        let record = RunRecord {
+        let record = TraceRecord {
             inside: vec![item],
             ..golden.clone()
         };
-        assert_eq!(harness.telmoni.record_run(record), Err(Error::EmptyName));
+        assert_eq!(harness.telmoni.record_trace(record), Err(Error::EmptyName));
     }
     harness.flush()?;
     assert_eq!(harness.transport.count(), 0, "nothing of a refused record");
 
     // A tool's empty name ingest reads as none, keeping the call.
-    harness.telmoni.record_run(RunRecord {
+    harness.telmoni.record_trace(TraceRecord {
         inside: vec![step(
             " ",
             vec![
@@ -688,28 +692,28 @@ fn a_record_with_an_empty_name_is_refused() -> Outcome {
 }
 
 /// What a refusal names, its cap, and a record holding that text at the length given.
-type Capped<'a> = (Text, usize, &'a dyn Fn(usize) -> RunRecord);
+type Capped<'a> = (Text, usize, &'a dyn Fn(usize) -> TraceRecord);
 
 /// Each text a record holds is sent at ingest's cap and refused one past it, counted in characters.
 #[test]
 fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
     assert_eq!(
         Error::TooLong {
-            what: Text::RunAgent,
+            what: Text::TraceAgent,
             max: 128
         }
         .to_string(),
-        "a recorded run's agent must be up to 128 characters"
+        "a recorded trace's agent must be up to 128 characters"
     );
     let harness = Harness::new()?;
-    let golden = RunRecord {
+    let golden = TraceRecord {
         inside: Vec::new(),
         ..the_record()?
     };
     let at = golden.start;
     // Two bytes each, so a cap counted in bytes would refuse every text at it.
     let text = |n: usize| "é".repeat(n);
-    let inside = |item: RecordItem| RunRecord {
+    let inside = |item: RecordItem| TraceRecord {
         inside: vec![item],
         ..golden.clone()
     };
@@ -725,19 +729,19 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
     let model = |n: usize| ModelCallRecord::new(text(n), at, at);
     let tool = |n: usize| ToolCallRecord::new(text(n), at, at);
     let cases: [Capped<'_>; 12] = [
-        (Text::RunAgent, 128, &|n| RunRecord {
+        (Text::TraceAgent, 128, &|n| TraceRecord {
             agent: text(n),
             ..golden.clone()
         }),
-        (Text::RunUserId, 128, &|n| RunRecord {
+        (Text::TraceUserId, 128, &|n| TraceRecord {
             user_id: Some(text(n)),
             ..golden.clone()
         }),
-        (Text::RunSessionId, 200, &|n| RunRecord {
+        (Text::TraceSessionId, 200, &|n| TraceRecord {
             session_id: Some(text(n)),
             ..golden.clone()
         }),
-        (Text::RunErrorType, 128, &|n| RunRecord {
+        (Text::TraceErrorType, 128, &|n| TraceRecord {
             error_type: Some(text(n)),
             ..golden.clone()
         }),
@@ -809,9 +813,9 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
         }),
     ];
     for &(what, max, record) in &cases {
-        harness.telmoni.record_run(record(max))?;
+        harness.telmoni.record_trace(record(max))?;
         assert_eq!(
-            harness.telmoni.record_run(record(max + 1)),
+            harness.telmoni.record_trace(record(max + 1)),
             Err(Error::TooLong { what, max }),
             "{what}"
         );
@@ -844,7 +848,7 @@ fn a_step_inside_a_step_goes_under_its_span() -> Outcome {
     let harness = Harness::new()?;
     let golden = the_record()?;
     let at = golden.start;
-    let run = Uuid::parse_str(&golden.run_id)?;
+    let trace = Uuid::parse_str(&golden.trace_id)?;
     let call = |name: &str| -> RecordItem { ToolCallRecord::new(name, at, at).into() };
     let step = |name: &str, calls: Vec<RecordItem>| -> RecordItem {
         StepRecord {
@@ -853,7 +857,7 @@ fn a_step_inside_a_step_goes_under_its_span() -> Outcome {
         }
         .into()
     };
-    harness.telmoni.record_run(RunRecord {
+    harness.telmoni.record_trace(TraceRecord {
         agent: "bot".to_owned(),
         inside: vec![
             step(
@@ -896,7 +900,7 @@ fn a_step_inside_a_step_goes_under_its_span() -> Outcome {
     ];
     let id_of = |name: &str| -> Result<String, Failure> {
         let place = places.iter().position(|each| *each == name).ok_or(name)?;
-        let id = Uuid::new_v5(&run, place.to_string().as_bytes());
+        let id = Uuid::new_v5(&trace, place.to_string().as_bytes());
         Ok(id
             .as_bytes()
             .iter()
@@ -937,13 +941,13 @@ fn steps_nest_16_deep_and_no_deeper() -> Outcome {
     let golden = the_record()?;
     let at = golden.start;
     assert_eq!(
-        harness.telmoni.record_run(RunRecord {
+        harness.telmoni.record_trace(TraceRecord {
             inside: vec![nested(17, at)],
             ..golden.clone()
         }),
         Err(Error::TooDeep { max: 16 })
     );
-    harness.telmoni.record_run(RunRecord {
+    harness.telmoni.record_trace(TraceRecord {
         inside: vec![nested(16, at)],
         ..golden
     })?;
@@ -975,7 +979,7 @@ fn a_record_leaves_off_tags_past_32_and_negative_counts() -> Outcome {
         output_tokens: Some(5),
         ..Usage::default()
     };
-    let record = RunRecord {
+    let record = TraceRecord {
         tags: tags.clone(),
         inside: vec![
             ModelCallRecord {
@@ -1000,12 +1004,12 @@ fn a_record_leaves_off_tags_past_32_and_negative_counts() -> Outcome {
         ],
         ..golden
     };
-    harness.telmoni.record_run(record.clone())?;
-    harness.telmoni.record_run(record.clone())?;
+    harness.telmoni.record_trace(record.clone())?;
+    harness.telmoni.record_trace(record.clone())?;
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let sent: BTreeSet<String> = attributes_of(run_span(&spans, &record.run_id)?)?
+    let sent: BTreeSet<String> = attributes_of(trace_span(&spans, &record.trace_id)?)?
         .as_object()
         .ok_or("attributes")?
         .keys()
@@ -1038,7 +1042,7 @@ fn a_record_leaves_off_tags_past_32_and_negative_counts() -> Outcome {
     let mut warned = harness.warnings.all();
     warned.sort();
     let mut expected = [
-        "telmoni: a run carries up to 32 tags, the most ingest keeps; the rest are not sent",
+        "telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent",
         "telmoni: gen_ai.usage.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
         "telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
     ];
@@ -1058,15 +1062,15 @@ fn a_record_leaves_off_a_tag_ingest_would_drop_before_its_32() -> Outcome {
     tags.insert(String::new(), "v".to_owned());
     tags.insert("k00a".to_owned(), "v".repeat(257));
     tags.insert("k".repeat(65), "v".to_owned());
-    let record = RunRecord {
+    let record = TraceRecord {
         tags,
         ..the_record()?
     };
-    harness.telmoni.record_run(record.clone())?;
+    harness.telmoni.record_trace(record.clone())?;
     harness.flush()?;
 
     let spans = harness.spans()?;
-    let sent: BTreeMap<String, Value> = attributes_of(run_span(&spans, &record.run_id)?)?
+    let sent: BTreeMap<String, Value> = attributes_of(trace_span(&spans, &record.trace_id)?)?
         .as_object()
         .ok_or("attributes")?
         .iter()
@@ -1101,7 +1105,7 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
     let through = Collected::<bool>::default();
     let (shared, noted, warned) = (Arc::clone(&client), through.clone(), warnings.clone());
     // No call in it, so the probe gives no warning of its own.
-    let probe = RunRecord {
+    let probe = TraceRecord {
         inside: Vec::new(),
         ..the_record()?
     };
@@ -1113,7 +1117,7 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
         let probe = probe.clone();
         let (done, finished) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = done.send(telmoni.record_run(probe));
+            let _ = done.send(telmoni.record_trace(probe));
         });
         noted.push(finished.recv_timeout(Duration::from_secs(5)).is_ok());
     });
@@ -1124,8 +1128,8 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
     let mut tags: BTreeMap<String, String> =
         (0..33).map(|n| (format!("k{n}"), String::new())).collect();
     tags.insert(String::new(), String::new());
-    let record = RunRecord {
-        run_id: "0f8fad5b-d9cb-469f-a165-70867728950e".to_owned(),
+    let record = TraceRecord {
+        trace_id: "0f8fad5bd9cb469fa16570867728950e".to_owned(),
         tags,
         inside: vec![
             ModelCallRecord {
@@ -1139,7 +1143,7 @@ fn a_records_warnings_come_before_its_hold() -> Outcome {
         ],
         ..golden
     };
-    let recorded = telmoni.record_run(record);
+    let recorded = telmoni.record_trace(record);
     *lock(&client) = None;
     recorded?;
     assert!(telmoni.flush());
@@ -1161,7 +1165,7 @@ fn a_record_after_shutdown_is_refused() -> Outcome {
     let harness = Harness::new()?;
     harness.telmoni.shutdown();
     assert_eq!(
-        harness.telmoni.record_run(the_record()?),
+        harness.telmoni.record_trace(the_record()?),
         Err(Error::Shutdown)
     );
     assert_eq!(harness.transport.count(), 0);
@@ -1186,7 +1190,7 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let golden = the_record()?;
     let at = golden.start;
-    let record = RunRecord {
+    let record = TraceRecord {
         inside: vec![
             ToolCallRecord::new("t", at, at).into(),
             ToolCallRecord::new("t", at, at).into(),
@@ -1195,13 +1199,13 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
     };
 
     // Two steps hold two of the four slots, the run's opening gone first.
-    let run = telmoni.run("bot", RunOptions::default())?;
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
     assert!(transport.wait_for(1), "the run's opening, out of the queue");
     for n in 0..2 {
-        let step = run.step(&format!("s{n}"))?;
+        let step = trace.step(&format!("s{n}"))?;
         step.end();
     }
-    let refused = telmoni.record_run(record.clone());
+    let refused = telmoni.record_trace(record.clone());
     assert_eq!(
         refused,
         Err(Error::QueueFull { spans: 3, queue: 4 }),
@@ -1212,9 +1216,9 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
             .to_string()
             .ends_with("flush or wait, then record it again")
     }));
-    run.end();
+    trace.end();
     assert!(telmoni.flush());
-    telmoni.record_run(record)?;
+    telmoni.record_trace(record)?;
     assert!(telmoni.flush());
     telmoni.shutdown();
 
@@ -1229,7 +1233,7 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         .count();
     assert!(
         calls == 2 && names.len() == 6,
-        "the live run's three spans and the record's three: {names:?}"
+        "the live trace's three spans and the record's three: {names:?}"
     );
     assert!(warnings.all().is_empty(), "{:?}", warnings.all());
     Ok(())
@@ -1249,14 +1253,14 @@ fn a_record_past_the_whole_queue_names_the_bound() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let golden = the_record()?;
     let at = golden.start;
-    let record = RunRecord {
+    let record = TraceRecord {
         inside: vec![
             ToolCallRecord::new("t", at, at).into(),
             ToolCallRecord::new("t", at, at).into(),
         ],
         ..golden
     };
-    let refused = telmoni.record_run(record);
+    let refused = telmoni.record_trace(record);
     assert_eq!(refused, Err(Error::QueueFull { spans: 3, queue: 2 }));
     assert_eq!(
         refused.err().map(|error| error.to_string()).as_deref(),
@@ -1284,18 +1288,18 @@ fn traces_in(body: &[u8]) -> Result<BTreeSet<String>, Failure> {
 fn a_record_travels_in_exports_of_its_own() -> Outcome {
     let harness = Harness::new()?;
     let record = the_record()?;
-    let beside = RunRecord {
-        run_id: "0191a3b4-2222-4aaa-8bbb-000000000002".to_owned(),
+    let beside = TraceRecord {
+        trace_id: "0191a3b422224aaa8bbb000000000002".to_owned(),
         ..record.clone()
     };
-    let live = harness.telmoni.run("live", RunOptions::default())?;
+    let live = harness.telmoni.trace("live", TraceOptions::default())?;
     live.step("live step")?.end();
-    harness.telmoni.record_run(record.clone())?;
-    harness.telmoni.record_run(beside.clone())?;
+    harness.telmoni.record_trace(record.clone())?;
+    harness.telmoni.record_trace(beside.clone())?;
     live.end();
     harness.flush()?;
     let sent = harness.transport.count();
-    harness.telmoni.record_run(record.clone())?;
+    harness.telmoni.record_trace(record.clone())?;
     harness.flush()?;
     harness.telmoni.shutdown();
 
@@ -1305,7 +1309,7 @@ fn a_record_travels_in_exports_of_its_own() -> Outcome {
         .into_iter()
         .map(|request| request.body)
         .collect();
-    let trace_of = |run: &RunRecord| run.run_id.replace('-', "");
+    let trace_of = |record: &TraceRecord| record.trace_id.clone();
     let mut first = Vec::new();
     let mut other = 0;
     for (n, body) in bodies.iter().enumerate() {
@@ -1322,7 +1326,7 @@ fn a_record_travels_in_exports_of_its_own() -> Outcome {
     assert_eq!(
         first,
         [&bodies[sent]],
-        "the record sent beside a live run is the bytes it is sent again as"
+        "the record sent beside a live trace is the bytes it is sent again as"
     );
     assert_eq!(
         other, 1,
@@ -1347,7 +1351,7 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let golden = the_record()?;
     let at = golden.start;
-    let record = RunRecord {
+    let record = TraceRecord {
         inside: vec![
             ToolCallRecord::new("t", at, at).into(),
             ToolCallRecord::new("t", at, at).into(),
@@ -1355,13 +1359,13 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
         ],
         ..golden
     };
-    let run = telmoni.run("bot", RunOptions::default())?;
+    let trace = telmoni.trace("bot", TraceOptions::default())?;
     assert!(transport.wait_for(1), "the run's opening, at once");
     for n in 0..2 {
-        run.step(&format!("s{n}"))?.end();
+        trace.step(&format!("s{n}"))?.end();
     }
-    telmoni.record_run(record)?;
-    run.end();
+    telmoni.record_trace(record)?;
+    trace.end();
     assert!(telmoni.flush());
     telmoni.shutdown();
 
@@ -1378,7 +1382,7 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
     assert_eq!(
         exports,
         [
-            vec!["telmoni.run.start"],
+            vec!["telmoni.trace.start"],
             vec!["s0", "s1"],
             vec!["execute_tool t", "execute_tool t", "execute_tool t"],
             vec!["invoke_agent claude-code"],
@@ -1403,7 +1407,7 @@ fn a_span_ending_while_a_record_is_built_travels_apart() -> Outcome {
             ..Batching::default()
         };
         let telmoni = Telmoni::with_hooks(keyed(), hooks);
-        let live = telmoni.run("live", RunOptions::default())?;
+        let live = telmoni.trace("live", TraceOptions::default())?;
         let stop = AtomicBool::new(false);
         let recorded = std::thread::scope(|scope| {
             scope.spawn(|| {
@@ -1413,7 +1417,7 @@ fn a_span_ending_while_a_record_is_built_travels_apart() -> Outcome {
                     }
                 }
             });
-            let recorded = telmoni.record_run(record.clone());
+            let recorded = telmoni.record_trace(record.clone());
             stop.store(true, Ordering::Relaxed);
             recorded
         });
@@ -1486,14 +1490,14 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
     let telmoni = Telmoni::with_hooks(config, hooks);
     let golden = the_record()?;
     let at = golden.start;
-    let record = RunRecord {
+    let record = TraceRecord {
         inside: vec![
             ToolCallRecord::new("t", at, at).into(),
             ToolCallRecord::new("t", at, at).into(),
         ],
         ..golden
     };
-    let live = Arc::new(telmoni.run("live", RunOptions::default())?);
+    let live = Arc::new(telmoni.trace("live", TraceOptions::default())?);
     assert!(transport.wait_for(1), "the run's opening, out of the queue");
     // Room for one step beside the record's three spans.
     let stepping = Arc::clone(&live);
@@ -1504,10 +1508,10 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
             }
         }
     }));
-    telmoni.record_run(record)?;
+    telmoni.record_trace(record)?;
     assert!(telmoni.flush());
     Arc::try_unwrap(live)
-        .map_err(|_| "the live run is still shared")?
+        .map_err(|_| "the live trace is still shared")?
         .end();
     assert!(telmoni.flush());
     telmoni.shutdown();
@@ -1548,10 +1552,10 @@ fn a_record_goes_at_once() -> Outcome {
         ..Batching::default()
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
-    let live = telmoni.run("live", RunOptions::default())?;
+    let live = telmoni.trace("live", TraceOptions::default())?;
     assert!(transport.wait_for(1), "the run's opening, at once");
     live.step("live step")?.end();
-    telmoni.record_run(the_record()?)?;
+    telmoni.record_trace(the_record()?)?;
     assert!(transport.wait_for(3), "the record waited for the delay");
     live.end();
     telmoni.shutdown();

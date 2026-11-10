@@ -44,7 +44,7 @@ type scoresFixture struct {
 	} `json:"scores"`
 	Targets []struct {
 		Case      string            `json:"case"`
-		RunID     string            `json:"run_id"`
+		TraceID   string            `json:"trace_id"`
 		SpanID    string            `json:"span_id"`
 		SessionID string            `json:"session_id"`
 		Kept      map[string]string `json:"kept"`
@@ -156,9 +156,9 @@ func TestEveryScoreIsKeptOrRefusedAsTheFixtureSays(t *testing.T) {
 		t.Run(c.Case, func(t *testing.T) {
 			h := contentOff(t)
 			value, opts := scoreOf(t, c.scoreSpec)
-			_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-			run.Score(c.Name, value, opts)
-			run.End()
+			_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+			tr.Score(c.Name, value, opts)
+			tr.End()
 			h.flush()
 			events := eventsOf(t, h, "invoke_agent bot")
 			if c.Kept == nil {
@@ -200,11 +200,11 @@ func TestEveryTargetIsKeptOrRefusedAsTheFixtureSays(t *testing.T) {
 	for _, c := range loadScores(t).Targets {
 		t.Run(c.Case, func(t *testing.T) {
 			h := newHarness(t, testConfig(), nil)
-			h.client.Score(telmoni.ScoreTarget{RunID: c.RunID, SpanID: c.SpanID, SessionID: c.SessionID}, "relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
+			h.client.Score(telmoni.ScoreTarget{TraceID: c.TraceID, SpanID: c.SpanID, SessionID: c.SessionID}, "relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
 			h.flush()
 			if c.Kept == nil {
 				expectRequests(t, h, 0)
-				expectOneRefusal(t, h, "it names a run, a run and one of its spans by 16 hex digits, or a session of up to 200 characters")
+				expectOneRefusal(t, h, "it names a trace by 32 hex digits, a trace and one of its spans by 16, or a session of up to 200 characters")
 				return
 			}
 			sent := h.transport.bodies(t)
@@ -213,7 +213,7 @@ func TestEveryTargetIsKeptOrRefusedAsTheFixtureSays(t *testing.T) {
 			}
 			item := sent[0]["scores"].([]any)[0].(map[string]any)
 			got := map[string]string{}
-			for _, key := range []string{"run_id", "span_id", "session_id"} {
+			for _, key := range []string{"trace_id", "span_id", "session_id"} {
 				if id, ok := item[key]; ok {
 					got[key] = id.(string)
 				}
@@ -231,7 +231,7 @@ func TestLateScoresLeaveInOnePostAsTheFixtureSendsThem(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
 	for _, s := range fixture.Late.Scores {
 		value, opts := scoreOf(t, s.scoreSpec)
-		target := telmoni.ScoreTarget{RunID: s.Raw["run_id"], SpanID: s.Raw["span_id"], SessionID: s.Raw["session_id"]}
+		target := telmoni.ScoreTarget{TraceID: s.Raw["trace_id"], SpanID: s.Raw["span_id"], SessionID: s.Raw["session_id"]}
 		h.client.Score(target, s.Name, value, opts)
 	}
 	h.flush()
@@ -264,13 +264,13 @@ func TestLateScoresLeaveInOnePostAsTheFixtureSendsThem(t *testing.T) {
 func TestLiveScoresAreTheFixturesEvents(t *testing.T) {
 	fixture := loadScores(t)
 	h := contentOff(t)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for _, s := range fixture.Live.Scores {
 		value, opts := scoreOf(t, s)
-		run.Score(s.Name, value, opts)
+		tr.Score(s.Name, value, opts)
 	}
-	spanID := run.SpanID()
-	run.End()
+	spanID := tr.SpanID()
+	tr.End()
 	h.flush()
 	span := byName(h.transport.spans(t))["invoke_agent bot"]
 	if span["spanId"] != spanID || !hex16.MatchString(spanID) {
@@ -329,12 +329,12 @@ func TestScoresPastAHundredGoInBodiesOfAHundred(t *testing.T) {
 	for range 101 {
 		h.client.Score(telmoni.ScoreTarget{SessionID: "conv-1"}, "relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
 	}
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// The opening apart, the run's own export holds no carrier.
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	// The opening apart, the agent's own export holds no carrier.
 	if !h.transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	var sizes []int
 	var spans []map[string]any
@@ -355,11 +355,11 @@ func TestScoresPastAHundredGoInBodiesOfAHundred(t *testing.T) {
 
 func TestTheSeventeenthScoreOnASpanIsNotSent(t *testing.T) {
 	h := contentOff(t)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	for range 17 {
-		run.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
+		tr.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	if events := eventsOf(t, h, "invoke_agent bot"); len(events) != 16 {
 		t.Errorf("sent %d events", len(events))
@@ -369,11 +369,11 @@ func TestTheSeventeenthScoreOnASpanIsNotSent(t *testing.T) {
 
 func TestAHandleScoredAfterItsSpanEndedSendsNothing(t *testing.T) {
 	h := contentOff(t)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	_, step := run.Step(ctx, "plan")
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, step := tr.Step(ctx, "plan")
 	step.End()
 	step.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
-	run.End()
+	tr.End()
 	h.flush()
 	if events := eventsOf(t, h, "plan"); len(events) != 0 {
 		t.Errorf("sent %v", events)
@@ -383,16 +383,16 @@ func TestAHandleScoredAfterItsSpanEndedSendsNothing(t *testing.T) {
 
 func TestHandlesThatDoNothingScoreNothing(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	var run *telmoni.Run
-	run.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
-	ctx, blank := h.client.Run(context.Background(), " ", telmoni.RunOptions{})
+	var none *telmoni.Trace
+	none.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
+	ctx, blank := h.client.Trace(context.Background(), " ", telmoni.TraceOptions{})
 	_, step := blank.Step(ctx, "plan")
 	_, call := blank.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
 	_, tool := blank.ToolCall(ctx, "t", telmoni.ToolCallOptions{})
 	for _, scored := range []interface {
 		Score(string, telmoni.ScoreValue, telmoni.ScoreOptions)
 		SpanID() string
-	}{run, blank, step, call, tool, (*telmoni.Step)(nil), (*telmoni.ModelCall)(nil), (*telmoni.ToolCall)(nil)} {
+	}{none, blank, step, call, tool, (*telmoni.Step)(nil), (*telmoni.ModelCall)(nil), (*telmoni.ToolCall)(nil)} {
 		scored.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
 		if id := scored.SpanID(); id != "" {
 			t.Errorf("SpanID() = %q", id)
@@ -406,14 +406,14 @@ func TestHandlesThatDoNothingScoreNothing(t *testing.T) {
 	}
 }
 
-func TestARecordedRunsScoresAreTimedAtEachSpansEnd(t *testing.T) {
+func TestARecordedTracesScoresAreTimedAtEachSpansEnd(t *testing.T) {
 	h := contentOff(t)
 	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	record := telmoni.RunRecord{
-		RunID: "5b7e1c2a-9d4f-4e8b-a6c3-1f2e3d4c5b6a",
-		Agent: "bot",
-		Start: start,
-		End:   start.Add(3 * time.Second),
+	record := telmoni.TraceRecord{
+		TraceID: "5b7e1c2a9d4f4e8ba6c31f2e3d4c5b6a",
+		Agent:   "bot",
+		Start:   start,
+		End:     start.Add(3 * time.Second),
 		Scores: []telmoni.RecordedScore{
 			{Name: "thumbs", Value: telmoni.Bool(true)},
 			{Name: " ", Value: telmoni.Number(0.5)},
@@ -425,7 +425,7 @@ func TestARecordedRunsScoresAreTimedAtEachSpansEnd(t *testing.T) {
 			Scores: []telmoni.RecordedScore{{Name: "tone", Value: telmoni.Category("polite")}},
 		}},
 	}
-	if err := h.client.RecordRun(context.Background(), record); err != nil {
+	if err := h.client.RecordTrace(context.Background(), record); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
 	h.flush()
@@ -455,17 +455,17 @@ func TestAScoresEventLeavesUntouchedByAMaskDroppingEverything(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), CaptureContent: true, Mask: func(string, string) (string, bool) {
 		return "", false
 	}}, newFakeTransport(t, on, on, on))
-	_, warm := h.client.Run(context.Background(), "warm", telmoni.RunOptions{})
+	_, warm := h.client.Trace(context.Background(), "warm", telmoni.TraceOptions{})
 	warm.End()
 	h.flush()
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{Version: "judge-2"})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{Version: "judge-2"})
 	trace.SpanFromContext(ctx).AddEvent("gen_ai.evaluation.result", trace.WithAttributes(
 		attribute.String("gen_ai.evaluation.name", "tone"),
 		attribute.String("gen_ai.evaluation.explanation", "polite throughout"),
 	))
-	run.Fail(errors.New("bad plan"))
-	run.End()
+	tr.Fail(errors.New("bad plan"))
+	tr.End()
 	h.flush()
 	events := eventsOf(t, h, "invoke_agent bot")
 	if len(events) != 3 {
@@ -488,9 +488,9 @@ func TestAScoresEventLeavesUntouchedByAMaskDroppingEverything(t *testing.T) {
 
 func TestAScoreAloneAsksNoContentMode(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret(testKey), CaptureContent: true}, nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.Score("relevance", telmoni.Number(0.5), telmoni.ScoreOptions{})
+	tr.End()
 	h.flush()
 	if bodies := h.transport.bodies(t); len(bodies) != 1 || len(eventsOf(t, h, "invoke_agent bot")) != 1 {
 		t.Errorf("sent %v", bodies)
@@ -522,13 +522,13 @@ func batchMax() int { return 1<<20 + 1 }
 
 func TestAnEvaluationEventsOwnExplanationStaysHomeWithContentOff(t *testing.T) {
 	h := contentOff(t)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	trace.SpanFromContext(ctx).AddEvent("gen_ai.evaluation.result", trace.WithAttributes(
 		attribute.String("gen_ai.evaluation.name", "relevance"),
 		attribute.Float64("gen_ai.evaluation.score.value", 0.5),
 		attribute.String("gen_ai.evaluation.explanation", "it answered the question"),
 	))
-	run.End()
+	tr.End()
 	h.flush()
 	events := eventsOf(t, h, "invoke_agent bot")
 	if len(events) != 1 {

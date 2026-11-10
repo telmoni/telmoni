@@ -20,16 +20,16 @@ import (
 func TestTheQueueIsBoundedAndDropsAreCountedOnce(t *testing.T) {
 	// A queue of two, and a worker that will not wake until flushed.
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2, 100, time.Minute))
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// The run's opening goes at once; the queue is filled after it.
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	// The trace's opening goes at once; the queue is filled after it.
 	if !h.transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	for n := range 5 {
-		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		_, step := tr.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
 	if got := sortedNames(h.transport.spans(t)); !reflect.DeepEqual(got, []string{"s0", "s1"}) {
 		t.Errorf("spans sent: %v", got)
@@ -39,15 +39,15 @@ func TestTheQueueIsBoundedAndDropsAreCountedOnce(t *testing.T) {
 		t.Fatalf("want one warning, got %q", warnings)
 	}
 	if !strings.Contains(warnings[0], "queue was full") || !strings.Contains(warnings[0], "4 spans") {
-		t.Errorf("warning = %q, want the count of the three steps and the run dropped", warnings[0])
+		t.Errorf("warning = %q, want the count of the three steps and the agent's span dropped", warnings[0])
 	}
 	expectFields(t, h, map[string]any{"kind": "queue_full"})
 }
 
 func TestShutdownDrainsWhatIsQueued(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	if err := h.client.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutting down: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestShutdownDrainsWhatIsQueued(t *testing.T) {
 		t.Errorf("a second shutdown: %v", err)
 	}
 	// Nothing opened after a shutdown is sent, and nothing breaks.
-	_, late := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, late := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	late.End()
 	if err := h.client.Flush(context.Background()); err != nil {
 		t.Errorf("a flush after shutdown: %v", err)
@@ -70,7 +70,7 @@ func TestShutdownDrainsWhatIsQueued(t *testing.T) {
 
 func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
-	_, queued := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, queued := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	queued.End()
 	// As a deferred Shutdown under signal.NotifyContext finds it after Ctrl-C,
 	// what is queued given up with it.
@@ -79,7 +79,7 @@ func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
 	if err := h.client.Shutdown(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("shutting down: %v", err)
 	}
-	_, late := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	_, late := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	late.End()
 	if err := h.client.Flush(context.Background()); err != nil {
 		t.Errorf("a flush after shutdown: %v", err)
@@ -93,17 +93,17 @@ func TestAShutdownWhoseContextIsDoneStillStopsTheWorker(t *testing.T) {
 func TestAShutdownGivesUpAtItsDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// Every answer asks for 20 s, waited through the SDK's own wait; a
-		// batch of one leaves the run's own span queued behind its step.
+		// batch of one leaves the agent's own span queued behind its step.
 		slow := scripted{status: http.StatusTooManyRequests, headers: map[string]string{"Retry-After": "20"}, body: []byte("{}")}
 		transport := newFakeTransport(t, slow, slow, slow, slow, slow, slow)
 		client, err := telmoni.New(testConfig(), telmoni.WithTransport(transport.send), telmoni.WithBatching(2048, 1, time.Minute))
 		if err != nil {
 			t.Fatalf("building the client: %v", err)
 		}
-		ctx, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		_, step := run.Step(ctx, "s")
+		ctx, tr := client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		_, step := tr.Step(ctx, "s")
 		step.End()
-		run.End()
+		tr.End()
 		if err := client.Shutdown(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("Shutdown = %v, want context.DeadlineExceeded", err)
 		}
@@ -126,8 +126,8 @@ func TestAClientDroppedWithoutShutdownSendsWhatItQueued(t *testing.T) {
 		if err != nil {
 			t.Fatalf("building the client: %v", err)
 		}
-		_, run := client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		run.End()
+		_, tr := client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		tr.End()
 	}()
 	// The cleanup runs once a collection finds nothing reaching the client.
 	for deadline := time.Now().Add(waitTimeout); time.Now().Before(deadline); {
@@ -141,12 +141,12 @@ func TestAClientDroppedWithoutShutdownSendsWhatItQueued(t *testing.T) {
 
 func TestABatchFillsAndGoesWithoutAFlush(t *testing.T) {
 	h := newHarness(t, testConfig(), nil, telmoni.WithBatching(2048, 3, time.Minute))
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	if !h.transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	for n := range 3 {
-		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		_, step := tr.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
 	if !h.transport.waitFor(1, waitTimeout) {
@@ -156,7 +156,7 @@ func TestABatchFillsAndGoesWithoutAFlush(t *testing.T) {
 	if got := sortedNames(first); !reflect.DeepEqual(got, []string{"s0", "s1", "s2"}) {
 		t.Errorf("the first export holds %v", got)
 	}
-	run.End()
+	tr.End()
 }
 
 func TestFlushHonoursItsContext(t *testing.T) {
@@ -168,8 +168,8 @@ func TestFlushHonoursItsContext(t *testing.T) {
 		<-release
 		return transport.send(req)
 	}))
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	// The provider joins its processors' errors, so the deadline is wrapped.
@@ -194,8 +194,8 @@ func TestAFlushWithoutADeadlineWaitsThirtySeconds(t *testing.T) {
 			<-release
 			return transport.send(req)
 		}))
-		_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-		run.End()
+		_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+		tr.End()
 		start := time.Now()
 		if err := h.client.Flush(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("Flush = %v, want context.DeadlineExceeded", err)
@@ -227,21 +227,21 @@ func TestAHookThatPanicsDoesNotStopTheExporter(t *testing.T) {
 		telmoni.WithLogger(slog.New(panicking{})),
 		telmoni.WithBatching(1, 100, time.Minute),
 	)
-	ctx, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	// Each run's opening leaves the queue of one before anything else ends.
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	// Each trace's opening leaves the queue of one before anything else ends.
 	if !transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	for n := range 3 {
-		_, step := run.Step(ctx, fmt.Sprintf("s%d", n))
+		_, step := tr.Step(ctx, fmt.Sprintf("s%d", n))
 		step.End()
 	}
-	run.End()
+	tr.End()
 	h.flush()
-	// The worker is alive: a run after the panic is sent.
-	_, again := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
+	// The worker is alive: a trace after the panic is sent.
+	_, again := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
 	if !transport.waitForOpenings(2, waitTimeout) {
-		t.Fatal("the second run's opening was not sent at once")
+		t.Fatal("the second trace's opening was not sent at once")
 	}
 	again.End()
 	h.flush()
@@ -262,18 +262,18 @@ func TestATransportThatPanicsLosesOnlyItsBatch(t *testing.T) {
 		}
 		return transport.send(req)
 	}))
-	_, lost := h.client.Run(context.Background(), "lost", telmoni.RunOptions{})
-	// The opening goes first, so the panic meets the run's own export.
+	_, lost := h.client.Trace(context.Background(), "lost", telmoni.TraceOptions{})
+	// The opening goes first, so the panic meets the agent's own export.
 	if !transport.waitForOpenings(1, waitTimeout) {
-		t.Fatal("the run's opening was not sent at once")
+		t.Fatal("the trace's opening was not sent at once")
 	}
 	lost.End()
 	h.flush()
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 	if got := names(transport.spans(t)); !reflect.DeepEqual(got, []string{"invoke_agent bot"}) {
-		t.Errorf("spans sent: %v, want the second run's own, the first's lost with the panic", got)
+		t.Errorf("spans sent: %v, want the second trace's own, the first's lost with the panic", got)
 	}
 	warnings := h.logs.warnings()
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "a hook panicked during an export; the batch was dropped") {

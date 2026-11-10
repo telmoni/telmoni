@@ -7,10 +7,10 @@ describe('the processor', () => {
     // A tiny queue, and a worker that will not wake until flushed.
     const h = harness({}, { processor: { maxQueueSize: 2, maxBatchSize: 100, scheduleDelaySeconds: 60 } });
     try {
-      await h.telmoni.run('bot', async (run) => {
-        // The run's opening goes at once; nothing yields after it, so the queue fills before the worker runs.
+      await h.telmoni.trace('bot', async (trace) => {
+        // The trace's opening goes at once; nothing yields after it, so the queue fills before the worker runs.
         expect(await h.transport.waitFor(1)).toBe(true);
-        for (let n = 0; n < 5; n++) run.step(`s${n}`, () => {});
+        for (let n = 0; n < 5; n++) trace.step(`s${n}`, () => {});
       });
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
@@ -35,11 +35,11 @@ describe('the processor', () => {
       },
     );
     try {
-      h.telmoni.run('bot', (run) => {
-        for (let n = 0; n < 5; n++) run.step(`s${n}`, () => {});
+      h.telmoni.trace('bot', (trace) => {
+        for (let n = 0; n < 5; n++) trace.step(`s${n}`, () => {});
       });
       expect(await h.telmoni.flush()).toBe(true);
-      h.telmoni.run('later', () => {});
+      h.telmoni.trace('later', () => {});
       expect(await h.telmoni.flush()).toBe(true);
     } finally {
       await h.telmoni.shutdown();
@@ -49,7 +49,7 @@ describe('the processor', () => {
 
   it('shutdown drains what is queued', async () => {
     const h = harness();
-    h.telmoni.run('bot', () => {});
+    h.telmoni.trace('bot', () => {});
     await h.telmoni.shutdown();
     expect(h.transport.spans().map((span) => span.name)).toEqual(['invoke_agent bot']);
     await h.telmoni.shutdown();
@@ -59,9 +59,9 @@ describe('the processor', () => {
   it('a batch fills and goes without a flush', async () => {
     const h = harness({}, { processor: { maxBatchSize: 3, scheduleDelaySeconds: 60 } });
     try {
-      await h.telmoni.run('bot', async (run) => {
-        expect(await h.transport.waitFor(1), "the run's opening, at once").toBe(true);
-        for (let n = 0; n < 3; n++) run.step(`s${n}`, () => {});
+      await h.telmoni.trace('bot', async (trace) => {
+        expect(await h.transport.waitFor(1), "the trace's opening, at once").toBe(true);
+        for (let n = 0; n < 3; n++) trace.step(`s${n}`, () => {});
         expect(await h.transport.waitFor(2), 'three steps fill a batch of three').toBe(true);
         expect(h.transport.spans().map((span) => span.name)).toEqual(['s0', 's1', 's2']);
       });
@@ -82,7 +82,7 @@ describe('the processor', () => {
       },
     });
     try {
-      h.telmoni.run('bot', () => {});
+      h.telmoni.trace('bot', () => {});
       const flushed = h.telmoni.flush(1);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       expect(h.transport.requests).toHaveLength(0);
@@ -107,7 +107,7 @@ describe('the processor', () => {
 
   it('flush gives up past its timeout', async () => {
     const h = harness({}, { transport: () => new Promise(() => {}) });
-    h.telmoni.run('bot', () => {});
+    h.telmoni.trace('bot', () => {});
     expect(await h.telmoni.flush(0.01)).toBe(false);
   });
 
@@ -123,11 +123,11 @@ describe('the processor', () => {
       },
     );
     try {
-      h.telmoni.run('bot', () => {});
+      h.telmoni.trace('bot', () => {});
       expect(await h.telmoni.flush(Infinity)).toBe(true);
       expect(sent.requests).toHaveLength(1);
       // NaN waits not at all.
-      h.telmoni.run('bot', () => {});
+      h.telmoni.trace('bot', () => {});
       expect(await h.telmoni.flush(Number.NaN)).toBe(false);
     } finally {
       await h.telmoni.shutdown();
@@ -138,13 +138,13 @@ describe('the processor', () => {
     vi.useFakeTimers();
     try {
       // The real sleep, on the fake clock: every answer asks for 20 s, and a
-      // batch of one leaves the run's own span queued behind its step.
+      // batch of one leaves the agent's own span queued behind its step.
       const h = harness(
         {},
         { sleep: undefined, processor: { maxBatchSize: 1 } },
         Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
       );
-      h.telmoni.run('bot', (run) => run.step('s', () => {}));
+      h.telmoni.trace('bot', (trace) => trace.step('s', () => {}));
       const done = h.telmoni.shutdown();
       // Before the deadline the drain goes on: the step's retry, 20 s in.
       await vi.advanceTimersByTimeAsync(30_000);
@@ -171,7 +171,7 @@ describe('the processor', () => {
         { sleep: undefined, processor: { maxBatchSize: 1 } },
         Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
       );
-      h.telmoni.run('bot', (run) => run.step('s', () => {}));
+      h.telmoni.trace('bot', (trace) => trace.step('s', () => {}));
       let flushed: boolean | undefined;
       void h.telmoni.flush(60).then((value) => {
         flushed = value;
@@ -204,7 +204,7 @@ describe('the processor', () => {
         { sleep, processor: { maxBatchSize: 1 } },
         Array.from({ length: 10 }, () => answer(429, { 'Retry-After': '20' }, '{}')),
       );
-      h.telmoni.run('bot', (run) => run.step('s', () => {}));
+      h.telmoni.trace('bot', (trace) => trace.step('s', () => {}));
       const done = h.telmoni.shutdown();
       await vi.advanceTimersByTimeAsync(30_000);
       await done;

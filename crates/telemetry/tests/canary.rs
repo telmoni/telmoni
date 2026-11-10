@@ -32,7 +32,6 @@ use telmoni_telemetry::{AppState, contract, otlp_router, router, v1_reads, v1_ro
 
 const KEY: &str = "tm_canary_ingest_key";
 const READ_KEY: &str = "tm_canary_read_key";
-const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f42";
 const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4742";
 const SPAN: &str = "00f067aa0ba90242";
 const OWNER: &str = "owner-1";
@@ -132,7 +131,6 @@ fn export(text: &str, named: &[(&str, &str)]) -> Vec<u8> {
     let messages =
         json!([{ "role": "user", "parts": [{ "type": "text", "content": text }] }]).to_string();
     let mut attributes = vec![
-        json!({ "key": contract::RUN_ID, "value": { "stringValue": RUN } }),
         json!({ "key": contract::AGENT, "value": { "stringValue": "canary-agent" } }),
         json!({ "key": contract::OPERATION, "value": { "stringValue": "invoke_agent" } }),
         json!({ "key": "gen_ai.input.messages", "value": { "stringValue": messages } }),
@@ -321,10 +319,10 @@ async fn the_canary_corpus_is_kept_and_shown_only_where_each_mode_lets_it(pool: 
     for door in [&off, &on] {
         answers.push(door.send(export(text, &[])).await);
         common::eventually("the run is read", || async {
-            door.get("/traces").await.1.contains(RUN)
+            door.get("/traces").await.1.contains(TRACE)
         })
         .await;
-        let failing = json!({ "name": "Any failure", "kind": "run", "measure": "failures",
+        let failing = json!({ "name": "Any failure", "kind": "agent", "measure": "failures",
             "aggregation": "count", "window": "hour", "operator": "gt", "alert_threshold": 0 });
         assert_eq!(
             door.post_json("/rules", &failing).await,
@@ -339,9 +337,9 @@ async fn the_canary_corpus_is_kept_and_shown_only_where_each_mode_lets_it(pool: 
 
     // What a reader is shown: nothing of an off project's, all of an on one's, each read filed.
     let reads = [
-        format!("/traces/{RUN}?content=true"),
+        format!("/traces/{TRACE}?content=true"),
         "/traces/export?format=json".to_owned(),
-        format!("/v1/traces/{RUN}?content=true"),
+        format!("/v1/traces/{TRACE}?content=true"),
     ];
     for read in &reads {
         let (status, shown) = off.get(read).await;
@@ -428,11 +426,11 @@ async fn content_an_sdk_scrubbed_arrives_as_its_markers_and_its_counts(pool: PgP
     on.send(export(scrubbed, &[(contract::SCRUBBED, &counts)]))
         .await;
     common::eventually("the run is read", || async {
-        on.get("/traces").await.1.contains(RUN)
+        on.get("/traces").await.1.contains(TRACE)
     })
     .await;
 
-    let (status, page) = on.get(&format!("/traces/{RUN}?content=true")).await;
+    let (status, page) = on.get(&format!("/traces/{TRACE}?content=true")).await;
     assert_eq!(status, StatusCode::OK, "{page}");
     for (kind, needle) in &needles {
         assert!(!page.contains(needle.as_str()), "{kind} on the run's page");
@@ -506,14 +504,13 @@ async fn a_value_planted_in_metadata_is_kept_where_the_inventory_says(pool: PgPo
         ],
     ))
     .expect("the export");
-    // A run is named for its agent, so the name is planted on its step, kept as sent.
+    // A trace is named for its agent, so the name is planted on its step, kept as sent.
     let step = {
         let mut step = body["resourceSpans"][0]["scopeSpans"][0]["spans"][0].clone();
         step["spanId"] = json!("00f067aa0ba90243");
         step["parentSpanId"] = json!(SPAN);
         step["name"] = json!(name);
         step["attributes"] = json!([
-            { "key": contract::RUN_ID, "value": { "stringValue": RUN } },
             { "key": contract::AGENT, "value": { "stringValue": "canary-agent" } }
         ]);
         step
@@ -524,7 +521,7 @@ async fn a_value_planted_in_metadata_is_kept_where_the_inventory_says(pool: PgPo
         .push(step);
     off.send(body.to_string().into_bytes()).await;
     common::eventually("the run is read", || async {
-        off.get("/traces").await.1.contains(RUN)
+        off.get("/traces").await.1.contains(TRACE)
     })
     .await;
 

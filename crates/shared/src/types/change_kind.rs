@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What changed: the release its runs were sent from, a model call's model,
+/// What changed: the release its traces were sent from, a model call's model,
 /// or a prompt's version. `[PUBLIC-API]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

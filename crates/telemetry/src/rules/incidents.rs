@@ -35,7 +35,7 @@ pub const REOPEN_WITHIN: TimeDelta = TimeDelta::hours(1);
 
 /// The most runs an incident keeps of those its notices showed, the latest,
 /// as the table's CHECK has it.
-pub const RUNS_KEPT: i32 = 20;
+pub const TRACES_KEPT: i32 = 20;
 
 /// Whose incident: an alert's, or a monitor's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,8 +91,8 @@ pub struct IncidentRow {
     pub reopened: i32,
     /// The connections its notices were queued to; the feed is not one.
     pub told_to: Vec<Uuid>,
-    /// The runs its notices showed, oldest first.
-    pub runs: Vec<Uuid>,
+    /// The traces its notices showed, oldest first.
+    pub traces: Vec<String>,
 }
 
 impl IncidentRow {
@@ -121,7 +121,7 @@ const INCIDENT_COLUMNS: &str = "incident.id, incident.rule_id, rule.name AS rule
     incident.monitor_id, monitor.agent AS agent, incident.cause, incident.project_id, incident.organization_id, incident.status, incident.severity, \
     incident.value, incident.opened_at, incident.acknowledged_at, incident.acknowledged_by, \
     incident.resolved_at, incident.resolved_by, incident.reopened, incident.told_to, \
-    incident.runs";
+    incident.traces";
 
 /// The incidents, their alert joined as `rule` and their monitor as `monitor`.
 const INCIDENT_FROM: &str = "telemetry.incidents AS incident \
@@ -515,48 +515,48 @@ pub(crate) async fn open_of<S: Binding>(
 
 /// Where one of the project's incident's notices went, kept on it after the
 /// notice is told: the connections it was queued to, beside those its others
-/// reached, and the run it showed, last among the [`RUNS_KEPT`] it keeps.
+/// reached, and the trace it showed, last among the [`TRACES_KEPT`] it keeps.
 pub async fn told<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
     id: Uuid,
     connections: &[Uuid],
-    run: Option<Uuid>,
+    trace: Option<&str>,
 ) -> sqlx::Result<()> {
     sqlx::query(
         "UPDATE telemetry.incidents AS incident
             SET told_to = ARRAY(SELECT DISTINCT unnest(incident.told_to || $3::uuid[]) ORDER BY 1),
-                runs = CASE WHEN $4::uuid IS NULL THEN incident.runs ELSE (
-                    SELECT moved.runs[greatest(1, cardinality(moved.runs) - $5 + 1):]
-                      FROM (SELECT array_remove(incident.runs, $4::uuid) || $4::uuid AS runs)
+                traces = CASE WHEN $4::text IS NULL THEN incident.traces ELSE (
+                    SELECT moved.traces[greatest(1, cardinality(moved.traces) - $5 + 1):]
+                      FROM (SELECT array_remove(incident.traces, $4::text) || $4::text AS traces)
                            AS moved) END
           WHERE incident.project_id = $1 AND incident.id = $2",
     )
     .bind(project_id)
     .bind(id)
     .bind(connections)
-    .bind(run)
-    .bind(RUNS_KEPT)
+    .bind(trace)
+    .bind(TRACES_KEPT)
     .execute(tx.conn())
     .await
     .map(|_| ())
 }
 
-/// The project's incidents whose notices showed `run_id`, the newest first.
+/// The project's incidents whose notices showed `trace_id`, the newest first.
 pub async fn showing<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
-    run_id: Uuid,
+    trace_id: &str,
     limit: i64,
 ) -> sqlx::Result<Vec<IncidentRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {INCIDENT_COLUMNS} FROM {INCIDENT_FROM}
-          WHERE incident.project_id = $1 AND incident.runs @> ARRAY[$2::uuid]
+          WHERE incident.project_id = $1 AND incident.traces @> ARRAY[$2::text]
           ORDER BY incident.opened_at DESC, incident.id
           LIMIT $3"
     )))
     .bind(project_id)
-    .bind(run_id)
+    .bind(trace_id)
     .bind(limit)
     .fetch_all(tx.conn())
     .await

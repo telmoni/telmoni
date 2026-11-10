@@ -1,7 +1,7 @@
 package telmoni_test
 
 // The golden fixtures in sdk/fixtures: the export every SDK must send for the
-// same run, and what each must do with the server's answers.
+// same trace, and what each must do with the server's answers.
 
 import (
 	"bytes"
@@ -39,9 +39,9 @@ var (
 
 var versioned = map[string]bool{"telemetry.sdk.version": true, "telemetry.distro.version": true}
 
-type runFixture struct {
+type traceFixture struct {
 	Scenario struct {
-		Run struct {
+		Trace struct {
 			Agent     string            `json:"agent"`
 			UserID    string            `json:"user_id"`
 			SessionID string            `json:"session_id"`
@@ -56,7 +56,7 @@ type runFixture struct {
 					FailsWith string `json:"fails_with"`
 				} `json:"tool_call"`
 			} `json:"inside"`
-		} `json:"run"`
+		} `json:"trace"`
 		CaptureContent bool   `json:"capture_content"`
 		Environment    string `json:"environment"`
 		Release        string `json:"release"`
@@ -82,11 +82,11 @@ type modelCallSpec struct {
 	OutputMessages any `json:"output_messages"`
 }
 
-func loadRun(t *testing.T) runFixture {
+func loadTrace(t *testing.T) traceFixture {
 	t.Helper()
-	var fixture runFixture
-	if err := json.Unmarshal(loadFixture(t, "run.json"), &fixture); err != nil {
-		t.Fatalf("decoding run.json: %v", err)
+	var fixture traceFixture
+	if err := json.Unmarshal(loadFixture(t, "trace.json"), &fixture); err != nil {
+		t.Fatalf("decoding trace.json: %v", err)
 	}
 	return fixture
 }
@@ -170,7 +170,6 @@ func normalize(t *testing.T, export map[string]any) map[string]any {
 			t.Errorf("traceId %q is not 32 lowercase hex characters", id)
 		}
 	}
-	runIDs := map[string]bool{}
 	for _, raw := range spans {
 		span := raw.(map[string]any)
 		name := span["name"].(string)
@@ -191,23 +190,7 @@ func normalize(t *testing.T, export map[string]any) map[string]any {
 		span["startTimeUnixNano"], span["endTimeUnixNano"] = "<time>", "<time>"
 		attributes := span["attributes"].([]any)
 		sortByKey(attributes)
-		for _, raw := range attributes {
-			attribute := raw.(map[string]any)
-			if attribute["key"] == "telmoni.run_id" {
-				value := attribute["value"].(map[string]any)
-				runIDs[value["stringValue"].(string)] = true
-				value["stringValue"] = "<uuid>"
-			}
-		}
 		span["attributes"] = attributes
-	}
-	if len(runIDs) != 1 {
-		t.Errorf("want one run id on every span, got %d", len(runIDs))
-	}
-	for id := range runIDs {
-		if !uuidV4.MatchString(id) {
-			t.Errorf("run id %q is not a lowercase version 4 UUID", id)
-		}
 	}
 	scoped["spans"] = spans
 	scoped["scope"].(map[string]any)["version"] = "<version>"
@@ -230,18 +213,18 @@ func normalize(t *testing.T, export map[string]any) map[string]any {
 }
 
 // perform runs the fixture's scenario through the SDK, as every suite does.
-func perform(t *testing.T, h *harness, fixture runFixture) {
+func perform(t *testing.T, h *harness, fixture traceFixture) {
 	t.Helper()
-	spec := fixture.Scenario.Run
-	ctx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{
+	spec := fixture.Scenario.Trace
+	ctx, tr := h.client.Trace(context.Background(), spec.Agent, telmoni.TraceOptions{
 		UserID:    spec.UserID,
 		SessionID: spec.SessionID,
 		Tags:      spec.Tags,
 	})
 	stepSpec := spec.Inside[0]
-	stepCtx, step := run.Step(ctx, stepSpec.Step)
+	stepCtx, step := tr.Step(ctx, stepSpec.Step)
 	callSpec := stepSpec.Inside[0].ModelCall
-	_, call := run.ModelCall(stepCtx, callSpec.Model, telmoni.ModelCallOptions{
+	_, call := tr.ModelCall(stepCtx, callSpec.Model, telmoni.ModelCallOptions{
 		Provider:      callSpec.Provider,
 		Prompt:        callSpec.Prompt,
 		PromptVersion: callSpec.PromptVersion,
@@ -262,15 +245,15 @@ func perform(t *testing.T, h *harness, fixture runFixture) {
 	call.End()
 	step.End()
 	toolSpec := spec.Inside[1].ToolCall
-	_, tool := run.ToolCall(ctx, toolSpec.Name, telmoni.ToolCallOptions{})
+	_, tool := tr.ToolCall(ctx, toolSpec.Name, telmoni.ToolCallOptions{})
 	tool.FailWith(toolSpec.FailsWith)
 	tool.End()
-	run.End()
+	tr.End()
 	h.flush()
 }
 
-func TestTheRunMatchesTheGoldenExport(t *testing.T) {
-	fixture := loadRun(t)
+func TestTheTraceMatchesTheGoldenExport(t *testing.T) {
+	fixture := loadTrace(t)
 	h := newHarness(t, telmoni.Config{
 		APIKey:         telmoni.NewSecret(testKey),
 		CaptureContent: fixture.Scenario.CaptureContent,
@@ -280,7 +263,7 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	perform(t, h, fixture)
 	bodies := h.transport.bodies(t)
 	if len(bodies) == 0 {
-		t.Fatal("the run was not sent")
+		t.Fatal("the trace was not sent")
 	}
 	gathered := deepCopy(t, bodies[0])
 	var spans []any
@@ -292,7 +275,7 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 	gathered["resourceSpans"].([]any)[0].(map[string]any)["scopeSpans"].([]any)[0].(map[string]any)["spans"] = spans
 	got := normalize(t, gathered)
 	if !reflect.DeepEqual(got, fixture.Export) {
-		t.Errorf("the export differs from run.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.Export))
+		t.Errorf("the export differs from trace.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.Export))
 	}
 	for _, req := range h.transport.all() {
 		if req.url != "https://api.telmoni.com/otlp/v1/traces" {
@@ -315,7 +298,7 @@ func TestTheRunMatchesTheGoldenExport(t *testing.T) {
 
 type retrievalFixture struct {
 	Scenario struct {
-		Run struct {
+		Trace struct {
 			Agent     string `json:"agent"`
 			UserID    string `json:"user_id"`
 			SessionID string `json:"session_id"`
@@ -329,7 +312,7 @@ type retrievalFixture struct {
 					FailsWith string `json:"fails_with"`
 				} `json:"retrieval"`
 			} `json:"inside"`
-		} `json:"run"`
+		} `json:"trace"`
 	} `json:"scenario"`
 	Cases []struct {
 		CaptureContent bool   `json:"capture_content"`
@@ -345,15 +328,15 @@ func TestTheRetrievalsMatchTheGoldenExport(t *testing.T) {
 	if err := json.Unmarshal(loadFixture(t, "retrieval.json"), &fixture); err != nil {
 		t.Fatalf("decoding retrieval.json: %v", err)
 	}
-	spec := fixture.Scenario.Run
+	spec := fixture.Scenario.Trace
 	for _, each := range fixture.Cases {
 		t.Run(each.Sends, func(t *testing.T) {
 			mode := scripted{status: http.StatusOK, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
 			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, mode, mode, mode, mode))
-			ctx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{UserID: spec.UserID, SessionID: spec.SessionID})
+			ctx, tr := h.client.Trace(context.Background(), spec.Agent, telmoni.TraceOptions{UserID: spec.UserID, SessionID: spec.SessionID})
 			for _, item := range spec.Inside {
 				given := item.Retrieval
-				_, found := run.Retrieval(ctx, given.Source, telmoni.RetrievalOptions{Query: given.Query, TopK: given.TopK, Memory: given.Memory})
+				_, found := tr.Retrieval(ctx, given.Source, telmoni.RetrievalOptions{Query: given.Query, TopK: given.TopK, Memory: given.Memory})
 				if given.FailsWith != "" {
 					found.FailWith(given.FailsWith)
 				} else {
@@ -361,7 +344,7 @@ func TestTheRetrievalsMatchTheGoldenExport(t *testing.T) {
 				}
 				found.End()
 			}
-			run.End()
+			tr.End()
 			h.flush()
 			// The ask before the first content holds no spans.
 			var bodies []map[string]any
@@ -371,7 +354,7 @@ func TestTheRetrievalsMatchTheGoldenExport(t *testing.T) {
 				}
 			}
 			if len(bodies) == 0 {
-				t.Fatal("the run was not sent")
+				t.Fatal("the trace was not sent")
 			}
 			gathered := deepCopy(t, bodies[0])
 			var spans []any
@@ -392,14 +375,14 @@ func TestTheRetrievalsMatchTheGoldenExport(t *testing.T) {
 	}
 }
 
-type runStartFixture struct {
+type traceStartFixture struct {
 	Scenario struct {
-		Run struct {
+		Trace struct {
 			Agent     string            `json:"agent"`
 			UserID    string            `json:"user_id"`
 			SessionID string            `json:"session_id"`
 			Tags      map[string]string `json:"tags"`
-		} `json:"run"`
+		} `json:"trace"`
 		Environment     string `json:"environment"`
 		Release         string `json:"release"`
 		ScheduleDelayMS int    `json:"schedule_delay_ms"`
@@ -408,24 +391,24 @@ type runStartFixture struct {
 	FirstExport map[string]any `json:"first_export"`
 }
 
-func TestARunIsSentFromItsStart(t *testing.T) {
-	var fixture runStartFixture
-	if err := json.Unmarshal(loadFixture(t, "run-start.json"), &fixture); err != nil {
-		t.Fatalf("decoding run-start.json: %v", err)
+func TestATraceIsSentFromItsStart(t *testing.T) {
+	var fixture traceStartFixture
+	if err := json.Unmarshal(loadFixture(t, "trace-start.json"), &fixture); err != nil {
+		t.Fatalf("decoding trace-start.json: %v", err)
 	}
-	scenario, spec := fixture.Scenario, fixture.Scenario.Run
+	scenario, spec := fixture.Scenario, fixture.Scenario.Trace
 	h := newHarness(t, telmoni.Config{
 		APIKey:      telmoni.NewSecret(testKey),
 		Environment: scenario.Environment,
 		Release:     scenario.Release,
 	}, nil, telmoni.WithBatching(2048, 512, time.Duration(scenario.ScheduleDelayMS)*time.Millisecond))
-	runCtx, run := h.client.Run(context.Background(), spec.Agent, telmoni.RunOptions{UserID: spec.UserID, SessionID: spec.SessionID, Tags: spec.Tags})
+	traceCtx, tr := h.client.Trace(context.Background(), spec.Agent, telmoni.TraceOptions{UserID: spec.UserID, SessionID: spec.SessionID, Tags: spec.Tags})
 	if !h.transport.waitForOpenings(1, time.Duration(scenario.SentWithinMS)*time.Millisecond) {
-		t.Fatal("nothing was sent before the run ended")
+		t.Fatal("nothing was sent before the trace ended")
 	}
 	first := decoded(t, h.transport.allOpenings())
 	if len(first) != 1 || len(h.transport.all()) != 0 {
-		t.Fatalf("%d bodies before the run ended, want one", len(first)+len(h.transport.all()))
+		t.Fatalf("%d bodies before the trace ended, want one", len(first)+len(h.transport.all()))
 	}
 	spans := spansIn(first[0])
 	if len(spans) != 1 {
@@ -438,39 +421,38 @@ func TestARunIsSentFromItsStart(t *testing.T) {
 	parent, _ := spans[0]["parentSpanId"].(string)
 	delete(spans[0], "parentSpanId")
 	got := normalize(t, first[0])
-	got["resourceSpans"].([]any)[0].(map[string]any)["scopeSpans"].([]any)[0].(map[string]any)["spans"].([]any)[0].(map[string]any)["parentSpanId"] = "<span:run>"
+	got["resourceSpans"].([]any)[0].(map[string]any)["scopeSpans"].([]any)[0].(map[string]any)["spans"].([]any)[0].(map[string]any)["parentSpanId"] = "<span:agent>"
 	if !reflect.DeepEqual(got, fixture.FirstExport) {
-		t.Errorf("the first body differs from run-start.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.FirstExport))
+		t.Errorf("the first body differs from trace-start.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.FirstExport))
 	}
-	run.End()
+	tr.End()
 	h.flush()
-	runs := byName(h.transport.spans(t))
-	own, ok := runs["invoke_agent "+spec.Agent]
+	own, ok := byName(h.transport.spans(t))["invoke_agent "+spec.Agent]
 	if !ok || len(h.transport.spans(t)) != 1 {
-		t.Fatalf("sent %v after the run ended, want its own span alone", names(h.transport.spans(t)))
+		t.Fatalf("sent %v after the trace ended, want the agent's span alone", names(h.transport.spans(t)))
 	}
 	if own["spanId"] != parent {
-		t.Errorf("the run's span is %v, the start's parent %v", own["spanId"], parent)
+		t.Errorf("the agent's span is %v, the start's parent %v", own["spanId"], parent)
 	}
 	if own["startTimeUnixNano"] != start["startTimeUnixNano"] {
-		t.Errorf("the run starts at %v, its start at %v", own["startTimeUnixNano"], start["startTimeUnixNano"])
+		t.Errorf("the agent's span starts at %v, its start at %v", own["startTimeUnixNano"], start["startTimeUnixNano"])
 	}
-	if a, b := attributesOf(t, own)["telmoni.run_id"], attributesOf(t, start)["telmoni.run_id"]; a == nil || a != b {
-		t.Errorf("the run's id is %v, its start's %v", a, b)
+	if own["traceId"] != start["traceId"] || own["traceId"] != tr.TraceID() {
+		t.Errorf("the trace's id is %v, its start's %v, TraceID() %s", own["traceId"], start["traceId"], tr.TraceID())
 	}
-	// A run continued from another service's headers sends no opening.
+	// A trace continued from another service's headers sends no opening.
 	header := http.Header{}
-	h.client.Inject(runCtx, header)
+	h.client.Inject(traceCtx, header)
 	ctx := h.client.Extract(context.Background(), header)
-	_, work := telmoni.RunFromContext(ctx).Step(ctx, "work")
+	_, work := telmoni.TraceFromContext(ctx).Step(ctx, "work")
 	work.End()
 	h.flush()
-	if n := len(h.transport.allOpenings()); n != 1 || strings.Contains(h.transport.text(), "telmoni.run.start") {
-		t.Errorf("%d openings sent alone and %q among the rest, want the first run's alone", n, "telmoni.run.start")
+	if n := len(h.transport.allOpenings()); n != 1 || strings.Contains(h.transport.text(), "telmoni.trace.start") {
+		t.Errorf("%d openings sent alone and %q among the rest, want the first trace's alone", n, "telmoni.trace.start")
 	}
 }
 
-// In nanoseconds, a retry its own: ingest moves a run by it.
+// In nanoseconds, a retry its own: ingest moves a trace by it.
 type failureFixture struct {
 	Scenario struct {
 		Agent string `json:"agent"`
@@ -494,7 +476,7 @@ type RateLimited struct{ message string }
 
 func (e *RateLimited) Error() string { return e.message }
 
-// normalizeFailure is the run's span as failure.json's README normalizes it.
+// normalizeFailure is the agent's span as failure.json's README normalizes it.
 func normalizeFailure(t *testing.T, span map[string]any) map[string]any {
 	t.Helper()
 	errorType, ok := attributesOf(t, span)["error.type"]
@@ -544,13 +526,13 @@ func TestAFailureLeavesInFullOnlyUnderBothLocks(t *testing.T) {
 	for _, each := range fixture.Cases {
 		mode := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, mode))
-		_, warm := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{})
+		_, warm := h.client.Trace(context.Background(), scenario.Agent, telmoni.TraceOptions{})
 		warm.End()
 		h.flush()
 		if got := h.client.ContentMode(); got != each.ContentMode {
 			t.Fatalf("the content mode is %q, want %q", got, each.ContentMode)
 		}
-		ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{})
+		ctx, tr := h.client.Trace(context.Background(), scenario.Agent, telmoni.TraceOptions{})
 		var attributes []attribute.KeyValue
 		for key, value := range scenario.Event.Attributes {
 			switch v := value.(type) {
@@ -561,8 +543,8 @@ func TestAFailureLeavesInFullOnlyUnderBothLocks(t *testing.T) {
 			}
 		}
 		trace.SpanFromContext(ctx).AddEvent(scenario.Event.Name, trace.WithAttributes(attributes...))
-		run.Fail(&RateLimited{scenario.Message})
-		run.End()
+		tr.Fail(&RateLimited{scenario.Message})
+		tr.End()
 		h.flush()
 		spans := h.transport.spans(t)
 		want := fixture.Kept
@@ -629,18 +611,18 @@ func TestTheModeIsAskedBeforeTheFirstContentItWouldSend(t *testing.T) {
 		}
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, answers...))
 		for n := range 2 {
-			ctx, run := h.client.Run(context.Background(), fixture.Agent, telmoni.RunOptions{})
-			// The opening alone and apart, so each run is one export.
+			ctx, tr := h.client.Trace(context.Background(), fixture.Agent, telmoni.TraceOptions{})
+			// The opening alone and apart, so each trace is one export.
 			if !h.transport.waitForOpenings(n+1, waitTimeout) {
-				t.Fatal("the run's opening was not sent at once")
+				t.Fatal("the trace's opening was not sent at once")
 			}
 			var opts telmoni.ModelCallOptions
 			if each.Content {
 				opts.InputMessages = fixture.InputMessages
 			}
-			_, call := run.ModelCall(ctx, fixture.Model, opts)
+			_, call := tr.ModelCall(ctx, fixture.Model, opts)
 			call.End()
-			run.End()
+			tr.End()
 			h.flush()
 		}
 		bodies := h.transport.bodies(t)
@@ -670,7 +652,7 @@ func TestTheModeIsAskedBeforeTheFirstContentItWouldSend(t *testing.T) {
 			t.Fatalf("%+v: %d model calls in the first export, want 1", each, len(calls))
 		}
 		if _, sent := attributesOf(t, calls[0])["gen_ai.input.messages"]; sent != each.Sent {
-			t.Errorf("%+v: the first run's content sent = %v, want %v", each, sent, each.Sent)
+			t.Errorf("%+v: the first trace's content sent = %v, want %v", each, sent, each.Sent)
 		}
 	}
 }
@@ -687,18 +669,18 @@ func TestImagesAreLiftedOutOfMessagesOnlyUnderBothLocks(t *testing.T) {
 	for _, each := range fixture.Cases {
 		mode := scripted{status: 200, headers: map[string]string{"Telmoni-Content-Mode": each.ContentMode}, body: []byte("{}")}
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent}, newFakeTransport(t, mode, mode, mode))
-		aRun(t, h)
+		aTrace(t, h)
 		// Twice, in two exports: each file is put once.
 		for range 2 {
-			ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{})
-			_, call := run.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{
+			ctx, tr := h.client.Trace(context.Background(), scenario.Agent, telmoni.TraceOptions{})
+			_, call := tr.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{
 				Provider:           scenario.Provider,
 				InputMessages:      scenario.InputMessages,
 				SystemInstructions: scenario.SystemInstructions,
 			})
 			call.Answered(telmoni.Answer{OutputMessages: scenario.OutputMessages})
 			call.End()
-			run.End()
+			tr.End()
 			h.flush()
 		}
 		calls := withPrefix(h.transport.spans(t), "chat ")
@@ -821,9 +803,9 @@ func TestTheMaskAnswersEachContentFieldOnlyUnderBothLocks(t *testing.T) {
 		// The mode to each export, the opening sharing one with a call or not.
 		transport.fallback = mode
 		h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: each.CaptureContent, Mask: mask}, transport)
-		aRun(t, h)
-		ctx, run := h.client.Run(context.Background(), scenario.Agent, telmoni.RunOptions{UserID: scenario.User, SessionID: scenario.Session, Tags: scenario.Tags})
-		_, call := run.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{
+		aTrace(t, h)
+		ctx, tr := h.client.Trace(context.Background(), scenario.Agent, telmoni.TraceOptions{UserID: scenario.User, SessionID: scenario.Session, Tags: scenario.Tags})
+		_, call := tr.ModelCall(ctx, scenario.Model, telmoni.ModelCallOptions{
 			Provider:           scenario.Provider,
 			InputMessages:      scenario.InputMessages,
 			SystemInstructions: scenario.SystemInstructions,
@@ -840,8 +822,8 @@ func TestTheMaskAnswersEachContentFieldOnlyUnderBothLocks(t *testing.T) {
 			}
 		}
 		trace.SpanFromContext(ctx).AddEvent(scenario.Event.Name, trace.WithAttributes(attributes...))
-		run.Fail(&Declined{scenario.Message})
-		run.End()
+		tr.Fail(&Declined{scenario.Message})
+		tr.End()
 		h.flush()
 
 		spans := h.transport.spans(t)
@@ -865,15 +847,15 @@ func TestTheMaskAnswersEachContentFieldOnlyUnderBothLocks(t *testing.T) {
 				sent[key] = decoded
 			}
 		}
-		want, wantRun, wantWarnings := fixture.Sent, fixture.Kept, fixture.Warnings
+		want, wantAgent, wantWarnings := fixture.Sent, fixture.Kept, fixture.Warnings
 		if !each.Masks {
-			want, wantRun, wantWarnings = map[string]any{}, fixture.Withheld, nil
+			want, wantAgent, wantWarnings = map[string]any{}, fixture.Withheld, nil
 		}
 		if !reflect.DeepEqual(sent, want) {
 			t.Errorf("%+v: sent\n%s\nwant\n%s", each, pretty(t, sent), pretty(t, want))
 		}
-		if got := normalizeFailure(t, spans[len(spans)-1]); !reflect.DeepEqual(got, wantRun) {
-			t.Errorf("%+v: the run sent\n%s\nwant\n%s", each, pretty(t, got), pretty(t, wantRun))
+		if got := normalizeFailure(t, spans[len(spans)-1]); !reflect.DeepEqual(got, wantAgent) {
+			t.Errorf("%+v: the agent's span sent\n%s\nwant\n%s", each, pretty(t, got), pretty(t, wantAgent))
 		}
 		if got := h.logs.warnings(); !slices.Equal(got, wantWarnings) {
 			t.Errorf("%+v: warnings %q, want %q", each, got, wantWarnings)
@@ -914,12 +896,12 @@ func TestAMaskThatPanicsIsWarnedOfOnceAndAskedEachExport(t *testing.T) {
 		panic(value)
 	}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k"), CaptureContent: true, Mask: mask}, newFakeTransport(t, contentOn(), contentOn(), contentOn()))
-	aRun(t, h)
+	aTrace(t, h)
 	for range 2 {
-		ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
-		_, call := run.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: "a secret"})
+		ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
+		_, call := tr.ModelCall(ctx, "gpt-4o", telmoni.ModelCallOptions{InputMessages: "a secret"})
 		call.End()
-		run.End()
+		tr.End()
 		h.flush()
 	}
 	if got := calls.Load(); got != 2 {
@@ -941,10 +923,10 @@ func TestAMaskAnsweringAValueUnchangedKeepsItsType(t *testing.T) {
 		}
 		return value, true
 	}}, newFakeTransport(t, contentOn(), contentOn()))
-	aRun(t, h)
-	ctx, run := h.client.Run(context.Background(), "support-bot", telmoni.RunOptions{})
+	aTrace(t, h)
+	ctx, tr := h.client.Trace(context.Background(), "support-bot", telmoni.TraceOptions{})
 	trace.SpanFromContext(ctx).AddEvent("checked", trace.WithAttributes(attribute.Int64("count", 3), attribute.Bool("found", true)))
-	run.End()
+	tr.End()
 	h.flush()
 	spans := h.transport.spans(t)
 	events := spans[len(spans)-1]["events"].([]any)
@@ -964,7 +946,7 @@ func TestEachAttemptCarriesThisClockAsItLeaves(t *testing.T) {
 		newFakeTransport(t, answerFrom(t, "answers/unavailable.json")),
 		telmoni.WithSleep(func(time.Duration) { time.Sleep(5 * time.Millisecond) }))
 	before := time.Now().UnixNano()
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	after := time.Now().UnixNano()
 	requests := h.transport.all()
@@ -984,11 +966,11 @@ func TestEachAttemptCarriesThisClockAsItLeaves(t *testing.T) {
 	}
 }
 
-// aRun is one empty run, sent in an export of its own.
-func aRun(t *testing.T, h *harness) {
+// aTrace is one empty trace, sent in an export of its own.
+func aTrace(t *testing.T, h *harness) {
 	t.Helper()
-	_, run := h.client.Run(context.Background(), "bot", telmoni.RunOptions{})
-	run.End()
+	_, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	tr.End()
 	h.flush()
 }
 
@@ -1037,7 +1019,7 @@ func TestKept(t *testing.T) {
 	if mode := h.client.ContentMode(); mode != "" {
 		t.Errorf("the content mode is %q before any answer", mode)
 	}
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectWarnings(t, h)
 	if mode := h.client.ContentMode(); mode != "off" {
@@ -1049,8 +1031,8 @@ func TestKept(t *testing.T) {
 func TestDroppedIsWarnedOnce(t *testing.T) {
 	dropped := answerFrom(t, "answers/dropped.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, dropped, dropped))
-	aRun(t, h)
-	aRun(t, h)
+	aTrace(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectAnswer(t, h, "answers/dropped.json")
 }
@@ -1058,7 +1040,7 @@ func TestDroppedIsWarnedOnce(t *testing.T) {
 func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 	unlisted := answerFrom(t, "answers/unlisted.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unlisted))
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectAnswer(t, h, "answers/unlisted.json")
 }
@@ -1066,7 +1048,7 @@ func TestUnlistedNamesTheTagThatWouldKeepIt(t *testing.T) {
 func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
 	cardinality := answerFrom(t, "answers/cardinality.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, cardinality))
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectAnswer(t, h, "answers/cardinality.json")
 }
@@ -1074,8 +1056,8 @@ func TestATagPastTheCardinalityCapIsWarnedWithWhatKeepsIt(t *testing.T) {
 func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 	refused := answerFrom(t, "answers/refused.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, refused, refused))
-	aRun(t, h)
-	aRun(t, h)
+	aTrace(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectAnswer(t, h, "answers/refused.json")
 	expectRequests(t, h, 2)
@@ -1085,7 +1067,7 @@ func TestRefusedIsWarnedOnceAndNeverRetried(t *testing.T) {
 func TestRateLimitedWaitsRetryAfterAndSendsTheSameBytes(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, answerFrom(t, "answers/rate-limited.json"), kept(t)))
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectSleeps(t, h, 2*time.Second)
 	requests := h.transport.all()
@@ -1099,7 +1081,7 @@ func TestRateLimitedWaitsRetryAfterAndSendsTheSameBytes(t *testing.T) {
 func TestARetryAfterPastTheCapWaitsTheCap(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, answerFrom(t, "answers/rate-limited-long.json"), kept(t)))
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Minute)
 	requests := h.transport.all()
@@ -1121,7 +1103,7 @@ func TestRetryAfterIsReadAsText(t *testing.T) {
 		limited("-5"), limited(" +7\t"), kept(t),
 		limited(strings.Repeat("9", 400)), kept(t)))
 	for range 3 {
-		aRun(t, h)
+		aTrace(t, h)
 	}
 	h.shutdown()
 	expectSleeps(t, h, time.Minute, 2*time.Second, 0, 7*time.Second, time.Minute)
@@ -1132,8 +1114,8 @@ func TestRetryAfterIsReadAsText(t *testing.T) {
 func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 	unavailable := answerFrom(t, "answers/unavailable.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unavailable, unavailable, unavailable, kept(t)))
-	aRun(t, h)
-	aRun(t, h)
+	aTrace(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, time.Second)
 	expectAnswer(t, h, "answers/unavailable.json")
@@ -1143,8 +1125,8 @@ func TestUnavailableIsRetriedThreeTimesThenDropped(t *testing.T) {
 func TestForbiddenIsNotRetriedAndTheNextBatchIsStillSent(t *testing.T) {
 	forbidden := answerFrom(t, "answers/forbidden.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, forbidden, forbidden))
-	aRun(t, h)
-	aRun(t, h)
+	aTrace(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectAnswer(t, h, "answers/forbidden.json")
 	expectRequests(t, h, 2)
@@ -1162,7 +1144,7 @@ func TestEachAnswerIsWarnedWordForWord(t *testing.T) {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			answer := answerFrom(t, name)
 			h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, answer, answer, answer))
-			aRun(t, h)
+			aTrace(t, h)
 			h.shutdown()
 			expectAnswer(t, h, name)
 		})
@@ -1172,7 +1154,7 @@ func TestEachAnswerIsWarnedWordForWord(t *testing.T) {
 func TestANetworkFailureIsRetriedWithBackoff(t *testing.T) {
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, errors.New("refused"), errors.New("refused"), kept(t)))
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, 2*time.Second)
 	expectWarnings(t, h)
@@ -1182,8 +1164,8 @@ func TestANetworkFailureIsRetriedWithBackoff(t *testing.T) {
 func TestANetworkFailureThreeTimesNamesTheErrorsType(t *testing.T) {
 	down := errors.New("refused")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, down, down, down, kept(t)))
-	aRun(t, h)
-	aRun(t, h)
+	aTrace(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectSleeps(t, h, time.Second, 2*time.Second)
 	expectWarnings(t, h, "telmoni: export failed after 3 attempts (errors.errorString); the batch was dropped")
@@ -1197,7 +1179,7 @@ func TestAFailureEndingInTransportErrorCarriesNoStatus(t *testing.T) {
 	down := errors.New("refused")
 	unavailable := answerFrom(t, "answers/unavailable.json")
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")}, newFakeTransport(t, unavailable, unavailable, down))
-	aRun(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectWarnings(t, h, "telmoni: export failed after 3 attempts (errors.errorString); the batch was dropped")
 	expectFields(t, h, map[string]any{"kind": "failed"})
@@ -1210,8 +1192,8 @@ func TestATransportFailureIsNamedByItsCause(t *testing.T) {
 	timedOut := &url.Error{Op: "Post", URL: "https://api.telmoni.com", Err: context.DeadlineExceeded}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, refused, refused, refused, timedOut, timedOut, timedOut))
-	aRun(t, h)
-	aRun(t, h)
+	aTrace(t, h)
+	aTrace(t, h)
 	h.shutdown()
 	expectWarnings(t, h,
 		"telmoni: export failed after 3 attempts (net.OpError); the batch was dropped",

@@ -1171,7 +1171,7 @@ async fn dispatch_redelivery(
         incident: delivery.incident_id.map(|id| EventIncident {
             project_id,
             id,
-            run_url: delivery.run_url.as_deref(),
+            trace_url: delivery.trace_url.as_deref(),
         }),
     };
     // Each step has its own budget, both inside the lease: a stalled unwrap

@@ -1,6 +1,6 @@
 //! A project's incidents, under [`Resource::Alert`] as their alerts are: `GET
 //! /internal/v1/telemetry/incidents`, those not resolved first, then the
-//! newest, or with `?run=` those whose notices showed that run, and
+//! newest, or with `?trace=` those whose notices showed that trace, and
 //! `/incidents/{id}`; `POST /incidents/{id}/acknowledge` and `/resolve`,
 //! which any member of the project sends, each filed in the organization's
 //! audit chain; an Acknowledge pressed on its Slack notice takes the same
@@ -56,12 +56,12 @@ pub struct IncidentList {
     pub incidents: Vec<IncidentAnswer>,
 }
 
-/// The list's query: none, or the run whose incidents a trace's page links.
+/// The list's query: none, or the trace whose incidents its page links.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IncidentQuery {
     #[serde(default)]
-    pub run: Option<String>,
+    pub trace: Option<String>,
 }
 
 fn incident_id(given: &str) -> Result<Uuid, TelmoniError> {
@@ -164,8 +164,8 @@ async fn answered(state: &AppState, project_id: &ProjectId, row: IncidentRow) ->
 }
 
 /// `GET /internal/v1/telemetry/incidents` — the project's incidents, those
-/// not resolved first, then the newest; with `?run=`, those whose notices
-/// showed that run, the newest first; [`INCIDENTS_MAX`] at most.
+/// not resolved first, then the newest; with `?trace=`, those whose notices
+/// showed that trace, the newest first; [`INCIDENTS_MAX`] at most.
 pub async fn list_incidents(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -184,17 +184,15 @@ pub(crate) async fn incident_list(
     project_id: &ProjectId,
     query: IncidentQuery,
 ) -> Result<IncidentList, TelmoniError> {
-    let run = match query.run.as_deref() {
+    let trace = match query.trace.as_deref() {
         None => None,
-        Some(given) => Some(
-            given
-                .parse::<Uuid>()
-                .map_err(|_| TelmoniError::BadRequest("run is a run's id, a UUID".into()))?,
-        ),
+        Some(given) => Some(super::traces::trace_id_of(given).map_err(|_| {
+            TelmoniError::BadRequest("trace is a trace's id, 32 hex characters".into())
+        })?),
     };
     let mut tx = project_scope(&state.db, project_id).await?;
-    let rows = match run {
-        Some(run) => incidents::showing(&mut tx, project_id, run, INCIDENTS_MAX).await?,
+    let rows = match trace {
+        Some(trace) => incidents::showing(&mut tx, project_id, &trace, INCIDENTS_MAX).await?,
         None => incidents::incidents(&mut tx, project_id, INCIDENTS_MAX).await?,
     };
     tx.commit().await?;
@@ -302,7 +300,7 @@ async fn moved(
         let change = chain::Change {
             action: AuditAction::Updated,
             kind: TelmoniResourceKind::Incident,
-            id,
+            id: id.to_string(),
             metadata: match row.owner() {
                 Some(incidents::Owner::Monitor(monitor_id)) => json!({
                     "agent": row.agent,

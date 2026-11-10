@@ -7,16 +7,16 @@ use serde::{Deserialize, Serialize};
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum ScoreTarget {
-    /// A run, its trace whole.
-    Run,
-    /// One span of a run.
+    /// A trace whole.
+    Trace,
+    /// One span of a trace.
     Span,
-    /// A session, its runs together.
+    /// A session, its traces together.
     Session,
 }
 
 crate::wire_enum!(ScoreTarget {
-    Run => "run",
+    Trace => "trace",
     Span => "span",
     Session => "session",
 });

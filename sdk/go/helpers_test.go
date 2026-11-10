@@ -108,8 +108,9 @@ type request struct {
 
 // fakeTransport records every export and answers from a script, then with
 // kept; each upload, a PUT, apart, answered from its own script, then with a
-// 204. An export of run openings alone is kept apart too, answered with a bare
-// 200: whether one goes alone or with its run is a race the worker runs.
+// 204. An export of trace openings alone is kept apart too, answered with a
+// bare 200: whether one goes alone or with its trace is a race the worker
+// runs.
 type fakeTransport struct {
 	mu            sync.Mutex
 	received      *sync.Cond
@@ -172,7 +173,7 @@ func (f *fakeTransport) send(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// openingsAlone is whether an export holds spans and each is a run's opening.
+// openingsAlone is whether an export holds spans and each is a trace's opening.
 func openingsAlone(body []byte) bool {
 	var export map[string]any
 	if json.Unmarshal(body, &export) != nil {
@@ -183,7 +184,7 @@ func openingsAlone(body []byte) bool {
 	}
 	spans := spansIn(export)
 	return len(spans) > 0 && !slices.ContainsFunc(spans, func(span map[string]any) bool {
-		return span["name"] != "telmoni.run.start"
+		return span["name"] != "telmoni.trace.start"
 	})
 }
 
@@ -256,14 +257,14 @@ func decoded(t *testing.T, requests []request) []map[string]any {
 	return out
 }
 
-// spans is every span sent but each run's opening, which run-start.json's
+// spans is every span sent but each trace's opening, which trace-start.json's
 // test reads.
 func (f *fakeTransport) spans(t *testing.T) []map[string]any {
 	t.Helper()
 	var out []map[string]any
 	for _, body := range f.bodies(t) {
 		for _, span := range spansIn(body) {
-			if span["name"] != "telmoni.run.start" {
+			if span["name"] != "telmoni.trace.start" {
 				out = append(out, span)
 			}
 		}

@@ -255,15 +255,15 @@ class Config:
     # TELMONI_SCRUB_SECRETS (0 turns it off) and TELMONI_SCRUB_PII (1 turns it on).
     scrub_secrets: bool | None = None
     scrub_pii: bool | None = None
-    # The sampler whose root decision a run takes when it starts a trace of its
-    # own; None reads it from the application's tracer provider, or samples.
+    # The sampler whose decision a trace takes as it opens; None reads it from
+    # the application's tracer provider, or samples.
     sampler: Sampler | None = field(default=None, repr=False)
     # The deployment this process runs in (production, staging) and the
     # release it runs (a version or a commit), sent on every span's resource
     # as deployment.environment.name and service.version; nothing when unset.
     environment: str | None = None
     release: str | None = None
-    # The project's own prices, which a run's spend cap counts a call by
+    # The project's own prices, which a trace's spend cap counts a call by
     # before the table this release carries; a name given twice takes its last.
     prices: Sequence[Price] = ()
 
@@ -478,12 +478,13 @@ class StepRecord:
 
 
 @dataclass(frozen=True)
-class RunRecord:
-    """A run that has ended, as ``record_run`` sends it: its id, a UUID the
-    caller gives, and everything in it, each with its own times. Times carry
-    their timezone, since a naive one would be read as this machine's."""
+class TraceRecord:
+    """A trace that has ended, as ``record_trace`` sends it: its id, 32 hex
+    digits the caller gives, and everything in it, each with its own times.
+    Times carry their timezone, since a naive one would be read as this
+    machine's."""
 
-    run_id: str
+    trace_id: str
     agent: str
     start: datetime
     end: datetime

@@ -12,11 +12,11 @@ import { putScoreAction } from "@/app/(app)/[organization]/[project]/traces/acti
 import { SpanScores, TraceScores, TraceScoresProvider } from "@/components/traces/trace-scores";
 import type { Score } from "@/lib/server/entities/scores";
 
-const RUN = "5d4f5c68-0000-4000-8000-00000000000a";
+const TRACE_ID = "5d4f5c6800004000800000000000000a";
 const SCORE: Score = {
   score_id: "7a1c0e52-0000-4000-8000-000000000002",
-  target: "run",
-  run_id: RUN,
+  target: "trace",
+  trace_id: TRACE_ID,
   name: "useful",
   data_type: "boolean",
   value: 1,
@@ -31,7 +31,7 @@ describe("a trace's scores", () => {
     render(
       <TraceScores
         projectId="p"
-        runId={RUN}
+        traceId={TRACE_ID}
         scores={[SCORE, { ...SCORE, score_id: "other", name: "plain" }]}
         comments={{ [SCORE.score_id]: "The refund was right." }}
         spanNames={{}}
@@ -47,7 +47,7 @@ describe("a trace's scores", () => {
 
   it("sends a comment with a score, trimmed, and none where it is left blank", async () => {
     render(
-      <TraceScores projectId="p" runId={RUN} scores={[]} comments={{}} spanNames={{}} me="user_me" administers={false} keepsContent />,
+      <TraceScores projectId="p" traceId={TRACE_ID} scores={[]} comments={{}} spanNames={{}} me="user_me" administers={false} keepsContent />,
     );
     const give = async (comment: string) => {
       if (!screen.queryByRole("dialog")) fireEvent.click(screen.getByRole("button", { name: "Score" }));
@@ -60,7 +60,7 @@ describe("a trace's scores", () => {
     await give("  Right refund.  ");
     await waitFor(() =>
       expect(putScoreAction).toHaveBeenCalledWith("p", {
-        run_id: RUN,
+        trace_id: TRACE_ID,
         name: "useful",
         data_type: "boolean",
         value: 1,
@@ -71,7 +71,7 @@ describe("a trace's scores", () => {
     await give("   ");
     await waitFor(() =>
       expect(putScoreAction).toHaveBeenCalledWith("p", {
-        run_id: RUN,
+        trace_id: TRACE_ID,
         name: "useful",
         data_type: "boolean",
         value: 1,
@@ -81,7 +81,7 @@ describe("a trace's scores", () => {
 
   it("asks no comment where the project keeps no content", () => {
     render(
-      <TraceScores projectId="p" runId={RUN} scores={[]} comments={{}} spanNames={{}} me="user_me" administers={false} keepsContent={false} />,
+      <TraceScores projectId="p" traceId={TRACE_ID} scores={[]} comments={{}} spanNames={{}} me="user_me" administers={false} keepsContent={false} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Score" }));
     expect(screen.queryByLabelText("Comment")).toBeNull();

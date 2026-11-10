@@ -1,4 +1,4 @@
-//! What runs spent: each model call's cost as reported, else its tokens at
+//! What traces spent: each model call's cost as reported, else its tokens at
 //! the price in force the day it arrived ([`crate::prices`]), else nothing,
 //! the call named as unpriced. Each read first finds the models of its calls
 //! that reported no cost, then is handed their prices as parameters, so
@@ -7,7 +7,6 @@
 
 use clickhouse::Row;
 use serde::Deserialize;
-use uuid::Uuid;
 
 use telmoni_shared::{ProjectId, RuleAggregation};
 
@@ -110,7 +109,7 @@ pub async fn book_for_rollups(
 }
 
 /// The model calls a window holds that an alert's filters admit, which take
-/// no tool or status for a run's cost.
+/// no tool or status for a trace's cost.
 macro_rules! window_calls {
     () => {
         concat!(
@@ -120,8 +119,8 @@ macro_rules! window_calls {
             "AND received_at < {to:DateTime64(6, 'UTC')} ",
             "AND kind = 'model_call' ",
             $crate::rules::calls_admitted!(),
-            // A run's tags ride on its own span, landing as it ends: found from a day before.
-            "AND (empty({tags:Array(String)}) OR run_id IN (SELECT run_id FROM telemetry.spans ",
+            // A trace's tags ride on the agent's span, landing as it ends: found from a day before.
+            "AND (empty({tags:Array(String)}) OR trace_id IN (SELECT trace_id FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
             "AND received_at >= {from:DateTime64(6, 'UTC')} - INTERVAL 1 DAY ",
             "AND hasAny(arrayMap((k, v) -> concat(k, ':', v), mapKeys(tags), mapValues(tags)), ",
@@ -137,36 +136,37 @@ const WINDOW_NAMES_SQL: &str = concat!(
     " AND isNull(cost) AND provider != '' AND model != ''"
 );
 
-/// Each run's spend over a window, folded: how many runs, the most one spent,
-/// their average, their sum scaled by each call's sample rate, and the costliest.
-const RUNS_SQL: &str = concat!(
-    "SELECT count() AS runs, max(run_spent) AS most, avg(run_spent) AS mean, ",
-    "sum(run_scaled) AS total, argMax(run_id, run_spent) AS costliest ",
-    "FROM (SELECT run_id, sum(spent) AS run_spent, ",
-    "sum(spent / ifNull(sample_rate, 1)) AS run_scaled ",
-    "FROM (SELECT run_id, sample_rate, ",
+/// Each trace's spend over a window, folded: how many traces, the most one
+/// spent, their average, their sum scaled by each call's sample rate, and
+/// the costliest.
+const TRACES_SQL: &str = concat!(
+    "SELECT count() AS traces, max(trace_spent) AS most, avg(trace_spent) AS mean, ",
+    "sum(trace_scaled) AS total, argMax(trace_id, trace_spent) AS costliest ",
+    "FROM (SELECT trace_id, sum(spent) AS trace_spent, ",
+    "sum(spent / ifNull(sample_rate, 1)) AS trace_scaled ",
+    "FROM (SELECT trace_id, sample_rate, ",
     priced!(),
     " ",
     window_calls!(),
-    ") GROUP BY run_id)"
+    ") GROUP BY trace_id)"
 );
 
-/// The names one run's calls that reported no cost are priced by.
-const RUN_NAMES_SQL: &str = concat!(
+/// The names one trace's calls that reported no cost are priced by.
+const TRACE_NAMES_SQL: &str = concat!(
     "SELECT DISTINCT provider, model FROM telemetry.spans ",
-    "WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} ",
+    "WHERE project_id IN {projects:Array(String)} AND trace_id = {trace:String} ",
     "AND kind = 'model_call' AND isNull(cost) AND provider != '' AND model != ''"
 );
 
-/// What one run has spent so far, and the names of its calls with neither a
-/// cost nor a price.
-const RUN_SQL: &str = concat!(
-    "SELECT sum(spent) AS run_spent, ",
+/// What one trace has spent so far, and the names of its calls with neither
+/// a cost nor a price.
+const TRACE_SQL: &str = concat!(
+    "SELECT sum(spent) AS trace_spent, ",
     "arraySort(groupUniqArrayIf((provider, model), unpriced)) AS unpriced_names ",
     "FROM (SELECT provider, model, ",
     priced!(),
     " FROM telemetry.spans ",
-    "WHERE project_id IN {projects:Array(String)} AND run_id = {run:UUID} ",
+    "WHERE project_id IN {projects:Array(String)} AND trace_id = {trace:String} ",
     "AND kind = 'model_call')"
 );
 
@@ -208,7 +208,7 @@ const SUMMED_NAMES_SQL: &str = concat!(
 );
 
 /// What a window's calls that an alert's filters admit spent, each scaled by
-/// its run's sample rate: the full hours from the totals, the rest from the
+/// its trace's sample rate: the full hours from the totals, the rest from the
 /// spans, so a month's sum outlives a retention shorter than it.
 const SUMMED_SQL: &str = concat!(
     "SELECT toUInt64(sum(n)) AS calls, sum(s) AS total FROM (",
@@ -226,7 +226,7 @@ const SUMMED_SQL: &str = concat!(
 );
 
 /// What the calls of `projects` that `filters` admit spent over `window`,
-/// each scaled by its run's sample rate: a budget's sum where it names no
+/// each scaled by its trace's sample rate: a budget's sum where it names no
 /// tag, which the totals keep no column for; none where no call landed.
 ///
 /// # Errors
@@ -291,43 +291,42 @@ impl From<sqlx::Error> for Unread {
     }
 }
 
-/// What the runs of a window spent, folded.
+/// What the traces of a window spent, folded.
 #[derive(Debug, Clone, Default, PartialEq, Row, Deserialize)]
-pub struct RunsSpent {
-    /// The runs whose model calls the window holds.
-    pub runs: u64,
+pub struct TracesSpent {
+    /// The traces whose model calls the window holds.
+    pub traces: u64,
     /// The most one of them spent.
     pub most: f64,
     /// Their average.
     pub mean: f64,
     /// Their sum.
     pub total: f64,
-    /// The run that spent the most.
-    #[serde(with = "clickhouse::serde::uuid")]
-    pub costliest: Uuid,
+    /// The trace that spent the most.
+    pub costliest: String,
 }
 
-impl RunsSpent {
+impl TracesSpent {
     /// An alert's value: the fold `aggregation` names, none where the window
-    /// holds no run's call.
+    /// holds no trace's call.
     #[must_use]
     pub fn value(&self, aggregation: RuleAggregation) -> Option<f64> {
-        if self.runs == 0 {
+        if self.traces == 0 {
             return None;
         }
         match aggregation {
             RuleAggregation::Max => Some(self.most),
             RuleAggregation::Avg => Some(self.mean),
             RuleAggregation::Sum => Some(self.total),
-            // A run's cost folds no other way ([`crate::rules::folds`]).
+            // A trace's cost folds no other way ([`crate::rules::folds`]).
             _ => None,
         }
     }
 }
 
-/// What one run has spent so far.
+/// What one trace has spent so far.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct RunSpent {
+pub struct TraceSpent {
     /// In US dollars, each call reported or priced.
     pub spent: f64,
     /// The provider and model of each name its calls with neither a cost
@@ -343,22 +342,22 @@ struct Name {
 
 #[derive(Row, Deserialize)]
 struct Spent {
-    run_spent: f64,
+    trace_spent: f64,
     unpriced_names: Vec<(String, String)>,
 }
 
-/// What each run of `projects` spent over `window`, read from its model
+/// What each trace of `projects` spent over `window`, read from its model
 /// calls that `filters` admit, folded.
 ///
 /// # Errors
 ///
 /// ClickHouse or Postgres did not answer, or refused the read.
-pub async fn runs(
+pub async fn traces(
     state: &AppState,
     projects: &Projects,
     window: Window,
     filters: &RuleFilters,
-) -> Result<RunsSpent, Unread> {
+) -> Result<TracesSpent, Unread> {
     let names: Vec<Name> = windowed(
         state.store.read(projects, WINDOW_NAMES_SQL),
         window,
@@ -368,34 +367,42 @@ pub async fn runs(
     .await?;
     let book = PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?;
     Ok(priced_by(
-        windowed(state.store.read(projects, RUNS_SQL), window, filters),
+        windowed(state.store.read(projects, TRACES_SQL), window, filters),
         &book,
     )
     .fetch_one()
     .await?)
 }
 
-/// What run `run_id` of `projects` has spent so far, all of its calls read.
+/// What trace `trace_id` of `projects` has spent so far, all of its calls
+/// read.
 ///
 /// # Errors
 ///
 /// ClickHouse or Postgres did not answer, or refused the read.
-pub async fn run(state: &AppState, projects: &Projects, run_id: Uuid) -> Result<RunSpent, Unread> {
+pub async fn trace(
+    state: &AppState,
+    projects: &Projects,
+    trace_id: &str,
+) -> Result<TraceSpent, Unread> {
     let names: Vec<Name> = state
         .store
-        .read(projects, RUN_NAMES_SQL)
-        .param("run", run_id)
+        .read(projects, TRACE_NAMES_SQL)
+        .param("trace", trace_id)
         .fetch_all()
         .await?;
     let book = PriceBook::read_for(&state.db, projects.as_slice(), &pairs(names)).await?;
     let spent: Spent = priced_by(
-        state.store.read(projects, RUN_SQL).param("run", run_id),
+        state
+            .store
+            .read(projects, TRACE_SQL)
+            .param("trace", trace_id),
         &book,
     )
     .fetch_one()
     .await?;
-    Ok(RunSpent {
-        spent: spent.run_spent,
+    Ok(TraceSpent {
+        spent: spent.trace_spent,
         unpriced: spent.unpriced_names,
     })
 }
@@ -435,7 +442,7 @@ fn pairs(names: Vec<Name>) -> Vec<(String, String)> {
         .collect()
 }
 
-/// `read` bound to `window` and to the filters a run's cost takes.
+/// `read` bound to `window` and to the filters a trace's cost takes.
 fn windowed(read: Read, window: Window, filters: &RuleFilters) -> Read {
     filters
         .bind_calls(
@@ -487,28 +494,28 @@ pub(crate) fn priced_by(read: Read, book: &PriceBook) -> Read {
 mod tests {
     use super::*;
 
-    /// A run's cost folds to the most, the average or the sum, and to
-    /// nothing where no run's call landed.
+    /// A trace's cost folds to the most, the average or the sum, and to
+    /// nothing where no trace's call landed.
     #[test]
-    fn a_runs_cost_is_folded_as_its_alert_asks() {
-        let spent = RunsSpent {
-            runs: 4,
+    fn a_traces_cost_is_folded_as_its_alert_asks() {
+        let spent = TracesSpent {
+            traces: 4,
             most: 5.5,
             mean: 2.0,
             total: 8.0,
-            costliest: Uuid::nil(),
+            costliest: "ab".repeat(16),
         };
         assert_eq!(spent.value(RuleAggregation::Max), Some(5.5));
         assert_eq!(spent.value(RuleAggregation::Avg), Some(2.0));
         assert_eq!(spent.value(RuleAggregation::Sum), Some(8.0));
         assert_eq!(spent.value(RuleAggregation::P99), None);
-        assert_eq!(RunsSpent::default().value(RuleAggregation::Max), None);
+        assert_eq!(TracesSpent::default().value(RuleAggregation::Max), None);
     }
 
     /// Every read binds the prices it reads, and each price is bound once.
     #[test]
     fn the_reads_name_the_prices_they_are_handed() {
-        for sql in [RUNS_SQL, RUN_SQL] {
+        for sql in [TRACES_SQL, TRACE_SQL] {
             for price in [
                 "{price_projects:Array(String)}",
                 "{price_providers:Array(String)}",

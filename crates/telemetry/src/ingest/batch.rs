@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use uuid::Uuid;
 
 use telmoni_shared::ProjectId;
 
@@ -29,10 +28,9 @@ pub struct Batch {
     /// The content of each kept span that carries any, on a project that keeps it.
     pub content: Vec<SpanContent>,
     /// Another exporter's spans, each with its content, held until its
-    /// trace's tree places it in a run ([`crate::foreign`]).
+    /// trace's tree names its agent ([`crate::foreign`]).
     pub held: Vec<(SpanRow, Vec<(String, String)>)>,
-    /// The scores the spans' evaluation events gave, each naming its span;
-    /// another exporter's under the nil run until its trace is placed.
+    /// The scores the spans' evaluation events gave, each naming its span.
     pub scores: Vec<crate::scores::ScoreRow>,
     /// The spans refused and the attributes dropped.
     pub report: Report,
@@ -41,7 +39,6 @@ pub struct Batch {
 /// One kept span's content: each field by its name, as it arrived.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpanContent {
-    pub run_id: Uuid,
     pub trace_id: String,
     pub span_id: String,
     pub fields: Vec<(String, String)>,
@@ -117,7 +114,6 @@ pub fn read(
                             .extend(scores_of(one, &row, project_id, received_at));
                         if !fields.is_empty() {
                             batch.content.push(SpanContent {
-                                run_id: row.run_id,
                                 trace_id: row.trace_id.clone(),
                                 span_id: row.span_id.clone(),
                                 fields,
@@ -165,8 +161,8 @@ pub fn read(
     Ok(batch)
 }
 
-/// A kept span's scores, from its evaluation events: the run's own scores the
-/// run, any other span itself.
+/// A kept span's scores, from its evaluation events: the agent's own span's
+/// score the trace, any other span itself.
 fn scores_of(
     span: &opentelemetry_proto::tonic::trace::v1::Span,
     row: &SpanRow,
@@ -184,12 +180,11 @@ fn scores_of(
                 project_id: project_id.clone(),
                 received_at,
                 score_id,
-                target: if row.kind == SpanKind::Run {
-                    ScoreTarget::Run
+                target: if row.kind == SpanKind::Agent {
+                    ScoreTarget::Trace
                 } else {
                     ScoreTarget::Span
                 },
-                run_id: row.run_id,
                 trace_id: row.trace_id.clone(),
                 span_id: row.span_id.clone(),
                 session_id: row.session_id.clone(),
@@ -208,20 +203,26 @@ fn scores_of(
         .collect()
 }
 
-/// Every span under the nil run, another exporter's, moved to `held` with
-/// its content, once its clock is read as its export's.
+/// Every span naming no agent, another exporter's, moved to `held` with its
+/// content, once its clock is read as its export's.
 fn hold_foreign(batch: &mut Batch) {
-    if batch.rows.iter().all(|row| !row.run_id.is_nil()) {
+    if batch.rows.iter().all(|row| !row.agent.is_empty()) {
         return;
     }
     let (held, rows): (Vec<SpanRow>, Vec<SpanRow>) = std::mem::take(&mut batch.rows)
         .into_iter()
-        .partition(|row| row.run_id.is_nil());
+        .partition(|row| row.agent.is_empty());
     batch.rows = rows;
+    let theirs_ids: std::collections::HashSet<(String, String)> = held
+        .iter()
+        .map(|row| (row.trace_id.clone(), row.span_id.clone()))
+        .collect();
     let (mut theirs, ours): (Vec<SpanContent>, Vec<SpanContent>) =
         std::mem::take(&mut batch.content)
             .into_iter()
-            .partition(|content| content.run_id.is_nil());
+            .partition(|content| {
+                theirs_ids.contains(&(content.trace_id.clone(), content.span_id.clone()))
+            });
     batch.content = ours;
     batch.held = held
         .into_iter()
@@ -286,12 +287,9 @@ mod tests {
         }
     }
 
-    /// A span of ours, inside a run.
+    /// A span of ours, inside a trace.
     fn ours(n: u8, operation: Option<&str>) -> Span {
-        let mut attributes = vec![
-            kv(contract::RUN_ID, "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01"),
-            kv(contract::AGENT, "nightly-report"),
-        ];
+        let mut attributes = vec![kv(contract::AGENT, "nightly-report")];
         if let Some(operation) = operation {
             attributes.push(kv(contract::OPERATION, operation));
         }
@@ -364,7 +362,7 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                ("01".repeat(8), SpanKind::Run),
+                ("01".repeat(8), SpanKind::Agent),
                 ("02".repeat(8), SpanKind::Step),
                 ("03".repeat(8), SpanKind::Span),
             ],

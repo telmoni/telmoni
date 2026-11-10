@@ -16,6 +16,7 @@ import {
   SpanKind,
   SpanStatus,
 } from "@/lib/types/enums";
+import { TraceIdSchema } from "@/lib/types/traces";
 
 import { ChangeSchema } from "./changes";
 import { MISSING, readLane } from "./traces";
@@ -54,7 +55,7 @@ const RuleFiltersSchema = z.object({
 });
 export type RuleFilters = z.infer<typeof RuleFiltersSchema>;
 
-// An objective's promise: `target` of one agent's runs succeed, or end
+// An objective's promise: `target` of one agent's traces succeed, or end
 // inside `latency_ms`, over its days.
 const ObjectiveSchema = z.object({
   target: z.number(),
@@ -92,7 +93,7 @@ const AlertSchema = z.object({
   severity: z.enum(Severity),
   severity_since: z.string(),
   connectors: z.array(AlertLinkSchema),
-  /** Made by the project's first run rather than a member. */
+  /** Made by the project's first trace rather than a member. */
   starter: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -101,7 +102,7 @@ export type Alert = z.infer<typeof AlertSchema>;
 
 // One incident: its alert or its monitor, where it stands, who took or
 // resolved it, where its notices went — the connections, the feed apart — and
-// the runs they showed, oldest first. A monitor's names its agent and cause.
+// the traces they showed, oldest first. A monitor's names its agent and cause.
 // Its changes are what the agents it watches changed to in the day before it
 // opened, the newest first: none where they could not be read.
 export const IncidentSchema = z.object({
@@ -121,7 +122,7 @@ export const IncidentSchema = z.object({
   resolved_by: z.string().nullable(),
   reopened: z.number().int(),
   told_to: z.array(z.string()),
-  runs: z.array(z.string()),
+  traces: z.array(z.string()),
   changes: z.array(ChangeSchema).nullable(),
   /** Whether it had more than are named. */
   changes_more: z.boolean(),
@@ -156,7 +157,7 @@ export type AlertsAccess =
   | {
       kind: "ok";
       alerts: Alert[];
-      /** The starters the project's first run found no room for, by measure. */
+      /** The starters the project's first trace found no room for, by measure. */
       startersWithheld: RuleMeasure[];
       /** Where any were, the plan's own sentence on what holds more. */
       startersDetail: string | null;
@@ -221,7 +222,7 @@ const StandingSchema = z.object({
   hour_burn: z.number(),
   six_hour_burn: z.number(),
   days: z.number().int(),
-  runs: z.number().int(),
+  traces: z.number().int(),
   missed: z.number().int(),
   budget_left: z.number(),
 });
@@ -265,16 +266,16 @@ export const fetchAlerts = cache(async (projectId: string): Promise<AlertsAccess
   };
 });
 
-/** The incidents whose notices showed the run `runId`, the newest first, as
- *  a trace's page links them; none where they cannot be read, which the page
- *  goes on without, and none asked for a run's id the path cannot be. */
-export const fetchRunIncidents = cache(
-  async (projectId: string, runId: string): Promise<Incident[]> => {
-    if (!z.guid().safeParse(runId).success) return [];
+/** The incidents whose notices showed the trace `traceId`, the newest first,
+ *  as a trace's page links them; none where they cannot be read, which the
+ *  page goes on without, and none asked for a trace id the path cannot be. */
+export const fetchTraceIncidents = cache(
+  async (projectId: string, traceId: string): Promise<Incident[]> => {
+    if (!TraceIdSchema.safeParse(traceId).success) return [];
     const read = await readLane(
-      "fetchRunIncidents",
+      "fetchTraceIncidents",
       projectId,
-      `/incidents?run=${encodeURIComponent(runId)}`,
+      `/incidents?trace=${encodeURIComponent(traceId)}`,
       IncidentListSchema,
     );
     return read.kind === "ok" ? read.value.incidents : [];

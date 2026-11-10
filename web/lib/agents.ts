@@ -6,7 +6,7 @@ function heldTo(alert: Alert): readonly string[] {
   return alert.filters.agent ?? [];
 }
 
-/** The alerts that read `agent`'s runs, paused ones aside: those held to it,
+/** The alerts that read `agent`'s traces, paused ones aside: those held to it,
  *  and those over every agent. */
 export function watchersOf(alerts: readonly Alert[], agent: string): number {
   return alerts.filter((alert) => {

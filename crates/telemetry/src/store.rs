@@ -66,7 +66,7 @@ const READ_MAX_EXECUTION_SECS: &str = "8";
 /// The most memory a read may take on the server: past it the read fails
 /// alone, as one past [`READ_MAX_EXECUTION_SECS`] does, rather than taking
 /// the memory every project's reads and writes share. 512 MiB lists some
-/// 170,000 runs.
+/// 170,000 traces.
 const READ_MAX_MEMORY_BYTES: &str = "536870912";
 
 /// The longest the client waits for a read: the console's own wait, past
@@ -81,10 +81,10 @@ const DELETE_ROLLUP: &str =
     "DELETE FROM telemetry.spans_hourly WHERE project_id = {project:String}";
 /// A project's scores marked deleted with its spans.
 const DELETE_SCORES: &str = "DELETE FROM telemetry.scores WHERE project_id = {project:String}";
-/// The scores of some runs, deleted with them.
-const DELETE_RUN_SCORES: &str = "DELETE FROM telemetry.scores
-     WHERE project_id = {project:String} AND has({runs:Array(UUID)}, run_id)";
-/// The scores of some sessions, deleted with an end user's runs of them.
+/// The scores of some traces, deleted with them.
+const DELETE_TRACE_SCORES: &str = "DELETE FROM telemetry.scores
+     WHERE project_id = {project:String} AND has({traces:Array(String)}, trace_id)";
+/// The scores of some sessions, deleted with an end user's traces of them.
 const DELETE_SESSION_SCORES: &str = "DELETE FROM telemetry.scores
      WHERE project_id = {project:String} AND target = 'session'
        AND has({sessions:Array(String)}, session_id)";
@@ -96,12 +96,12 @@ pub(crate) const DELETE_SCORES_BEFORE: &str = "DELETE FROM telemetry.scores
 /// one. The hourly totals keep their counts.
 pub(crate) const DELETE_BEFORE: &str = "DELETE FROM telemetry.spans
      WHERE project_id = {project:String} AND received_at < {cutoff:DateTime64(6, 'UTC')}";
-/// Some of a project's runs marked deleted: what [`Store::delete_runs`] sends.
-/// The hourly totals keep their counts, since they name no run.
-const DELETE_RUNS: &str = "DELETE FROM telemetry.spans
-     WHERE project_id = {project:String} AND has({runs:Array(UUID)}, run_id)";
-/// The most runs one of those names, about 190 KB of URL.
-const RUNS_PER_DELETE: usize = 5_000;
+/// Some of a project's traces marked deleted: what [`Store::delete_traces`]
+/// sends. The hourly totals keep their counts, since they name no trace.
+const DELETE_TRACES: &str = "DELETE FROM telemetry.spans
+     WHERE project_id = {project:String} AND has({traces:Array(String)}, trace_id)";
+/// The most traces one of those names, about 180 KB of URL.
+const TRACES_PER_DELETE: usize = 5_000;
 /// The longest the client waits for ClickHouse to take a delete down: the
 /// statement answers once the mutation is recorded, not once it has run, so
 /// a healthy server answers at once, and a deletion's budget is not spent on
@@ -278,12 +278,12 @@ pub struct SpanRow {
     pub received_at: DateTime<Utc>,
     /// What it counts against its plan.
     pub units: u32,
-    /// Its run's id, the same on every span of a run.
-    #[serde(with = "clickhouse::serde::uuid")]
-    pub run_id: Uuid,
-    /// Its run's agent.
+    /// The agent it sits under: the trace's, the same on every span our
+    /// SDKs send; empty until another exporter's span is placed by its
+    /// trace's tree ([`crate::foreign`]).
     pub agent: String,
-    /// Its trace's id, in hex.
+    /// Its trace's id, in hex: a trace is one agent's execution, the unit
+    /// the list shows and an alert counts.
     pub trace_id: String,
     /// Its own id, in hex.
     pub span_id: String,
@@ -292,7 +292,8 @@ pub struct SpanRow {
     /// What it is.
     #[serde(with = "text")]
     pub kind: SpanKind,
-    /// The agent's name on a run, the tool's on a tool call, its own on the rest.
+    /// The agent's name on its own span, the tool's on a tool call, its own
+    /// on the rest.
     pub name: String,
     /// When it started, by the sender's clock, moved back where that ran far ahead.
     #[serde(with = "clickhouse::serde::chrono::datetime64::micros")]
@@ -332,7 +333,8 @@ pub struct SpanRow {
     pub release: String,
     /// The application's own tags.
     pub tags: Vec<(String, String)>,
-    /// The share of runs the SDK sends, on a run; `None` on every other kind.
+    /// The share of traces kept past the plan's grant, on the agent's span;
+    /// `None` on every other kind.
     pub sample_rate: Option<f64>,
     /// The attributes the contract keeps, under their own names.
     pub attributes: Vec<(String, String)>,
@@ -484,28 +486,28 @@ impl Store {
         Ok(())
     }
 
-    /// `runs` of `project` marked deleted, as [`Store::delete_project`] marks
-    /// a project's, but answered once the mark has been applied, so a page
-    /// read after it no longer shows them; off the disk by `rotate`.
+    /// `traces` of `project` marked deleted, as [`Store::delete_project`]
+    /// marks a project's, but answered once the mark has been applied, so a
+    /// page read after it no longer shows them; off the disk by `rotate`.
     ///
     /// ⚠ An error's text can carry ClickHouse's own message: log its kind,
     /// never the text.
-    pub async fn delete_runs(
+    pub async fn delete_traces(
         &self,
         project: &ProjectId,
-        runs: &[Uuid],
+        traces: &[String],
     ) -> clickhouse::error::Result<()> {
         // A parameter travels in the URL, which ClickHouse caps at 1 MiB.
-        for some in runs.chunks(RUNS_PER_DELETE) {
-            for statement in [DELETE_RUNS, DELETE_RUN_SCORES] {
-                let delete = self.delete(project, statement, true).param("runs", some);
+        for some in traces.chunks(TRACES_PER_DELETE) {
+            for statement in [DELETE_TRACES, DELETE_TRACE_SCORES] {
+                let delete = self.delete(project, statement, true).param("traces", some);
                 within(DELETE_TIMEOUT, delete.execute()).await?;
             }
         }
         Ok(())
     }
 
-    /// The scores of `sessions` of `project`, deleted as [`Store::delete_runs`] deletes.
+    /// The scores of `sessions` of `project`, deleted as [`Store::delete_traces`] deletes.
     ///
     /// ⚠ An error's text can carry ClickHouse's own message: log its kind.
     pub async fn delete_session_scores(
@@ -513,7 +515,7 @@ impl Store {
         project: &ProjectId,
         sessions: &[String],
     ) -> clickhouse::error::Result<()> {
-        for some in sessions.chunks(RUNS_PER_DELETE) {
+        for some in sessions.chunks(TRACES_PER_DELETE) {
             let delete = self
                 .delete(project, DELETE_SESSION_SCORES, true)
                 .param("sessions", some);
@@ -620,9 +622,9 @@ impl Read {
     /// variant quoted, and a `String` parameter keeps the quotes, so it
     /// matches nothing.
     ///
-    /// ⚠ A value from a request binds as its column's type, parsed first — a
-    /// run's id as a `Uuid` into `{run:UUID}` — so one that does not parse is
-    /// the caller's 400: ClickHouse's error prints a value it cannot parse
+    /// ⚠ A value from a request binds as its column's type, checked first — a
+    /// trace's id as 32 hex digits into `{trace:String}` — so one that is not
+    /// is the caller's 400: ClickHouse's error prints a value it cannot parse
     /// unquoted, past its masking. Never an `Identifier` from a request.
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
         if name == "projects" {

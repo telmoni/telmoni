@@ -6,7 +6,7 @@ import { SpanKind } from "@/lib/types/enums";
 // it a span at a time (`components/traces/trace-view.tsx`): each span under
 // its parent.
 
-/** Past this many spans a trace opens with its branches shut, so a run of
+/** Past this many spans a trace opens with its branches shut, so a trace of
  *  thousands draws its first rows at once. */
 export const OPEN_ALL_UP_TO = 400;
 
@@ -25,17 +25,17 @@ export type SpanNode = {
 
 /** A trace's spans as the tree they were recorded in, siblings in the order
  *  they started, the span's id settling a tie so two renders agree. A span
- *  whose parent is not among them — the run's own, or one under a span
+ *  whose parent is not among them — the agent's own, or one under a span
  *  sampled out or still on its way — stands at the top, as does one caught
  *  in a cycle, which only a hand-written export can draw: it would otherwise
  *  be under nothing and drawn nowhere. */
 export function spanTree(all: readonly TraceSpan[]): SpanNode[] {
-  // A run's opening stands in for it until its own span lands, then is the
-  // run's and drawn no more.
-  const spans = all.some((s) => s.kind === SpanKind.Run)
-    ? all.filter((s) => s.kind !== SpanKind.RunStart)
+  // A trace's opening stands in for its agent until the agent's own span
+  // lands, then is the agent's and drawn no more.
+  const spans = all.some((s) => s.kind === SpanKind.Agent)
+    ? all.filter((s) => s.kind !== SpanKind.TraceStart)
     : all;
-  // Each start read once, not at every comparison: a run holds thousands.
+  // Each start read once, not at every comparison: a trace holds thousands.
   const start = new Map(spans.map((s) => [s.span_id, Date.parse(s.started_at)]));
   const byStart = (a: TraceSpan, b: TraceSpan) =>
     start.get(a.span_id)! - start.get(b.span_id)! ||
@@ -171,7 +171,7 @@ export type TreeState = {
 export type TreeAction =
   | { type: "choose"; id: string }
   | { type: "toggle"; id: string }
-  /** The spans drawn moved on, as a run still going is read again. */
+  /** The spans drawn moved on, as a trace still going is read again. */
   | { type: "spans"; parentOf: ReadonlyMap<string, string> };
 
 /** One transition for the one `dispatch` every row is handed. Shutting the
@@ -201,10 +201,10 @@ export function parentRow(rows: readonly SpanNode[], node: SpanNode): SpanNode |
 
 /** A trace summed from its spans alone, as its header reads it. */
 export type TraceSummary = {
-  /** The run's own span, or `null` while it has not arrived. */
-  run: TraceSpan | null;
-  /** What the trace is named by: the run's span, or the first span while
-   *  the run is still going. */
+  /** The agent's own span, or `null` while it has not arrived. */
+  agent: TraceSpan | null;
+  /** What the trace is named by: the agent's span, or the first span while
+   *  the trace is still going. */
   root: TraceSpan;
   startedAt: string;
   endedAt: string;
@@ -223,7 +223,7 @@ export type TraceSummary = {
  *  does. */
 export function summarizeTrace(spans: readonly TraceSpan[]): TraceSummary {
   const first = spans[0]!;
-  const run = spans.find((s) => s.kind === SpanKind.Run) ?? null;
+  const agent = spans.find((s) => s.kind === SpanKind.Agent) ?? null;
   // As times, never as text: the server writes as few fractional digits as a
   // time needs, and `…:00Z` sorts after `…:00.250Z` as text.
   const startedAt = spans.reduce(
@@ -236,8 +236,8 @@ export function summarizeTrace(spans: readonly TraceSpan[]): TraceSummary {
   );
   const modelCalls = spans.filter((s) => s.kind === SpanKind.ModelCall);
   return {
-    run,
-    root: run ?? first,
+    agent,
+    root: agent ?? first,
     startedAt,
     endedAt,
     durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)),

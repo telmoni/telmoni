@@ -10,7 +10,7 @@ const KEY = "tm_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG";
 /** Each SDK's install command as the book's *Installation* prints it. */
 function bookInstalls(): Map<string, string> {
   const page = readFileSync(join(__dirname, "../content/docs/api/sdks.mdx"), "utf8");
-  const section = page.slice(page.indexOf("## Installation"), page.indexOf("## A run"));
+  const section = page.slice(page.indexOf("## Installation"), page.indexOf("## A trace"));
   const installs = new Map<string, string>();
   for (const [, label, command] of section.matchAll(/<Tab value="(\w+)">\s*```console\s*\$ ([^\n]+)/g)) {
     installs.set(label!, command!.trim());
@@ -19,7 +19,7 @@ function bookInstalls(): Map<string, string> {
 }
 
 describe("firstTraceSnippets", () => {
-  it("installs each SDK as the book does, sets the key once, and runs one run", () => {
+  it("installs each SDK as the book does, sets the key once, and sends one trace", () => {
     const installs = bookInstalls();
     const snippets = firstTraceSnippets(KEY);
     expect(snippets.map((s) => s.label)).toEqual([...installs.keys()]);

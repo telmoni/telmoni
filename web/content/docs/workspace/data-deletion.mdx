@@ -82,14 +82,14 @@ A project's **Admin** or the organization's **Owner** can.
   rotation removes the spans from disk. A trace still running is remembered
   for a day, and what it sends after is dropped as it arrives.
 - **Receipt:** the request is recorded in the organization's audit log
-  before anything goes — a trace by its run's id, an end user by the keyed
+  before anything goes — a trace by its id, an end user by the keyed
   hash their id is stored as, never the id — and you are mailed once it is
   done.
 - **What stays:** the hourly totals, counts and costs that name no trace or
-  user, keep counting them; an alert's incident keeps the run's id, which
+  user, keep counting them; an alert's incident keeps the trace's id, which
   then opens nothing, and so does an agent's
-  [change](/docs/monitoring/traces#changes) the run first carried, kept while
-  other runs within retention carry what changed.
+  [change](/docs/monitoring/traces#changes) the trace first carried, kept while
+  other traces within retention carry what changed.
 - **If a step fails:** the answer is an error, and trying again finishes the
   deletion; the audit log then records each request.
 

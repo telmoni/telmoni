@@ -7,10 +7,10 @@ import (
 
 // recordingSampler records every span and decides nothing of its own.
 //
-// A run takes the sampled flag of the trace it joins. Where it starts a trace,
-// it takes the decision the configured root sampler gives it, so an
-// application sampling at a tenth keeps a tenth of its own spans inside runs
-// as outside them. Nothing is dropped here: the SDK's processor exports
+// A trace started here takes the decision the configured root sampler gives
+// it, so an application sampling at a tenth keeps a tenth of its own spans
+// inside traces as outside them; one continued from another service takes
+// the flag it came with. Nothing is dropped here: the SDK's processor exports
 // recorded spans whether the flag is set or not.
 type recordingSampler struct {
 	root sdktrace.Sampler

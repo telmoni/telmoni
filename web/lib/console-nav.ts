@@ -153,7 +153,7 @@ export interface ConsoleNavItem {
   icon: LucideIcon;
   isActive: boolean;
   /** Opens a block: this row and the rest up to the next that opens one stand
-   *  clear of the rows above. A run's first row opens its first block. */
+   *  clear of the rows above. A group's first row opens its first block. */
   block?: boolean;
   /** The letter after `g` that reaches the row (`lib/keys.ts`). */
   key?: string;
@@ -164,7 +164,7 @@ export interface ConsoleNavGroup {
   items: ConsoleNavItem[];
 }
 
-/** A run's rows in their blocks, for the rail to draw. */
+/** A group's rows in their blocks, for the rail to draw. */
 export function navBlocks(items: readonly ConsoleNavItem[]): ConsoleNavItem[][] {
   const blocks: ConsoleNavItem[][] = [];
   for (const item of items) {
@@ -198,11 +198,10 @@ const CORE_GROUPS: GroupSpec[] = [
   {
     title: "Project",
     // What answers "are my agents OK?", then the project's own housekeeping a
-    // block below. The pages keep their paths: Runs is the trace list, Spend
-    // the dashboards.
+    // block below. The pages keep their paths: Spend is the dashboards.
     items: [
       { title: "Agents", path: "", icon: Bot, key: "o" },
-      { title: "Runs", path: "/traces", icon: ListTree, key: "r" },
+      { title: "Traces", path: "/traces", icon: ListTree, key: "t" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
       { title: "Objectives", path: "/objectives", icon: Target, key: "v" },
       { title: "Spend", path: "/dashboards", icon: Wallet, key: "s" },

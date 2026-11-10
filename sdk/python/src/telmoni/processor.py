@@ -1,9 +1,9 @@
 """The SDK's own batch processor: OpenTelemetry's batching and bounded queue,
 without the check that skips a span whose trace is not sampled.
 
-A run inside a trace the application does not sample is still sent. The queue
-is bounded, so a slow Telmoni never slows an agent: past its size, spans are
-dropped and counted. A recorded run goes at once, in exports of its own.
+A trace the application's sampler does not sample is still sent. The queue is
+bounded, so a slow Telmoni never slows an agent: past its size, spans are
+dropped and counted. A recorded trace goes at once, in exports of its own.
 """
 
 from __future__ import annotations
@@ -33,14 +33,14 @@ SHUTDOWN_TIMEOUT_S = 30.0
 
 
 class QueueFullError(RuntimeError):
-    """``record_run`` refused a record the export queue has no room for,
+    """``record_trace`` refused a record the export queue has no room for,
     queuing nothing of it: flush, or wait for the queue to drain, and record
     it again; one of more spans than the queue holds, once
     ``Batching(max_queue_size=...)`` raises its size."""
 
 
 class ShutdownError(RuntimeError):
-    """``record_run`` refused a record once the client was shut down, queuing
+    """``record_trace`` refused a record once the client was shut down, queuing
     nothing of it."""
 
 
@@ -79,7 +79,7 @@ class Processor(SpanProcessor):
         self._reserved = 0
         self._dropped = 0
         self._flushing = 0
-        # A run's opening queued, which goes without waiting for the delay.
+        # A trace's opening queued, which goes without waiting for the delay.
         self._opening = False
         self._shutdown = False
         self._exporting = False
@@ -134,7 +134,7 @@ class Processor(SpanProcessor):
         """Stage the spans of the record in ``trace_id``, queued whole as the
         block ends, in exports of their own; refused, holding nothing, once shut
         down or without room for ``need``. A record warns before it: a handler
-        recording a run would wait on the block."""
+        recording a trace would wait on the block."""
         with self._recording:
             with self._lock:
                 if self._shutdown:
@@ -191,7 +191,7 @@ class Processor(SpanProcessor):
                 self._dropped += 1
                 return
             self._queue.append(span)
-            if span.name == contract.RUN_START and span.parent is not None:
+            if span.name == contract.TRACE_START and span.parent is not None:
                 self._opening = True
                 self._wake.notify_all()
             elif len(self._queue) >= self._max_batch_size:
@@ -262,7 +262,7 @@ class Processor(SpanProcessor):
 
     def _due(self) -> bool:
         """Under the lock: whether the worker should export without waiting; a
-        record queued, or a run's opening, goes at once."""
+        record queued, or a trace's opening, goes at once."""
         return (
             self._shutdown
             or self._flushing > 0

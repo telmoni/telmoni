@@ -1,7 +1,7 @@
 {
   "scenario": {
     "record": {
-      "run_id": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d",
+      "trace_id": "3d6f8a1c5b2e4f7a9c0d8e1f2a3b4c5d",
       "agent": "claude-code",
       "user_id": "user_42",
       "session_id": "session_7",
@@ -155,7 +155,6 @@
                   { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1200" } },
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "85" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -173,7 +172,6 @@
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
                   { "key": "gen_ai.tool.name", "value": { "stringValue": "Bash" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ],
                 "status": { "code": 2 }
@@ -196,7 +194,6 @@
                   { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "300" } },
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "40" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -213,7 +210,6 @@
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } },
                   { "key": "gen_ai.tool.name", "value": { "stringValue": "Read" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -236,7 +232,6 @@
                   { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "640" } },
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "52" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -251,7 +246,6 @@
                 "attributes": [
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -266,7 +260,6 @@
                 "attributes": [
                   { "key": "gen_ai.conversation.id", "value": { "stringValue": "session_7" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -288,7 +281,6 @@
                   { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1450" } },
                   { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "12" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -306,7 +298,6 @@
                   { "key": "gen_ai.tool.name", "value": { "stringValue": "WebFetch" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
                   { "key": "telmoni.cancelled", "value": { "boolValue": true } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]
               },
@@ -323,7 +314,6 @@
                   { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } },
                   { "key": "telmoni.agent", "value": { "stringValue": "claude-code" } },
                   { "key": "telmoni.cancelled", "value": { "boolValue": true } },
-                  { "key": "telmoni.run_id", "value": { "stringValue": "3d6f8a1c-5b2e-4f7a-9c0d-8e1f2a3b4c5d" } },
                   { "key": "telmoni.tag.skills", "value": { "stringValue": "review" } },
                   { "key": "user.id", "value": { "stringValue": "user_42" } }
                 ]

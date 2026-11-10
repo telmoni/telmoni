@@ -41,7 +41,8 @@ const INGEST_KEY: &str = "tm_ingest_key";
 const READ_KEY: &str = "tm_read_only_key";
 /// Another project's ingest key, in another organization.
 const OTHER_KEY: &str = "tm_other_projects_key";
-const RUN: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f01";
+/// The trace every [`export_json`] is of.
+const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
 
 /// The module's lanes as the binary mounts them, ingest nested at `/otlp`.
 fn lanes(state: Arc<telmoni_telemetry::AppState>) -> Router {
@@ -165,14 +166,13 @@ fn export_from(service: &str, environment: &str, span_names: &[&str]) -> Value {
         .enumerate()
         .map(|(n, name)| {
             let mut span = json!({
-                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "traceId": TRACE,
                 "spanId": format!("00f067aa0ba902b{n}"),
                 "name": name,
                 "kind": 1,
                 "startTimeUnixNano": "1760000000000000000",
                 "endTimeUnixNano": "1760000001500000000",
                 "attributes": [
-                    { "key": contract::RUN_ID, "value": { "stringValue": RUN } },
                     { "key": contract::AGENT, "value": { "stringValue": "nightly-report" } },
                     { "key": contract::OPERATION, "value": { "stringValue": "chat" } },
                     { "key": contract::RESPONSE_MODEL, "value": { "stringValue": "claude-sonnet-5-5" } },
@@ -309,13 +309,12 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
     ));
     let started = Utc::now() - chrono::Duration::minutes(5);
     let nanos = |at: chrono::DateTime<Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
-    let export = |run: &str, trace: &str, session: &str| {
+    let export = |trace: &str, session: &str| {
         json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
             "traceId": trace, "spanId": "00f067aa0ba902b7", "name": "triage", "kind": 1,
             "startTimeUnixNano": nanos(started),
             "endTimeUnixNano": nanos(started + chrono::Duration::seconds(2)),
             "attributes": [
-                { "key": contract::RUN_ID, "value": { "stringValue": run } },
                 { "key": contract::AGENT, "value": { "stringValue": "triage" } },
                 { "key": contract::OPERATION, "value": { "stringValue": "invoke_agent" } },
                 { "key": contract::SESSION_ID, "value": { "stringValue": session } }
@@ -324,23 +323,11 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
         .to_string()
     };
     let runs = [
-        (
-            "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f11",
-            "4bf92f3577b34da6a3ce929d0e0e4711",
-            EMAIL,
-        ),
-        (
-            "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f12",
-            "4bf92f3577b34da6a3ce929d0e0e4712",
-            EMAIL,
-        ),
-        (
-            "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f13",
-            "4bf92f3577b34da6a3ce929d0e0e4713",
-            "another-session",
-        ),
+        ("4bf92f3577b34da6a3ce929d0e0e4711", EMAIL),
+        ("4bf92f3577b34da6a3ce929d0e0e4712", EMAIL),
+        ("4bf92f3577b34da6a3ce929d0e0e4713", "another-session"),
     ];
-    for (run, trace, session) in runs {
+    for (trace, session) in runs {
         let answer = app
             .clone()
             .oneshot(
@@ -349,7 +336,7 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
                     .uri(LANE)
                     .header(header::AUTHORIZATION, format!("Bearer {INGEST_KEY}"))
                     .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(export(run, trace, session)))
+                    .body(Body::from(export(trace, session)))
                     .expect("a request"),
             )
             .await
@@ -372,8 +359,8 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
         .store
         .read(
             &only,
-            "SELECT toString(run_id), session_id FROM telemetry.spans \
-             WHERE project_id IN {projects:Array(String)} ORDER BY run_id",
+            "SELECT trace_id, session_id FROM telemetry.spans \
+             WHERE project_id IN {projects:Array(String)} ORDER BY trace_id",
         )
         .fetch_all()
         .await
@@ -401,8 +388,8 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
         .expect("the count");
     assert_eq!(anywhere, 0, "the email is kept nowhere a span holds text");
 
-    // Runs, as the console reads them: the hash groups the session's two, and
-    // the id as sent finds none.
+    // Traces, as the console reads them: the hash groups the session's two,
+    // and the id as sent finds none.
     let list = |session: &str| {
         let app = app.clone();
         let (organization, project) = (organization.clone(), project.clone());
@@ -438,20 +425,20 @@ async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_grou
         .as_array()
         .expect("traces")
         .iter()
-        .map(|trace| trace["run_id"].as_str().expect("a run"))
+        .map(|trace| trace["trace_id"].as_str().expect("a trace"))
         .collect();
     listed.sort_unstable();
     assert_eq!(listed, [runs[0].0, runs[1].0], "{grouped}");
     assert_eq!(list(EMAIL).await["total"], 0);
 }
 
-/// A run's opening, sent alone, lists the run open with nothing counted and
-/// costs no unit; its own span closes it, and an opening sent again, or after
-/// the run ended, changes neither.
+/// A trace's opening, sent alone, lists the trace open with nothing counted
+/// and costs no unit; the agent's own span closes it, and an opening sent
+/// again, or after the trace ended, changes neither.
 #[sqlx::test]
-async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool) {
-    const OPENED: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f21";
-    const LATE: &str = "0191a3b4-7c2e-7d3f-8e4a-5b6c7d8e9f22";
+async fn a_traces_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool) {
+    const OPENED: &str = "4bf92f3577b34da6a3ce929d0e0e9f21";
+    const LATE: &str = "4bf92f3577b34da6a3ce929d0e0e9f22";
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -472,31 +459,23 @@ async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool)
     ));
     let started = Utc::now() - chrono::Duration::minutes(5);
     let nanos = |at: chrono::DateTime<Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
-    let trace_of = |run: &str| {
-        format!(
-            "4bf92f3577b34da6a3ce929d0e0e{}",
-            run.get(32..).expect("a run id's last four")
-        )
-    };
-    let opening = |run: &str| {
+    let opening = |trace: &str| {
         json!({
-            "traceId": trace_of(run), "spanId": "00f067aa0ba902b8",
-            "parentSpanId": "00f067aa0ba902b7", "name": contract::RUN_START, "kind": 1,
+            "traceId": trace, "spanId": "00f067aa0ba902b8",
+            "parentSpanId": "00f067aa0ba902b7", "name": contract::TRACE_START, "kind": 1,
             "startTimeUnixNano": nanos(started), "endTimeUnixNano": nanos(started),
             "attributes": [
-                { "key": contract::RUN_ID, "value": { "stringValue": run } },
                 { "key": contract::AGENT, "value": { "stringValue": "nightly-triage" } }
             ]
         })
     };
-    let own = |run: &str| {
+    let own = |trace: &str| {
         json!({
-            "traceId": trace_of(run), "spanId": "00f067aa0ba902b7",
+            "traceId": trace, "spanId": "00f067aa0ba902b7",
             "name": "invoke_agent nightly-triage", "kind": 1,
             "startTimeUnixNano": nanos(started),
             "endTimeUnixNano": nanos(started + chrono::Duration::seconds(2)),
             "attributes": [
-                { "key": contract::RUN_ID, "value": { "stringValue": run } },
                 { "key": contract::AGENT, "value": { "stringValue": "nightly-triage" } },
                 { "key": contract::OPERATION, "value": { "stringValue": "invoke_agent" } }
             ]
@@ -523,7 +502,7 @@ async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool)
             assert_eq!(answer.status(), StatusCode::OK);
         }
     };
-    let listed = |run: &'static str| {
+    let listed = |trace_id: &'static str| {
         let app = app.clone();
         let (organization, project) = (organization.clone(), project.clone());
         async move {
@@ -554,9 +533,9 @@ async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool)
                 .as_array()
                 .expect("traces")
                 .iter()
-                .find(|trace| trace["run_id"] == run)
+                .find(|trace| trace["trace_id"] == trace_id)
                 .cloned()
-                .unwrap_or_else(|| panic!("{run} listed: {all}"))
+                .unwrap_or_else(|| panic!("{trace_id} listed: {all}"))
         }
     };
 
@@ -575,13 +554,13 @@ async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool)
             "SELECT kind, units FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND name = {name:String}",
         )
-        .param("name", contract::RUN_START)
+        .param("name", contract::TRACE_START)
         .fetch_one()
         .await
         .expect("the opening's row");
-    assert_eq!((kind.as_str(), units), ("run_start", 0));
+    assert_eq!((kind.as_str(), units), ("trace_start", 0));
 
-    // The run's own span with its opening again, in a body of their own.
+    // The agent's own span with its opening again, in a body of their own.
     send(vec![opening(OPENED), own(OPENED)]).await;
     let closed = listed(OPENED).await;
     assert_eq!(closed["ended"], true, "{closed}");
@@ -591,13 +570,13 @@ async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool)
         (Some(1), Some(0))
     );
 
-    // An opening that lands after its run ended leaves it ended.
+    // An opening that lands after its trace ended leaves it ended.
     send(vec![own(LATE)]).await;
     send(vec![opening(LATE)]).await;
     let late = listed(LATE).await;
     assert_eq!(late["ended"], true, "{late}");
 
-    // The dashboards count the two runs' own spans and none of their three
+    // The dashboards count the two traces' own spans and none of their three
     // openings, from the hourly totals and from the spans alike.
     for uri in ["/rollups?days=1", "/rollups?days=1&group=user"] {
         let response = app
@@ -632,7 +611,7 @@ async fn a_runs_opening_lists_it_open_until_its_own_span_closes_it(pool: PgPool)
                 .map(|point| point[field].as_u64().expect("a count"))
                 .sum()
         };
-        assert_eq!((sum("spans"), sum("runs")), (2, 2), "{uri}: {points}");
+        assert_eq!((sum("spans"), sum("traces")), (2, 2), "{uri}: {points}");
     }
     assert_eq!(
         (late["spans"].as_u64(), late["steps"].as_u64()),
@@ -913,7 +892,7 @@ async fn another_exporters_spans_are_held_then_placed_in_their_runs(pool: PgPool
             .fetch_all::<(String, String, String, String)>()
     };
     let none = rows(
-        "SELECT span_id, kind, agent, toString(run_id) FROM telemetry.spans \
+        "SELECT span_id, kind, agent, trace_id FROM telemetry.spans \
          WHERE project_id IN {projects:Array(String)} ORDER BY span_id",
     )
     .await
@@ -929,66 +908,58 @@ async fn another_exporters_spans_are_held_then_placed_in_their_runs(pool: PgPool
         .expect("a pass");
     common::eventually("the placed spans are read", || async {
         rows(
-            "SELECT span_id, kind, agent, toString(run_id) FROM telemetry.spans \
+            "SELECT span_id, kind, agent, trace_id FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} ORDER BY span_id",
         )
         .await
-        .is_ok_and(|rows| rows.len() == 4)
+        .is_ok_and(|rows| rows.len() == 6)
     })
     .await;
     let landed = rows(
-        "SELECT span_id, kind, agent, toString(run_id) FROM telemetry.spans \
+        "SELECT span_id, kind, agent, trace_id FROM telemetry.spans \
          WHERE project_id IN {projects:Array(String)} ORDER BY span_id",
     )
     .await
     .expect("the rows");
-    let agent_run =
-        telmoni_telemetry::foreign::run_of_span(&lane.project, &agent_trace, &"22".repeat(8))
-            .to_string();
-    let calls_run =
-        telmoni_telemetry::foreign::run_of_trace(&lane.project, &calls_trace).to_string();
     let of = |id: &str| landed.iter().find(|(span, ..)| span == id).cloned();
+    let row = |id: &str, kind: &str, agent: &str, trace: &str| {
+        Some((
+            id.repeat(8),
+            kind.to_owned(),
+            agent.to_owned(),
+            trace.to_owned(),
+        ))
+    };
     assert_eq!(
         of(&"11".repeat(8)),
-        None,
-        "a span above every run is dropped"
+        row("11", "span", "planner", &agent_trace),
+        "a span above the agent is the trace's, named for it"
     );
-    assert_eq!(of(&"44".repeat(8)), None);
     assert_eq!(
         of(&"22".repeat(8)),
-        Some((
-            "22".repeat(8),
-            "run".into(),
-            "planner".into(),
-            agent_run.clone()
-        ))
+        row("22", "agent", "planner", &agent_trace)
     );
     assert_eq!(
         of(&"33".repeat(8)),
-        Some((
-            "33".repeat(8),
-            "model_call".into(),
-            "planner".into(),
-            agent_run
-        ))
+        row("33", "model_call", "planner", &agent_trace)
+    );
+    assert_eq!(
+        of(&"44".repeat(8)),
+        row("44", "span", "checkout", &calls_trace),
+        "a trace with no agent is the service's"
     );
     assert_eq!(
         of(&"55".repeat(8)),
-        Some((
-            "55".repeat(8),
-            "model_call".into(),
-            "checkout".into(),
-            calls_run.clone()
-        ))
+        row("55", "model_call", "checkout", &calls_trace)
     );
-    let run_span = landed
+    let written = landed
         .iter()
-        .find(|(_, kind, _, run)| kind == "run" && *run == calls_run)
-        .expect("the calls' run has a span of its own");
-    assert_eq!(run_span.2, "checkout");
-    assert_eq!(landed.len(), 4, "{landed:?}");
+        .find(|(_, kind, _, trace)| kind == "agent" && *trace == calls_trace)
+        .expect("the calls' trace has an agent's span, written for it");
+    assert_eq!(written.2, "checkout");
+    assert_eq!(landed.len(), 6, "{landed:?}");
 
-    // Landed, each keeps only its run; a second pass lands nothing again.
+    // Landed, each keeps its trace; a second pass lands nothing again.
     let waiting: i64 =
         sqlx::query_scalar("SELECT count(*) FROM telemetry.held_spans WHERE landed_at IS NULL")
             .fetch_one(&pool)
@@ -999,12 +970,12 @@ async fn another_exporters_spans_are_held_then_placed_in_their_runs(pool: PgPool
         .await
         .expect("a pass");
     let again = rows(
-        "SELECT span_id, kind, agent, toString(run_id) FROM telemetry.spans \
+        "SELECT span_id, kind, agent, trace_id FROM telemetry.spans \
          WHERE project_id IN {projects:Array(String)} ORDER BY span_id",
     )
     .await
     .expect("the rows");
-    assert_eq!(again.len(), 4);
+    assert_eq!(again.len(), 6);
 }
 
 /// Another exporter's texts holding a NUL, which Postgres cannot store, are
@@ -1110,8 +1081,8 @@ async fn another_exporters_texts_with_a_nul_are_held_and_land_without_it(pool: P
 }
 
 /// Another exporter's retrievals and memory searches land as retrievals,
-/// named by what they searched: under an agent, in its run, and with none,
-/// in their trace's; an agent's data source stays an attribute of its run.
+/// named by what they searched: under an agent, as its own, and with none,
+/// as the service's; an agent's data source stays an attribute of its span.
 #[sqlx::test]
 async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -1176,10 +1147,10 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
         ch.store
             .read(
                 &Projects::one(lane.project.clone()),
-                "SELECT span_id, kind, name, agent, toString(run_id), \
+                "SELECT span_id, kind, name, agent, trace_id, \
                  attributes['gen_ai.data_source.id'], attributes['gen_ai.retrieval.top_k'], \
                  attributes['gen_ai.memory.record.count'] FROM telemetry.spans \
-                 WHERE project_id IN {projects:Array(String)} AND kind != 'run_start' \
+                 WHERE project_id IN {projects:Array(String)} AND kind != 'trace_start' \
                  ORDER BY span_id",
             )
             .fetch_all::<(
@@ -1194,7 +1165,7 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
             )>()
     };
     common::eventually("the placed spans are read", || async {
-        read().await.is_ok_and(|rows| rows.len() == 5)
+        read().await.is_ok_and(|rows| rows.len() == 6)
     })
     .await;
     let landed = read().await.expect("the rows");
@@ -1205,16 +1176,11 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
             .cloned()
             .expect("the span landed")
     };
-    let agent_run =
-        telmoni_telemetry::foreign::run_of_span(&lane.project, &agent_trace, &"22".repeat(8))
-            .to_string();
-    let calls_run =
-        telmoni_telemetry::foreign::run_of_trace(&lane.project, &calls_trace).to_string();
-    let run = of(&"22".repeat(8));
-    assert_eq!((run.1.as_str(), run.2.as_str()), ("run", "planner"));
+    let agent = of(&"22".repeat(8));
+    assert_eq!((agent.1.as_str(), agent.2.as_str()), ("agent", "planner"));
     assert_eq!(
-        run.5, "docs-index",
-        "an agent's data source is its run's attribute"
+        agent.5, "docs-index",
+        "an agent's data source is its own span's attribute"
     );
     let found = of(&"33".repeat(8));
     assert_eq!(
@@ -1224,7 +1190,7 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
             found.3.as_str(),
             found.4.as_str()
         ),
-        ("retrieval", "docs-index", "planner", agent_run.as_str())
+        ("retrieval", "docs-index", "planner", agent_trace.as_str())
     );
     assert_eq!((found.5.as_str(), found.6.as_str()), ("docs-index", "5"));
     let alone = of(&"55".repeat(8));
@@ -1235,13 +1201,13 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
             alone.3.as_str(),
             alone.4.as_str()
         ),
-        ("retrieval", "kb", "checkout", calls_run.as_str()),
-        "a retrieval with no agent above it is kept in its trace's run"
+        ("retrieval", "kb", "checkout", calls_trace.as_str()),
+        "a retrieval with no agent above it is the service's"
     );
     let memory = of(&"66".repeat(8));
     assert_eq!(
         (memory.1.as_str(), memory.2.as_str(), memory.4.as_str()),
-        ("retrieval", "preferences", calls_run.as_str())
+        ("retrieval", "preferences", calls_trace.as_str())
     );
     assert_eq!(memory.7, "2");
     assert!(
@@ -1251,7 +1217,7 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
 }
 
 /// An agent's children, sent before the agent ends, wait for it however
-/// quiet the trace goes, then land in its run once it arrives.
+/// quiet the trace goes, then land under it once it arrives.
 #[sqlx::test]
 async fn a_long_agents_children_wait_for_its_own_span(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -1341,19 +1307,22 @@ async fn a_long_agents_children_wait_for_its_own_span(pool: PgPool) {
     telmoni_telemetry::foreign::land_quiet(&lane.state)
         .await
         .expect("a pass");
-    common::eventually("the run lands whole", || async { count().await == 3 }).await;
-    let run = telmoni_telemetry::foreign::run_of_span(&lane.project, &trace, &"01".repeat(8));
-    let runs: Vec<String> = ch
+    common::eventually("the trace lands whole", || async { count().await == 3 }).await;
+    let agents: Vec<(String, String)> = ch
         .store
         .read(
             &Projects::one(lane.project.clone()),
-            "SELECT DISTINCT toString(run_id) FROM telemetry.spans \
+            "SELECT DISTINCT trace_id, agent FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)}",
         )
         .fetch_all()
         .await
-        .expect("runs");
-    assert_eq!(runs, [run.to_string()], "one run, its plain span kept");
+        .expect("traces");
+    assert_eq!(
+        agents,
+        [(trace.clone(), "coder".to_owned())],
+        "one trace, the agent's, its plain span kept"
+    );
 }
 
 /// A landing another replica began is left to it, then retried under its token once overdue.
@@ -1495,22 +1464,22 @@ async fn a_runs_spans_from_two_services_land_as_one_run_within_their_project(poo
         );
     }
 
-    let runs: Vec<(String, u64, String, String)> = ch
+    let traces: Vec<(String, u64, String, String)> = ch
         .store
         .read(
             &Projects::one(lane.project.clone()),
-            "SELECT toString(run_id), count(), \
+            "SELECT trace_id, count(), \
              arrayStringConcat(arraySort(groupUniqArray(environment)), ';'), \
              arrayStringConcat(arraySort(groupUniqArray(parent_span_id)), ';') \
              FROM telemetry.spans WHERE project_id IN {projects:Array(String)} \
-             GROUP BY run_id",
+             GROUP BY trace_id",
         )
         .fetch_all()
         .await
-        .expect("the runs");
-    assert_eq!(runs.len(), 1, "one run, not one a service: {runs:?}");
-    let (run_id, spans, environments, parents) = &runs[0];
-    assert_eq!(run_id, RUN);
+        .expect("the traces");
+    assert_eq!(traces.len(), 1, "one trace, not one a service: {traces:?}");
+    let (trace_id, spans, environments, parents) = &traces[0];
+    assert_eq!(trace_id, TRACE);
     assert_eq!(*spans, 2);
     assert_eq!(environments, "production;workers");
     assert_eq!(
@@ -1706,10 +1675,9 @@ fn tagged_export(name: &str, tags: &[Vec<(String, String)>]) -> Vec<u8> {
         .iter()
         .enumerate()
         .map(|(n, tags)| {
-            let mut attributes = vec![
-                json!({ "key": contract::RUN_ID, "value": { "stringValue": RUN } }),
-                json!({ "key": contract::AGENT, "value": { "stringValue": "nightly-report" } }),
-            ];
+            let mut attributes = vec![json!({
+                "key": contract::AGENT, "value": { "stringValue": "nightly-report" }
+            })];
             attributes.extend(tags.iter().map(|(key, value)| {
                 json!({ "key": format!("{}{key}", contract::TAG_PREFIX), "value": { "stringValue": value } })
             }));
@@ -2303,24 +2271,26 @@ async fn a_body_that_cannot_be_read_is_invalid_not_too_large(pool: PgPool) {
     assert_eq!(auth.homes_asked(), 0, "nothing keyed");
 }
 
-/// The `n`th export of two runs, a span each, each its own trace, so none is
-/// answered as one sent again: past a plan's month, the first is kept and the
-/// second sampled out, where `runs` were picked so ([`picked`]).
-fn two_runs(n: u32, runs: &[String; 2]) -> Vec<u8> {
+/// The `n`th export of two traces, a span each, started `n` nanoseconds
+/// apart, so none is answered as one sent again: past a plan's month, the
+/// first is kept and the second sampled out, where `traces` were picked so
+/// ([`picked`]).
+fn two_traces(n: u32, traces: &[String; 2]) -> Vec<u8> {
     let mut export = export_json(&["kept", "sampled"]);
-    for (span, run) in runs.iter().enumerate() {
+    for (span, trace) in traces.iter().enumerate() {
         let at = |field: &str| format!("/resourceSpans/0/scopeSpans/0/spans/{span}/{field}");
         *export
             .pointer_mut(&at("traceId"))
-            .expect("the span's trace") = json!(format!("4bf92f3577b34da6a3ce929d0e0e{n:04x}"));
+            .expect("the span's trace") = json!(trace);
         *export
-            .pointer_mut(&at("attributes/0/value/stringValue"))
-            .expect("the span's run") = json!(run);
+            .pointer_mut(&at("startTimeUnixNano"))
+            .expect("the span's start") =
+            json!((1_760_000_000_000_000_000_u64 + u64::from(n)).to_string());
     }
     export.to_string().into_bytes()
 }
 
-/// Two runs, the first kept past a plan's month and the second sampled out
+/// Two traces, the first kept past a plan's month and the second sampled out
 /// under the project's key (`capacity::kept_past_the_grant`), once the key
 /// exists.
 async fn picked(lane: &Lane) -> [String; 2] {
@@ -2329,10 +2299,9 @@ async fn picked(lane: &Lane) -> [String; 2] {
         .expect("the project's key");
     let pick = |kept: bool| {
         (1..u128::MAX)
-            .map(uuid::Uuid::from_u128)
-            .find(|run| telmoni_telemetry::capacity::kept_past_the_grant(&storage, *run) == kept)
-            .expect("a run")
-            .to_string()
+            .map(|n| uuid::Uuid::from_u128(n).simple().to_string())
+            .find(|trace| telmoni_telemetry::capacity::kept_past_the_grant(&storage, trace) == kept)
+            .expect("a trace")
     };
     [pick(true), pick(false)]
 }
@@ -2371,13 +2340,13 @@ async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool
             content_bytes: 25_000_000,
         },
     );
-    let any = [RUN.to_owned(), RUN.to_owned()];
+    let any = [TRACE.to_owned(), TRACE.to_owned()];
     let (status, _, answer) = lane
         .send(
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(1, &any),
+            two_traces(1, &any),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2393,7 +2362,7 @@ async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(n, &runs),
+            two_traces(n, &runs),
         )
     };
     let (status, _, first) = send(2).await;
@@ -2426,7 +2395,7 @@ async fn spans_past_the_month_are_sampled_and_counted_in_the_answer(pool: PgPool
     while told() == 0 && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    // The same export sent again is answered as it was: its sampled run
+    // The same export sent again is answered as it was: its sampled trace
     // still counted, not told it was kept.
     let (_, _, again) = send(2).await;
     assert_eq!(
@@ -2493,13 +2462,13 @@ async fn a_cap_set_mid_period_counts_the_hours_before_it(pool: PgPool) {
     .expect("the project's cap");
 
     // Its first export files it; its count knows nothing of the earlier hour.
-    let any = [RUN.to_owned(), RUN.to_owned()];
+    let any = [TRACE.to_owned(), TRACE.to_owned()];
     let (status, _, answer) = lane
         .send(
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(1, &any),
+            two_traces(1, &any),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2526,7 +2495,7 @@ async fn a_cap_set_mid_period_counts_the_hours_before_it(pool: PgPool) {
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(2, &runs),
+            two_traces(2, &runs),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2549,7 +2518,7 @@ async fn a_cap_set_mid_period_counts_the_hours_before_it(pool: PgPool) {
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(3, &runs),
+            two_traces(3, &runs),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2614,13 +2583,13 @@ async fn a_cap_with_no_plan_counts_the_hours_before_it_and_is_rebuilt(pool: PgPo
         .expect("the earlier hour");
 
     // Filed by its first export, with no cap and nothing counted.
-    let any = [RUN.to_owned(), RUN.to_owned()];
+    let any = [TRACE.to_owned(), TRACE.to_owned()];
     let (status, _, _) = lane
         .send(
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(1, &any),
+            two_traces(1, &any),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2661,7 +2630,7 @@ async fn a_cap_with_no_plan_counts_the_hours_before_it_and_is_rebuilt(pool: PgPo
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(2, &runs),
+            two_traces(2, &runs),
         )
         .await;
     sampled(&past);
@@ -2683,7 +2652,7 @@ async fn a_cap_with_no_plan_counts_the_hours_before_it_and_is_rebuilt(pool: PgPo
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(3, &runs),
+            two_traces(3, &runs),
         )
         .await;
     sampled(&past);
@@ -2702,7 +2671,7 @@ async fn a_cap_with_no_plan_counts_the_hours_before_it_and_is_rebuilt(pool: PgPo
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(4, &runs),
+            two_traces(4, &runs),
         )
         .await;
     sampled(&past);
@@ -2745,13 +2714,13 @@ async fn a_project_past_its_own_cap_is_sampled_with_no_grace(pool: PgPool) {
     .await
     .expect("the project's cap");
 
-    let any = [RUN.to_owned(), RUN.to_owned()];
+    let any = [TRACE.to_owned(), TRACE.to_owned()];
     let (status, _, answer) = lane
         .send(
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(1, &any),
+            two_traces(1, &any),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2767,7 +2736,7 @@ async fn a_project_past_its_own_cap_is_sampled_with_no_grace(pool: PgPool) {
             Some(INGEST_KEY),
             "application/json",
             None,
-            two_runs(2, &runs),
+            two_traces(2, &runs),
         )
         .await;
     assert_eq!(status, StatusCode::OK);
@@ -2795,7 +2764,7 @@ async fn a_project_past_its_own_cap_is_sampled_with_no_grace(pool: PgPool) {
         Some(INGEST_KEY),
         "application/json",
         None,
-        two_runs(3, &runs),
+        two_traces(3, &runs),
     )
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -2822,7 +2791,7 @@ async fn spans_past_the_month_are_kept_whole_through_the_grace(pool: PgPool) {
                 Some(INGEST_KEY),
                 "application/json",
                 None,
-                two_runs(n, &[RUN.to_owned(), RUN.to_owned()]),
+                two_traces(n, &[TRACE.to_owned(), TRACE.to_owned()]),
             )
             .await;
         assert_eq!(status, StatusCode::OK);

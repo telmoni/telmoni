@@ -283,7 +283,7 @@ async fn a_projects_purge_cut_short_is_finished_by_the_sweep(pool: PgPool) {
         settings_and_a_view(&pool, project, &organization).await;
         clickhouse
             .store
-            .insert_spans(&[common::span(project, SpanKind::Run, "hourly-sync", 100)])
+            .insert_spans(&[common::span(project, SpanKind::Agent, "hourly-sync", 100)])
             .await
             .expect("a span of the project's");
     }
