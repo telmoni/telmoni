@@ -294,6 +294,19 @@ describe("TracesPage", () => {
     );
   });
 
+  it("keeps the keyboard on its row when a newer trace lands above it", async () => {
+    mockTraces = list({ traces: [TRACE_B], total: 1 });
+    const { rerender } = render(
+      await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }),
+    );
+    const link = screen.getByRole("link", { name: "7a1b2c3d" });
+    link.focus();
+    mockTraces = list();
+    rerender(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(link.isConnected).toBe(true);
+    expect(document.activeElement).toBe(link);
+  });
+
   // Grouped by session, each session heads its own traces and opens them in
   // order; a trace that named none is under a head that says so.
   it("groups the traces by session, each head opening the session's traces in order", async () => {

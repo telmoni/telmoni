@@ -76,8 +76,10 @@ export function TraceTable({ organization, slug, query, ui, traces, knownTags }:
           tags={{ keys: tagKeys(knownTags), href: (key) => sortedBy(`tag:${key}`) }}
         />
       </THead>
-      {groupsOf(traces, group).map((rows) => (
-        <tbody key={rows[0]!.trace_id}>
+      {groupsOf(traces, group).map((rows, at, groups) => (
+        // Keyed by the group, never its first row: a trace landing on top
+        // leaves the rows under it, and the keyboard's place among them.
+        <tbody key={bodyKey(groups, at, group)}>
           {group && (
             <GroupHead
               group={group}
@@ -157,6 +159,14 @@ function groupsOf(traces: readonly Trace[], group: Group | undefined): Trace[][]
     else groups.push([trace]);
   }
   return groups;
+}
+
+/** A body's key: its group's value, numbered where a value heads two groups. */
+function bodyKey(groups: Trace[][], at: number, group: Group | undefined): string {
+  if (!group) return "all";
+  const value = valueOf(groups[at]![0]!, group);
+  const before = groups.slice(0, at).filter((rows) => valueOf(rows[0]!, group) === value);
+  return `${before.length}:${value}`;
 }
 
 /** A group's head: its session or user, which opens the group's traces, and how
