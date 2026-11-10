@@ -1349,10 +1349,13 @@ async fn a_landing_begun_elsewhere_is_retried_only_once_overdue(pool: PgPool) {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
+    // Named for the project, as a landing's token is: a store reused across
+    // runs keeps one insert a token, and would drop this run's under a fixed one.
     sqlx::query(
         "UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes', \
-         landing = 'held/elsewhere', tried_at = now()",
+         landing = $1, tried_at = now()",
     )
+    .bind(format!("held/elsewhere/{}", lane.project.as_str()))
     .execute(&pool)
     .await
     .expect("begun elsewhere");

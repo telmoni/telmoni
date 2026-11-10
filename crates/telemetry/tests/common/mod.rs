@@ -1121,22 +1121,22 @@ pub(crate) async fn clickhouse_or_skip(test: &str) -> Option<ClickHouse> {
     })
 }
 
-/// Wait for `holds` to answer true, asking every 50 ms for up to ten
-/// seconds, or fail naming `what`: a lightweight delete answers once it is
-/// recorded, and its rows go a moment later.
+/// Wait for `holds` to answer true, asking every 50 ms for up to a minute, or
+/// fail naming `what`: a lightweight delete answers once it is recorded, and
+/// its rows go when the store reaches it, behind every suite's deletes.
 pub(crate) async fn eventually<F, Fut>(what: &str, mut holds: F)
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = bool>,
 {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
     loop {
         if holds().await {
             return;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "{what}: still not so after ten seconds"
+            "{what}: still not so after a minute"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
