@@ -13,11 +13,13 @@ import {
 } from "@/lib/server/data";
 import { organizationPath } from "@/lib/slug";
 
-import { AuditLog } from "../../_audit-log";
+import { AuditLog, auditPaging } from "../../_audit-log";
 
 export const metadata = { title: "Audit log" };
 
-export default async function OrganizationAuditPage() {
+export default async function OrganizationAuditPage({
+  searchParams,
+}: PageProps<"/[organization]/audit-log">) {
   const [gate, ident] = await Promise.all([
     getServerContext(),
     identityContext(),
@@ -40,7 +42,8 @@ export default async function OrganizationAuditPage() {
 
   return (
     <AuditLog
-      access={await fetchOrganizationAudit()}
+      access={await fetchOrganizationAudit(auditPaging(await searchParams))}
+      base={`${overview}/audit-log`}
       what="this organization's audit log"
       owner={ownerContact(organization)}
       backHref={overview}
@@ -52,7 +55,7 @@ export default async function OrganizationAuditPage() {
         "same transaction as the change it records; each row carries the hash of " +
         "the one before it, so an export can be re-verified by somebody who does " +
         "not trust us: Export builds a file of any range, every event with its " +
-        "hashes. The most recent 100 events are shown here."
+        "hashes."
       }
       empty={
         "Actions across the organization — a project's keys and members, its own " +

@@ -362,6 +362,63 @@ fn verifies(organization: &str, rows: &[Value]) {
     }
 }
 
+/// A numbered page answers its rows with the total its filters admit, on
+/// both lanes; one past the last answers none, the total still told.
+#[sqlx::test]
+async fn a_numbered_page_answers_its_rows_and_the_total(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let organization = sign_in(&pool, OWNER).await;
+    let project = create_project(&pool, &organization, "First project").await;
+    for name in ["one", "two", "three", "four"] {
+        mint(&pool, OWNER, &organization, &project, name).await;
+    }
+
+    for lane in [
+        format!("/internal/v1/audit/projects/{project}"),
+        format!("/internal/v1/audit/organizations/{organization}"),
+    ] {
+        let read = |query: &'static str| {
+            let (pool, lane, organization) = (pool.clone(), lane.clone(), organization.clone());
+            async move {
+                let (status, body) = call(
+                    &pool,
+                    "GET",
+                    &format!("{lane}?{query}"),
+                    OWNER,
+                    &organization,
+                    None,
+                    None,
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{body}");
+                body
+            }
+        };
+        let whole = read("limit=1000").await;
+        let total = events(&whole).len();
+        assert!(total >= 5, "four mints and the project's creation: {whole}");
+        assert_eq!(whole["total"], json!(total));
+        assert_eq!((&whole["page"], &whole["limit"]), (&json!(1), &json!(1000)));
+
+        let second = read("limit=2&page=2").await;
+        assert_eq!(second["total"], json!(total), "the total is the filters'");
+        assert_eq!((&second["page"], &second["limit"]), (&json!(2), &json!(2)));
+        assert_eq!(
+            events(&second),
+            &events(&whole)[2..4],
+            "the third and fourth newest: {second}"
+        );
+        assert!(second["nextCursor"].is_string(), "a page that filled");
+
+        let past = read("limit=2&page=900").await;
+        assert!(events(&past).is_empty(), "{past}");
+        assert_eq!(past["total"], json!(total));
+
+        let filtered = read("limit=2&page=1&resource_kind=token").await;
+        assert_eq!(filtered["total"], json!(4), "the four mints: {filtered}");
+    }
+}
+
 #[sqlx::test]
 async fn a_projects_page_lists_the_rows_written_inside_it_and_no_others(pool: PgPool) {
     apply_audit_migrations(&pool).await;

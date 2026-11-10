@@ -337,6 +337,7 @@ impl Auth for AppState {
                 resource_kind: None,
                 cursor: None,
                 limit: query.limit.clamp(1, AUDIT_TOOL_MAX),
+                offset: 0,
             },
         )
         .await?;

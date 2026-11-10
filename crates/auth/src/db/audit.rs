@@ -51,7 +51,8 @@ pub async fn seats_given_since<B: HasOrganization>(
     .await
 }
 
-/// Filters for [`list`]. `cursor` paginates newest-first via the `UUIDv7` PK.
+/// Filters for [`list`] and [`count`]. `cursor` paginates newest-first via
+/// the `UUIDv7` PK; `offset` reads a numbered page.
 pub struct AuditQuery<'a> {
     pub organization_id: &'a OrganizationId,
     pub in_project: Option<&'a ProjectId>,
@@ -65,6 +66,8 @@ pub struct AuditQuery<'a> {
     pub resource_kind: Option<TelmoniResourceKind>,
     pub cursor: Option<Uuid>,
     pub limit: i64,
+    /// Rows skipped past the newest the filters admit: a numbered page.
+    pub offset: i64,
 }
 
 /// Distinct `organization_id`s that have at least one audit row, for the
@@ -92,24 +95,16 @@ pub async fn distinct_organizations(
     .await
 }
 
-/// List an organization's audit rows newest-first — the whole chain, or one
-/// project's rows of it — filtered and cursor-paginated.
+/// The WHERE both [`list`] and [`count`] read, so a page and its total are
+/// one filter set; never the cursor, which places a page and counts nothing.
 ///
 /// Only the filters given reach the planner. A `$n IS NULL OR col = $n`
 /// shape lost partition pruning and the actor and project indexes once the
 /// prepared statement settled on a generic plan, and a rare actor then
 /// walked the organization's whole history.
-pub async fn list<B: HasOrganization>(
-    tx: &mut Scoped<'_, B>,
-    q: &AuditQuery<'_>,
-) -> sqlx::Result<Vec<AuditRow>> {
-    let mut sql = QueryBuilder::<Postgres>::new(
-        "SELECT id, organization_id, actor_id, action, resource_kind, resource_id,
-                request_id, metadata, created_at, prev_hash, row_hash, in_project
-           FROM audit.events
-          WHERE organization_id = ",
-    );
-    sql.push_bind(q.organization_id);
+fn filters(sql: &mut QueryBuilder<Postgres>, q: &AuditQuery<'_>) {
+    sql.push(" WHERE organization_id = ")
+        .push_bind(q.organization_id);
     if let Some(project) = q.in_project {
         sql.push(" AND in_project = ").push_bind(project);
     }
@@ -128,11 +123,38 @@ pub async fn list<B: HasOrganization>(
     if let Some(kind) = q.resource_kind {
         sql.push(" AND resource_kind = ").push_bind(kind);
     }
+}
+
+/// List an organization's audit rows newest-first — the whole chain, or one
+/// project's rows of it — filtered, after the cursor and past the offset.
+pub async fn list<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
+    q: &AuditQuery<'_>,
+) -> sqlx::Result<Vec<AuditRow>> {
+    let mut sql = QueryBuilder::<Postgres>::new(
+        "SELECT id, organization_id, actor_id, action, resource_kind, resource_id,
+                request_id, metadata, created_at, prev_hash, row_hash, in_project
+           FROM audit.events",
+    );
+    filters(&mut sql, q);
     if let Some(cursor) = q.cursor {
         sql.push(" AND id < ").push_bind(cursor);
     }
     sql.push(" ORDER BY id DESC LIMIT ").push_bind(q.limit);
+    if q.offset > 0 {
+        sql.push(" OFFSET ").push_bind(q.offset);
+    }
     sql.build_query_as::<AuditRow>().fetch_all(tx.conn()).await
+}
+
+/// How many rows [`list`]'s filters admit, whatever the page.
+pub async fn count<B: HasOrganization>(
+    tx: &mut Scoped<'_, B>,
+    q: &AuditQuery<'_>,
+) -> sqlx::Result<i64> {
+    let mut sql = QueryBuilder::<Postgres>::new("SELECT count(*) FROM audit.events");
+    filters(&mut sql, q);
+    sql.build_query_scalar::<i64>().fetch_one(tx.conn()).await
 }
 
 /// One row of an export: every field the row hash covers

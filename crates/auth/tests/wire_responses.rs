@@ -581,6 +581,9 @@ fn the_audit_log_answers_as_the_console_reads() {
                 row_hash: Some("f".repeat(64)),
                 in_project: Some(project()),
             }],
+            total: 3,
+            page: 1,
+            limit: 1,
             next_cursor: Some(EVENT),
         },
     );

@@ -33,13 +33,20 @@ export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 export const AuditPageSchema = z.object({
   events: z.array(AuditEventSchema),
+  total: z.number(),
+  page: z.number(),
+  limit: z.number(),
   nextCursor: z.string().nullish(),
 });
 
-const LIST_LIMIT = 100;
+/** A numbered page of a list: the first where none is named. */
+export interface AuditPaging {
+  page?: number;
+  limit: number;
+}
 
 export type AuditAccess =
-  | { kind: "ok"; events: AuditEvent[] }
+  | { kind: "ok"; events: AuditEvent[]; total: number; page: number; limit: number }
   | { kind: "forbidden" }
   | { kind: "unavailable" };
 
@@ -54,12 +61,12 @@ export interface AuditFilter {
 export const fetchAuditEvents = cache(
   async (
     projectId: string,
-    limit: number = LIST_LIMIT,
+    paging: AuditPaging,
     filter?: AuditFilter,
   ): Promise<AuditAccess> => {
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
-    const query = new URLSearchParams({ limit: String(limit) });
+    const query = pagingQuery(paging);
     if (filter) {
       query.set("action", filter.action);
       query.set("resource_kind", filter.resourceKind);
@@ -74,14 +81,14 @@ export const fetchAuditEvents = cache(
 );
 
 export const fetchOrganizationAudit = cache(
-  async (limit: number = LIST_LIMIT): Promise<AuditAccess> => {
+  async (paging: AuditPaging): Promise<AuditAccess> => {
     const ctx = await identityContext();
     if (!ctx) return { kind: "unavailable" };
     return listAudit(
       "fetchOrganizationAudit",
       `${env.SERVER_URL}/internal/v1/audit/organizations/${encodeURIComponent(
         ctx.organizationId,
-      )}?limit=${limit}`,
+      )}?${pagingQuery(paging)}`,
       organizationHeaders(ctx),
     );
   },
@@ -264,5 +271,13 @@ async function listAudit(
   headers: Record<string, string>,
 ): Promise<AuditAccess> {
   const read = await readJson(fetcher, url, { headers }, AuditPageSchema);
-  return read.kind === "ok" ? { kind: "ok", events: read.value.events } : read;
+  if (read.kind !== "ok") return read;
+  const { events, total, page, limit } = read.value;
+  return { kind: "ok", events, total, page, limit };
+}
+
+function pagingQuery({ page, limit }: AuditPaging): URLSearchParams {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (page !== undefined) query.set("page", String(page));
+  return query;
 }

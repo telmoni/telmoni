@@ -39,6 +39,8 @@ use crate::db::{audit_exports, locks};
 /// for everything times out on exactly the history worth reading.
 const DEFAULT_LIMIT: i64 = 100;
 const MAX_LIMIT: i64 = 1000;
+/// The last numbered page: past it an offset reads further than a person pages.
+const MAX_PAGE: i64 = 1000;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +55,19 @@ pub struct ListParams {
     resource_kind: Option<TelmoniResourceKind>,
     cursor: Option<Uuid>,
     limit: Option<i64>,
+    /// A numbered page, the first where none is named; the cursor's readers
+    /// name none.
+    page: Option<i64>,
+}
+
+impl ListParams {
+    /// The rows a page holds and the page asked for, each inside its bounds.
+    fn paging(&self) -> (i64, i64) {
+        (
+            self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
+            self.page.unwrap_or(1).clamp(1, MAX_PAGE),
+        )
+    }
 }
 
 /// `GET /internal/v1/audit/projects/{project_id}` — the events written inside one
@@ -76,24 +91,23 @@ pub async fn list_project_audit(
 
     let mut tx = tx.bind_organization(&organization).await?;
 
-    let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let events = audit::list(
-        &mut tx,
-        &AuditQuery {
-            organization_id: &organization,
-            in_project: Some(&project_id),
-            from: params.from,
-            to: params.to,
-            actor: params.actor.as_deref(),
-            action: params.action,
-            resource_kind: params.resource_kind,
-            cursor: params.cursor,
-            limit,
-        },
-    )
-    .await?;
+    let (limit, number) = params.paging();
+    let query = AuditQuery {
+        organization_id: &organization,
+        in_project: Some(&project_id),
+        from: params.from,
+        to: params.to,
+        actor: params.actor.as_deref(),
+        action: params.action,
+        resource_kind: params.resource_kind,
+        cursor: params.cursor,
+        limit,
+        offset: (number - 1) * limit,
+    };
+    let total = audit::count(&mut tx, &query).await?;
+    let events = audit::list(&mut tx, &query).await?;
     tx.commit().await?;
-    Ok(page(events, limit))
+    Ok(page(events, total, number, limit))
 }
 
 /// `GET /internal/v1/audit/organizations/{organization_id}` — the organization's
@@ -114,24 +128,23 @@ pub async fn list_organization_audit(
     let role = super::organization_role_or_forbidden(&mut tx, &organization_id, &principal.user_id)
         .await?;
     authorize_organization(role, OrganizationAction::ReadWholeAudit)?;
-    let limit = params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    let events = audit::list(
-        &mut tx,
-        &AuditQuery {
-            organization_id: &organization_id,
-            in_project: None,
-            from: params.from,
-            to: params.to,
-            actor: params.actor.as_deref(),
-            action: params.action,
-            resource_kind: params.resource_kind,
-            cursor: params.cursor,
-            limit,
-        },
-    )
-    .await?;
+    let (limit, number) = params.paging();
+    let query = AuditQuery {
+        organization_id: &organization_id,
+        in_project: None,
+        from: params.from,
+        to: params.to,
+        actor: params.actor.as_deref(),
+        action: params.action,
+        resource_kind: params.resource_kind,
+        cursor: params.cursor,
+        limit,
+        offset: (number - 1) * limit,
+    };
+    let total = audit::count(&mut tx, &query).await?;
+    let events = audit::list(&mut tx, &query).await?;
     tx.commit().await?;
-    Ok(page(events, limit))
+    Ok(page(events, total, number, limit))
 }
 
 /// What a data sheet was drawn at: its own read, filed in the chain, as the
@@ -344,12 +357,16 @@ pub struct ExportList {
     pub max_bytes: usize,
 }
 
-/// One page of a chain, and the cursor to the page after it while one may
+/// One page of a chain: how many rows its filters admit, which page of how
+/// many rows this is, and the cursor to the page after it while one may
 /// follow.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditPage {
     pub events: Vec<AuditRow>,
+    pub total: i64,
+    pub page: i64,
+    pub limit: i64,
     pub next_cursor: Option<Uuid>,
 }
 
@@ -392,13 +409,16 @@ pub async fn download_audit_export(
 }
 
 /// One page of a chain, as both lists answer it.
-fn page(events: Vec<AuditRow>, limit: i64) -> Json<AuditPage> {
+fn page(events: Vec<AuditRow>, total: i64, page: i64, limit: i64) -> Json<AuditPage> {
     let next_cursor = events
         .last()
         .filter(|_| i64::try_from(events.len()).is_ok_and(|n| n == limit))
         .map(|r| r.id);
     Json(AuditPage {
         events,
+        total,
+        page,
+        limit,
         next_cursor,
     })
 }

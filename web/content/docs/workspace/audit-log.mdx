@@ -11,7 +11,7 @@ Audit logs are read in the web console:
 - **Organization audit log**: the organization's **Audit log** page (`/{organization}/audit-log`). It holds every event in the organization, its projects' included. Open to the organization's **Owner** and **Admins**.
 - **Project audit log**: the project's **Audit log** page (`/{organization}/{project}/audit-log`), with the events written inside that project in its current organization: after a [transfer](/docs/workspace/organizations-and-projects#transferring-a-project), its earlier events stay in the old organization's log. Open to the project's **Owner** and **Admins**. A project **Member** cannot read it.
 
-Each page shows the latest 100 events. The [console agent](/docs/self-host/agent) reads the same events with its `audit_events` tool, under the same roles, without the email addresses their details record.
+Each page shows 50 events, newest first, or 25 or 100 by the rows picker at its foot, beside the total and the way to the other pages; the URL carries the page. The [console agent](/docs/self-host/agent) reads the same events with its `audit_events` tool, under the same roles, without the email addresses their details record.
 
 ---
 

@@ -89,7 +89,7 @@ export default async function DataSheetPage() {
       const [mode, posture, history] = await Promise.all([
         fetchContentMode(project.id),
         fetchPrivacyPosture(project.id),
-        fetchAuditEvents(project.id, 1000, {
+        fetchAuditEvents(project.id, { limit: 1000 }, {
           action: "updated",
           resourceKind: ResourceKind.Project,
           from: EVERY_CHANGE_SINCE,

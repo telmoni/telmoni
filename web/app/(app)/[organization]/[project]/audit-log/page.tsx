@@ -6,12 +6,13 @@ import { projectPage } from "@/lib/server/project-page";
 import { projectPath } from "@/lib/slug";
 import { administers } from "@/lib/roles";
 
-import { AuditLog } from "../../../_audit-log";
+import { AuditLog, auditPaging } from "../../../_audit-log";
 
 export const metadata = { title: "Audit log" };
 
 export default async function AuditPage({
   params,
+  searchParams,
 }: PageProps<"/[organization]/[project]/audit-log">) {
   const { organization, project: slug } = await params;
   const resolved = await projectPage(slug);
@@ -29,11 +30,12 @@ export default async function AuditPage({
     );
   }
 
-  const access = await fetchAuditEvents(project.id);
+  const access = await fetchAuditEvents(project.id, auditPaging(await searchParams));
 
   return (
     <AuditLog
       access={access}
+      base={`${overview}/audit-log`}
       what="this project's audit log"
       owner={ownerContact(activeOrganization(gate))}
       backHref={overview}
@@ -41,7 +43,7 @@ export default async function AuditPage({
         "Who did what, when — every mutation on this project, written append-only " +
         "in the same transaction as the change it records. Each row carries the " +
         "hash of the one before it, so an export can be re-verified by somebody " +
-        "who does not trust us. The most recent 100 events are shown."
+        "who does not trust us."
       }
       empty={
         "Actions on this project — minting a key, inviting a member, changing a " +

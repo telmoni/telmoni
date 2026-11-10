@@ -19,6 +19,13 @@ let mockProject: unknown;
 let mockAuditEvents: unknown;
 let auditFetches = 0;
 let auditAskedFor: string | null = null;
+let auditPagingAsked: unknown = null;
+
+vi.mock("@/components/audit-pagination", () => ({
+  AuditPagination: (props: { base: string; total: number; page: number; limit: number }) => (
+    <div data-testid="pages">{JSON.stringify(props)}</div>
+  ),
+}));
 
 vi.mock("@/lib/server/data", async () => {
   const { activeOrganization } = await vi.importActual<
@@ -28,9 +35,10 @@ vi.mock("@/lib/server/data", async () => {
     activeOrganization,
     getServerContext: async () => mockContext,
     fetchProjectBySlug: async () => mockProject,
-    fetchAuditEvents: async (projectId: string) => {
+    fetchAuditEvents: async (projectId: string, paging: unknown) => {
       auditFetches += 1;
       auditAskedFor = projectId;
+      auditPagingAsked = paging;
       return mockAuditEvents;
     },
   };
@@ -44,7 +52,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   auditFetches = 0;
   auditAskedFor = null;
-  mockAuditEvents = { kind: "ok", events: [] };
+  auditPagingAsked = null;
+  mockAuditEvents = { kind: "ok", events: [], total: 0, page: 1, limit: 50 };
   mockContext = {
     organizations: [
       {
@@ -108,6 +117,26 @@ describe("AuditPage (project)", () => {
     expect(screen.queryByTestId("access-denied")).toBeNull();
     expect(screen.getByTestId("page-header")).toHaveTextContent("Audit log");
     expect(auditFetches).toBe(1);
+  });
+
+  it("reads the page and the rows its URL names, and spells its pages from its own path", async () => {
+    render(await AuditPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(auditPagingAsked).toEqual({ page: undefined, limit: 50 });
+
+    mockAuditEvents = { kind: "ok", events: [], total: 60, page: 3, limit: 25 };
+    render(
+      await AuditPage({
+        params: PARAMS,
+        searchParams: Promise.resolve({ page: "3", limit: "25" }),
+      }),
+    );
+    expect(auditPagingAsked).toEqual({ page: 3, limit: 25 });
+    expect(JSON.parse(screen.getByTestId("pages").textContent ?? "")).toEqual({
+      base: "/acme/payments/audit-log",
+      total: 60,
+      page: 3,
+      limit: 25,
+    });
   });
 
   it("renders outage when server context is missing", async () => {
