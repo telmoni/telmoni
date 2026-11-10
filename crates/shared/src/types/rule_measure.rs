@@ -15,6 +15,8 @@ pub enum RuleMeasure {
     Count,
     /// One for each span that ended in an error, none for the rest.
     Failures,
+    /// One for each span whose fault the alert names, zero for the rest.
+    Faults,
     /// How long each took, in milliseconds.
     Duration,
     /// Each span's input and output tokens, summed.
@@ -39,6 +41,7 @@ pub enum RuleMeasure {
 crate::wire_enum!(RuleMeasure {
     Count => "count",
     Failures => "failures",
+    Faults => "faults",
     Duration => "duration",
     Tokens => "tokens",
     Cost => "cost",
@@ -58,7 +61,7 @@ impl RuleMeasure {
         use RuleAggregation as A;
         match self {
             Self::Count | Self::Stalled => matches!(aggregation, A::Count),
-            Self::Failures => matches!(aggregation, A::Count | A::Avg),
+            Self::Failures | Self::Faults => matches!(aggregation, A::Count | A::Avg),
             Self::Duration => !matches!(aggregation, A::Count | A::Max),
             Self::Tokens => matches!(aggregation, A::Avg | A::Sum),
             Self::Cost => matches!(aggregation, A::Avg | A::Sum | A::Max),
@@ -79,7 +82,7 @@ impl RuleMeasure {
             Self::Cost | Self::Score | Self::Burn | Self::Steps | Self::Repeats | Self::Stalled => {
                 matches!(kind, SpanKind::Agent)
             }
-            Self::Count | Self::Failures | Self::Duration => true,
+            Self::Count | Self::Failures | Self::Faults | Self::Duration => true,
         }
     }
 }

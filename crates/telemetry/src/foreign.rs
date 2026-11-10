@@ -355,6 +355,7 @@ fn agent_row(agent: &str, span_id: &str, spans: &[SpanRow]) -> Option<SpanRow> {
             SpanStatus::Ok
         },
         error_type: failed.map(|c| c.error_type.clone()).unwrap_or_default(),
+        fault: failed.and_then(|c| c.fault),
         model: String::new(),
         provider: String::new(),
         input_tokens: 0,
@@ -733,6 +734,7 @@ mod tests {
             ended_at: now,
             status: SpanStatus::Ok,
             error_type: String::new(),
+            fault: None,
             model: String::new(),
             provider: String::new(),
             input_tokens: 0,

@@ -77,10 +77,11 @@ const LEVELS: [RuleAggregation; 4] = [
 /// An alert's window, as two sources read it: the full hours from the
 /// totals, and the rest from the spans, each ignoring what the other reads.
 const TOTALS_SQL: &str = concat!(
-    "SELECT sum(n) AS spans, sum(f) AS failed, sum(d) AS duration_sum, sum(t) AS tokens, ",
+    "SELECT sum(n) AS spans, sum(f) AS failed, sum(x) AS faulted, sum(d) AS duration_sum, sum(t) AS tokens, ",
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.95, 0.99)(q) AS Array(Float64)) AS quantiles ",
     "FROM (",
     "SELECT sum(spans) AS n, sumIf(spans, status = 'error') AS f, sum(duration_ms_sum) AS d, ",
+    "sumIf(spans, has({faults:Array(String)}, fault)) AS x, ",
     "sum(input_tokens) + sum(output_tokens) AS t, ",
     "quantilesTDigestMergeState(0.5, 0.9, 0.99)(duration_ms) AS q ",
     "FROM telemetry.spans_hourly ",
@@ -93,8 +94,9 @@ const TOTALS_SQL: &str = concat!(
     "AND (empty({statuses:Array(String)}) OR status IN {statuses:Array(String)}) ",
     "UNION ALL ",
     "SELECT count() AS n, countIf(status = 'error') AS f, sum(duration) AS d, ",
+    "countIf(has({faults:Array(String)}, fault)) AS x, ",
     "sum(input_tokens + output_tokens) AS t, quantilesTDigestState(0.5, 0.9, 0.99)(duration) AS q ",
-    "FROM (SELECT status, input_tokens, output_tokens, ",
+    "FROM (SELECT status, fault, input_tokens, output_tokens, ",
     "greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000 AS duration ",
     "FROM telemetry.spans ",
     "WHERE project_id IN {projects:Array(String)} ",
@@ -142,10 +144,11 @@ macro_rules! places {
 /// window: each row read once and counted for each alert it passes, `i` the
 /// alert's place; one whose window held nothing is left out.
 const TOTALS_TOGETHER_SQL: &str = concat!(
-    "SELECT i, sum(n) AS spans, sum(f) AS failed, sum(d) AS duration_sum, sum(t) AS tokens, ",
+    "SELECT i, sum(n) AS spans, sum(f) AS failed, sum(x) AS faulted, sum(d) AS duration_sum, sum(t) AS tokens, ",
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.95, 0.99)(q) AS Array(Float64)) AS quantiles ",
     "FROM (",
     "SELECT i, sum(spans) AS n, sumIf(spans, status = 'error') AS f, sum(duration_ms_sum) AS d, ",
+    "sumIf(spans, has({faults:Array(Array(String))}[i + 1], fault)) AS x, ",
     "sum(input_tokens) + sum(output_tokens) AS t, ",
     "quantilesTDigestMergeState(0.5, 0.9, 0.99)(duration_ms) AS q ",
     "FROM telemetry.spans_hourly ARRAY JOIN ",
@@ -158,8 +161,9 @@ const TOTALS_TOGETHER_SQL: &str = concat!(
     "GROUP BY i ",
     "UNION ALL ",
     "SELECT i, count() AS n, countIf(status = 'error') AS f, sum(duration) AS d, ",
+    "countIf(has({faults:Array(Array(String))}[i + 1], fault)) AS x, ",
     "sum(input_tokens + output_tokens) AS t, quantilesTDigestState(0.5, 0.9, 0.99)(duration) AS q ",
-    "FROM (SELECT i, status, input_tokens, output_tokens, ",
+    "FROM (SELECT i, status, fault, input_tokens, output_tokens, ",
     "greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000 AS duration ",
     "FROM telemetry.spans ARRAY JOIN ",
     places!(),
@@ -460,6 +464,7 @@ fn quantile(quantiles: &[f64], percentile: RuleAggregation) -> Option<f64> {
 pub struct Totals {
     pub spans: u64,
     pub failed: u64,
+    pub faulted: u64,
     pub duration_sum: f64,
     pub tokens: u64,
     pub quantiles: Vec<f64>,
@@ -476,12 +481,19 @@ impl Totals {
             clippy::cast_precision_loss,
             reason = "a count past 2^53 spans is no alert's"
         )]
-        let (spans, failed, tokens) = (self.spans as f64, self.failed as f64, self.tokens as f64);
+        let (spans, failed, faulted, tokens) = (
+            self.spans as f64,
+            self.failed as f64,
+            self.faulted as f64,
+            self.tokens as f64,
+        );
         let at = |percentile: RuleAggregation| quantile(&self.quantiles, percentile);
         match (measure, aggregation) {
             (RuleMeasure::Count, _) => Some(spans),
             (RuleMeasure::Failures, RuleAggregation::Avg) => Some(failed / spans),
             (RuleMeasure::Failures, _) => Some(failed),
+            (RuleMeasure::Faults, RuleAggregation::Avg) => Some(faulted / spans),
+            (RuleMeasure::Faults, _) => Some(faulted),
             (RuleMeasure::Duration, RuleAggregation::Avg) => Some(self.duration_sum / spans),
             (RuleMeasure::Duration, RuleAggregation::Sum) => Some(self.duration_sum),
             (RuleMeasure::Duration, percentile) => at(percentile),
@@ -621,6 +633,7 @@ struct TotalsAt {
     i: u32,
     spans: u64,
     failed: u64,
+    faulted: u64,
     duration_sum: f64,
     tokens: u64,
     quantiles: Vec<f64>,
@@ -659,6 +672,7 @@ impl Together {
                 let group = match definition.measure {
                     RuleMeasure::Count
                     | RuleMeasure::Failures
+                    | RuleMeasure::Faults
                     | RuleMeasure::Duration
                     | RuleMeasure::Tokens => {
                         Group::Totals(project, definition.kind, definition.window, at)
@@ -708,6 +722,10 @@ fn bind_together(read: Read, members: &[&RuleRow]) -> Read {
             .collect()
     };
     read.param("agents", field(|filters| filters.agent.clone()))
+        .param(
+            "faults",
+            field(|filters| filters.fault.iter().map(ToString::to_string).collect()),
+        )
         .param("models", field(|filters| filters.model.clone()))
         .param("providers", field(|filters| filters.provider.clone()))
         .param("environments", field(|filters| filters.environment.clone()))
@@ -745,6 +763,7 @@ async fn group_values(
                     *slot = Totals {
                         spans: row.spans,
                         failed: row.failed,
+                        faulted: row.faulted,
                         duration_sum: row.duration_sum,
                         tokens: row.tokens,
                         quantiles: row.quantiles,
@@ -1091,7 +1110,7 @@ fn counts(definition: &crate::rules::Definition) -> bool {
     ) || (definition.aggregation == RuleAggregation::Count
         && matches!(
             definition.measure,
-            RuleMeasure::Failures | RuleMeasure::Score
+            RuleMeasure::Failures | RuleMeasure::Faults | RuleMeasure::Score
         ))
 }
 
@@ -1357,6 +1376,7 @@ mod tests {
         let totals = Totals {
             spans: 4,
             failed: 1,
+            faulted: 2,
             duration_sum: 1_000.0,
             tokens: 400,
             quantiles: vec![100.0, 400.0, 450.0, 490.0],

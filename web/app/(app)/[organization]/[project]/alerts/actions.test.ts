@@ -132,6 +132,13 @@ describe("saveAlertAction", () => {
     expect(sent()).toMatchObject({ url: `${BASE}/rules/${RULE}`, method: "PUT", body: INPUT });
   });
 
+  it("forwards a fault selector without replacing ordinary filters", async () => {
+    const fault = { ...INPUT, measure: "faults", aggregation: "avg", alert_threshold: 0.05,
+      warning_threshold: null, filters: { provider: ["provider-a"], fault: ["rate_limited", "timeout"] } };
+    expect(await saveAlertAction(PROJECT, null, fault)).toEqual({ ok: true });
+    expect(sent().body).toEqual(fault);
+  });
+
   it("makes a retrieval alert on its source, and saves it over with the source kept", async () => {
     const searches = {
       ...INPUT,

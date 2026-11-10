@@ -20,13 +20,14 @@ import {
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
 import { formatScoreValue } from "@/lib/scores";
-import { formatCost, formatCount, formatDuration, type ChangeMark } from "@/lib/traces";
+import { FAULT_LABEL, formatCost, formatCount, formatDuration, type ChangeMark } from "@/lib/traces";
+import { SpanFault } from "@/lib/types/enums";
 import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-const METRICS = ["traces", "tokens", "cost", "duration", "first_token", "score"] as const;
+const METRICS = ["traces", "faults", "tokens", "cost", "duration", "first_token", "score"] as const;
 type Metric = (typeof METRICS)[number];
 
 /** The metrics `histogram` can draw: a score's mean only where the list is
@@ -37,6 +38,7 @@ function drawn(histogram: TraceHistogram): Metric[] {
 
 const METRIC_LABEL: Record<Metric, string> = {
   traces: "Traces",
+  faults: "Traces with faults",
   tokens: "Tokens",
   cost: "Cost",
   duration: "Duration",
@@ -52,6 +54,25 @@ const TRACES: ChartConfig = {
   error: { label: "Error", color: "var(--destructive)" },
   cancelled: { label: "Cancelled", color: "var(--ring)" },
 };
+/** A class's dashes, its own on every chart, so a line reads the same whichever others are drawn. */
+function faultDash(fault: SpanFault): string {
+  const place = Object.values(SpanFault).indexOf(fault) + 1;
+  return `${place} ${place}`;
+}
+const FAULTS: ChartConfig = Object.fromEntries(
+  Object.values(SpanFault).map((fault) => [
+    fault,
+    {
+      label: FAULT_LABEL[fault],
+      color: "var(--foreground)",
+      icon: () => (
+        <svg viewBox="0 0 32 16" className="h-4 w-8" aria-hidden="true">
+          <path d="M0 8H32" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray={faultDash(fault)} />
+        </svg>
+      ),
+    },
+  ]),
+);
 const TOKENS: ChartConfig = {
   tokens: { label: "Tokens", color: "var(--muted-foreground)" },
 };
@@ -91,6 +112,7 @@ function rows(histogram: TraceHistogram, metric: Metric) {
     ok: bar.ok,
     error: bar.error,
     cancelled: bar.cancelled,
+    ...Object.fromEntries(Object.values(SpanFault).map((fault) => [fault, bar.faults[fault] ?? 0])),
     tokens: bar.tokens,
     cost: bar.spend,
     p50: metric === "first_token" ? bar.time_to_first_token_p50_ms : bar.duration_p50_ms,
@@ -119,11 +141,18 @@ function MetricChart({
   const data = rows(histogram, metric);
   const seconds = histogram.bucket_seconds;
   const changed = new Map(marks.map((mark) => [mark.at, mark.changes]));
-  const lines = metric === "duration" || metric === "first_token" || metric === "score";
+  const lines =
+    metric === "duration" || metric === "first_token" || metric === "score" || metric === "faults";
+  // Only the classes the window holds: a class nobody met is no line and no legend entry.
+  const faults = Object.values(SpanFault).filter((fault) =>
+    histogram.bars.some((bar) => (bar.faults[fault] ?? 0) > 0),
+  );
   const config =
     metric === "traces"
       ? TRACES
-      : metric === "tokens"
+      : metric === "faults"
+        ? Object.fromEntries(faults.map((fault) => [fault, FAULTS[fault]!]))
+        : metric === "tokens"
         ? TOKENS
         : metric === "cost"
           ? COST
@@ -133,6 +162,7 @@ function MetricChart({
   const value = (v: number) =>
     metric === "score"
       ? formatScoreValue(v)
+      : metric === "faults" ? formatCount(v)
       : lines
         ? formatDuration(v)
         : metric === "cost"
@@ -219,7 +249,20 @@ function MetricChart({
           {yAxis}
           {tooltip}
           {legend && <ChartLegend content={<ChartLegendContent />} />}
-          {metric === "score" ? (
+          {metric === "faults" ? (
+            faults.map((fault) => (
+              <Line
+                key={fault}
+                dataKey={fault}
+                type="monotone"
+                stroke="var(--foreground)"
+                strokeDasharray={faultDash(fault)}
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls={false}
+              />
+            ))
+          ) : metric === "score" ? (
             // Dotted too: a bar between empty ones has no neighbour to draw a line to.
             <Line dataKey="score" type="monotone" stroke="var(--color-score)" strokeWidth={2} dot={{ r: 4 }} connectNulls={false} />
           ) : (
@@ -289,7 +332,8 @@ export function TraceHistogramStrip({
           </SelectContent>
         </Select>
       </div>
-      <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-28" />
+      {metric === "faults" && <p className="text-muted-foreground">Traces containing each fault; one trace may appear in several categories.</p>}
+      <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-28" legend={metric === "faults"} />
     </div>
   );
 }
@@ -317,6 +361,7 @@ export function TraceCharts({
           <h2 className="text-base font-medium">
             {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
           </h2>
+          {metric === "faults" && <p className="text-muted-foreground">Traces containing each fault; categories can overlap.</p>}
           <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />
         </div>
       ))}

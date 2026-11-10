@@ -77,7 +77,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         .read(
             &only,
             "SELECT project_id, received_at, units, agent, trace_id, span_id, \
-             parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
+             parent_span_id, kind, name, started_at, ended_at, status, error_type, fault, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
              cache_write_input_tokens, cost, time_to_first_token, user_id, session_id, environment, \
              release, tags, sample_rate, attributes, sent \

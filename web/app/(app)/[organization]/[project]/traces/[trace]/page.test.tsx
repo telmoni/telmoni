@@ -32,7 +32,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({}));
 
 import { testSpan } from "@/lib/span-fixture";
-import { Role, SpanKind } from "@/lib/types/enums";
+import { Role, SpanFault, SpanKind } from "@/lib/types/enums";
 
 let mockContext: unknown;
 let mockProject: unknown;
@@ -280,6 +280,16 @@ describe("TracePage", () => {
     expect(within(chosen()).getByText("1,200")).toBeInTheDocument();
     expect(within(chosen()).getByText("anthropic")).toBeInTheDocument();
     expect(within(chosen()).getByText("Time to first token").nextSibling).toHaveTextContent("420 ms");
+  });
+
+  it("shows a refused model call's fault without changing its successful status", async () => {
+    mockTrace = { kind: "ok", trace: { trace_id: TRACE_ID,
+      spans: SPANS.map((span) => span.kind === SpanKind.ModelCall ? { ...span, fault: SpanFault.Refused } : span),
+      truncated: false, spend: null, content: [] } };
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    fireEvent.click(within(screen.getByRole("tree", { name: "Spans" })).getByText("chat claude-sonnet-5-5"));
+    expect(within(chosen()).getByText("Fault").nextSibling).toHaveTextContent("Refused");
+    expect(within(chosen()).getAllByText("OK").length).toBeGreaterThan(0);
   });
 
   it("draws a retrieval by its source with its count, beside the trace's other calls", async () => {

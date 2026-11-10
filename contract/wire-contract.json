@@ -123,6 +123,7 @@
       "provider",
       "tool",
       "status",
+      "fault",
       "environment",
       "release",
       "tag",
@@ -209,6 +210,7 @@
     "RuleMeasure": [
       "count",
       "failures",
+      "faults",
       "duration",
       "tokens",
       "cost",
@@ -257,6 +259,17 @@
     "SortDirection": [
       "asc",
       "desc"
+    ],
+    "SpanFault": [
+      "rate_limited",
+      "overloaded",
+      "timeout",
+      "context_length",
+      "unauthorized",
+      "invalid_output",
+      "refused",
+      "truncated",
+      "other"
     ],
     "SpanKind": [
       "agent",
@@ -375,6 +388,10 @@
         "count",
         "avg"
       ],
+      "faults": [
+        "count",
+        "avg"
+      ],
       "repeats": [
         "max"
       ],
@@ -407,6 +424,7 @@
       "agent": [
         "count",
         "failures",
+        "faults",
         "duration",
         "cost",
         "score",
@@ -418,22 +436,26 @@
       "model_call": [
         "count",
         "failures",
+        "faults",
         "duration",
         "tokens"
       ],
       "retrieval": [
         "count",
         "failures",
+        "faults",
         "duration"
       ],
       "step": [
         "count",
         "failures",
+        "faults",
         "duration"
       ],
       "tool_call": [
         "count",
         "failures",
+        "faults",
         "duration"
       ]
     }

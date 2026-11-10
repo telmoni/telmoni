@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { env } from "@/lib/env";
 import { queryString } from "@/lib/list-query";
-import { ChartMeasure, MetricsGroup, SortDirection, TraceSort } from "@/lib/types/enums";
+import { ChartMeasure, MetricsGroup, SortDirection, SpanFault, TraceSort } from "@/lib/types/enums";
 
 import {
   FILTER_KEYS,
@@ -85,6 +85,7 @@ const HistogramBarSchema = z.object({
   ok: z.number(),
   error: z.number(),
   cancelled: z.number(),
+  faults: z.partialRecord(z.enum(SpanFault), z.number().int().nonnegative()),
   tokens: z.number(),
   /** What its traces' model calls cost, each trace its own. */
   spend: z.number(),

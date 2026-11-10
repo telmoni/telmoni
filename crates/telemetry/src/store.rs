@@ -306,6 +306,9 @@ pub struct SpanRow {
     pub status: SpanStatus,
     /// The exception's class on an error, never its message; empty otherwise.
     pub error_type: String,
+    /// A failure class, independent of the span's status.
+    #[serde(default, with = "text::optional")]
+    pub fault: Option<telmoni_shared::SpanFault>,
     /// The model that answered a model call; empty on every other kind.
     pub model: String,
     /// Its provider, as the conventions spell it; empty on every other kind.
@@ -368,6 +371,33 @@ pub(crate) mod text {
         String::deserialize(deserializer)?
             .parse()
             .map_err(de::Error::custom)
+    }
+    pub(crate) mod optional {
+        use super::*;
+
+        pub(crate) fn serialize<T: Display, S: Serializer>(
+            value: &Option<T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            // None is the empty text, as every optional word of a span is kept.
+            match value {
+                Some(value) => serializer.serialize_str(&value.to_string()),
+                None => serializer.serialize_str(""),
+            }
+        }
+
+        pub(crate) fn deserialize<'de, T: FromStr, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<T>, D::Error>
+        where
+            T::Err: Display,
+        {
+            let value = String::deserialize(deserializer)?;
+            if value.is_empty() {
+                return Ok(None);
+            }
+            value.parse().map(Some).map_err(de::Error::custom)
+        }
     }
 }
 

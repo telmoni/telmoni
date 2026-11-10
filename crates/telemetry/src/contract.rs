@@ -689,7 +689,7 @@ pub const INVENTORY: &[InventoryRow] = &[
     row(
         ERROR_TYPE,
         ReadOn::AnySpan,
-        "the column error_type",
+        "the column error_type; a failed span's fault class",
         Needs::AnyMode,
         "1 to 128 characters: the exception's class, never its message",
     ),
@@ -820,7 +820,7 @@ pub const INVENTORY: &[InventoryRow] = &[
     row(
         "gen_ai.response.finish_reasons",
         ReadOn::ModelCall,
-        KEPT_ATTRIBUTE,
+        "kept in attributes; a successful model call's refused or truncated fault",
         Needs::AnyMode,
         RULE_ATTRIBUTE,
     ),

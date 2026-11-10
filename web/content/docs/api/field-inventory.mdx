@@ -73,7 +73,7 @@ keeps for it alone. It is kept as any tag is, and so are the
 | `gen_ai.agent.name` | the agent's span | the column `name` | any | 1 to 145 characters |
 | `gen_ai.workflow.name` | the agent's span | the column `name`, where `gen_ai.agent.name` is unset | any | 1 to 145 characters |
 | `gen_ai.tool.name` | a tool call | the column `name` | any | 1 to 145 characters |
-| `error.type` | any span | the column `error_type` | any | 1 to 128 characters: the exception's class, never its message |
+| `error.type` | any span | the column `error_type`; a failed span's `fault` class | any | 1 to 128 characters: the exception's class or provider code, never its message; an unknown failure is `other` |
 | `gen_ai.response.model` | a model call | the column `model` | any | 1 to 128 characters, as the provider spells it |
 | `gen_ai.request.model` | a model call | the column `model`, where the response names none | any | 1 to 128 characters, as the provider spells it |
 | `gen_ai.provider.name` | a model call | the column `provider` | any | 1 to 128 characters, as the conventions spell it: `openai`, `anthropic`, `gcp.vertex_ai`, `aws.bedrock` |
@@ -114,7 +114,7 @@ them.
 | Attribute | On | Kept as | Needs | Rule |
 |---|---|---|---|---|
 | `gen_ai.response.id` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `gen_ai.response.finish_reasons` | a model call | `attributes`, under its own name | any | an array, as its JSON |
+| `gen_ai.response.finish_reasons` | a model call | `attributes`, under its own name; a successful call's `fault` | any | an array, as its JSON; a refusal or filter gives `refused`, an output token limit `truncated`; neither changes its status |
 | `gen_ai.response.status` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.request.reasoning.level` | a model call | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `gen_ai.agent.version` | the agent's span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |

@@ -263,7 +263,7 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_kind_check
         CHECK (kind IN ('agent', 'step', 'model_call', 'tool_call', 'retrieval')),
     CONSTRAINT rules_measure_check
-        CHECK (measure IN ('count', 'failures', 'duration', 'tokens', 'cost', 'score', 'burn',
+        CHECK (measure IN ('count', 'failures', 'faults', 'duration', 'tokens', 'cost', 'score', 'burn',
                            'steps', 'repeats', 'stalled')),
     CONSTRAINT rules_objective_check
         CHECK ((measure = 'burn') = (objective IS NOT NULL)
@@ -279,6 +279,14 @@ CREATE TABLE telemetry.rules (
     CONSTRAINT rules_aggregation_check
         CHECK (aggregation IN ('count', 'avg', 'sum', 'max', 'p50', 'p90', 'p95', 'p99')),
     CONSTRAINT rules_filters_check CHECK (jsonb_typeof(filters) = 'object'),
+    CONSTRAINT rules_faults_check CHECK (
+        CASE WHEN measure = 'faults' THEN
+            CASE WHEN jsonb_typeof(filters->'fault') = 'array' THEN
+                jsonb_array_length(filters->'fault') > 0 AND
+                filters->'fault' <@ '["rate_limited", "overloaded", "timeout", "context_length", "unauthorized", "invalid_output", "refused", "truncated", "other"]'::jsonb
+            ELSE false END
+        ELSE COALESCE(NOT (filters ? 'fault') OR filters->'fault' = '[]'::jsonb, false) END
+    ),
     CONSTRAINT rules_lookback_check CHECK (lookback IN ('hour', 'day', 'week', 'month')),
     CONSTRAINT rules_operator_check CHECK (operator IN ('gt', 'gte', 'lt', 'lte', 'eq', 'ne')),
     CONSTRAINT rules_missing_data_check

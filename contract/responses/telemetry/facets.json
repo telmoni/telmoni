@@ -18,6 +18,15 @@
       }
     ]
   },
+  "fault": {
+    "more": false,
+    "values": [
+      {
+        "count": 1,
+        "value": "rate_limited"
+      }
+    ]
+  },
   "model": {
     "more": false,
     "values": [

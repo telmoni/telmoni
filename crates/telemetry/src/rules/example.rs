@@ -22,6 +22,7 @@ use crate::store::{Projects, micros};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
     LatestFailed,
+    LatestFault,
     Slowest,
     MostTokens,
     MostSpent,
@@ -43,6 +44,7 @@ impl Pick {
                 Self::HighestScored
             }
             RuleMeasure::Failures | RuleMeasure::Burn => Self::LatestFailed,
+            RuleMeasure::Faults => Self::LatestFault,
             RuleMeasure::Duration => Self::Slowest,
             RuleMeasure::Tokens => Self::MostTokens,
             RuleMeasure::Cost => Self::MostSpent,
@@ -57,6 +59,7 @@ impl Pick {
     const fn as_str(self) -> &'static str {
         match self {
             Self::LatestFailed => "latest_failed",
+            Self::LatestFault => "latest_fault",
             Self::Slowest => "slowest",
             Self::MostTokens => "most_tokens",
             Self::MostSpent => "most_spent",
@@ -115,6 +118,7 @@ const PICK_SQL: &str = concat!(
     "AND kind = {kind:String} ",
     crate::rules::spans_admitted!(),
     "AND ({pick:String} != 'latest_failed' OR status = 'error') ",
+    "AND ({pick:String} != 'latest_fault' OR has({faults:Array(String)}, fault)) ",
     "ORDER BY multiIf(",
     "{pick:String} = 'slowest', dateDiff('microsecond', started_at, ended_at), ",
     "{pick:String} = 'most_tokens', toInt64(input_tokens + output_tokens), ",

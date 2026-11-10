@@ -30,6 +30,7 @@ pub mod score_target;
 pub mod score_type;
 pub mod severity;
 pub mod sort_direction;
+pub mod span_fault;
 pub mod span_kind;
 pub mod span_status;
 pub mod tenant_id;
@@ -69,6 +70,7 @@ pub use score_target::ScoreTarget;
 pub use score_type::ScoreType;
 pub use severity::Severity;
 pub use sort_direction::SortDirection;
+pub use span_fault::SpanFault;
 pub use span_kind::SpanKind;
 pub use span_status::SpanStatus;
 pub use tenant_id::{

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ScoreType, SpanKind, SpanStatus } from "@/lib/types/enums";
+import { ScoreType, SpanFault, SpanKind, SpanStatus } from "@/lib/types/enums";
 import { ScoreSchema } from "@/lib/types/scores";
 
 // A trace as the server answers it, parsed on the server by its entity
@@ -48,6 +48,7 @@ const Values = z.array(z.string()).optional();
 export const ListFiltersSchema = z.object({
   agent: Values,
   status: z.array(z.enum(SpanStatus)).optional(),
+  fault: z.array(z.enum(SpanFault)).optional(),
   model: Values,
   tool: Values,
   user: Values,
@@ -181,6 +182,7 @@ export const TraceSpanSchema = z.object({
   cost: z.number().nullable(),
   /** Seconds to its answer's first token; null where it reported none. */
   time_to_first_token: z.number().nullable(),
+  fault: z.enum(SpanFault).nullable(),
   user_id: z.string(),
   session_id: z.string(),
   /** The deployment its resource named, and its release; empty for none. */

@@ -627,6 +627,9 @@ fn traces_link(state: &AppState, rule: &RuleRow) -> Option<String> {
     };
     {
         let mut query = url.query_pairs_mut();
+        for fault in &filters.fault {
+            query.append_pair("fault", &fault.to_string());
+        }
         // The month's days so far, back to its first, which no fixed count covers.
         let days = match rule.definition.window {
             RuleWindow::Hour | RuleWindow::Day => 1,
@@ -819,6 +822,7 @@ fn picked(kind: SpanKind, pick: Pick) -> String {
         (Pick::Stalest, _) => "The trace quiet longest".to_owned(),
         (Pick::Latest, SpanKind::Agent) => "The latest trace".to_owned(),
         (Pick::Latest, _) => format!("The trace of the latest {one}"),
+        (Pick::LatestFault, _) => format!("The trace of the latest {one} with a selected fault"),
     }
 }
 
@@ -1084,6 +1088,8 @@ fn measured(rule: &RuleRow) -> String {
         (RuleMeasure::Count, _) => "The count".to_owned(),
         (RuleMeasure::Failures, RuleAggregation::Avg) => "The share failed".to_owned(),
         (RuleMeasure::Failures, _) => "The failures".to_owned(),
+        (RuleMeasure::Faults, RuleAggregation::Avg) => "The share with a selected fault".to_owned(),
+        (RuleMeasure::Faults, _) => "The selected faults".to_owned(),
         (RuleMeasure::Duration, RuleAggregation::Avg) => "The average duration".to_owned(),
         (RuleMeasure::Duration, RuleAggregation::Sum) => "The summed duration".to_owned(),
         (RuleMeasure::Duration, percentile) => format!("The {percentile} duration"),
@@ -1203,7 +1209,9 @@ fn amount(definition: &crate::rules::Definition, value: f64) -> String {
     }
     match (definition.measure, definition.aggregation) {
         (RuleMeasure::Duration, _) => format!("{} ms", number(value)),
-        (RuleMeasure::Failures, RuleAggregation::Avg) => format!("{}%", number(value * 100.0)),
+        (RuleMeasure::Failures | RuleMeasure::Faults, RuleAggregation::Avg) => {
+            format!("{}%", number(value * 100.0))
+        }
         (RuleMeasure::Cost, _) => dollars(value),
         (RuleMeasure::Burn, _) => format!("{}×", number(value)),
         _ => number(value),

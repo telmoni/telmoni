@@ -60,6 +60,7 @@ const METRICS_SQL: &str = concat!(
     "{group:String} = 'provider', h.provider, ",
     "{group:String} = 'tool', if(h.kind = 'tool_call', h.tool, ''), ",
     "{group:String} = 'status', h.status, {group:String} = 'environment', h.environment, ",
+    "{group:String} = 'fault', h.fault, ",
     "{group:String} = 'release', h.release, '')) AS key, toUInt8(0) AS folded, ",
     "toUInt64(sum(h.spans)) AS spans, toUInt64(sumIf(h.spans, h.status = 'error')) AS failed, ",
     "toUInt64(sumIf(h.spans, h.kind = 'agent')) AS traces, ",

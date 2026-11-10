@@ -338,6 +338,12 @@ pub fn map(
         started_at,
         ended_at,
         status,
+        fault: crate::faults::of(
+            status,
+            kind,
+            fields.error_type.as_deref().unwrap_or_default(),
+            fields.finish_fault,
+        ),
         error_type: fields.error_type.unwrap_or_default(),
         model: fields
             .response_model
@@ -385,6 +391,7 @@ pub fn units_of(row: &SpanRow) -> u32 {
     ]
     .into_iter()
     .map(String::len)
+    .chain(row.fault.map(|fault| fault.to_string().len()))
     .chain(row.tags.iter().map(|(k, v)| k.len() + v.len()))
     .chain(row.attributes.iter().map(|(k, v)| k.len() + v.len()))
     .fold(0usize, usize::saturating_add);
@@ -405,6 +412,7 @@ struct Fields {
     data_source_id: Option<String>,
     memory_store_id: Option<String>,
     error_type: Option<String>,
+    finish_fault: Option<telmoni_shared::SpanFault>,
     response_model: Option<String>,
     request_model: Option<String>,
     provider: Option<String>,
@@ -471,6 +479,10 @@ impl Fields {
                     contract::ERROR_TYPE_MAX,
                     contract::ERROR_TYPE,
                 )?);
+            }
+            "gen_ai.response.finish_reasons" => {
+                self.finish_fault = crate::faults::finish(value);
+                self.keep_listed(key, value, &mut drop_attribute);
             }
             contract::RESPONSE_MODEL => {
                 self.response_model = Some(bounded_text(
@@ -989,6 +1001,44 @@ mod tests {
             resource_sent: &[],
             store_id: store,
             keep_content: false,
+        }
+    }
+
+    #[test]
+    fn faults_survive_content_modes_and_attribute_caps_without_changing_status() {
+        let project = ProjectId::new();
+        let hash = |id: &str| id.to_owned();
+        for keep_content in [false, true] {
+            let context = Context {
+                keep_content,
+                ..context(&project, &[], &hash)
+            };
+            let mut span = call();
+            span.status = Some(Status::default());
+            span.attributes
+                .retain(|kv| kv.key != "gen_ai.response.finish_reasons");
+            span.attributes.extend(
+                (0..ATTRIBUTES_MAX).map(|n| kv(&format!("metric.{n}"), Value::IntValue(1))),
+            );
+            span.attributes
+                .push(kv("gen_ai.response.finish_reasons", s("max_tokens")));
+            let (row, _) = map(&span, &context, &mut Drops::default()).expect("kept");
+            assert_eq!(row.status, SpanStatus::Ok);
+            assert_eq!(row.fault, Some(telmoni_shared::SpanFault::Truncated));
+            assert!(
+                !row.attributes
+                    .iter()
+                    .any(|(key, _)| key == "gen_ai.response.finish_reasons")
+            );
+            span.status = Some(Status {
+                code: StatusCode::Error as i32,
+                ..Status::default()
+            });
+            span.attributes
+                .push(kv(contract::ERROR_TYPE, s("openai.RateLimitError")));
+            let (row, _) = map(&span, &context, &mut Drops::default()).expect("kept");
+            assert_eq!(row.status, SpanStatus::Error);
+            assert_eq!(row.fault, Some(telmoni_shared::SpanFault::RateLimited));
         }
     }
 

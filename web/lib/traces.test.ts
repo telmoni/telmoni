@@ -53,6 +53,11 @@ const span = (over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">) =>
   testSpan({ name: over.kind, ...over });
 
 describe("the URL as the list's state", () => {
+  it("keeps known fault categories and drops unknown values", () => {
+    const query = parseTraceQuery({ fault: ["rate_limited", "timeout", "made_up"] });
+    expect(query.fault).toEqual(["rate_limited", "timeout"]);
+    expect(listDownloadHref("traces", "org", "project", query, "csv")).toContain("fault=rate_limited");
+  });
   it("reads a score and its bounds, a chip that clears them together, and bounds alone as none", () => {
     const query = parseTraceQuery({ score: " relevance ", score_min: "0.5", score_max: "x" });
     expect(query).toMatchObject({ score: "relevance", score_min: 0.5 });

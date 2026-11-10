@@ -82,6 +82,7 @@ const FACETS = {
   tag: { values: [{ value: "team:search", count: 1 }], more: false },
   prompt: { values: [], more: false },
   prompt_version: { values: [], more: false },
+  fault: { values: [{ value: "rate_limited", count: 1 }], more: false },
 };
 
 const HISTOGRAM = {
@@ -95,6 +96,7 @@ const HISTOGRAM = {
       ok: 1,
       error: 0,
       cancelled: 0,
+      faults: {},
       tokens: 1500,
       spend: 0.25,
       duration_p50_ms: 2000,
@@ -108,6 +110,7 @@ const HISTOGRAM = {
       ok: 0,
       error: 0,
       cancelled: 0,
+      faults: {},
       tokens: 0,
       spend: 0,
       duration_p50_ms: null,
@@ -138,6 +141,7 @@ const SPAN = {
   cache_write_input_tokens: 0,
   cost: null,
   time_to_first_token: null,
+  fault: null,
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
   session_id: "conv-1",
   environment: "production",

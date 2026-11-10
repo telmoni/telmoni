@@ -19,7 +19,7 @@ import type {
   RuleFilters,
 } from "@/lib/server/data";
 import { projectPath } from "@/lib/slug";
-import { SCORE_NAME_MAX, formatCost } from "@/lib/traces";
+import { FAULT_LABEL, SCORE_NAME_MAX, formatCost } from "@/lib/traces";
 import { UTC_OFFSET_EAST, UTC_OFFSET_WEST } from "@/lib/utc-offset";
 import {
   type ConnectionStatus,
@@ -33,6 +33,7 @@ import {
   RuleOperator,
   RuleWindow,
   Severity,
+  SpanFault,
   SpanKind,
   SpanStatus,
 } from "@/lib/types/enums";
@@ -72,6 +73,7 @@ export function measuresFor(kind: AlertKind): RuleMeasure[] {
   return [
     RuleMeasure.Count,
     RuleMeasure.Failures,
+    RuleMeasure.Faults,
     RuleMeasure.Duration,
     ...(kind === SpanKind.ModelCall ? [RuleMeasure.Tokens] : []),
     ...(kind === SpanKind.Agent
@@ -82,6 +84,7 @@ export function measuresFor(kind: AlertKind): RuleMeasure[] {
 
 /** What a measure read trace by trace counts, as the form says it under the measure. */
 export const MEASURE_HINT: Partial<Record<RuleMeasure, string>> = {
+  [RuleMeasure.Faults]: "Selected fault categories count once per span; the share includes every span admitted by the filters.",
   [RuleMeasure.Steps]: "Each trace's steps, a trace still going counted as far as it has gone.",
   [RuleMeasure.Repeats]:
     "The most times in a row each trace called one tool, whatever it called between them: a loop.",
@@ -103,6 +106,7 @@ export function aggregationsFor(measure: RuleMeasure): readonly [RuleAggregation
     case RuleMeasure.Count:
       return [RuleAggregation.Count];
     case RuleMeasure.Failures:
+    case RuleMeasure.Faults:
       return [RuleAggregation.Avg, RuleAggregation.Count];
     case RuleMeasure.Duration:
       return [
@@ -148,6 +152,7 @@ export function aggregationsFor(measure: RuleMeasure): readonly [RuleAggregation
 export const MEASURE_LABEL: Record<RuleMeasure, string> = {
   [RuleMeasure.Count]: "Count",
   [RuleMeasure.Failures]: "Failures",
+  [RuleMeasure.Faults]: "Faults",
   [RuleMeasure.Duration]: "Duration",
   [RuleMeasure.Tokens]: "Tokens",
   [RuleMeasure.Cost]: "Cost",
@@ -165,6 +170,8 @@ export function aggregationLabel(measure: RuleMeasure, aggregation: RuleAggregat
       return "How many";
     case RuleMeasure.Failures:
       return aggregation === RuleAggregation.Avg ? "Share failed" : "How many failed";
+    case RuleMeasure.Faults:
+      return aggregation === RuleAggregation.Avg ? "Share with selected faults" : "How many with selected faults";
     case RuleMeasure.Score:
       return aggregation === RuleAggregation.Count
         ? "How many scores"
@@ -274,6 +281,8 @@ function measuredWords(alert: Metric): string {
         return "The count";
       case RuleMeasure.Failures:
         return alert.aggregation === RuleAggregation.Avg ? "The share failed" : "The failures";
+      case RuleMeasure.Faults:
+        return alert.aggregation === RuleAggregation.Avg ? "The share with selected faults" : "The selected faults";
       case RuleMeasure.Duration:
         return alert.aggregation === RuleAggregation.Avg
           ? "The average duration"
@@ -302,7 +311,7 @@ export function unitOf(
   if (measure === RuleMeasure.Duration) return "ms";
   if (measure === RuleMeasure.Cost) return "dollars";
   if (measure === RuleMeasure.Burn) return "times";
-  if (measure === RuleMeasure.Failures && aggregation === RuleAggregation.Avg) return "percent";
+  if ((measure === RuleMeasure.Failures || measure === RuleMeasure.Faults) && aggregation === RuleAggregation.Avg) return "percent";
   return "number";
 }
 
@@ -477,6 +486,7 @@ export function filterWords(filters: RuleFilters): string[] {
     if (values.length > 0) words.push(`${FILTER_LABEL[field].toLowerCase()} ${joinValues(values)}`);
   }
   if (filters.status && filters.status.length > 0) words.push(`status ${filters.status.join(", ")}`);
+  if (filters.fault && filters.fault.length > 0) words.push(`fault ${filters.fault.map((fault) => FAULT_LABEL[fault]).join(", ")}`);
   return words;
 }
 
@@ -658,6 +668,7 @@ export type AlertDraft = {
   baseline: RuleBaseline;
   filters: Record<FilterField, string>;
   statuses: SpanStatus[];
+  faults: SpanFault[];
   connectors: LinkDraft[];
 };
 
@@ -709,6 +720,7 @@ export const NEW_ALERT: AlertDraft = {
   baseline: RuleBaseline.None,
   filters: NO_FILTERS,
   statuses: [],
+  faults: [],
   connectors: [],
 };
 
@@ -823,6 +835,7 @@ export function draftOf(alert: Alert): AlertDraft {
     baseline: alert.baseline,
     filters,
     statuses: alert.filters.status ?? [],
+    faults: alert.filters.fault ?? [],
     connectors: alert.connectors.map((link) => ({
       connectionId: link.connection_id,
       level: link.level,
@@ -930,6 +943,10 @@ export function inputOf(
   const links = linksOf(draft.connectors);
   if (!links.ok) return links;
   const filters: RuleFilters = {};
+  if (draft.measure === RuleMeasure.Faults) {
+    if (draft.faults.length === 0) return { ok: false, error: "Choose at least one fault category." };
+    filters.fault = [...new Set(draft.faults)];
+  }
   for (const field of filterFieldsFor(draft.kind, draft.measure)) {
     const values = splitValues(draft.filters[field]);
     if (values.length > 0) filters[field] = values;

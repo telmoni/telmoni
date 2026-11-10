@@ -52,6 +52,7 @@ const HISTOGRAM = {
       ok: 3,
       error: 1,
       cancelled: 0,
+      faults: { rate_limited: 1, timeout: 1 },
       tokens: 1200,
       spend: 0.25,
       duration_p50_ms: 1500,
@@ -70,6 +71,16 @@ function linesOf(name: string): unknown {
 }
 
 describe("TraceCharts", () => {
+  it("draws overlapping fault categories independently of trace status", () => {
+    render(<TraceCharts histogram={HISTOGRAM} marks={[]} />);
+    expect(linesOf("Traces with faults")).toEqual([expect.objectContaining({ rate_limited: 1, timeout: 1, ok: 3, error: 1 })]);
+    expect(screen.getByText("Traces containing each fault; categories can overlap.")).toBeInTheDocument();
+    // A class the window never met is no line.
+    const series = within(screen.getByRole("region", { name: "Traces with faults" }))
+      .getAllByTestId("series")
+      .map((line) => line.textContent);
+    expect(series).toEqual(["rate_limited", "timeout"]);
+  });
   it("draws time to first token from its own median and 95th percentile, never the duration's", () => {
     render(<TraceCharts histogram={HISTOGRAM} marks={[]} />);
     expect(linesOf("Time to first token")).toEqual([expect.objectContaining({ p50: 320, p95: 900 })]);

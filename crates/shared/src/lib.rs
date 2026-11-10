@@ -52,6 +52,6 @@ pub use types::{
     NotificationKind, OrganizationAction, OrganizationId, OrganizationIdError, OrganizationRole,
     OrganizationStatus, ParseEnumError, Paused, ProjectId, ProjectIdError, Redacted, Role,
     RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator, RuleWindow, ScoreSource,
-    ScoreTarget, ScoreType, SessionId, SessionIdError, Severity, SortDirection, SpanKind,
-    SpanStatus, TelmoniResourceKind, TraceSort, UserId, UserIdError,
+    ScoreTarget, ScoreType, SessionId, SessionIdError, Severity, SortDirection, SpanFault,
+    SpanKind, SpanStatus, TelmoniResourceKind, TraceSort, UserId, UserIdError,
 };

@@ -13,6 +13,7 @@ import {
   RuleOperator,
   RuleWindow,
   Severity,
+  SpanFault,
   SpanKind,
   SpanStatus,
 } from "@/lib/types/enums";
@@ -42,13 +43,14 @@ const AlertLinkSchema = z.object({
 
 // The fields an alert's spans are filtered by, each any of its values; a
 // field it does not filter by is absent.
-const RuleFiltersSchema = z.object({
+export const RuleFiltersSchema = z.object({
   agent: z.array(z.string()).optional(),
   model: z.array(z.string()).optional(),
   provider: z.array(z.string()).optional(),
   tool: z.array(z.string()).optional(),
   source: z.array(z.string()).optional(),
   status: z.array(z.enum(SpanStatus)).optional(),
+  fault: z.array(z.enum(SpanFault)).optional(),
   environment: z.array(z.string()).optional(),
   release: z.array(z.string()).optional(),
   tag: z.array(z.string()).optional(),

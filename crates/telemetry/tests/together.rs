@@ -52,6 +52,16 @@ fn mixed() -> Vec<Value> {
         alert("Traces", "agent", "count", "count", 3.0),
         alert("Share failed", "agent", "failures", "avg", 0.1),
         with(
+            alert("Rate limits", "model_call", "faults", "avg", 0.05),
+            "filters",
+            json!({ "fault": ["rate_limited"] }),
+        ),
+        with(
+            alert("Transient faults", "model_call", "faults", "count", 0.0),
+            "filters",
+            json!({ "fault": ["rate_limited", "timeout"] }),
+        ),
+        with(
             alert("Billing failed", "agent", "failures", "count", 0.0),
             "filters",
             json!({ "agent": ["billing-bot"] }),
@@ -134,6 +144,26 @@ fn mixed() -> Vec<Value> {
 fn spans(project: &ProjectId) -> Vec<SpanRow> {
     let now = Utc::now();
     let mut rows = common::varied_traces(project);
+    for (n, fault) in [
+        telmoni_shared::SpanFault::RateLimited,
+        telmoni_shared::SpanFault::Timeout,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        rows.push(SpanRow {
+            span_id: format!("{:016x}", 0xc00 + n),
+            status: SpanStatus::Error,
+            fault: Some(fault),
+            ..common::received(
+                project,
+                SpanKind::ModelCall,
+                "chat",
+                100,
+                now - TimeDelta::minutes(20),
+            )
+        });
+    }
     let searched = [
         (SpanKind::Retrieval, "docs-index", SpanStatus::Error),
         (SpanKind::Retrieval, "docs-index", SpanStatus::Ok),

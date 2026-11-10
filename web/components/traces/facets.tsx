@@ -25,6 +25,7 @@ import type { Facet, Facets, ListQuery } from "@/lib/server/entities/traces";
 import {
   FILTERS,
   FILTER_LABEL,
+  FAULT_LABEL,
   ROW_NOUN,
   SCORE_NAME_MAX,
   STATUS_LABEL,
@@ -42,7 +43,7 @@ import {
   type TraceUi,
 } from "@/lib/traces";
 import { isOneOf } from "@/lib/one-of";
-import { SpanStatus } from "@/lib/types/enums";
+import { SpanFault, SpanStatus } from "@/lib/types/enums";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 import { decimalTyped } from "@/lib/typed-number";
@@ -247,7 +248,7 @@ function FacetSection({
       .map((value) => ({ value, count: 0 })),
   ];
   const text = (value: string) =>
-    filter === "status" && isOneOf(STATUSES, value) ? STATUS_LABEL[value] : value;
+    filter === "status" && isOneOf(STATUSES, value) ? STATUS_LABEL[value] : filter === "fault" && isOneOf(Object.values(SpanFault), value) ? FAULT_LABEL[value] : value;
 
   return (
     <Collapsible open={open} onOpenChange={setChosen} className="border-b border-border">

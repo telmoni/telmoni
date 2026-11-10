@@ -125,6 +125,20 @@ export const ScoreTarget = {
 } as const;
 export type ScoreTarget = typeof ScoreTarget[keyof typeof ScoreTarget];
 
+/** Wire vocabulary of the Rust `SpanFault`: a class independent of status. */
+export const SpanFault = {
+  RateLimited: "rate_limited",
+  Overloaded: "overloaded",
+  Timeout: "timeout",
+  ContextLength: "context_length",
+  Unauthorized: "unauthorized",
+  InvalidOutput: "invalid_output",
+  Refused: "refused",
+  Truncated: "truncated",
+  Other: "other",
+} as const;
+export type SpanFault = typeof SpanFault[keyof typeof SpanFault];
+
 /** Wire vocabulary of the Rust `MetricsGroup`: what a project's totals over
  *  time are split by. */
 export const MetricsGroup = {
@@ -133,6 +147,7 @@ export const MetricsGroup = {
   Provider:    "provider",
   Tool:        "tool",
   Status:      "status",
+  Fault:       "fault",
   Environment: "environment",
   Release:     "release",
   Tag:         "tag",
@@ -157,6 +172,7 @@ export type ChartMeasure = typeof ChartMeasure[keyof typeof ChartMeasure];
 export const RuleMeasure = {
   Count:    "count",
   Failures: "failures",
+  Faults:   "faults",
   Duration: "duration",
   Tokens:   "tokens",
   Cost:     "cost",

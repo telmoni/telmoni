@@ -102,6 +102,7 @@ pub struct TraceQuery {
     pub session: Vec<String>,
     /// How they ended: `ok`, `error` or `cancelled`.
     pub status: Vec<String>,
+    pub fault: Vec<String>,
     /// Models one of their calls answered with.
     pub model: Vec<String>,
     /// Tools one of their calls ran.
@@ -186,6 +187,7 @@ impl TraceQuery {
             Facet::User => &mut self.user,
             Facet::Session => &mut self.session,
             Facet::Status => &mut self.status,
+            Facet::Fault => &mut self.fault,
             Facet::Model => &mut self.model,
             Facet::Tool => &mut self.tool,
             Facet::Environment => &mut self.environment,
@@ -261,6 +263,14 @@ impl TraceQuery {
             user_ids: values("user", &self.user, FILTER_VALUE_MAX.user)?,
             session_ids: values("session", &self.session, FILTER_VALUE_MAX.session)?,
             statuses,
+            faults: values("fault", &self.fault, usize::MAX)?
+                .iter()
+                .map(|given| {
+                    given
+                        .parse()
+                        .map_err(|_| TelmoniError::BadRequest("fault is not a known class".into()))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             models: values("model", &self.model, FILTER_VALUE_MAX.model)?,
             tools: values("tool", &self.tool, FILTER_VALUE_MAX.tool)?,
             environments: values(
@@ -667,6 +677,7 @@ pub struct Facets {
     pub user: FacetValues,
     pub session: FacetValues,
     pub status: FacetValues,
+    pub fault: FacetValues,
     pub model: FacetValues,
     pub tool: FacetValues,
     pub environment: FacetValues,
@@ -702,6 +713,7 @@ impl Facets {
             Facet::User => &mut self.user,
             Facet::Session => &mut self.session,
             Facet::Status => &mut self.status,
+            Facet::Fault => &mut self.fault,
             Facet::Model => &mut self.model,
             Facet::Tool => &mut self.tool,
             Facet::Environment => &mut self.environment,
@@ -808,6 +820,7 @@ pub struct TraceSpan {
     pub ended_at: DateTime<Utc>,
     pub status: SpanStatus,
     pub error_type: String,
+    pub fault: Option<telmoni_shared::SpanFault>,
     pub model: String,
     pub provider: String,
     pub input_tokens: u64,
@@ -842,6 +855,7 @@ impl From<SpanRow> for TraceSpan {
             ended_at: row.ended_at,
             status: row.status,
             error_type: row.error_type,
+            fault: row.fault,
             model: row.model,
             provider: row.provider,
             input_tokens: row.input_tokens,

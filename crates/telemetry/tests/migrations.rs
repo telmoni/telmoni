@@ -286,6 +286,7 @@ fn spans_has_a_column_for_every_field_of_the_row_and_no_other() {
         ended_at: chrono::Utc::now(),
         status: telmoni_shared::SpanStatus::Ok,
         error_type: String::new(),
+        fault: None,
         model: String::new(),
         provider: String::new(),
         input_tokens: 0,

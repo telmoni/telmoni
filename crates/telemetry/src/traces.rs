@@ -60,6 +60,7 @@ pub struct TraceFilter {
     pub session_ids: Vec<String>,
     /// How they ended.
     pub statuses: Vec<SpanStatus>,
+    pub faults: Vec<telmoni_shared::SpanFault>,
     /// Models one of their calls answered with.
     pub models: Vec<String>,
     /// Tools one of their calls ran.
@@ -101,6 +102,7 @@ impl Default for TraceFilter {
             user_ids: Vec::new(),
             session_ids: Vec::new(),
             statuses: Vec::new(),
+            faults: Vec::new(),
             models: Vec::new(),
             tools: Vec::new(),
             environments: Vec::new(),
@@ -198,6 +200,7 @@ pub enum Facet {
     User,
     Session,
     Status,
+    Fault,
     Model,
     Tool,
     Environment,
@@ -213,6 +216,7 @@ telmoni_shared::wire_enum!(Facet {
     User => "user",
     Session => "session",
     Status => "status",
+    Fault => "fault",
     Model => "model",
     Tool => "tool",
     Environment => "environment",
@@ -255,6 +259,7 @@ pub struct BucketRow {
     pub error: u64,
     /// That were cancelled.
     pub cancelled: u64,
+    pub faults: Vec<(String, u64)>,
     /// Their input and output tokens, summed.
     pub token_total: u64,
     /// What their model calls cost, in US dollars.
@@ -281,6 +286,8 @@ pub struct Bar {
     pub error: u64,
     /// That were cancelled.
     pub cancelled: u64,
+    /// Traces carrying each fault; categories may overlap on one trace.
+    pub faults: std::collections::BTreeMap<String, u64>,
     /// Their input and output tokens, summed.
     pub tokens: u64,
     /// What their model calls cost, in US dollars, each trace its own.
@@ -323,6 +330,9 @@ macro_rules! admits {
     (status) => {
         "(empty({statuses:Array(String)}) OR has({statuses:Array(String)}, trace_status))"
     };
+    (fault) => {
+        "(empty({faults:Array(String)}) OR hasAny(trace_faults, {faults:Array(String)}))"
+    };
     (model) => {
         "(empty({models:Array(String)}) OR hasAny(models, {models:Array(String)}))"
     };
@@ -356,6 +366,7 @@ macro_rules! admits {
 macro_rules! trace_carries {
     () => {
         concat!(
+            "arraySort(groupUniqArrayIf(fault, fault != '')) AS trace_faults, ",
             "arraySort(groupUniqArrayIf(environment, environment != '')) AS environments, ",
             "arraySort(groupUniqArrayIf(release, release != '')) AS releases, ",
             "arraySort(groupUniqArrayArray(arrayMap((k, v) -> concat(k, ':', v), ",
@@ -443,6 +454,8 @@ macro_rules! traces {
             admits!(session),
             " AND ",
             admits!(status),
+            " AND ",
+            admits!(fault),
             " AND ",
             admits!(model),
             " AND ",
@@ -563,7 +576,9 @@ const HISTOGRAM_SQL: &str = concat!(
     "now64(6) - toIntervalDay({days:UInt16})), now64(6))) + {shift:Int64}, {bucket:Int64}) ",
     "* {bucket:Int64} - {shift:Int64} AS at_ms, ",
     "countIf(trace_status = 'ok') AS ok, countIf(trace_status = 'error') AS error, ",
-    "countIf(trace_status = 'cancelled') AS cancelled, sum(tokens) AS token_total, ",
+    "countIf(trace_status = 'cancelled') AS cancelled, ",
+    "sumMap(mapFromArrays(trace_faults, arrayMap(x -> toUInt64(1), trace_faults))) AS faults, ",
+    "sum(tokens) AS token_total, ",
     "sum(spent) AS spend_total, ",
     "quantile(0.5)(duration_ms) AS duration_p50_ms, ",
     "quantile(0.95)(duration_ms) AS duration_p95_ms, ",
@@ -600,6 +615,7 @@ macro_rules! facets_sql {
             "toUInt8(", $crate::traces::admits!(user), ") AS m_user, ",
             "toUInt8(", $crate::traces::admits!(session), ") AS m_session, ",
             "toUInt8(", $crate::traces::admits!(status), ") AS m_status, ",
+            "toUInt8(", $crate::traces::admits!(fault), ") AS m_fault, ",
             "toUInt8(", $crate::traces::admits!(model), ") AS m_model, ",
             "toUInt8(", $crate::traces::admits!(tool), ") AS m_tool, ",
             "toUInt8(", $crate::traces::admits!(environment), ") AS m_environment, ",
@@ -612,7 +628,7 @@ macro_rules! facets_sql {
             // needs no miss, with it down that one miss alone.
             "(1 - m_agent) + (1 - m_user) + (1 - m_session) + (1 - m_status) + (1 - m_model) ",
             "+ (1 - m_tool) + (1 - m_environment) + (1 - m_release) + (1 - m_tag) ",
-            "+ (1 - m_prompt) + (1 - m_prompt_version) AS misses ",
+            "+ (1 - m_prompt) + (1 - m_prompt_version) + (1 - m_fault) AS misses ",
             $crate::traces::window!(),
             "GROUP BY trace_id) ",
             "ARRAY JOIN arrayConcat(",
@@ -620,6 +636,7 @@ macro_rules! facets_sql {
             "[tuple('user', CAST(trace_user_id AS String), toUInt8(misses + m_user = 1))], ",
             "[tuple('session', CAST(trace_session_id AS String), toUInt8(misses + m_session = 1))], ",
             "[tuple('status', CAST(trace_status AS String), toUInt8(misses + m_status = 1))], ",
+            "arrayMap(x -> tuple('fault', CAST(x AS String), toUInt8(misses + m_fault = 1)), trace_faults), ",
             "arrayMap(x -> tuple('model', CAST(x AS String), toUInt8(misses + m_model = 1)), models), ",
             "arrayMap(x -> tuple('tool', CAST(x AS String), toUInt8(misses + m_tool = 1)), tools), ",
             "arrayMap(x -> tuple('environment', CAST(x AS String), ",
@@ -638,6 +655,7 @@ macro_rules! facets_sql {
             "ORDER BY facet, has(multiIf(facet = 'agent', {agents:Array(String)}, ",
             "facet = 'user', {users:Array(String)}, facet = 'session', {sessions:Array(String)}, ",
             "facet = 'status', {statuses:Array(String)}, facet = 'model', {models:Array(String)}, ",
+            "facet = 'fault', {faults:Array(String)}, ",
             "facet = 'tool', {tools:Array(String)}, ",
             "facet = 'environment', {environments:Array(String)}, ",
             "facet = 'release', {releases:Array(String)}, facet = 'tag', {tags:Array(String)}, ",
@@ -656,7 +674,7 @@ const FACETS_SQL: &str = facets_sql!("count()", "");
 /// together, the one that ended later, which holds the other — up to the one
 /// that takes their units past `{units_max}`, summed on the light columns.
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, agent, trace_id, \
-     span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, model, \
+     span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, fault, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
      cost, time_to_first_token, user_id, session_id, environment, release, tags, sample_rate, \
      attributes, sent \
@@ -682,6 +700,14 @@ pub(crate) fn filtered(read: Read, filter: &TraceFilter) -> Read {
         .param("users", &filter.user_ids)
         .param("sessions", &filter.session_ids)
         .param("statuses", statuses)
+        .param(
+            "faults",
+            filter
+                .faults
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+        )
         .param("models", &filter.models)
         .param("tools", &filter.tools)
         .param("environments", &filter.environments)
@@ -1003,6 +1029,7 @@ pub fn bars(
                     ok: row.ok,
                     error: row.error,
                     cancelled: row.cancelled,
+                    faults: row.faults.into_iter().collect(),
                     tokens: row.token_total,
                     spend: row.spend_total,
                     duration_p50_ms: Some(row.duration_p50_ms),
@@ -1016,6 +1043,7 @@ pub fn bars(
                     ok: 0,
                     error: 0,
                     cancelled: 0,
+                    faults: std::collections::BTreeMap::new(),
                     tokens: 0,
                     spend: 0.0,
                     duration_p50_ms: None,
@@ -1267,6 +1295,7 @@ mod tests {
 
     fn row(at_ms: i64, ok: u64) -> BucketRow {
         BucketRow {
+            faults: Vec::new(),
             at_ms,
             ok,
             error: 1,

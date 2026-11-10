@@ -17,6 +17,8 @@ pub enum MetricsGroup {
     Tool,
     /// How a span ended.
     Status,
+    /// A span's failure class, empty where it has none.
+    Fault,
     /// The deployment's environment.
     Environment,
     /// The deployment's release.
@@ -35,6 +37,7 @@ crate::wire_enum!(MetricsGroup {
     Provider => "provider",
     Tool => "tool",
     Status => "status",
+    Fault => "fault",
     Environment => "environment",
     Release => "release",
     Tag => "tag",

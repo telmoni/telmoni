@@ -250,6 +250,21 @@ Every way in:
 
 ## Data
 
+A span's `fault` is separate from its status: `SpanFault`'s nine classes,
+derived in `telemetry::faults` from bounded `error.type` codes and exception
+classes, or a successful model call's finish reasons, never a message.
+Unknown errors are `other`; cancellation has none. Refusal precedes
+truncation when choices disagree. The column, empty where a span has none, survives foreign
+staging, and the hourly view groups by it. A faults alert keeps its selected
+categories in `filters.fault`; individual and batched reads apply that
+selector to the numerator alone, counting each matching span once, while
+the denominator includes every span admitted by the ordinary filters.
+Notices pick a matching span's trace. Trace filters admit whole traces,
+facets omit their own filter, and the histogram counts each trace once per
+category, so categories can overlap without changing status counts.
+`/v1/metrics` groups by fault, an empty value for none. Source-linked error
+spellings are in `crates/telemetry/tests/fixtures/faults.json`.
+
 Foreign content is scrubbed during batch mapping, before direct persistence
 or encrypted foreign staging. Telemetry reuses the Rust SDK's public `scrub`
 module through its local SDK dependency. Project settings default

@@ -48,6 +48,7 @@ import {
   Severity,
   SortDirection,
   SpanKind,
+  SpanFault,
   SpanStatus,
   TraceSort,
 } from "./enums";
@@ -141,6 +142,7 @@ const CONSOLE: Record<string, Record<string, string>> = {
   SortDirection,
   SpanKind,
   SpanStatus,
+  SpanFault,
   TraceSort,
 };
 

@@ -79,7 +79,7 @@ import {
   type LinkDraft,
 } from "@/lib/alerts";
 import type { History } from "@/lib/server/data";
-import { STATUS_LABEL } from "@/lib/traces";
+import { FAULT_LABEL, STATUS_LABEL } from "@/lib/traces";
 import {
   MissingData,
   RuleBaseline,
@@ -88,6 +88,7 @@ import {
   RuleOperator,
   RuleWindow,
   SpanStatus,
+  SpanFault,
 } from "@/lib/types/enums";
 import { useAction } from "@/lib/use-action";
 import { decimalTyped, wholeTyped } from "@/lib/typed-number";
@@ -335,6 +336,19 @@ function AlertPanel({
               </p>
             )}
           </SidePanelRow>
+          {draft.measure === RuleMeasure.Faults && (
+            <SidePanelRow label="Fault categories">
+              <fieldset className="grid gap-gutter" disabled={pending}>
+                <legend className="sr-only">Fault categories</legend>
+                {Object.values(SpanFault).map((fault) => (
+                  <Label key={fault} className="flex items-center gap-gutter">
+                    <Checkbox checked={draft.faults.includes(fault)} onCheckedChange={(checked) => change({ ...draft, faults: checked === true ? [...draft.faults, fault] : draft.faults.filter((value) => value !== fault) })} />
+                    {FAULT_LABEL[fault]}
+                  </Label>
+                ))}
+              </fieldset>
+            </SidePanelRow>
+          )}
           {draft.measure === RuleMeasure.Score && (
             <SidePanelRow label="Score" htmlFor={`${id}-score`}>
               <Input

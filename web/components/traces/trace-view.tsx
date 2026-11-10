@@ -60,6 +60,7 @@ import {
 } from "@/lib/trace-tree";
 import {
   KIND_LABEL,
+  FAULT_LABEL,
   formatCost,
   formatCount,
   formatDuration,
@@ -780,6 +781,9 @@ function SpanDetail({
                     <LocalTime iso={span.ended_at} mode="precise" />
                   </Field>
                   <Field label="Duration">{formatDuration(spanMillis(span))}</Field>
+                  {span.fault !== null && (
+                    <Field label="Fault">{FAULT_LABEL[span.fault]}</Field>
+                  )}
                   {span.time_to_first_token !== null && (
                     <Field label="Time to first token">{formatDuration(span.time_to_first_token * 1000)}</Field>
                   )}

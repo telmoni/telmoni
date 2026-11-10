@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 use telmoni_shared::{
     MissingData, RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
-    SpanKind, SpanStatus, TelmoniError,
+    SpanFault, SpanKind, SpanStatus, TelmoniError,
 };
 
 use crate::contract::{
@@ -281,6 +281,9 @@ pub struct RuleFilters {
     pub source: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub status: Vec<SpanStatus>,
+    /// A faults measure's numerator, never a restriction on its denominator.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fault: Vec<SpanFault>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub environment: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -334,6 +337,13 @@ impl RuleFilters {
     pub(crate) fn bind(&self, read: Read) -> Read {
         let statuses: Vec<String> = self.status.iter().map(SpanStatus::to_string).collect();
         self.bind_calls(read)
+            .param(
+                "faults",
+                self.fault
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            )
             .param("tools", self.names())
             .param("statuses", statuses)
     }
@@ -357,6 +367,12 @@ impl RuleFilters {
                 status.push(given);
             }
         }
+        let mut fault = Vec::new();
+        for given in self.fault {
+            if !fault.contains(&given) {
+                fault.push(given);
+            }
+        }
         Ok(Self {
             agent: values("agent", &self.agent, AGENT_MAX)?,
             model: values("model", &self.model, MODEL_MAX)?,
@@ -364,6 +380,7 @@ impl RuleFilters {
             tool: values("tool", &self.tool, NAME_MAX)?,
             source: values("source", &self.source, NAME_MAX)?,
             status,
+            fault,
             environment: values("environment", &self.environment, ENVIRONMENT_MAX)?,
             release: values("release", &self.release, RELEASE_MAX)?,
             tag: crate::handler::traces::tag_values(&self.tag)?,
@@ -497,7 +514,7 @@ impl RuleInput {
         if !self.measure.folds(self.aggregation) {
             return Err(bad(&format!(
                 "{} is not folded by {}: count takes count; failures count or avg; duration \
-                 avg, sum or a percentile; tokens avg or sum; cost avg, sum or max; score \
+                 avg, sum or a percentile; faults count or avg; tokens avg or sum; cost avg, sum or max; score \
                  count, avg, max or a percentile; burn avg; steps avg, max or a percentile; \
                  repeats max; stalled count",
                 self.measure, self.aggregation
@@ -517,6 +534,13 @@ impl RuleInput {
             }));
         }
         let filters = self.filters.checked()?;
+        match (self.measure, filters.fault.is_empty()) {
+            (RuleMeasure::Faults, true) => {
+                return Err(bad("a faults alert names at least one fault"));
+            }
+            (RuleMeasure::Faults, false) | (_, true) => {}
+            (_, false) => return Err(bad("only a faults alert takes a fault selector")),
+        }
         let score_name = self.score_name.map(|given| given.trim().to_owned());
         if self.measure == RuleMeasure::Score {
             if !score_name
@@ -701,6 +725,45 @@ mod tests {
             objective: None,
             connectors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn faults_require_categories_only_for_their_own_measure() {
+        let faults = RuleInput {
+            measure: RuleMeasure::Faults,
+            aggregation: RuleAggregation::Avg,
+            filters: RuleFilters {
+                fault: vec![SpanFault::Timeout, SpanFault::Timeout],
+                ..RuleFilters::default()
+            },
+            ..input()
+        };
+        let checked = faults.clone().checked().expect("a faults alert");
+        assert_eq!(checked.definition.filters.fault, [SpanFault::Timeout]);
+        assert!(
+            RuleInput {
+                filters: RuleFilters::default(),
+                ..faults.clone()
+            }
+            .checked()
+            .is_err()
+        );
+        assert!(
+            RuleInput {
+                measure: RuleMeasure::Failures,
+                ..faults.clone()
+            }
+            .checked()
+            .is_err()
+        );
+        assert!(
+            RuleInput {
+                aggregation: RuleAggregation::Sum,
+                ..faults
+            }
+            .checked()
+            .is_err()
+        );
     }
 
     /// An objective's alert takes its thresholds and window from its burn,

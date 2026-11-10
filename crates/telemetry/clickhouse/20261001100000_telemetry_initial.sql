@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     ended_at                 DateTime64(6, 'UTC'),
     status                   LowCardinality(String),
     error_type               LowCardinality(String),
+    fault                    LowCardinality(String),
     model                    LowCardinality(String),
     provider                 LowCardinality(String),
     input_tokens             UInt64,
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
     tool                     LowCardinality(String),
     status                   LowCardinality(String),
     environment              LowCardinality(String),
+    fault                    LowCardinality(String),
     release                  LowCardinality(String),
     sample_rate              Float64,
     cost_reported            Bool,
@@ -136,7 +138,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(hour)
-ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, environment, release,
+ORDER BY (project_id, hour, agent, kind, model, provider, tool, status, fault, environment, release,
           sample_rate, cost_reported)
 -- As long as `spans` keeps its tokens: the totals of a copy it drops are
 -- dropped with it, where without them they would count it again.
@@ -160,6 +162,7 @@ AS SELECT
     provider,
     if(kind IN ('tool_call', 'retrieval'), name, '') AS tool,
     status,
+    fault,
     environment,
     release,
     ifNull(spans.sample_rate, 1) AS sample_rate,
@@ -176,7 +179,7 @@ AS SELECT
         greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000
     ) AS duration_ms
 FROM telemetry.spans
-GROUP BY project_id, hour, agent, kind, model, provider, tool, status, environment, release,
+GROUP BY project_id, hour, agent, kind, model, provider, tool, status, fault, environment, release,
     sample_rate, cost_reported;
 
 -- One row per score: of a trace, one of its spans, or a session, from the

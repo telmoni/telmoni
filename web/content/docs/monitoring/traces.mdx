@@ -131,7 +131,18 @@ they ended, or their tokens, or what they cost (**Cost**, each trace's own
 spend), or the median and 95th percentile of their durations or of their
 times to first token, as the menu above the bars picks — each bar an hour, a
 few hours, a day or a week, starting on your own clock. **Chart** shows the
-five as charts in the table's place, two to a row.
+charts in the table's place, two to a row.
+
+**Fault** filters by a class carried by any span: rate limited, overloaded,
+timeout, context length, unauthorized, invalid output, refused, truncated or
+other. The complete trace remains visible, including its successful calls.
+The fault appears in each span's details. A successful model call may be
+refused or truncated; its status stays as reported.
+
+**Traces with faults** charts how many traces contain each category, once
+per trace and category. Categories can overlap: a trace with a timeout and a
+rate limit appears in both, even if its agent ultimately succeeded. These
+counts are separate from the chart of trace statuses.
 
 The list draws itself again as the project's traces land, and so does a
 trace's own page as its spans land, each while it is in view: at once for the

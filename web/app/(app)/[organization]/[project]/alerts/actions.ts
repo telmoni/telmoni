@@ -8,6 +8,7 @@ import { ALERT_KINDS, MUTE_MINUTES_MAX } from "@/lib/alerts";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
 import { admitProject } from "@/lib/server/admit";
+import { RuleFiltersSchema } from "@/lib/server/entities/alerts";
 import {
   MissingData,
   RuleAggregation,
@@ -16,7 +17,6 @@ import {
   RuleMeasure,
   RuleOperator,
   RuleWindow,
-  SpanStatus,
 } from "@/lib/types/enums";
 
 import type { Answer } from "./_act";
@@ -32,24 +32,13 @@ import type { Answer } from "./_act";
 type Result = Answer;
 
 const Id = z.guid();
-const Values = z.array(z.string()).optional();
 
 const RuleInputSchema = z.strictObject({
   name: z.string(),
   kind: z.enum(ALERT_KINDS),
   measure: z.enum(RuleMeasure),
   aggregation: z.enum(RuleAggregation),
-  filters: z.strictObject({
-    agent: Values,
-    model: Values,
-    provider: Values,
-    tool: Values,
-    source: Values,
-    status: z.array(z.enum(SpanStatus)).optional(),
-    environment: Values,
-    release: Values,
-    tag: Values,
-  }),
+  filters: RuleFiltersSchema.strict(),
   window: z.enum(RuleWindow),
   operator: z.enum(RuleOperator),
   alert_threshold: z.number(),

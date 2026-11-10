@@ -41,6 +41,7 @@ function trace(traceId: string, tags: Record<string, string> = {}) {
         ended_at: "2026-10-11T03:00:02.000Z",
         status: "ok",
         error_type: "",
+        fault: null,
         model: "",
         provider: "",
         input_tokens: 0,

@@ -218,7 +218,7 @@ totals Telmoni keeps an hour at a time.
 - `step`: `day`, the default, or `hour`, the default for a day's window, each
   starting on the hour or at midnight UTC.
 - `group`: Splits each step by one of `agent`, `model`, `provider`, `tool`,
-  `status`, `environment` or `release`, from the totals; or by `tag`, `user`
+  `status`, `fault`, `environment` or `release`, from the totals; or by `tag`, `user`
   or `session`, from the spans, no further back than your plan keeps them,
   which `days` in the answer then says. Only tool calls carry a `tool`; every
   other span falls under the empty value. Only a span that names a model
@@ -227,6 +227,14 @@ totals Telmoni keeps an hour at a time.
   empty value.
 - `tag`: With `group=tag`, the tag key whose values split each step, 1 to 64
   characters.
+
+With `group=fault`, each point's `value` is `rate_limited`, `overloaded`,
+`timeout`, `context_length`, `unauthorized`, `invalid_output`, `refused`,
+`truncated` or `other`; the empty value holds spans without a fault. A
+category's `spans` counts spans, including successful model calls whose
+finish reasons indicated refusal or truncation. Its `failed` still counts
+only spans with error status. The trace detail's spans also carry `fault`,
+one of these words or `null`. No error message is used to classify a fault.
 
 ### Response
 

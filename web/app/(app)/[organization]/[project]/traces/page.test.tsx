@@ -216,6 +216,7 @@ beforeEach(() => {
       tag: NONE,
       prompt: NONE,
       prompt_version: NONE,
+      fault: NONE,
     },
   };
   mockHistogram = {

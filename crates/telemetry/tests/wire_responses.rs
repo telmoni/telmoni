@@ -324,6 +324,7 @@ fn the_facets_answer_as_the_console_reads() {
     pin(
         "facets",
         &Facets {
+            fault: values("rate_limited", 1),
             days: 7,
             agent: values("support", 12),
             user: values("u_1f3a", 3),
@@ -359,6 +360,7 @@ fn the_histogram_answers_as_the_console_reads() {
                     ok: 10,
                     error: 1,
                     cancelled: 1,
+                    faults: [("rate_limited".into(), 1)].into(),
                     tokens: 18_000,
                     spend: 0.063,
                     duration_p50_ms: Some(1_800.0),
@@ -372,6 +374,7 @@ fn the_histogram_answers_as_the_console_reads() {
                     ok: 0,
                     error: 0,
                     cancelled: 0,
+                    faults: Default::default(),
                     tokens: 0,
                     spend: 0.0,
                     duration_p50_ms: None,
@@ -389,6 +392,7 @@ fn the_histogram_answers_as_the_console_reads() {
 #[test]
 fn a_trace_answers_as_the_console_reads() {
     let span = |span_id: &str, kind, cost: Option<f64>| TraceSpan {
+        fault: None,
         span_id: span_id.into(),
         parent_span_id: String::new(),
         trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".into(),

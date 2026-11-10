@@ -37,6 +37,156 @@ use telmoni_telemetry::{AppState, router};
 
 const LANE: &str = "/internal/v1/telemetry/rules";
 
+/// Selected faults share a denominator across hourly totals and live spans, then warn, fire and recover.
+#[sqlx::test]
+async fn fault_shares_keep_successes_and_follow_the_incident_lifecycle(pool: PgPool) {
+    use telmoni_shared::SpanFault;
+    apply_audit_migrations(&pool).await;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (auth, organization, project, other) = seated();
+    let notices = common::NoticeLog::new();
+    let state = common::state_with_console(&pool, auth, notices.clone());
+    let app = router(state.clone());
+    let body = json!({ "name": "Provider rate limits", "kind": "model_call", "measure": "faults",
+        "aggregation": "avg", "filters": { "provider": ["provider-a"], "fault": ["rate_limited"] },
+        "window": "day", "operator": "gt", "alert_threshold": 0.05, "warning_threshold": 0.04 });
+    for fault in [json!([]), json!(["not_a_fault"])] {
+        let mut invalid = body.clone();
+        invalid["filters"]["fault"] = fault;
+        assert_eq!(
+            answer(
+                &app,
+                request(
+                    "POST",
+                    LANE,
+                    "user_member",
+                    &organization,
+                    &project,
+                    Some(&invalid)
+                )
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let (status, made) = answer(
+        &app,
+        request(
+            "POST",
+            LANE,
+            "user_member",
+            &organization,
+            &project,
+            Some(&body),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let id: Uuid = made["id"].as_str().expect("id").parse().expect("uuid");
+    let now = Utc::now();
+    let full = (now - TimeDelta::hours(2))
+        .duration_trunc(TimeDelta::hours(1))
+        .expect("hour")
+        + TimeDelta::minutes(5);
+    let call = |n: u64, fault: Option<SpanFault>, at| telmoni_telemetry::store::SpanRow {
+        span_id: format!("{n:016x}"),
+        provider: "provider-a".into(),
+        model: "model-a".into(),
+        fault,
+        status: if matches!(fault, Some(SpanFault::RateLimited | SpanFault::Timeout)) {
+            SpanStatus::Error
+        } else {
+            SpanStatus::Ok
+        },
+        ..common::received(&project, SpanKind::ModelCall, "chat", 100, at)
+    };
+    let mut rows = (0..20)
+        .map(|n| {
+            call(
+                n + 1,
+                match n {
+                    0 => Some(SpanFault::RateLimited),
+                    1 => Some(SpanFault::Timeout),
+                    2 => Some(SpanFault::Refused),
+                    _ => None,
+                },
+                if n < 10 {
+                    full
+                } else {
+                    now - TimeDelta::seconds(1)
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let rate_trace = Uuid::parse_str(&rows[0].trace_id).expect("trace");
+    rows.push(telmoni_telemetry::store::SpanRow {
+        project_id: other,
+        ..call(99, Some(SpanFault::RateLimited), full)
+    });
+    ch.store.insert_spans(&rows).await.expect("kept");
+
+    for (phase, more, expected, severity) in [
+        (0, Vec::new(), 0.05, "warning"),
+        (
+            1,
+            vec![
+                call(100, Some(SpanFault::RateLimited), now),
+                call(101, Some(SpanFault::RateLimited), now),
+            ],
+            3.0 / 22.0,
+            "alert",
+        ),
+        (
+            2,
+            (200..400).map(|n| call(n, None, now)).collect(),
+            3.0 / 222.0,
+            "ok",
+        ),
+    ] {
+        if !more.is_empty() {
+            ch.store.insert_spans(&more).await.expect("more calls");
+        }
+        sqlx::query("UPDATE telemetry.rules SET evaluated_at = NULL WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .expect("due");
+        assert_eq!(evaluate::pass(&state).await.expect("pass"), 1);
+        let (_, rule) = answer(
+            &app,
+            request(
+                "GET",
+                &format!("{LANE}/{id}"),
+                "user_member",
+                &organization,
+                &project,
+                None,
+            ),
+        )
+        .await;
+        let value = rule["value"].as_f64().expect("share");
+        assert!((value - expected).abs() < 1e-12, "phase {phase}: {rule}");
+        assert_eq!(rule["severity"], severity, "phase {phase}: {rule}");
+    }
+    assert!(
+        shown_by(&pool, "Provider rate limits")
+            .await
+            .contains(&rate_trace)
+    );
+    let resolved: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM telemetry.incidents WHERE rule_id = $1 AND status = 'resolved'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("incident");
+    assert_eq!(resolved, 1);
+    assert!(!notices.notices().is_empty(), "the incident is told");
+}
+
 /// A plan of `alerts` alerts for every organization.
 struct Holds(u32);
 

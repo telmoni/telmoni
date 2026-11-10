@@ -1373,6 +1373,7 @@ pub(crate) fn received(
         ended_at: at,
         status: SpanStatus::Ok,
         error_type: String::new(),
+        fault: None,
         model: String::new(),
         provider: String::new(),
         input_tokens: 0,

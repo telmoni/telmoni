@@ -8,6 +8,7 @@ import { SpanKind, SpanStatus } from "@/lib/types/enums";
  *  field `over` leaves out empty, zero or none. */
 export function testSpan(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id">): TraceSpan {
   return {
+    fault: null,
     parent_span_id: "",
     trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
     agent: "nightly-report",

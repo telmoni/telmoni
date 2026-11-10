@@ -44,8 +44,34 @@ import {
   RuleWindow,
   Severity,
   SpanKind,
+  SpanFault,
   SpanStatus,
 } from "./types/enums";
+
+describe("fault alert selection", () => {
+  const draft = { ...NEW_ALERT, name: "Rate limits", kind: SpanKind.ModelCall, measure: RuleMeasure.Faults,
+    aggregation: RuleAggregation.Avg, alertThreshold: "5", faults: [SpanFault.RateLimited] };
+
+  it("keeps category selection and converts a percent to a share", () => {
+    const result = inputOf(draft);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.input.filters.fault).toEqual([SpanFault.RateLimited]);
+    expect(result.input.alert_threshold).toBe(0.05);
+    expect(amount(RuleMeasure.Faults, RuleAggregation.Avg, 0.05)).toBe("5%");
+    const edited = draftOf({ ...ALERT, ...result.input, id: ALERT.id, connectors: [] });
+    expect(edited.faults).toEqual([SpanFault.RateLimited]);
+    expect(edited.alertThreshold).toBe("5");
+  });
+
+  it("requires a category and omits the selector when changing measure", () => {
+    expect(inputOf({ ...draft, faults: [] })).toEqual({ ok: false, error: "Choose at least one fault category." });
+    const result = inputOf(withMeasure(draft, RuleMeasure.Failures));
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.input.filters.fault).toBeUndefined();
+  });
+});
 
 const ALERT: Alert = {
   id: "7a1c0e52-0000-4000-8000-000000000002",

@@ -6,6 +6,9 @@
       "duration_p50_ms": 1800.0,
       "duration_p95_ms": 4000.0,
       "error": 1,
+      "faults": {
+        "rate_limited": 1
+      },
       "ok": 10,
       "score_mean": 0.82,
       "spend": 0.063,
@@ -19,6 +22,7 @@
       "duration_p50_ms": null,
       "duration_p95_ms": null,
       "error": 0,
+      "faults": {},
       "ok": 0,
       "score_mean": null,
       "spend": 0.0,

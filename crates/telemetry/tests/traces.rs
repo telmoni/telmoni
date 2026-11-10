@@ -36,6 +36,82 @@ const ADMIN: &str = "user_admin";
 const MEMBER: &str = "user_member";
 const STRANGER: &str = "user_stranger";
 
+/// Fault filters admit whole traces, their facets ignore themselves, and overlapping classes count once each.
+#[sqlx::test]
+async fn faults_filter_whole_traces_and_chart_each_class_once(pool: PgPool) {
+    use telmoni_shared::SpanFault;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let (a, b, other) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let at = Utc::now() - Duration::minutes(1);
+    let fault = |project: &ProjectId, trace, n, class| SpanRow {
+        fault: Some(class),
+        input_tokens: 10,
+        ..span_at(project, trace, SpanKind::ModelCall, "chat", at, 20, n)
+    };
+    ch.store
+        .insert_spans(&[
+            span_at(&p.ours, a, SpanKind::Agent, "agent", at, 100, 1),
+            fault(&p.ours, a, 2, SpanFault::RateLimited),
+            fault(&p.ours, a, 3, SpanFault::RateLimited),
+            fault(&p.ours, a, 4, SpanFault::Timeout),
+            fault(&p.ours, b, 5, SpanFault::Refused),
+            fault(&p.theirs, other, 6, SpanFault::RateLimited),
+        ])
+        .await
+        .expect("kept");
+    let list = p.list("?fault=rate_limited").await;
+    assert_eq!(ids(&list), [a]);
+    assert_eq!(trace(&list, a)["spans"], 4, "all the trace's spans remain");
+    assert_eq!(trace(&list, a)["input_tokens"], 30);
+    assert_eq!(
+        trace(&list, a)["status"],
+        "ok",
+        "a child fault does not rewrite the agent's status"
+    );
+    assert_eq!(
+        values(
+            &p.get(&format!("{LANE}/facets?fault=rate_limited")).await,
+            "fault"
+        ),
+        owned(&[("rate_limited", 1), ("refused", 1), ("timeout", 1)])
+    );
+    let histogram = p.get(&format!("{LANE}/histogram?fault=rate_limited")).await;
+    let faulted = histogram["bars"]
+        .as_array()
+        .expect("bars")
+        .iter()
+        .find(|bar| bar["ok"] == 1)
+        .expect("one trace");
+    assert_eq!(
+        faulted["faults"],
+        serde_json::json!({ "rate_limited": 1, "timeout": 1 })
+    );
+    let metrics = p
+        .get("/internal/v1/telemetry/rollups?days=1&group=fault")
+        .await;
+    let rate = metrics["points"]
+        .as_array()
+        .expect("points")
+        .iter()
+        .find(|point| point["value"] == "rate_limited")
+        .expect("rate limits");
+    assert_eq!(rate["spans"], 2, "the other project is excluded");
+    let (status, _, bytes) = p.download(MEMBER, "?fault=rate_limited&format=csv").await;
+    assert_eq!(status, StatusCode::OK);
+    let csv = String::from_utf8(bytes).expect("csv");
+    assert!(csv.contains(&a.simple().to_string()));
+    assert!(!csv.contains(&b.simple().to_string()));
+    assert_eq!(
+        p.send(p.request(MEMBER, &p.ours, &format!("{LANE}?fault=unknown")))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
 /// Two projects: ours, with its three people seated, and another's.
 struct Projects {
     app: Router,

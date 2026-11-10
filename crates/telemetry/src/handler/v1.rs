@@ -259,7 +259,7 @@ pub const V1_LANES: &[V1Lane] = &[
             description: "The project's spans, traces, failures, tokens, spend and durations \
                           over the window, by the hour or the day, from the \
                           totals kept an hour at a time, and grouped, if asked, \
-                          by one of agent, model, provider, tool, status, \
+                          by one of agent, model, provider, tool, status, fault, \
                           environment or release; or by a tag's values, the \
                           end user or the session, from the spans the plan \
                           keeps, the ten values that spent most each and the \
@@ -281,7 +281,7 @@ pub const V1_LANES: &[V1Lane] = &[
                     name: "group",
                     in_query: true,
                     required: false,
-                    description: "One of `agent`, `model`, `provider`, `tool`, `status`, `environment`, `release`, `tag`, `user` or `session`.",
+                    description: "One of `agent`, `model`, `provider`, `tool`, `status`, `fault`, `environment`, `release`, `tag`, `user` or `session`.",
                 },
                 Param {
                     name: "tag",

@@ -68,7 +68,10 @@ impl DashboardChart {
             ));
         }
         // A tool call and a span's status carry no spend of their own.
-        if matches!(self.group, Some(MetricsGroup::Tool | MetricsGroup::Status)) {
+        if matches!(
+            self.group,
+            Some(MetricsGroup::Tool | MetricsGroup::Status | MetricsGroup::Fault)
+        ) {
             return Err(TelmoniError::BadRequest(
                 "spend is split by model, agent, provider, environment, release, tag, user or \
                  session"

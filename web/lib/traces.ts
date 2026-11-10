@@ -8,7 +8,7 @@ import type {
 } from "@/lib/server/entities/traces";
 import { isOneOf } from "@/lib/one-of";
 import { projectPath } from "@/lib/slug";
-import { ChangeKind, SortDirection, SpanKind, SpanStatus, TraceSort } from "@/lib/types/enums";
+import { ChangeKind, SortDirection, SpanFault, SpanKind, SpanStatus, TraceSort } from "@/lib/types/enums";
 import {
   FILTER_KEYS,
   TAG_KEY_MAX,
@@ -54,10 +54,23 @@ export const MAX_PAGE = 1_000;
 export const FILTERS = FILTER_KEYS;
 export type FilterKey = (typeof FILTERS)[number];
 
+export const FAULT_LABEL: Record<SpanFault, string> = {
+  rate_limited: "Rate limited",
+  overloaded: "Overloaded",
+  timeout: "Timeout",
+  context_length: "Context length",
+  unauthorized: "Unauthorized",
+  invalid_output: "Invalid output",
+  refused: "Refused",
+  truncated: "Truncated",
+  other: "Other",
+};
+
 /** The word the page gives each filter. */
 export const FILTER_LABEL: Record<FilterKey, string> = {
   agent: "Agent",
   status: "Status",
+  fault: "Fault",
   model: "Model",
   tool: "Tool",
   user: "User",
@@ -76,7 +89,7 @@ export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
 /** The longest value each filter takes, in characters, as the server caps it
  *  (`crates/telemetry/src/contract.rs`); a tag's is its key, colon and value,
  *  a prompt version's its name, colon and version. */
-export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status">, number> = {
+export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status" | "fault">, number> = {
   agent: 128,
   model: 128,
   tool: 145,
@@ -104,6 +117,7 @@ function some<T>(values: T[]): T[] | undefined {
 /** Whether `value` is within `filter`'s length, counted in characters as the
  *  server counts them, not in UTF-16's units. */
 export function fits(filter: Exclude<FilterKey, "status">, value: string): boolean {
+  if (filter === "fault") return isOneOf(Object.values(SpanFault), value);
   return [...value].length <= FILTER_VALUE_MAX[filter];
 }
 
@@ -119,6 +133,7 @@ export function parseFilters(searchParams: SearchParams): ListFilters {
   const statuses = Object.values(SpanStatus);
   const values = (filter: FilterKey): string[] => {
     if (filter === "status") return many(searchParams.status).filter((s) => isOneOf(statuses, s));
+    if (filter === "fault") return many(searchParams.fault).filter((s) => isOneOf(Object.values(SpanFault), s));
     const kept = capped(filter, searchParams);
     if (filter === "tag") return kept.filter(isTagPair);
     return filter === "prompt_version" ? kept.filter(isPromptVersion) : kept;
