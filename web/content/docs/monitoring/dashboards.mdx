@@ -1,6 +1,6 @@
 ---
 title: "Spend"
-description: "A project's Spend page: its spend, tokens, traces and their failures, latency and time to first token over a window, with its budgets this month above."
+description: "A project's spend, tokens, traces, latency, first-token timing and output speed, with its budgets this month above."
 ---
 
 A project's **Spend** page (`/{organization}/{project}/dashboards`) charts
@@ -16,6 +16,7 @@ whatever it keeps of the spans:
 | Traces | The traces, each in the hour its agent's own span arrived, those that ended well and those that failed |
 | Latency | The traces' durations at the median, the 95th and the 99th percentile |
 | Time to first token | How soon the traces' first model calls began to answer, at the median and the 95th percentile, read from the spans, which alone keep it, so within the project's retention |
+| Output speed | Model calls' output tokens/s after their first token, by model at the median and 5th percentile, from retained spans |
 
 Above them, each of the project's running [budgets](/docs/monitoring/alerts#a-budget):
 what the month had spent of it when the budget last read it, or **Not read
@@ -35,3 +36,13 @@ be read whole, the chart draws every model's tokens together, without it.
 
 The same totals, by the hour or the day and split, are
 [`GET /v1/metrics`](/docs/api/reference#get-v1metrics).
+
+Output speed uses the same [per-call formula and eligibility](/docs/monitoring/traces#sort-pages-and-the-window)
+as Traces. Its independent model picker shows one model at a time, and the
+5th percentile is the slow tail. With one eligible call the two lines coincide;
+missing timing leaves a gap. Output includes reasoning, so a long wait for a
+reasoning model's first chunk can be followed by a high reported speed.
+First-token timing and speed cover only the retained span window shown beside
+the chart, even when the totals cover longer. Their bars use that window's
+bucket width and UTC labels. A failed speed read is shown as unavailable;
+it does not remove the hourly totals.

@@ -133,6 +133,21 @@ times to first token, as the menu above the bars picks — each bar an hour, a
 few hours, a day or a week, starting on your own clock. **Chart** shows the
 charts in the table's place, two to a row.
 
+**Output speed**, beside time to first token, shows each model's median and
+5th percentile in output tokens/s after its first token. Select one model;
+the picker admits the calls of that model within the whole traces the filters
+admit. The default prefers a model with measured timing. Missing measurements
+leave gaps, and with one eligible call the two percentiles coincide.
+
+The call's detail, in the page and peek, shows the same derived speed:
+`(output_tokens - 1) / (duration_seconds - time_to_first_token_seconds)`.
+A call has none, and shows no speed, without first-token timing, with fewer than two output
+tokens, or when the timing leaves no positive duration after the first token.
+It estimates speed from reported counts and first-chunk timing, rather than
+timing every token. Output includes reasoning: a reasoning model may report a
+long wait for its first chunk and a high speed after it. Only retained,
+observed calls contribute; sampling does not multiply their speed.
+
 The Tokens chart stacks input, cache read, cache write, output and reasoning.
 Its model picker narrows the chart and **Cache share**, the sum of cache-read
 tokens divided by the sum of input tokens; no input shows **—**. The input

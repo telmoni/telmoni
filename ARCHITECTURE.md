@@ -275,6 +275,20 @@ bucketed by the trace's start. Spend uses grouped hourly totals for its model
 picker. Both charts share five exclusive segments and a weighted cache share,
 using saturating subtraction like pricing for inconsistent counts.
 
+Output speed is derived on reads from each model call's microsecond timestamps,
+inclusive output and first-token timing: `(output_tokens - 1) / (duration - first_token)`
+in tokens/s. Missing, non-finite or negative timing, fewer than two tokens or a
+nonpositive denominator yields none. The same scoped model-call scan adds
+`countIf` and one `quantilesIf(0.05, 0.5)` state per bucket/model, leaving token
+sums intact. Empty samples and non-finite results become null before JSON.
+SQL widens output counts to Int128 before subtracting one, since UInt64
+subtraction returns Int64 and would wrap large valid counts.
+Detail and the public read API share the Rust derivation; Traces and Spend share
+the model picker and speed chart. Percentiles describe retained observed calls,
+without inverse sampling weights, and cannot be recovered from hourly totals.
+No ingest field, stored column or SDK behavior changes. The query keeps the
+store's time and memory caps; the quantile states add memory within those caps.
+
 Foreign content is scrubbed during batch mapping, before direct persistence
 or encrypted foreign staging. Telemetry reuses the Rust SDK's public `scrub`
 module through its local SDK dependency. Project settings default

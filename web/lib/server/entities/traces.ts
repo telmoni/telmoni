@@ -76,10 +76,16 @@ const facetShape = Object.fromEntries(FILTER_KEYS.map((key) => [key, FacetSchema
 export const FacetsSchema = z.object({ days: z.number(), ...facetShape });
 export type Facets = z.infer<typeof FacetsSchema>;
 
-// The window in bars of equal width, each starting on the reader's clock:
-// the traces that started in it by how they ended, their tokens, and the
-// median and 95th percentile of their durations and of their times to first
-// token, none where no trace started or reported one.
+// Parse entries so Zod's record safeguard does not discard a model named __proto__.
+function modelRecord<T extends z.ZodType>(value: T) {
+  return z.preprocess(
+    (given) => given !== null && typeof given === "object" && !Array.isArray(given)
+      ? Object.entries(given) : undefined,
+    z.array(z.tuple([z.string(), value])),
+  ).transform((entries) => Object.fromEntries(entries));
+}
+
+// The reader's trace-start buckets; missing measurements remain null.
 const HistogramBarSchema = z.object({
   at: z.string(),
   ok: z.number(),
@@ -88,8 +94,7 @@ const HistogramBarSchema = z.object({
   faults: z.partialRecord(z.enum(SpanFault), z.number().int().nonnegative()),
   tokens: z.number(),
   /** Its traces' model calls' tokens, by the model that spent them. */
-  tokens_by_model: z.record(
-    z.string(),
+  tokens_by_model: modelRecord(
     z.object({
       input_tokens: z.number(),
       output_tokens: z.number(),
@@ -98,6 +103,10 @@ const HistogramBarSchema = z.object({
       reasoning_output_tokens: z.number(),
     }),
   ),
+  output_speed_by_model: modelRecord(z.object({
+    p50: z.number().positive().nullable(),
+    p05: z.number().positive().nullable(),
+  })),
   /** What its traces' model calls cost, each trace its own. */
   spend: z.number(),
   duration_p50_ms: z.number().nullable(),
@@ -118,7 +127,7 @@ export const TraceHistogramSchema = z.object({
 });
 export type TraceHistogram = z.infer<typeof TraceHistogramSchema>;
 
-/** A dashboard's charts: what each draws and, for spend, what splits it. */
+/** A dashboard's measures and optional splits of spend or tokens. */
 export const DashboardQuerySchema = z.object({
   charts: z
     .array(

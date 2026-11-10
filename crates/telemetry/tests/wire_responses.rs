@@ -375,6 +375,20 @@ fn the_histogram_answers_as_the_console_reads() {
                     )]
                     .into(),
                     spend: 0.063,
+                    output_speed_by_model: [
+                        (
+                            "gpt-4o-mini".into(),
+                            telmoni_telemetry::traces::OutputSpeed {
+                                p50: Some(50.0),
+                                p05: Some(5.0),
+                            },
+                        ),
+                        (
+                            "untimed".into(),
+                            telmoni_telemetry::traces::OutputSpeed::default(),
+                        ),
+                    ]
+                    .into(),
                     duration_p50_ms: Some(1_800.0),
                     duration_p95_ms: Some(4_000.0),
                     time_to_first_token_p50_ms: Some(400.0),
@@ -389,6 +403,7 @@ fn the_histogram_answers_as_the_console_reads() {
                     faults: Default::default(),
                     tokens: 0,
                     tokens_by_model: Default::default(),
+                    output_speed_by_model: Default::default(),
                     spend: 0.0,
                     duration_p50_ms: None,
                     duration_p95_ms: None,
@@ -425,6 +440,7 @@ fn a_trace_answers_as_the_console_reads() {
         reasoning_output_tokens: 20,
         cost,
         time_to_first_token: cost.map(|_| 0.42),
+        output_speed: cost.map(|_| 169.0 / (4.0 - 0.42)),
         user_id: "u_1f3a".into(),
         session_id: "s_9c2e".into(),
         environment: "production".into(),

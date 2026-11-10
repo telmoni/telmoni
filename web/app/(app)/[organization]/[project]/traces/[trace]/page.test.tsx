@@ -121,6 +121,7 @@ const SPANS = [
     input_tokens: 1200,
     output_tokens: 300,
     time_to_first_token: 0.42,
+    output_speed: 50,
     started_at: "2026-10-11T03:00:00.020Z",
     ended_at: "2026-10-11T03:00:01.520Z",
   }),
@@ -280,6 +281,17 @@ describe("TracePage", () => {
     expect(within(chosen()).getByText("1,200")).toBeInTheDocument();
     expect(within(chosen()).getByText("anthropic")).toBeInTheDocument();
     expect(within(chosen()).getByText("Time to first token").nextSibling).toHaveTextContent("420 ms");
+    expect(within(chosen()).getByText("Output speed").nextSibling).toHaveTextContent("50 tokens/s");
+  });
+
+  it("shows no output speed on a model call that has none", async () => {
+    mockTrace = { kind: "ok", trace: { trace_id: TRACE_ID,
+      spans: SPANS.map((span) => span.kind === SpanKind.ModelCall ? { ...span, output_speed: null } : span),
+      truncated: false, spend: null, content: [] } };
+    render(await TracePage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    fireEvent.click(within(screen.getByRole("tree", { name: "Spans" })).getByText("chat claude-sonnet-5-5"));
+    expect(within(chosen()).getByText("Time to first token")).toBeInTheDocument();
+    expect(within(chosen()).queryByText("Output speed")).toBeNull();
   });
 
   it("shows a refused model call's fault without changing its successful status", async () => {

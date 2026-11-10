@@ -23,7 +23,7 @@ function daysOf(given: string | string[] | undefined): number {
 }
 
 // The month's budgets, then the window's charts: spend, tokens, traces and
-// latency from the hourly totals, time to first token from the spans.
+// latency from the hourly totals, first-token timing and output speed from the spans.
 export default async function DashboardsPage({
   params,
   searchParams,
@@ -59,7 +59,7 @@ export default async function DashboardsPage({
     <>
       <PageHeader
         title="Spend"
-        info="What the project's agents spend, against this month's budgets, and charts over the window, by the UTC day or, for a day, the hour: spend, tokens, traces and latency from the hourly totals, and time to first token from the spans. Spend is priced as it is read, the project's own prices first."
+        info="What the project's agents spend, against this month's budgets, and charts over the window, by the UTC day or, for a day, the hour: spend, tokens, traces and latency from the hourly totals, and first-token timing and output speed from retained spans. Output speed shows each model's median and 5th percentile in tokens/s after the first token. Spend is priced as it is read, the project's own prices first."
         action={<WindowPicker days={days} windows={TOTALS_WINDOWS} />}
       />
       <div className="grid gap-page">
@@ -111,6 +111,7 @@ export default async function DashboardsPage({
             }
             hourly={totals.rollups.step === "hour"}
             firstTokenHourly={histogram.kind === "ok" && histogram.histogram.bucket_seconds < 86_400}
+            histogram={histogram.kind === "ok" ? histogram.histogram : null}
           />
         )}
         {truncated && (

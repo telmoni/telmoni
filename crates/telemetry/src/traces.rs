@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use clickhouse::{Row, RowOwned, RowRead};
 use serde::{Deserialize, Serialize};
 
-use telmoni_shared::{SortDirection, SpanStatus, TraceSort};
+use telmoni_shared::{SortDirection, SpanKind, SpanStatus, TraceSort};
 
 use crate::contract::TAG_KEY_MAX;
 use crate::store::{Projects, Read, SpanRow, Store, text};
@@ -294,6 +294,8 @@ pub struct Bar {
     pub tokens: u64,
     /// Inclusive counts of each model's calls, under the whole-trace filters.
     pub tokens_by_model: std::collections::BTreeMap<String, TokenCounts>,
+    /// Eligible model calls' output tokens per second after their first token.
+    pub output_speed_by_model: std::collections::BTreeMap<String, OutputSpeed>,
     /// What their model calls cost, in US dollars, each trace its own.
     pub spend: f64,
     /// Their durations' median, in milliseconds, where it had traces.
@@ -996,6 +998,55 @@ pub struct TokenCounts {
     pub reasoning_output_tokens: u64,
 }
 
+/// A measured call's output tokens per second after its first token.
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "rates use Float64 on both readers; subtract counts before conversion"
+)]
+pub fn output_speed(
+    kind: SpanKind,
+    output_tokens: u64,
+    duration: chrono::TimeDelta,
+    first: Option<f64>,
+) -> Option<f64> {
+    if kind != SpanKind::ModelCall || output_tokens < 2 {
+        return None;
+    }
+    let first = first?;
+    let duration = duration.num_microseconds()? as f64 / 1_000_000.0;
+    if !first.is_finite() || first < 0.0 || duration <= first {
+        return None;
+    }
+    let speed = (output_tokens - 1) as f64 / (duration - first);
+    (speed.is_finite() && speed > 0.0).then_some(speed)
+}
+
+/// The slow tail and median of eligible calls; none without observations.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+pub struct OutputSpeed {
+    pub p50: Option<f64>,
+    pub p05: Option<f64>,
+}
+
+macro_rules! call_speed {
+    () => {
+        "(toFloat64(greatest(toInt128(s.output_tokens), toInt128(1)) - toInt128(1)) / \
+         nullIf((toUnixTimestamp64Micro(s.ended_at) - toUnixTimestamp64Micro(s.started_at)) \
+         / 1000000.0 - s.time_to_first_token, 0))"
+    };
+    (valid) => {
+        concat!(
+            "(s.output_tokens >= 2 AND isFinite(s.time_to_first_token) ",
+            "AND s.time_to_first_token >= 0 AND isFinite(",
+            call_speed!(),
+            ") AND ",
+            call_speed!(),
+            " > 0)"
+        )
+    };
+}
+
 const TOKENS_BY_MODEL_SQL: &str = concat!(
     "SELECT intDiv(toUnixTimestamp64Milli(least(greatest(t.first_started_at, ",
     "now64(6) - toIntervalDay({days:UInt16})), now64(6))) + {shift:Int64}, {bucket:Int64}) ",
@@ -1003,7 +1054,15 @@ const TOKENS_BY_MODEL_SQL: &str = concat!(
     "sum(s.input_tokens) AS input_tokens, sum(s.output_tokens) AS output_tokens, ",
     "sum(s.cache_read_input_tokens) AS cache_read_input_tokens, ",
     "sum(s.cache_write_input_tokens) AS cache_write_input_tokens, ",
-    "sum(s.reasoning_output_tokens) AS reasoning_output_tokens ",
+    "sum(s.reasoning_output_tokens) AS reasoning_output_tokens, ",
+    "countIf(",
+    call_speed!(valid),
+    ") AS speed_calls, ",
+    "quantilesIf(0.05, 0.5)(ifNull(",
+    call_speed!(),
+    ", 0), ",
+    call_speed!(valid),
+    ") AS speed_quantiles ",
     "FROM telemetry.spans AS s INNER JOIN (",
     traces!(),
     ") AS t ON s.trace_id = t.trace_id ",
@@ -1012,7 +1071,7 @@ const TOKENS_BY_MODEL_SQL: &str = concat!(
     "GROUP BY at_ms, model ORDER BY at_ms, model"
 );
 
-/// One model's counts in a trace-start bucket.
+/// One model's counts and speed observations in a trace-start bucket.
 #[derive(Debug, Row, Deserialize)]
 pub struct ModelTokensRow {
     pub at_ms: i64,
@@ -1022,9 +1081,11 @@ pub struct ModelTokensRow {
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
     pub reasoning_output_tokens: u64,
+    pub speed_calls: u64,
+    pub speed_quantiles: Vec<f64>,
 }
 
-/// Counts by model after admitting whole traces, on the histogram's clock.
+/// Counts and speeds by model under whole-trace admission and its clock.
 ///
 /// # Errors
 ///
@@ -1043,10 +1104,27 @@ pub async fn tokens_by_model(
         .await
 }
 
-/// Merge model counts without changing the histogram's buckets.
-pub fn with_tokens_by_model(bars: &mut [Bar], rows: Vec<ModelTokensRow>) {
+/// Merge model metrics without changing the histogram's buckets.
+pub fn with_model_metrics(bars: &mut [Bar], rows: Vec<ModelTokensRow>) {
     let mut counts = std::collections::BTreeMap::new();
+    let mut speeds = std::collections::BTreeMap::new();
     for row in rows {
+        let quantile = |place: usize| -> Option<f64> {
+            (row.speed_calls > 0)
+                .then(|| row.speed_quantiles.get(place).copied())
+                .flatten()
+                .filter(|value| value.is_finite() && *value > 0.0)
+        };
+        speeds
+            .entry(row.at_ms)
+            .or_insert_with(std::collections::BTreeMap::new)
+            .insert(
+                row.model.clone(),
+                OutputSpeed {
+                    p05: quantile(0),
+                    p50: quantile(1),
+                },
+            );
         counts
             .entry(row.at_ms)
             .or_insert_with(std::collections::BTreeMap::new)
@@ -1062,6 +1140,9 @@ pub fn with_tokens_by_model(bars: &mut [Bar], rows: Vec<ModelTokensRow>) {
             );
     }
     for bar in bars {
+        bar.output_speed_by_model = speeds
+            .remove(&bar.at.timestamp_millis())
+            .unwrap_or_default();
         bar.tokens_by_model = counts
             .remove(&bar.at.timestamp_millis())
             .unwrap_or_default();
@@ -1121,6 +1202,7 @@ pub fn bars(
                     faults: row.faults.into_iter().collect(),
                     tokens: row.token_total,
                     tokens_by_model: std::collections::BTreeMap::new(),
+                    output_speed_by_model: std::collections::BTreeMap::new(),
                     spend: row.spend_total,
                     duration_p50_ms: Some(row.duration_p50_ms),
                     duration_p95_ms: Some(row.duration_p95_ms),
@@ -1136,6 +1218,7 @@ pub fn bars(
                     faults: std::collections::BTreeMap::new(),
                     tokens: 0,
                     tokens_by_model: std::collections::BTreeMap::new(),
+                    output_speed_by_model: std::collections::BTreeMap::new(),
                     spend: 0.0,
                     duration_p50_ms: None,
                     duration_p95_ms: None,
@@ -1191,6 +1274,53 @@ pub fn shown(each: impl IntoIterator<Item = u32>, limit: u32, units: u32) -> usi
 mod tests {
     use super::*;
     use crate::store::PROJECTS_PARAM;
+
+    #[test]
+    fn output_speed_uses_measured_microseconds_and_refuses_unknowns() {
+        use chrono::TimeDelta;
+        for (tokens, micros, first, expected) in [
+            (101, 3_000_000, Some(1.0), Some(50.0)),
+            (11, 3_000_000, Some(1.0), Some(5.0)),
+            (2, 500_000, Some(0.0), Some(2.0)),
+            (0, 3_000_000, Some(1.0), None),
+            (1, 3_000_000, Some(1.0), None),
+            (101, 3_000_000, None, None),
+            (101, 3_000_000, Some(3.0), None),
+            (101, 3_000_000, Some(4.0), None),
+            (2, 0, Some(0.0), None),
+            (2, -1, Some(0.0), None),
+            (2, 3, Some(0.000001), Some(500_000.0)),
+            (2, 3_000_000, Some(-1.0), None),
+            (2, 3_000_000, Some(f64::NAN), None),
+            (2, 3_000_000, Some(f64::INFINITY), None),
+            (
+                u64::MAX,
+                2_000_000,
+                Some(1.0),
+                Some(18_446_744_073_709_551_616.0),
+            ),
+        ] {
+            let got = output_speed(
+                SpanKind::ModelCall,
+                tokens,
+                TimeDelta::microseconds(micros),
+                first,
+            );
+            match (got, expected) {
+                (Some(got), Some(expected)) => assert!(
+                    (got - expected).abs() <= expected * 1e-12,
+                    "{got} != {expected}"
+                ),
+                _ => assert_eq!(got, expected),
+            }
+        }
+        for kind in [SpanKind::Agent, SpanKind::ToolCall] {
+            assert_eq!(
+                output_speed(kind, 101, TimeDelta::seconds(3), Some(1.0)),
+                None
+            );
+        }
+    }
 
     /// Every filter's parameter, which every read but a trace's spans binds.
     const FILTER_PARAMS: [&str; 12] = [

@@ -26,9 +26,11 @@ import {
   formatCost,
   formatCount,
   formatDuration,
+  formatOutputSpeed,
   tokenBreakdown,
   type ChangeMark,
   type TokenBar,
+  type OutputSpeedBar,
 } from "@/lib/traces";
 import { SpanFault } from "@/lib/types/enums";
 import { useInBrowser } from "@/lib/in-browser";
@@ -36,7 +38,7 @@ import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
 
 /** What a chart of the list draws. */
-const METRICS = ["traces", "faults", "tokens", "cost", "duration", "first_token", "score"] as const;
+const METRICS = ["traces", "faults", "tokens", "cost", "duration", "first_token", "output_speed", "score"] as const;
 type Metric = (typeof METRICS)[number];
 
 /** The metrics `histogram` can draw: a score's mean only where the list is
@@ -52,6 +54,7 @@ const METRIC_LABEL: Record<Metric, string> = {
   cost: "Cost",
   duration: "Duration",
   first_token: "Time to first token",
+  output_speed: "Output speed",
   score: "Score",
 };
 
@@ -92,6 +95,10 @@ const DURATION: ChartConfig = {
   p50: { label: "Median", color: "var(--muted-foreground)" },
   p95: { label: "95th percentile", color: "var(--foreground)" },
 };
+const OUTPUT_SPEED: ChartConfig = {
+  p50: { label: "Median", color: "var(--muted-foreground)" },
+  p05: { label: "5th percentile", color: "var(--foreground)" },
+};
 // Five steps of the ink, darkest first, so the stack reads in either theme.
 const ink = (share: number) => `color-mix(in oklab, var(--foreground) ${share}%, var(--background))`;
 const TOKEN_SEGMENTS: ChartConfig = {
@@ -108,7 +115,7 @@ const TOKEN_SEGMENTS: ChartConfig = {
 function tickLabel(iso: string, days: number, timeZone?: "UTC"): string {
   const at = new Date(iso);
   return days <= 1
-    ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone })
     : at.toLocaleDateString([], { month: "short", day: "numeric", timeZone });
 }
 
@@ -116,7 +123,7 @@ function tickLabel(iso: string, days: number, timeZone?: "UTC"): string {
 function barLabel(iso: string, seconds: number, timeZone?: "UTC"): string {
   const at = new Date(iso);
   return seconds < 86_400
-    ? at.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    ? at.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone })
     : at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone });
 }
 
@@ -161,7 +168,7 @@ function changeLines(marks: readonly ChangeMark[]) {
 }
 
 /** The histogram's bars as the charts read them, the percentiles `metric`'s. */
-function rows(histogram: TraceHistogram, metric: Exclude<Metric, "tokens">) {
+function rows(histogram: TraceHistogram, metric: Exclude<Metric, "tokens" | "output_speed">) {
   return histogram.bars.map((bar) => ({
     at: bar.at,
     ok: bar.ok,
@@ -185,7 +192,7 @@ function MetricChart({
 }: {
   histogram: TraceHistogram;
   marks: readonly ChangeMark[];
-  metric: Exclude<Metric, "tokens">;
+  metric: Exclude<Metric, "tokens" | "output_speed">;
   className?: string;
   legend?: boolean;
 }) {
@@ -367,6 +374,14 @@ export function TraceHistogramStrip({
           marks={marks}
           className="h-28"
         />
+      ) : metric === "output_speed" ? (
+        <OutputSpeedChart
+          bars={histogram.bars}
+          days={histogram.days}
+          bucketSeconds={histogram.bucket_seconds}
+          marks={marks}
+          className="h-28"
+        />
       ) : (
         <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-28" legend={metric === "faults"} />
       )}
@@ -409,6 +424,14 @@ export function TraceCharts({
               marks={marks}
               className="h-56"
             />
+          ) : metric === "output_speed" ? (
+            <OutputSpeedChart
+              bars={histogram.bars}
+              days={histogram.days}
+              bucketSeconds={histogram.bucket_seconds}
+              marks={marks}
+              className="h-56"
+            />
           ) : (
             <MetricChart
               histogram={histogram}
@@ -425,6 +448,138 @@ export function TraceCharts({
 }
 
 const ALL_MODELS = "all";
+// Prefixed, so a model named as the whole is still its own choice.
+const modelChoice = (model: string) => `model:${model}`;
+
+/** The models a chart offers; one model, or none named, leaves nothing to pick between. */
+function ModelSelect({
+  models,
+  value,
+  onValueChange,
+  label,
+  all = false,
+}: {
+  models: readonly string[];
+  value: string;
+  onValueChange: (value: string) => void;
+  label: string;
+  /** Whether every model together is a choice. */
+  all?: boolean;
+}) {
+  if (models.length <= 1) return null;
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger aria-label={label}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent position="popper" align="start">
+        {all && <SelectItem value={ALL_MODELS}>All models</SelectItem>}
+        {models.map((model) => (
+          <SelectItem key={model} value={modelChoice(model)}>
+            {model || "No model"}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// One model's calls at a time, since percentiles of two models cannot be
+// joined; a bar with no measured call is a gap, never a zero.
+export function OutputSpeedChart({
+  bars,
+  days,
+  bucketSeconds,
+  marks = [],
+  timeZone,
+  className,
+}: {
+  bars: readonly OutputSpeedBar[];
+  days: number;
+  bucketSeconds: number;
+  marks?: readonly ChangeMark[];
+  /** Set where a bar starts on the UTC clock, as Spend's do. */
+  timeZone?: "UTC";
+  className?: string;
+}) {
+  const inBrowser = useInBrowser();
+  const [picked, setPicked] = useState<string | null>(null);
+  // `Object.hasOwn`, so a model named as a property of every object is still data.
+  const speedOf = (bar: OutputSpeedBar, model: string) =>
+    Object.hasOwn(bar.output_speed_by_model, model) ? bar.output_speed_by_model[model] : undefined;
+  const models = [...new Set(bars.flatMap((bar) => Object.keys(bar.output_speed_by_model)))].sort();
+  const measured = models.find((model) => bars.some((bar) => speedOf(bar, model)?.p50 != null));
+  // The reader's pick while it is in the window, else the first model with a speed.
+  const selected = models.find((model) => modelChoice(model) === picked) ?? measured ?? models[0] ?? "";
+  const data = bars.map((bar) => {
+    const speed = speedOf(bar, selected);
+    return { at: bar.at, p50: speed?.p50 ?? null, p05: speed?.p05 ?? null };
+  });
+  const latest = data.findLast((bar) => bar.p50 !== null);
+  const speedOrNone = (speed: number | null | undefined) => (speed == null ? "none" : formatOutputSpeed(speed));
+
+  return (
+    <div className="grid min-w-0 gap-gutter">
+      <ModelSelect
+        models={models}
+        value={modelChoice(selected)}
+        onValueChange={setPicked}
+        label="Output speed model"
+      />
+      {latest ? (
+        <p className="sr-only">
+          {selected || "No model"}: latest median {speedOrNone(latest.p50)}, 5th percentile{" "}
+          {speedOrNone(latest.p05)}.
+        </p>
+      ) : (
+        <p className="text-muted-foreground">No model call in the window reported its time to first token.</p>
+      )}
+      {inBrowser ? (
+        <ChartContainer config={OUTPUT_SPEED} className={cn("aspect-auto w-full", className)}>
+          <LineChart data={data} margin={{ left: 0, right: 8, top: 4 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="at"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={6}
+              minTickGap={24}
+              tickFormatter={(iso: string) => tickLabel(iso, days, timeZone)}
+            />
+            <YAxis width="auto" tickLine={false} axisLine={false} tickFormatter={formatOutputSpeed} />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(_, payload) => {
+                    const iso = payload?.[0]?.payload?.at;
+                    return typeof iso === "string" ? markedLabel(iso, bucketSeconds, marks, timeZone) : null;
+                  }}
+                  formatter={tooltipRow(OUTPUT_SPEED, formatOutputSpeed)}
+                />
+              }
+            />
+            <ChartLegend content={<ChartLegendContent />} />
+            {/* Dots, so a lone bar between two gaps is still drawn. */}
+            {Object.keys(OUTPUT_SPEED).map((key) => (
+              <Line
+                key={key}
+                dataKey={key}
+                type="monotone"
+                stroke={`var(--color-${key})`}
+                strokeWidth={1.5}
+                dot={{ r: 2 }}
+                connectNulls={false}
+              />
+            ))}
+            {changeLines(marks)}
+          </LineChart>
+        </ChartContainer>
+      ) : (
+        <div className={className} aria-hidden="true" />
+      )}
+    </div>
+  );
+}
 
 // The tokens as five, stacked: input no cache served, the cache's reads and
 // writes, output and reasoning, of every model or the one picked, with the
@@ -452,12 +607,11 @@ export function TokenChart({
   const inBrowser = useInBrowser();
   const [picked, setPicked] = useState(ALL_MODELS);
   const models = [...new Set([...listed, ...bars.flatMap((bar) => Object.keys(bar.tokens_by_model))])].sort();
-  // Prefixed, so a model named as the whole is still its own choice; one that left the window falls back.
-  const choice = (model: string) => `model:${model}`;
-  const selected = models.some((model) => choice(model) === picked) ? picked : ALL_MODELS;
+  // A model that left the window falls back to the whole.
+  const selected = models.some((model) => modelChoice(model) === picked) ? picked : ALL_MODELS;
   const countsOf = (bar: TokenBar) =>
     Object.entries(bar.tokens_by_model)
-      .filter(([model]) => selected === ALL_MODELS || choice(model) === selected)
+      .filter(([model]) => selected === ALL_MODELS || modelChoice(model) === selected)
       .map(([, counts]) => counts);
   const data = bars.map((bar) => ({ at: bar.at, ...tokenBreakdown(countsOf(bar)) }));
   const totals = tokenBreakdown(bars.flatMap(countsOf));
@@ -466,22 +620,7 @@ export function TokenChart({
   return (
     <div className="grid min-w-0 gap-gutter">
       <div className="flex flex-wrap items-center gap-gutter">
-        {/* One model, or none named, leaves nothing to pick between. */}
-        {models.length > 1 && (
-          <Select value={selected} onValueChange={setPicked}>
-            <SelectTrigger aria-label="Token model">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" align="start">
-              <SelectItem value={ALL_MODELS}>All models</SelectItem>
-              {models.map((model) => (
-                <SelectItem key={model} value={choice(model)}>
-                  {model || "No model"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        <ModelSelect models={models} value={selected} onValueChange={setPicked} label="Token model" all />
         <span className="text-muted-foreground tabular-nums">Cache share {share}</span>
       </div>
       <p className="sr-only">

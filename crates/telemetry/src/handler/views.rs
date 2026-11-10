@@ -48,7 +48,7 @@ fn once<T: PartialEq>(given: Vec<T>) -> Vec<T> {
 /// The most charts one dashboard draws, each a read of its own.
 pub const DASHBOARD_CHARTS_MAX: usize = 12;
 
-/// One of a dashboard's charts: what it draws and, for spend, what splits it.
+/// One chart's measure and optional split of spend or tokens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DashboardChart {
@@ -411,6 +411,24 @@ mod tests {
                 { "measure": "first_token" },
             ] })
         );
+    }
+
+    #[test]
+    fn output_speed_is_kept_without_an_extra_group() {
+        let query = json!({ "charts": [{ "measure": "output_speed" }] });
+        assert_eq!(
+            dashboard(query.clone()).checked().expect("kept").query,
+            query
+        );
+        let read = DashboardOptions::readable(&query);
+        assert_eq!(read.charts[0].measure, ChartMeasure::OutputSpeed);
+        for split in [
+            json!({ "measure": "output_speed", "group": "model" }),
+            json!({ "measure": "output_speed", "group": "tag", "tag": "team" }),
+            json!({ "measure": "output_speed", "tag": "team" }),
+        ] {
+            assert!(dashboard(json!({ "charts": [split] })).checked().is_err());
+        }
     }
 
     /// ⚠ A dashboard the page would refuse is a 400 that echoes none of it:

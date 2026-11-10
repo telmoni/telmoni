@@ -13,8 +13,8 @@ vi.mock("@/components/page-header", () => ({
 vi.mock("@/components/window-picker", () => ({ WindowPicker: () => null }));
 // Recharts measures a box jsdom has none of: the charts are their bars' count.
 vi.mock("./_charts", () => ({
-  DashboardCharts: ({ bars, firstToken }: { bars: unknown[]; firstToken: unknown[] }) => (
-    <div data-testid="charts" data-bars={bars.length} data-first-token={firstToken.length} />
+  DashboardCharts: ({ bars, firstToken, histogram }: { bars: unknown[]; firstToken: unknown[]; histogram: { days: number; bucket_seconds: number } | null }) => (
+    <div data-testid="charts" data-bars={bars.length} data-first-token={firstToken.length} data-speed-days={histogram?.days} data-speed-bucket={histogram?.bucket_seconds} data-speed-unavailable={histogram === null} />
   ),
 }));
 vi.mock("@/lib/server/project-page", () => ({
@@ -41,6 +41,7 @@ const histogram = () => ({
         { at: "2026-11-02T00:00:00Z", time_to_first_token_p50_ms: 300, time_to_first_token_p95_ms: 900 },
       ],
       bucket_seconds: 86_400,
+      days: 7,
     },
 });
 
@@ -120,6 +121,10 @@ describe("DashboardsPage", () => {
     expect(charts.dataset.bars).toBe("1");
     expect(charts.dataset.firstToken).toBe("1");
     expect(fetchRollups).toHaveBeenCalledTimes(2);
+    expect(fetchTraceHistogram).toHaveBeenCalledTimes(1);
+    expect(fetchTraceHistogram).toHaveBeenCalledWith("project_1", { days: 7 }, 0);
+    expect(charts.dataset.speedDays).toBe("7");
+    expect(charts.dataset.speedBucket).toBe("86400");
     expect(fetchRollups).toHaveBeenCalledWith("project_1", 7);
     expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, "model");
 
@@ -137,6 +142,19 @@ describe("DashboardsPage", () => {
     render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "90" }) }));
     expect(fetchRollups).toHaveBeenCalledWith("project_1", 90);
     expect(screen.getByTestId("charts").dataset.firstToken).toBe("0");
+    expect(screen.getByTestId("charts").dataset.speedUnavailable).toBe("true");
+  });
+
+  it("passes the retained speed window rather than the longer totals window", async () => {
+    const retained = histogram();
+    retained.histogram.days = 2;
+    retained.histogram.bucket_seconds = 3600;
+    fetchTraceHistogram.mockResolvedValue(retained);
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "90" }) }));
+    expect(fetchTraceHistogram).toHaveBeenCalledTimes(1);
+    expect(fetchTraceHistogram).toHaveBeenCalledWith("project_1", { days: 90 }, 0);
+    expect(screen.getByTestId("charts").dataset.speedDays).toBe("2");
+    expect(screen.getByTestId("charts").dataset.speedBucket).toBe("3600");
   });
 
   it("says nothing has landed in the window the totals read, and draws no chart", async () => {

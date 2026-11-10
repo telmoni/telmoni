@@ -11,7 +11,8 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { TokenChart } from "@/components/traces/charts";
+import { OutputSpeedChart, TokenChart } from "@/components/traces/charts";
+import type { TraceHistogram } from "@/lib/server/entities/traces";
 import type { Bar as DashboardBar } from "@/lib/dashboards";
 import { useInBrowser } from "@/lib/in-browser";
 import { formatCost, formatCount, formatDuration, type TokenBar } from "@/lib/traces";
@@ -136,6 +137,7 @@ export function DashboardCharts({
   hourly,
   firstTokenHourly,
   tokenBars,
+  histogram,
 }: {
   bars: DashboardBar[];
   /** The tokens by model, or under one name where the grouped totals could not be read whole. */
@@ -144,8 +146,11 @@ export function DashboardCharts({
   hourly: boolean;
   /** Whether the spans' bars, which the histogram sizes to the window, are under a day. */
   firstTokenHourly: boolean;
+  /** The spans' histogram, which output speed is read from; null where it could not be read. */
+  histogram: TraceHistogram | null;
 }) {
   const tokensId = useId();
+  const speedId = useId();
   const sum = (of: (bar: DashboardBar) => number) => bars.reduce((total, bar) => total + of(bar), 0);
   const last = <T,>(rows: readonly T[], of: (row: T) => number | null) =>
     rows.findLast((row) => of(row) !== null) ?? null;
@@ -201,6 +206,31 @@ export function DashboardCharts({
         format={formatDuration}
         kind="lines"
       />
+      <section
+        aria-labelledby={speedId}
+        className="grid min-w-0 gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border"
+      >
+        <h2 id={speedId} className="text-base font-medium">
+          Output speed
+        </h2>
+        {histogram ? (
+          <>
+            <p className="text-muted-foreground">
+              Model calls over the last {histogram.days === 1 ? "day" : `${histogram.days} days`}, as far
+              back as the project keeps its spans.
+            </p>
+            <OutputSpeedChart
+              bars={histogram.bars}
+              days={histogram.days}
+              bucketSeconds={histogram.bucket_seconds}
+              timeZone="UTC"
+              className="h-48"
+            />
+          </>
+        ) : (
+          <p className="text-muted-foreground">Output speed could not be read. Reload to try again.</p>
+        )}
+      </section>
     </div>
   );
 }

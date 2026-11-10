@@ -834,6 +834,8 @@ pub struct TraceSpan {
     pub cost: Option<f64>,
     /// Seconds to its answer's first token; none where it reported none.
     pub time_to_first_token: Option<f64>,
+    /// Output tokens per second after the first token; none without valid timing.
+    pub output_speed: Option<f64>,
     pub user_id: String,
     pub session_id: String,
     pub environment: String,
@@ -847,6 +849,12 @@ pub struct TraceSpan {
 
 impl From<SpanRow> for TraceSpan {
     fn from(row: SpanRow) -> Self {
+        let output_speed = traces::output_speed(
+            row.kind,
+            row.output_tokens,
+            row.ended_at - row.started_at,
+            row.time_to_first_token,
+        );
         Self {
             span_id: row.span_id,
             parent_span_id: row.parent_span_id,
@@ -868,6 +876,7 @@ impl From<SpanRow> for TraceSpan {
             reasoning_output_tokens: row.reasoning_output_tokens,
             cost: row.cost,
             time_to_first_token: row.time_to_first_token,
+            output_speed,
             user_id: row.user_id,
             session_id: row.session_id,
             environment: row.environment,
@@ -1256,7 +1265,7 @@ pub async fn get_histogram(
         traces::tokens_by_model(&state.store, &projects, &filter, bucket_seconds, utc_offset)
             .await
             .map_err(read_failed)?;
-    traces::with_tokens_by_model(&mut bars, tokens);
+    traces::with_model_metrics(&mut bars, tokens);
     Ok(Json(TraceHistogram {
         days: filter.days,
         bucket_seconds,

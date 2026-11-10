@@ -184,6 +184,8 @@ export const TraceSpanSchema = z.object({
   cost: z.number().nullable(),
   /** Seconds to its answer's first token; null where it reported none. */
   time_to_first_token: z.number().nullable(),
+  /** Output tokens/s after the first token; null without valid measurements. */
+  output_speed: z.number().positive().nullable(),
   fault: z.enum(SpanFault).nullable(),
   user_id: z.string(),
   session_id: z.string(),

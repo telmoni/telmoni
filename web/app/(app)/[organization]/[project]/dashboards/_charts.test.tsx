@@ -18,13 +18,14 @@ const bar = (at: string, spend: number, failed: number) => ({
 });
 
 describe("DashboardCharts", () => {
-  it("draws the five charts in order, each said in words over the window", () => {
+  it("draws speed beside first token, each chart said in words", () => {
     render(
       <DashboardCharts
         bars={[bar("2026-11-01T00:00:00Z", 1.5, 1), bar("2026-11-02T00:00:00Z", 2.5, 0)]}
         firstToken={[{ at: "2026-11-02T00:00:00Z", firstTokenP50: 300, firstTokenP95: 900 }]}
         hourly={false}
         firstTokenHourly={false}
+        histogram={{ days: 7, bucket_seconds: 86400, utc_offset: 0, score: null, bars: [] }}
         tokenBars={[
           {
             at: "2026-11-01T00:00:00Z",
@@ -41,13 +42,14 @@ describe("DashboardCharts", () => {
         ]}
       />,
     );
-    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-labelledby"))).toHaveLength(5);
+    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-labelledby"))).toHaveLength(6);
     expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
       "Spend",
       "Tokens",
       "Traces",
       "Latency",
       "Time to first token",
+      "Output speed",
     ]);
     expect(screen.getByText("$4.00 over the window.")).toBeInTheDocument();
     expect(
@@ -60,7 +62,8 @@ describe("DashboardCharts", () => {
   });
 
   it("says a latency chart holds nothing where no bar read one", () => {
-    render(<DashboardCharts bars={[]} tokenBars={[]} firstToken={[]} hourly={false} firstTokenHourly={false} />);
+    render(<DashboardCharts bars={[]} tokenBars={[]} firstToken={[]} hourly={false} firstTokenHourly={false} histogram={null} />);
     expect(screen.getAllByText("None read in the window.")).toHaveLength(2);
+    expect(screen.getByText(/Output speed could not be read/)).toBeInTheDocument();
   });
 });

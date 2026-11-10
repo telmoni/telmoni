@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChartMeasure {
-    /// What the model calls cost; the one measure a chart may split by a group.
+    /// What the model calls cost.
     Spend,
     /// Input and output tokens.
     Tokens,
@@ -16,6 +16,8 @@ pub enum ChartMeasure {
     Latency,
     /// Time to first token, from the spans.
     FirstToken,
+    /// Model calls' output tokens per second after the first token, by model.
+    OutputSpeed,
 }
 
 crate::wire_enum!(ChartMeasure {
@@ -24,6 +26,7 @@ crate::wire_enum!(ChartMeasure {
     Traces => "traces",
     Latency => "latency",
     FirstToken => "first_token",
+    OutputSpeed => "output_speed",
 });
 
 #[cfg(test)]

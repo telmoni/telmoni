@@ -37,6 +37,119 @@ const MEMBER: &str = "user_member";
 const STRANGER: &str = "user_stranger";
 
 #[sqlx::test]
+async fn output_speed_is_per_call_by_model_without_losing_untimed_tokens(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let trace_id = Uuid::new_v4();
+    let at = (Utc::now() - Duration::minutes(1)).trunc_subsecs(6);
+    let call = |model: &str, tokens, first, micros, n| SpanRow {
+        model: model.into(),
+        output_tokens: tokens,
+        time_to_first_token: first,
+        ended_at: at + Duration::microseconds(micros),
+        ..span_at(&p.ours, trace_id, SpanKind::ModelCall, "chat", at, 3000, n)
+    };
+    let mut calls = vec![span_at(
+        &p.ours,
+        trace_id,
+        SpanKind::Agent,
+        "agent",
+        at,
+        3000,
+        1,
+    )];
+    for n in 2..22 {
+        calls.push(call(
+            "m",
+            if n < 6 { 11 } else { 101 },
+            Some(1.0),
+            3_000_000,
+            n,
+        ));
+    }
+    calls.extend([
+        call("m", 1000, None, 3_000_000, 22),
+        call("n", 2, Some(0.000001), 3, 23),
+        call("", 2, Some(0.0), 500_000, 24),
+        call("untimed", 100, None, 3_000_000, 25),
+        call("untimed", 0, Some(1.0), 3_000_000, 26),
+        call("untimed", 1, Some(1.0), 3_000_000, 27),
+        call("untimed", 101, Some(3.0), 3_000_000, 28),
+        call("untimed", 101, Some(4.0), 3_000_000, 29),
+        call("untimed", 2, Some(0.0), 0, 30),
+    ]);
+    calls.push(SpanRow {
+        project_id: p.theirs.clone(),
+        model: "decoy".into(),
+        ..calls[1].clone()
+    });
+    // A separate trace keeps its large count out of the ordinary token sums.
+    let large = SpanRow {
+        trace_id: Uuid::new_v4().simple().to_string(),
+        ..call("large", u64::MAX, Some(1.0), 2_000_000, 31)
+    };
+    ch.store.insert_spans(&calls).await.expect("calls land");
+    ch.store
+        .insert_spans(std::slice::from_ref(&large))
+        .await
+        .expect("large call lands");
+    let histogram = p.get(&format!("{LANE}/histogram?days=1&model=m")).await;
+    let bars = histogram["bars"].as_array().expect("bars");
+    let bar = bars
+        .iter()
+        .find(|bar| bar["output_speed_by_model"].get("m").is_some())
+        .expect("measured bar");
+    let speeds = &bar["output_speed_by_model"];
+    assert_eq!(speeds["m"], serde_json::json!({ "p50": 50.0, "p05": 5.0 }));
+    assert_eq!(speeds[""], serde_json::json!({ "p50": 2.0, "p05": 2.0 }));
+    assert_eq!(
+        speeds["untimed"],
+        serde_json::json!({ "p50": null, "p05": null })
+    );
+    assert!(speeds.get("decoy").is_none());
+    assert!(
+        speeds.get("large").is_none(),
+        "whole-trace model filter still holds"
+    );
+    assert_eq!(bar["tokens_by_model"]["m"]["output_tokens"], 2660);
+    assert_eq!(bar["tokens_by_model"]["untimed"]["output_tokens"], 305);
+    assert!(
+        bars.iter()
+            .any(|bar| bar["output_speed_by_model"] == serde_json::json!({}))
+    );
+    let detail = p.get(&format!("{LANE}/{}", trace_id.simple())).await;
+    for call in calls.iter().filter(|call| call.project_id == p.ours) {
+        let expected = telmoni_telemetry::traces::output_speed(
+            call.kind,
+            call.output_tokens,
+            call.ended_at - call.started_at,
+            call.time_to_first_token,
+        );
+        let read = detail["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .find(|span| span["span_id"] == call.span_id)
+            .expect("span kept");
+        assert_eq!(read["output_speed"].as_f64(), expected);
+        if call.model == "n" {
+            let speed = speeds["n"]["p50"].as_f64().expect("tiny call speed");
+            assert!((speed - expected.expect("measured")).abs() < 1e-6);
+        }
+    }
+    let large_histogram = p.get(&format!("{LANE}/histogram?days=1&model=large")).await;
+    let speed = large_histogram["bars"]
+        .as_array()
+        .expect("bars")
+        .iter()
+        .find_map(|bar| bar["output_speed_by_model"]["large"]["p50"].as_f64())
+        .expect("large speed");
+    assert_eq!(speed, 18_446_744_073_709_551_616.0);
+}
+
+#[sqlx::test]
 async fn token_models_keep_whole_trace_filters_and_exclude_other_projects(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;

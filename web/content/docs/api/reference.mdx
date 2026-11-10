@@ -196,6 +196,14 @@ content, so it files nothing.
 
 - `spans`: Each span's every field, as the trace's page reads it; the example
   shows a few.
+  A model call's `output_speed` is its output tokens/s after its first token:
+  `(output_tokens - 1) / (duration_seconds - time_to_first_token_seconds)`,
+  calculated at stored microsecond precision. It is `null` on other span kinds,
+  without finite nonnegative first-token timing, with fewer than two output
+  tokens, or without a positive remaining duration and finite positive rate.
+  Inclusive output includes reasoning; the value is an estimate from reported
+  first-chunk timing, not a measurement of every token interval. This is a
+  derived read field, not an attribute an SDK sends.
 - `truncated`: Whether the trace holds more spans than the answer carries.
 - `spend`: What its model calls cost, in US dollars, and the models no price
   covers; `null` when it could not be read.

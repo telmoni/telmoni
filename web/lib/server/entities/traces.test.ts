@@ -21,6 +21,7 @@ import {
   fetchTraceHistogram,
   fetchTraces,
   traceDownload,
+  TraceHistogramSchema,
 } from "./traces";
 
 const PROJECT = "project_1";
@@ -100,6 +101,7 @@ const HISTOGRAM = {
       faults: {},
       tokens: 1500,
       tokens_by_model: {},
+      output_speed_by_model: { m: { p50: 50, p05: 5 }, untimed: { p50: null, p05: null } },
       spend: 0.25,
       duration_p50_ms: 2000,
       duration_p95_ms: 2000,
@@ -115,6 +117,7 @@ const HISTOGRAM = {
       faults: {},
       tokens: 0,
       tokens_by_model: {},
+      output_speed_by_model: {},
       spend: 0,
       duration_p50_ms: null,
       duration_p95_ms: null,
@@ -145,6 +148,7 @@ const SPAN = {
   reasoning_output_tokens: 0,
   cost: null,
   time_to_first_token: null,
+  output_speed: null,
   fault: null,
   user_id: "9f86d081884c7d659a2feaa0c55ad015",
   session_id: "conv-1",
@@ -229,6 +233,17 @@ describe("fetchTraces", () => {
 });
 
 describe("the reads beside the list", () => {
+  it("keeps model names as own keys and refuses invalid speed measurements", () => {
+    const bar = HISTOGRAM.bars[0]!;
+    const speed = { ["__proto__"]: { p50: 50, p05: 5 }, all: { p50: null, p05: null } };
+    const parsed = TraceHistogramSchema.parse({ ...HISTOGRAM, bars: [{ ...bar, output_speed_by_model: speed }] });
+    expect(Object.hasOwn(parsed.bars[0]!.output_speed_by_model, "__proto__")).toBe(true);
+    expect(parsed.bars[0]!.output_speed_by_model["__proto__"]).toEqual({ p50: 50, p05: 5 });
+    for (const value of [0, -1, Infinity, NaN]) {
+      expect(TraceHistogramSchema.safeParse({ ...HISTOGRAM, bars: [{ ...bar, output_speed_by_model: { m: { p50: value, p05: null } } }] }).success).toBe(false);
+    }
+    expect(TraceHistogramSchema.safeParse({ ...HISTOGRAM, bars: [{ ...bar, output_speed_by_model: [] }] }).success).toBe(false);
+  });
   // Each of these lanes refuses a parameter it has no use for, so each is
   // sent the filters and the window alone.
   const QUERY = { agent: ["zeta"], status: ["error" as const], sort: "tokens" as const, page: 3, limit: 25, days: 30 };

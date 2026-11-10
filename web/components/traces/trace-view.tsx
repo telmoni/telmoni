@@ -65,6 +65,7 @@ import {
   formatCost,
   formatCount,
   formatDuration,
+  formatOutputSpeed,
   barsById,
   retrievalCounts,
   retrievalSource,
@@ -797,6 +798,9 @@ function SpanDetail({
                   )}
                   {span.time_to_first_token !== null && (
                     <Field label="Time to first token">{formatDuration(span.time_to_first_token * 1000)}</Field>
+                  )}
+                  {span.output_speed !== null && (
+                    <Field label="Output speed">{formatOutputSpeed(span.output_speed)}</Field>
                   )}
                   {agent && span.user_id && (
                     <FilterField

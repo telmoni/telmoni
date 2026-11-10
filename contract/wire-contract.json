@@ -45,7 +45,8 @@
       "tokens",
       "traces",
       "latency",
-      "first_token"
+      "first_token",
+      "output_speed"
     ],
     "ConnectionStatus": [
       "active",

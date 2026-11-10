@@ -54,6 +54,10 @@ export type TokenCounts = {
 
 /** One bar's tokens, by the model that spent them. */
 export type TokenBar = { at: string; tokens_by_model: Record<string, TokenCounts> };
+export type OutputSpeedBar = {
+  at: string;
+  output_speed_by_model: Record<string, { p50: number | null; p05: number | null }>;
+};
 
 /** The counts summed and told apart as five that add up to input and output,
  *  and the share of input the cache answered, none where there was no input.
@@ -868,6 +872,15 @@ export function formatCost(dollars: number): string {
   // Rounded first, so $0.9999 reads as $1.00 rather than $1.0.
   const shown = Number(dollars.toPrecision(3));
   return shown >= 1 || shown === 0 ? DOLLARS.format(dollars) : UNDER_A_DOLLAR.format(dollars);
+}
+
+const SPEED = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 3 });
+const SCIENTIFIC_SPEED = new Intl.NumberFormat("en-US", { notation: "scientific", maximumSignificantDigits: 3 });
+
+/** A measured output rate, retaining small positive fractions. */
+export function formatOutputSpeed(speed: number): string {
+  const format = (speed > 0 && speed < 0.000001) || speed >= 1e9 ? SCIENTIFIC_SPEED : SPEED;
+  return `${format.format(speed)} tokens/s`;
 }
 
 /** A duration in milliseconds, in the unit a person reads it in (`340 ms`, `1.2 s`,

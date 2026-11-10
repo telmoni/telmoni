@@ -10,6 +10,16 @@
         "rate_limited": 1
       },
       "ok": 10,
+      "output_speed_by_model": {
+        "gpt-4o-mini": {
+          "p05": 5.0,
+          "p50": 50.0
+        },
+        "untimed": {
+          "p05": null,
+          "p50": null
+        }
+      },
       "score_mean": 0.82,
       "spend": 0.063,
       "time_to_first_token_p50_ms": 400.0,
@@ -33,6 +43,7 @@
       "error": 0,
       "faults": {},
       "ok": 0,
+      "output_speed_by_model": {},
       "score_mean": null,
       "spend": 0.0,
       "time_to_first_token_p50_ms": null,

@@ -51,6 +51,7 @@ function trace(traceId: string, tags: Record<string, string> = {}) {
         reasoning_output_tokens: 0,
         cost: null,
         time_to_first_token: null,
+        output_speed: null as number | null,
         user_id: "",
         session_id: "",
         environment: "",
@@ -95,6 +96,14 @@ function peek() {
 const peeked = () => new URL(window.location.href).searchParams.get("peek");
 
 describe("TracePeek", () => {
+  it("uses the server-derived speed on a model call", async () => {
+    const detail = trace(TRACE_A);
+    detail.spans[0] = { ...detail.spans[0]!, kind: "model_call", output_speed: 50 };
+    answers[TRACE_A] = () => Response.json(detail);
+    open(TRACE_A);
+    peek();
+    expect(await screen.findByText("50 tokens/s")).toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockShell = document.body;

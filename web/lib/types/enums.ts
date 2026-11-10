@@ -164,6 +164,7 @@ export const ChartMeasure = {
   Traces:     "traces",
   Latency:    "latency",
   FirstToken: "first_token",
+  OutputSpeed: "output_speed",
 } as const;
 export type ChartMeasure = typeof ChartMeasure[keyof typeof ChartMeasure];
 

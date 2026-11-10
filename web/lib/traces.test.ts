@@ -19,6 +19,7 @@ import {
   fits,
   formatCost,
   formatDuration,
+  formatOutputSpeed,
   groupOf,
   groupedBy,
   isTagPair,
@@ -52,6 +53,14 @@ import {
 } from "./traces";
 
 describe("token accounting", () => {
+  it("formats speed with units without rounding slow calls to zero", () => {
+    expect(formatOutputSpeed(0)).toBe("0 tokens/s");
+    expect(formatOutputSpeed(50)).toBe("50 tokens/s");
+    expect(formatOutputSpeed(0.0001234)).toBe("0.000123 tokens/s");
+    expect(formatOutputSpeed(1234567)).toBe("1,230,000 tokens/s");
+    expect(formatOutputSpeed(1e-12)).toBe("1E-12 tokens/s");
+    expect(formatOutputSpeed(1e300)).toBe("1E300 tokens/s");
+  });
   const usage = {
     input_tokens: 1000, output_tokens: 400, cache_read_input_tokens: 200,
     cache_write_input_tokens: 100, reasoning_output_tokens: 150,

@@ -36,6 +36,44 @@ const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4742";
 const SPAN: &str = "00f067aa0ba90242";
 const OWNER: &str = "owner-1";
 
+#[sqlx::test]
+async fn measured_speed_agrees_on_public_and_internal_metadata_reads(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let door = door(&pool, ContentMode::Off).await;
+    let at = chrono::Utc::now() - chrono::Duration::minutes(1);
+    ch.store
+        .insert_spans(&[telmoni_telemetry::store::SpanRow {
+            trace_id: TRACE.into(),
+            span_id: SPAN.into(),
+            started_at: at,
+            ended_at: at + chrono::Duration::seconds(3),
+            output_tokens: 101,
+            time_to_first_token: Some(1.0),
+            ..common::span(
+                &door.project,
+                telmoni_shared::SpanKind::ModelCall,
+                "chat",
+                3000,
+            )
+        }])
+        .await
+        .expect("measured call lands");
+    for path in [format!("/traces/{TRACE}"), format!("/v1/traces/{TRACE}")] {
+        let (status, body) = door.get(&path).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let body: Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(body["spans"][0]["output_speed"], 50.0);
+    }
+    assert_eq!(
+        door.viewed(&pool).await,
+        0,
+        "metadata read opens no content"
+    );
+}
+
 /// The corpus, as every SDK's suite and every plugin's reads it.
 fn corpus() -> Value {
     let path =
