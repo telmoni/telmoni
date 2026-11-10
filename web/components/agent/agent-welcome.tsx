@@ -1,4 +1,4 @@
-import { ArrowRight, History, MessageCircleText, Plug, Users, type LucideIcon } from "lucide-react";
+import { ArrowRight, BotMessageSquare, History, Plug, Users, type LucideIcon } from "lucide-react";
 
 import type { AgentSuggestion, SuggestionTopic } from "@/lib/agent/suggestions";
 
@@ -24,7 +24,7 @@ export function Welcome({
   return (
     <div className="my-auto grid justify-items-center gap-page py-4 text-center">
       <div className="grid justify-items-center gap-2">
-        <MessageCircleText aria-hidden className="size-6 text-muted-foreground" />
+        <BotMessageSquare aria-hidden className="size-6 text-muted-foreground" />
         <h3 className="text-base font-medium wrap-break-word">Ask about {project}</h3>
         <p className="max-w-sm text-sm text-muted-foreground">
           It looks things up as you, so it sees what you can see, and it changes nothing.
