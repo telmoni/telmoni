@@ -274,8 +274,7 @@ function ListControls({ list, organization, slug, query, total }: ListControlsPr
   );
 }
 
-/** A refresh now. The list counts the traces that land in a bar above itself
- *  (`NewTraces`) and draws them when asked, so it needs no timer. */
+/** A refresh now. The list draws itself as traces land, so it needs no timer. */
 function RefreshControl() {
   const router = useRouter();
   const [refreshing, start] = useTransition();

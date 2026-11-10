@@ -21,16 +21,15 @@ import {
 import { LIVE_HOLD_MS, liveRefresher } from "@/lib/live-refresh";
 import { projectPath } from "@/lib/slug";
 import { PEEK_PARAM, PEEK_NUDGED } from "@/lib/traces";
-import { listIsEmpty, tracesArrived } from "@/lib/use-new-traces";
 
 const RETRY_MS = 30_000;
 
 // A roster or an audit log: a project's, or the organization's own.
 const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
-// A page reading a project's spans: its traces, the list or one of them. A
-// trace's page names its trace, which a nudge is compared with.
-const SPAN_PAGES = /^\/[^/]+\/[^/]+\/traces(?:\/([^/]+))?$/;
+// A page reading a project's spans: its agents, or its traces, the list or
+// one of them. A trace's page names its trace, which a nudge is compared with.
+const SPAN_PAGES = /^\/[^/]+\/[^/]+(\/traces(?:\/([^/]+))?)?$/;
 
 function payload<K extends RealtimeEventType>(
   e: MessageEvent,
@@ -225,25 +224,24 @@ export function RealtimeListener({
       });
 
       // A project's spans arrived: a page reading them is drawn again, the
-      // nudges coalesced (`liveRefresher`) — but the Traces list, whose rows
-      // landed spans would move under the reader's hand, counts those in a bar
-      // above itself instead (`NewTraces`), unless it is empty and has nothing
-      // to move; and a trace's page is drawn for its own trace alone.
+      // nudges coalesced (`liveRefresher`); a trace's page for its own trace
+      // alone.
       es.addEventListener("spans:ingested", (e: MessageEvent) => {
         const data = payload(e, "spans:ingested");
         if (!data || data.projectId !== standing().projectId) return;
         const page = SPAN_PAGES.exec(standing().pathname);
         if (!page) return;
-        const [, one] = page;
+        const [, traces, one] = page;
+        // The Agents page: an agent's row moves only as its own traces land.
+        if (!traces) {
+          live.nudge();
+          return;
+        }
         // A download's route, not a page.
         if (one === "export") return;
         const peeked = one ? null : new URLSearchParams(window.location.search).get(PEEK_PARAM);
         // A trace's peek for its own trace.
         if (peeked && (data.more || data.traces.includes(peeked))) peekLive.nudge();
-        if (!one && !listIsEmpty(data.projectId)) {
-          tracesArrived(data.projectId, data.traces, data.more);
-          return;
-        }
         if (one && !data.more && !data.traces.includes(one)) return;
         live.nudge();
       });

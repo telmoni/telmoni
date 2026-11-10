@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RealtimeListener } from "@/components/realtime-listener";
 import { PEEK_NUDGED } from "@/lib/traces";
-import { listDrawn, newTraces } from "@/lib/use-new-traces";
 
 const mockReplace = vi.fn();
 const mockRefresh = vi.fn();
@@ -377,41 +376,41 @@ describe("RealtimeListener - spans:ingested", () => {
     ];
   });
 
-  afterEach(() => {
-    for (const project of ["project_1", "project_10"]) {
-      listDrawn(project, { rows: [], empty: false, first: true });
+  it("draws the Traces list as its traces land, held as every page is", () => {
+    vi.useFakeTimers();
+    try {
+      mockPathname = "/acme/web/traces";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1", ["trace_1", "trace_2"]);
+      nudge("project_1", ["trace_3"], true);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(mockRefresh).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
     }
   });
 
-  it("counts the Traces list's new traces for its bar rather than drawing the list", () => {
-    listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
-    mockPathname = "/acme/web/traces";
-    render(<RealtimeListener />);
-    nudge("project_1", ["trace_1", "trace_2"]);
-    nudge("project_1", ["trace_2", "r1"], true);
-    expect(mockRefresh).not.toHaveBeenCalled();
-    expect(newTraces("project_1"), "r1 is on the list already").toEqual({ count: 2, more: true });
-  });
-
-  // Nothing on an empty list can move, so its first trace shows itself —
-  // under the hold and only in view, as the other pages are drawn.
-  it("draws an empty Traces list rather than counting for it", () => {
-    listDrawn("project_1", { rows: [], empty: true, first: true });
-    mockPathname = "/acme/web/traces";
-    render(<RealtimeListener />);
-    nudge("project_1", ["trace_1"]);
-    expect(mockRefresh).toHaveBeenCalledTimes(1);
-    expect(newTraces("project_1")).toEqual({ count: 0, more: false });
+  it("draws the Agents page, held as a trace's page is", () => {
+    vi.useFakeTimers();
+    try {
+      mockPathname = "/acme/web";
+      render(<RealtimeListener liveHoldMs={100} />);
+      nudge("project_1", ["trace_1"]);
+      nudge("project_1", ["trace_2"]);
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(mockRefresh).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leaves a page of another project, and a page reading no spans, alone", () => {
-    listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
     mockPathname = "/acme/web/traces";
     render(<RealtimeListener />);
     nudge("project_10");
     expect(mockRefresh).not.toHaveBeenCalled();
-    expect(newTraces("project_10")).toEqual({ count: 0, more: false });
-    expect(newTraces("project_1")).toEqual({ count: 0, more: false });
 
     mockPathname = "/acme/web/members";
     render(<RealtimeListener />);
@@ -456,14 +455,12 @@ describe("RealtimeListener - spans:ingested", () => {
     }
   });
 
-  // The list's peek is read again when its own trace lands, held as a page
-  // is, while the list itself still counts rather than draws.
-  it("tells the list's peek when its own trace lands, and the list counts it", () => {
+  // The list's peek is read again when its own trace lands, held as a page is.
+  it("tells the list's peek when its own trace lands", () => {
     vi.useFakeTimers();
     const landed = vi.fn();
     window.addEventListener(PEEK_NUDGED, landed);
     try {
-      listDrawn("project_1", { rows: ["r1"], empty: false, first: true });
       window.history.replaceState(null, "", "/acme/web/traces?peek=trace_7");
       mockPathname = "/acme/web/traces";
       render(<RealtimeListener liveHoldMs={100} />);
@@ -475,8 +472,6 @@ describe("RealtimeListener - spans:ingested", () => {
       expect(landed, "held, as a page is").toHaveBeenCalledTimes(1);
       vi.advanceTimersByTime(100);
       expect(landed).toHaveBeenCalledTimes(2);
-      expect(mockRefresh).not.toHaveBeenCalled();
-      expect(newTraces("project_1").count).toBe(2);
     } finally {
       window.removeEventListener(PEEK_NUDGED, landed);
       window.history.replaceState(null, "", "/");

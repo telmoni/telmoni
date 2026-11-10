@@ -49,7 +49,6 @@ export function ListPage<L extends ListWindow>({
   toolbar,
   nothingYet,
   firstRun,
-  before,
   instead,
   table,
   children,
@@ -74,8 +73,6 @@ export function ListPage<L extends ListWindow>({
   /** In place of the filters and the list, where the page decided nothing has ever
    *  landed for it: the way to the first. */
   firstRun?: ReactNode;
-  /** Drawn under the filter bar, before the rows. */
-  before?: ReactNode;
   /** Drawn in place of the table and its pages. */
   instead?: ReactNode;
   table: (list: L) => ReactNode;
@@ -128,10 +125,7 @@ export function ListPage<L extends ListWindow>({
     return (
       <>
         <PageHeader title={title} info={info} />
-        <div className="grid gap-page">
-          {before}
-          {firstRun}
-        </div>
+        {firstRun}
       </>
     );
   }
@@ -162,7 +156,6 @@ export function ListPage<L extends ListWindow>({
                   query={query}
                   ui={ui}
                 />
-                {before}
                 {none ??
                   instead ?? (
                     <>

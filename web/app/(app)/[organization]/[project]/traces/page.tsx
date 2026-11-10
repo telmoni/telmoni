@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
 import { ListPage } from "@/components/traces/list-page";
-import { NewTraces } from "@/components/traces/new-traces";
 import { TracePeek } from "@/components/traces/peek";
 import { TraceTable } from "@/components/traces/table";
 import { TraceToolbar } from "@/components/traces/toolbar";
@@ -67,9 +66,6 @@ export default async function TracesPage({
       Only the window&rsquo;s newest changes are marked; its older ones are not.
     </p>
   );
-  // The rows this render drew, as one token: the table is keyed by it, and
-  // the new-traces bar reads a change in it as the list drawn again.
-  const drawn = access.kind === "ok" ? access.list.traces.map((t) => t.trace_id).join() : "";
   const knownTags = facets.kind === "ok" ? facets.facets.tag.values.map((v) => v.value) : [];
   // An empty, unfiltered window is a first run only where all the plan keeps is empty too.
   const ever =
@@ -181,18 +177,6 @@ export default async function TracesPage({
             {days === 1 ? "day" : "days"} are shown.
           </>
         )}
-        // What landed since this render, counted rather than drawn in: the
-        // rows stay under the reader's hand until they ask.
-        before={
-          access.kind === "ok" && (
-            <NewTraces
-              key={project.id}
-              projectId={project.id}
-              drawn={drawn}
-              empty={access.list.total === 0}
-            />
-          )
-        }
         // The charts in place of the table, when the page asks for them.
         instead={
           ui.display === "chart" ? (
