@@ -55,6 +55,7 @@ describe("readersByProject", () => {
 describe("scrubbedSpans", () => {
   it("reads how many spans arrived carrying the scrubbers' counts", () => {
     const posture = {
+      door_scrub: { door_scrub_secrets: true, door_scrub_pii: false },
       days: 30,
       since: "2026-10-06T00:00:00Z",
       spans: 100,

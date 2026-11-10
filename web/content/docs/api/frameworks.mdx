@@ -13,6 +13,12 @@ by its topmost agent or workflow, or, where only the model client is
 instrumented, by your `service.name`, under an agent's span Telmoni writes.
 They show on the **Traces** page a minute or so after the trace goes quiet.
 
+On a project with content on, **Door scrubbers** in project **Settings** apply
+the SDK's scanners before foreign content is stored: secrets on by default,
+personal data off. Owners and admins can change these audited switches.
+SDK exports declaring `telemetry.distro.name=telmoni` are exempt; that name is
+sender-declared, not authenticated. See [Content](/docs/monitoring/content).
+
 Each instrumentation below sets `gen_ai.operation.name` on its spans, which is
 what Telmoni reads them by. One that writes a convention of its own instead —
 OpenInference's `openinference.span.kind`, say — reaches Telmoni as plain

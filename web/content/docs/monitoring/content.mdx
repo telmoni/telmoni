@@ -56,6 +56,19 @@ application knows is the mask's to keep home.
 
 ## What is kept
 
+For an export whose resource does not declare `telemetry.distro.name=telmoni`,
+ingest applies the same scanners before content is compressed, encrypted or
+held waiting for its trace. **Door scrubbers** in project **Settings** default
+to secrets on and personal data off; owners and admins can change them, with
+each change audited. They apply to subsequent exports, not content already
+kept. A failed scanner drops its field rather than keeping it raw. The trace
+shows replacement counts from SDK or door scrubbing.
+
+SDK exports keep the developer's policy and are not scrubbed again. The
+distribution name is sender-declared, not authenticated: these scanners are a
+safeguard against accidental disclosure, not a guarantee against a sender
+claiming that name. They scan text, never image or file bytes.
+
 On a project that keeps content, ingest keeps each piece whole, past the 1,024
 characters an attribute is otherwise held to, sealed under a key of the
 project's own, in Postgres alone, never in the span store:

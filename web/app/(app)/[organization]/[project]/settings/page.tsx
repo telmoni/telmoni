@@ -20,7 +20,7 @@ import { DeleteProjectForm } from "./_delete-project";
 import { EraseEndUserForm } from "./_erase-end-user";
 import { ModelPricesForm } from "./_model-prices";
 import { RenameProjectForm } from "./_rename-project";
-import { RetentionForm } from "./_retention";
+import { DoorScrubForm, RetentionForm } from "./_retention";
 
 export const metadata = {
   title: "Settings",
@@ -164,6 +164,11 @@ export default async function SettingsPage({
               max={posture.retention.max_span_days}
             />
           )}
+        </Section>
+
+        <Section card title="Door scrubbers" description="For content from other OpenTelemetry distributions, before it is stored. SDK content keeps the developer's scrubber settings. Changes affect subsequent exports, not content already kept.">
+          {posture ? <DoorScrubForm key={JSON.stringify(posture.door_scrub)} projectId={project.id} policy={posture.door_scrub} disabled={!canEdit} /> :
+            <p className="text-muted-foreground">Scrubbers could not be read. Reload to try again.</p>}
         </Section>
 
         <Section card

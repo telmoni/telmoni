@@ -46,6 +46,60 @@ const SPAN: &str = "00f067aa0ba902b7";
 const TRACE: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
 const MESSAGES: &str = r#"[{"role":"user","parts":[{"type":"text","content":"hi"}]}]"#;
 
+/// Only owners and admins can change door policy, and each actual change is audited.
+#[sqlx::test]
+async fn door_scrub_policy_is_authorized_and_audited(pool: PgPool) {
+    apply_audit_migrations(&pool).await;
+    let door = door_over(&pool, ContentMode::Off, false).await;
+    for (user, role, project_role) in [
+        ("owner-1", OrganizationRole::Owner, None),
+        ("admin-1", OrganizationRole::Admin, None),
+        ("member-1", OrganizationRole::Member, Some(Role::Member)),
+    ] {
+        door.auth
+            .seat(user, &door.organization, &door.project, role, project_role);
+    }
+    let policy = json!({ "door_scrub_secrets": false, "door_scrub_pii": true });
+    assert_eq!(
+        door.lane("PUT", "/door-scrub", "member-1", Some(policy.clone()))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        door.lane("PUT", "/door-scrub", "stranger", Some(policy.clone()))
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        door.lane(
+            "PUT",
+            "/door-scrub",
+            "admin-1",
+            Some(json!({"door_scrub_secrets": "false", "door_scrub_pii": true}))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    for user in ["owner-1", "admin-1"] {
+        let (status, answer) = door
+            .lane("PUT", "/door-scrub", user, Some(policy.clone()))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{answer}");
+        assert_eq!(answer, policy);
+    }
+    let changed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit.events WHERE in_project = $1 AND metadata ? 'door_scrub'",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("audit count");
+    assert_eq!(changed, 1, "an unchanged save adds no event");
+}
+
 struct Door {
     app: Router,
     state: Arc<AppState>,

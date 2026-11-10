@@ -1,10 +1,4 @@
-//! A project's privacy posture, `GET /internal/v1/telemetry/privacy`, whose
-//! `retention` the project's Settings reads: what its spans arrived with over
-//! the last [`SENT_DAYS`] by the field inventory's rows, dropped content among
-//! them, and how long its spans and the hourly totals that outlive them are
-//! kept.
-//! Every role on the project `x-project-id` names reads it; its owners and
-//! admins choose its retention, `PUT /internal/v1/telemetry/retention`.
+//! Project privacy posture and audited owner/admin choices of retention and door scrubbing.
 
 use std::sync::Arc;
 
@@ -46,6 +40,8 @@ struct Counted {
 /// What the lane answers.
 #[derive(Debug, Serialize)]
 pub struct Posture {
+    /// The scrubbers applied to content from other distributions.
+    pub door_scrub: DoorScrub,
     /// [`SENT_DAYS`].
     pub days: u32,
     /// Where they begin.
@@ -108,6 +104,7 @@ pub async fn get_privacy(
     let since = Utc::now() - Duration::days(i64::from(SENT_DAYS));
     let mut tx = project_scope(&state.db, project_id).await?;
     let chosen = db::retention_days(&mut tx, project_id).await?;
+    let door_scrub = db::door_scrub(&mut tx, project_id).await?;
     tx.commit().await?;
     let counted: Counted = state
         .store
@@ -134,6 +131,7 @@ pub async fn get_privacy(
             .then_with(|| a.attribute.cmp(&b.attribute))
     });
     Ok(Json(Posture {
+        door_scrub,
         days: SENT_DAYS,
         since,
         spans: counted.spans,
@@ -199,4 +197,59 @@ pub async fn put_retention(
 /// The days a choice keeps, the longest sold for none.
 fn days_of(chosen: Option<i16>) -> i64 {
     chosen.map_or(SPAN_RETENTION_DAYS, i64::from)
+}
+
+/// Project policy, independent of the developer's SDK switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DoorScrub {
+    /// Defaults on, including before the first export.
+    pub door_scrub_secrets: bool,
+    /// Defaults off to preserve personal data unless requested.
+    pub door_scrub_pii: bool,
+}
+
+impl Default for DoorScrub {
+    fn default() -> Self {
+        Self {
+            door_scrub_secrets: true,
+            door_scrub_pii: false,
+        }
+    }
+}
+
+/// Policy and its audit event commit together under the organization's chain lock.
+pub async fn put_door_scrub(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(change): Json<DoorScrub>,
+) -> Result<Json<DoorScrub>, TelmoniError> {
+    let acting = state.auth.resolve(&headers).await?;
+    let project_id = acting
+        .require_project(Verb::Update, Resource::Project)?
+        .project_id
+        .clone();
+    chain::write(&state.db, &acting, &project_id, "door-scrub", async |tx| {
+        chain::held(&*state.auth, &acting, tx, Verb::Update, Resource::Project).await?;
+        let before = db::door_scrub(tx, &project_id).await?;
+        db::set_door_scrub(tx, &project_id, &acting.organization_id, change).await?;
+        if before != change {
+            emit_audit(
+                tx,
+                AuditEvent::new(
+                    &acting.organization_id,
+                    Actor::User(acting.user_id.as_str()),
+                    AuditAction::Updated,
+                    TelmoniResourceKind::Project,
+                )
+                .in_project(&project_id)
+                .on(project_id.as_str())
+                .details(json!({ "door_scrub": { "from": before, "to": change } })),
+            )
+            .await?;
+        }
+        Ok(())
+    })
+    .await?;
+    Ok(Json(change))
 }

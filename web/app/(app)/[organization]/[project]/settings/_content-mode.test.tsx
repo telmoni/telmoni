@@ -25,9 +25,31 @@ const updateContentModeAction = vi.hoisted(() =>
 const requestContentModeCodeAction = vi.hoisted(() =>
   vi.fn<(projectId: string) => Promise<ActionResult>>(async () => ({ ok: true })),
 );
-vi.mock("./actions", () => ({ updateContentModeAction, requestContentModeCodeAction }));
+const setDoorScrubAction = vi.hoisted(() => vi.fn(async () => ({ ok: true } as ActionResult)));
+vi.mock("./actions", () => ({ updateContentModeAction, requestContentModeCodeAction, setDoorScrubAction }));
 
 import { ContentModeForm } from "./_content-mode";
+import { DoorScrubForm } from "./_retention";
+
+describe("DoorScrubForm", () => {
+  const policy = { door_scrub_secrets: true, door_scrub_pii: false };
+  it("shows the project policy without permitting a member to change it", () => {
+    render(<DoorScrubForm projectId="project_1" policy={policy} disabled />);
+    expect(screen.getByRole("checkbox", { name: "Scrub secrets at the door" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Scrub personal data at the door" })).not.toBeChecked();
+    expect(screen.getAllByRole("checkbox").every((control) => control.hasAttribute("disabled"))).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+  it("submits both switches and surfaces a failed save", async () => {
+    setDoorScrubAction.mockResolvedValueOnce({ ok: false, error: "Try again" });
+    render(<DoorScrubForm projectId="project_1" policy={policy} disabled={false} />);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Scrub personal data at the door" }));
+    await act(async () => { fireEvent.submit(screen.getByRole("button", { name: "Save" }).closest("form")!); });
+    expect(setDoorScrubAction).toHaveBeenCalledWith("project_1", { door_scrub_secrets: true, door_scrub_pii: true });
+    expect(toast.error).toHaveBeenCalledWith("Try again");
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

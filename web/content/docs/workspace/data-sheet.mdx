@@ -19,7 +19,7 @@ and rail left off.
 | **Where it is kept** | Spans' metadata in ClickHouse, never a prompt or a reply; content, kept only by a project whose content mode is on, sealed in Postgres under a key of the project's own; user and session ids kept only as the project's keyed hash of them; and, on a deployment that says so, where its stores are |
 | **Each project** | Its [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode) and every change of it, when and by whom, read from the audit log; its [retention](/docs/workspace/data-retention); its own keys; how many of its spans of the last 30 days arrived with something [scrubbed](/docs/api/sdks#scrubbing-secrets-and-personal-data); and who read its content over the last 90 days, a person by name and an API key by its id |
 | **What a project keeps** | The [field inventory](/docs/api/field-inventory), each attribute with what it is kept as, the content mode it needs, and whether it can carry a person: never, only if your code puts one there, only as the project's hash of it, or as content |
-| **What the SDKs scrub** | Each kind of secret and personal data the SDKs' scrubbers replace before content leaves, their switches, and what no pattern finds |
+| **What the SDKs and door scrub** | Each kind of secret and personal data the shared scanners replace, their switches, and what no pattern finds; foreign content uses the project's door policy before storage, while SDK content keeps the developer's policy |
 | **Subprocessors** | The providers the deployment hands what it keeps to, where it names them; a self-hosted deployment names none |
 
 ## Checking it against the audit log

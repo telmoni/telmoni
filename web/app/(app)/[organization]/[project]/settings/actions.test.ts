@@ -69,7 +69,7 @@ import { fetchProject } from "@/lib/server/entities/projects";
 import { getServerSession } from "@/lib/server/session";
 import { Role } from "@/lib/types/enums";
 
-import { deleteProjectAction, updateContentModeAction, updateProjectNameAction } from "./actions";
+import { deleteProjectAction, setDoorScrubAction, updateContentModeAction, updateProjectNameAction } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 
@@ -110,6 +110,27 @@ beforeEach(() => {
     organizations: [{ organizationId: ORGANIZATION, slug: "acme" }],
   } as never);
   wentBy("marketing-site");
+});
+
+describe("setDoorScrubAction", () => {
+  const policy = { door_scrub_secrets: false, door_scrub_pii: true };
+  it("posts the project policy through the admitted lane", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(policy), { status: 200 }));
+    expect(await setDoorScrubAction(PROJECT, policy)).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith("http://auth.test/internal/v1/telemetry/door-scrub", expect.objectContaining({ method: "PUT", body: JSON.stringify(policy) }));
+    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
+    expect(headers["x-project-id"]).toBe(PROJECT);
+  });
+  it("rejects malformed policy before contacting the server", async () => {
+    expect((await setDoorScrubAction(PROJECT, { ...policy, door_scrub_pii: "true" } as never)).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("surfaces network and server refusals", async () => {
+    fetchMock.mockResolvedValueOnce(null);
+    expect((await setDoorScrubAction(PROJECT, policy)).ok).toBe(false);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    expect(errorOf(await setDoorScrubAction(PROJECT, policy))).toBe("problem");
+  });
 });
 
 describe("updateProjectNameAction", () => {

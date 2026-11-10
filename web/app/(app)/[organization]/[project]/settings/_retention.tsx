@@ -4,11 +4,13 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToastAction } from "@/lib/use-action";
+import type { DoorScrub } from "@/lib/server/entities/privacy";
 
-import { setRetentionAction } from "./actions";
+import { setDoorScrubAction, setRetentionAction } from "./actions";
 
 /** An owner's or admin's choice of how many days the project keeps its spans
  *  and their content, up to the longest sold; the nightly purge holds it. */
@@ -60,6 +62,37 @@ export function RetentionForm({
       <Button type="submit" variant="filled" disabled={!changed || pending}>
         {pending ? "Saving…" : "Save"}
       </Button>
+    </form>
+  );
+}
+
+/** These switches affect foreign exports, never the developer's SDK policy. */
+export function DoorScrubForm({ projectId, policy, disabled }: {
+  projectId: string;
+  policy: DoorScrub;
+  disabled: boolean;
+}) {
+  const [secrets, setSecrets] = useState(policy.door_scrub_secrets);
+  const [pii, setPii] = useState(policy.door_scrub_pii);
+  const { pending, run } = useToastAction();
+  return (
+    <form className="grid gap-gutter" onSubmit={(event) => {
+      event.preventDefault();
+      if (disabled || pending) return;
+      run(() => setDoorScrubAction(projectId, { door_scrub_secrets: secrets, door_scrub_pii: pii }),
+        () => toast.success("Door scrubbers updated."));
+    }}>
+      <label className="flex items-center gap-gutter">
+        <Checkbox checked={secrets} disabled={disabled || pending} onCheckedChange={(checked) => setSecrets(checked === true)} />
+        Scrub secrets at the door
+      </label>
+      <label className="flex items-center gap-gutter">
+        <Checkbox checked={pii} disabled={disabled || pending} onCheckedChange={(checked) => setPii(checked === true)} />
+        Scrub personal data at the door
+      </label>
+      {!disabled && <Button className="justify-self-start" type="submit" variant="filled" disabled={pending || (secrets === policy.door_scrub_secrets && pii === policy.door_scrub_pii)}>
+        {pending ? "Saving…" : "Save"}
+      </Button>}
     </form>
   );
 }

@@ -193,6 +193,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/telemetry/retention", put(handler::privacy::put_retention))
         .route(
+            "/telemetry/door-scrub",
+            put(handler::privacy::put_door_scrub),
+        )
+        .route(
             "/telemetry/scores",
             get(handler::scores::get_scores).put(handler::scores::put_score),
         )

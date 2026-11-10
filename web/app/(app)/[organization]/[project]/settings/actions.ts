@@ -14,6 +14,7 @@ import { admitProject } from "@/lib/server/admit";
 import { activeOrganization, getServerContext } from "@/lib/server/entities/organization";
 import { ProjectRenamedSchema, fetchProject } from "@/lib/server/entities/projects";
 import { ModelPricesSchema } from "@/lib/server/entities/model-prices";
+import { DoorScrubSchema, type DoorScrub } from "@/lib/server/entities/privacy";
 import { canonicalPath } from "@/lib/server/path";
 import { ContentMode } from "@/lib/types/enums";
 
@@ -215,6 +216,26 @@ export async function setRetentionAction(
   if (!res) return refused("Failed to change the retention. Please try again.");
   if (!res.ok) return refused((await extractProblem(res)).message);
 
+  revalidatePath("/(app)/[organization]/[project]/settings", "page");
+  return { ok: true };
+}
+
+/** The server checks the role again under its audit lock. */
+export async function setDoorScrubAction(
+  projectId: string,
+  policy: DoorScrub,
+): Promise<ActionResult> {
+  const gate = await admitProject({ call: "project:door-scrub", limit: 10 }, projectId);
+  if (!gate.ok) return refused(gate.error);
+  const checked = DoorScrubSchema.safeParse(policy);
+  if (!checked.success) return refused("Choose whether each scrubber is on or off.");
+  const res = await tryFetchWithTimeout(`${env.SERVER_URL}/internal/v1/telemetry/door-scrub`, {
+    method: "PUT",
+    headers: { ...gate.headers, "content-type": "application/json" },
+    body: JSON.stringify(checked.data),
+  });
+  if (!res) return refused("Failed to change the scrubbers. Please try again.");
+  if (!res.ok) return refused((await extractProblem(res)).message);
   revalidatePath("/(app)/[organization]/[project]/settings", "page");
   return { ok: true };
 }

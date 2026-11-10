@@ -13,6 +13,7 @@ name = "telmoni_telemetry"
 path = "src/lib.rs"
 
 [dependencies]
+telmoni = { path = "../../sdk/rust" }
 telmoni-shared = { path = "../shared" }
 
 anyhow      = { workspace = true }
@@ -49,8 +50,6 @@ reqwest     = { workspace = true, features = ["rustls-tls"] }
 [dev-dependencies]
 tower          = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
-# The door reached as a customer reaches it (`tests/sdk.rs`).
-telmoni        = { path = "../../sdk/rust" }
 
 [lints]
 workspace = true

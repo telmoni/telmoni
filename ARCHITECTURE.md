@@ -250,6 +250,18 @@ Every way in:
 
 ## Data
 
+Foreign content is scrubbed during batch mapping, before direct persistence
+or encrypted foreign staging. Telemetry reuses the Rust SDK's public `scrub`
+module through its local SDK dependency. Project settings default
+`door_scrub_secrets` on and `door_scrub_pii` off, including when no row exists.
+Owners and admins update both through `PUT /internal/v1/telemetry/door-scrub`,
+with authorization rechecked under the audit chain lock and the event committed
+with the policy. Each export reads one policy snapshot; staged spans are not
+scrubbed again when landed. Replacement counts use `telmoni.scrubbed`; failures
+omit the affected field. Resources declaring `telemetry.distro.name=telmoni`
+retain the developer's policy unchanged. This is sender-declared provenance,
+not authentication. No media bytes or previously kept content are scanned.
+
 ```text
 audit           events, partitioned by month: one hash chain per organization
 auth            identities, accounts, credentials, external_identities, sessions,

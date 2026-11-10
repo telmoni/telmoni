@@ -18,6 +18,46 @@ impl Lane for TelemetryLane {
     const SET_ROLE: &'static str = MaintenanceLane::Telemetry.set_role();
 }
 
+/// Missing settings use the same defaults as a newly inserted row.
+pub async fn door_scrub<B: HasProject>(
+    tx: &mut Scoped<'_, B>,
+    project_id: &ProjectId,
+) -> sqlx::Result<crate::handler::privacy::DoorScrub> {
+    let row: Option<(bool, bool)> = sqlx::query_as(
+        "SELECT door_scrub_secrets, door_scrub_pii FROM telemetry.project_settings WHERE project_id = $1",
+    ).bind(project_id).fetch_optional(tx.conn()).await?;
+    Ok(
+        row.map_or_else(Default::default, |(door_scrub_secrets, door_scrub_pii)| {
+            crate::handler::privacy::DoorScrub {
+                door_scrub_secrets,
+                door_scrub_pii,
+            }
+        }),
+    )
+}
+
+/// An upsert preserves unrelated settings, including encryption keys.
+pub async fn set_door_scrub(
+    tx: &mut Scoped<'_, ProjectAndOrganization>,
+    project_id: &ProjectId,
+    organization_id: &OrganizationId,
+    policy: crate::handler::privacy::DoorScrub,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO telemetry.project_settings
+        (project_id, organization_id, door_scrub_secrets, door_scrub_pii) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (project_id) DO UPDATE SET organization_id = EXCLUDED.organization_id,
+        door_scrub_secrets = EXCLUDED.door_scrub_secrets, door_scrub_pii = EXCLUDED.door_scrub_pii",
+    )
+    .bind(project_id)
+    .bind(organization_id)
+    .bind(policy.door_scrub_secrets)
+    .bind(policy.door_scrub_pii)
+    .execute(tx.conn())
+    .await?;
+    Ok(())
+}
+
 /// A project's content mode: its own row's, or `off` where it has none.
 pub async fn content_mode<B: HasProject>(
     tx: &mut Scoped<'_, B>,

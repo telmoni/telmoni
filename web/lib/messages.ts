@@ -167,9 +167,7 @@ export const SCRUBBED_KIND: Readonly<Record<string, string>> = {
   "pii:home_path": "home folder",
 };
 
-/** What an SDK's scrubbers replaced in a span's content before it left the
- *  agent, each kind with its count, and the fields they failed on and so
- *  dropped; none where the span carries no count. */
+/** What the SDK or door replaced, and the fields dropped on failure. */
 export function scrubbedFrom(
   attributes: Readonly<Record<string, string>>,
 ): { replaced: string[]; dropped: string[] } | null {

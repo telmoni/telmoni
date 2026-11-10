@@ -145,7 +145,7 @@ fn export(text: &str, named: &[(&str, &str)]) -> Vec<u8> {
     let now = chrono::Utc::now();
     let nanos =
         |at: chrono::DateTime<chrono::Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
-    json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
+    json!({ "resourceSpans": [{ "resource": { "attributes": [{ "key": contract::DISTRO_NAME, "value": { "stringValue": "telmoni" } }] }, "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
         "traceId": TRACE, "spanId": SPAN, "name": "canary trace", "kind": 1,
         "startTimeUnixNano": nanos(now - chrono::Duration::minutes(2)),
         "endTimeUnixNano": nanos(now - chrono::Duration::minutes(1)),
@@ -472,6 +472,92 @@ async fn content_an_sdk_scrubbed_arrives_as_its_markers_and_its_counts(pool: PgP
         posture.contains(&format!("\"attribute\":\"{}\"", contract::SCRUBBED)),
         "the posture counts the scrubbed span: {posture}"
     );
+}
+
+/// Door replacements survive sealing and every content read without leaking the planted values.
+#[sqlx::test]
+async fn foreign_content_is_scrubbed_before_it_is_kept(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    apply_audit_migrations(&pool).await;
+    let (_logging, logs) = captured_logs();
+    let corpus = corpus();
+    let text = every_planted(&corpus)["text"].as_str().expect("text");
+    let on = door(&pool, ContentMode::On).await;
+    sqlx::query(
+        "UPDATE telemetry.project_settings SET door_scrub_pii = true WHERE project_id = $1",
+    )
+    .bind(&on.project)
+    .execute(&pool)
+    .await
+    .expect("enable personal data scrubbing");
+    let mut payload: Value = serde_json::from_slice(&export(text, &[])).expect("export");
+    payload["resourceSpans"][0]["resource"] = json!({});
+    payload["resourceSpans"][0]["scopeSpans"][0]["scope"]["name"] = json!("stock-exporter");
+    payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        .as_array_mut()
+        .expect("attributes")
+        .retain(|attribute| attribute["key"] != contract::AGENT);
+    let answer = on.send(payload.to_string().into_bytes()).await;
+    let staged: String =
+        sqlx::query_scalar("SELECT row::text FROM telemetry.held_spans WHERE project_id = $1")
+            .bind(&on.project)
+            .fetch_one(&pool)
+            .await
+            .expect("held span");
+    assert!(staged.contains(contract::SCRUBBED));
+    for (kind, needle) in needles(&corpus) {
+        assert!(!staged.contains(&needle), "{kind} in staged metadata");
+    }
+    sqlx::query("UPDATE telemetry.project_settings SET door_scrub_secrets = false, door_scrub_pii = false WHERE project_id = $1")
+        .bind(&on.project).execute(&pool).await.expect("policy changed after receipt");
+    sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes' WHERE project_id = $1")
+        .bind(&on.project).execute(&pool).await.expect("quiet");
+    telmoni_telemetry::foreign::land_quiet(&on.state)
+        .await
+        .expect("land staged content");
+    common::eventually("the trace is read", || async {
+        on.get("/traces").await.1.contains(TRACE)
+    })
+    .await;
+    let failing = json!({ "name": "Any failure", "kind": "agent", "measure": "failures",
+        "aggregation": "count", "window": "hour", "operator": "gt", "alert_threshold": 0 });
+    assert_eq!(on.post_json("/rules", &failing).await, StatusCode::CREATED);
+    evaluate::pass(&on.state)
+        .await
+        .expect("evaluate the failed trace");
+    assert!(
+        !on.notices.notices().is_empty(),
+        "the failed trace generated a notice"
+    );
+    for path in [
+        format!("/traces/{TRACE}?content=true"),
+        "/traces/export?format=json".into(),
+        format!("/v1/traces/{TRACE}?content=true"),
+    ] {
+        let (status, shown) = on.get(&path).await;
+        assert_eq!(status, StatusCode::OK, "{shown}");
+        assert!(shown.contains("[secret: aws_key]"));
+        assert!(shown.contains("[pii: email]"));
+        for (kind, needle) in needles(&corpus) {
+            assert!(!shown.contains(&needle), "{kind} in {path}");
+            assert!(!answer.contains(&needle), "{kind} in answer");
+            assert_eq!(
+                on.in_clickhouse(&ch, &needle).await,
+                0,
+                "{kind} in ClickHouse"
+            );
+            assert!(
+                !notices_text(&on.notices).contains(&needle),
+                "{kind} in notices"
+            );
+        }
+    }
+    let logged = logs.text();
+    for (kind, needle) in needles(&corpus) {
+        assert!(!logged.contains(&needle), "{kind} in logs");
+    }
 }
 
 /// ⚠ A value planted in metadata is kept where the field inventory says and

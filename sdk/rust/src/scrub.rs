@@ -8,27 +8,32 @@ use std::collections::BTreeMap;
 
 /// Which scrubbers run.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Switches {
-    pub(crate) secrets: bool,
-    pub(crate) pii: bool,
+pub struct Switches {
+    /// Replace recognized credentials.
+    pub secrets: bool,
+    /// Replace recognized personal data.
+    pub pii: bool,
 }
 
 impl Switches {
-    pub(crate) fn any(self) -> bool {
+    /// Whether any scanner is enabled.
+    #[must_use]
+    pub fn any(self) -> bool {
         self.secrets || self.pii
     }
 }
 
 /// What the scrubbers took out of a span's content, by `<family>:<kind>`, and
 /// the fields one failed on, by `dropped:<field>`.
-pub(crate) type Counts = BTreeMap<String, u64>;
+pub type Counts = BTreeMap<String, u64>;
 
 /// Where a match starts and ends.
 type Span = (usize, usize);
 
 /// `text` as the scrubbers `on` leave it, and what they replaced; `None` where
 /// a rule went wrong, which fails the field.
-pub(crate) fn scrub(text: &str, on: Switches) -> Option<(String, Counts)> {
+#[must_use]
+pub fn scrub(text: &str, on: Switches) -> Option<(String, Counts)> {
     let mut counts = Counts::new();
     let mut text = Cow::Borrowed(text);
     if on.secrets {
@@ -1089,7 +1094,7 @@ mod tests {
         );
     }
 
-    /// Each hostile unit, repeated past 256 KiB, is scrubbed in each mode within 5 s.
+    /// Hostile text at a full ingest export's size stays within the scanning budget.
     #[test]
     fn hostile_text_is_scrubbed_in_linear_time() {
         // The bar is 2 s; `cargo test` builds without optimizations, hence 5.
@@ -1125,7 +1130,7 @@ mod tests {
             ("\\", "\""),
         ];
         for (unit, tail) in units {
-            let text = unit.repeat(262_144 / unit.len() + 1) + tail;
+            let text = unit.repeat(1_048_576 / unit.len() + 1) + tail;
             for on in [SECRETS_ONLY, BOTH] {
                 let started = Instant::now();
                 assert!(scrub(&text, on).is_some(), "{unit:?}");

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use opentelemetry_proto::tonic::common::v1::any_value::Value;
 
 use telmoni_shared::ProjectId;
 
@@ -68,6 +69,7 @@ pub fn read(
     sender: Option<SenderClock>,
     store_id: &dyn Fn(&str) -> String,
     keep_content: bool,
+    scrub: crate::handler::privacy::DoorScrub,
 ) -> Result<Batch, BatchError> {
     let count: usize = request
         .resource_spans
@@ -86,6 +88,15 @@ pub fn read(
     let mut resources = Vec::with_capacity(request.resource_spans.len());
     for resource_spans in &request.resource_spans {
         let first = batch.rows.len();
+        let sdk_resource = resource_spans.resource.as_ref().is_some_and(|resource| {
+            resource.attributes.iter().any(|attribute| {
+                attribute.key == crate::contract::DISTRO_NAME
+                    && matches!(
+                        attribute.value.as_ref().and_then(|value| value.value.as_ref()),
+                        Some(Value::StringValue(name)) if name == "telmoni"
+                    )
+            })
+        });
         let resource = span::read_resource(resource_spans.resource.as_ref());
         for scope_spans in &resource_spans.scope_spans {
             let context = Context {
@@ -108,7 +119,20 @@ pub fn read(
                 // reported on top, since none of it was going to be kept.
                 let dropped_before = batch.report.dropped.len();
                 match span::map(one, &context, &mut batch.report.dropped) {
-                    Ok((row, fields)) => {
+                    Ok((mut row, mut fields)) => {
+                        if !sdk_resource {
+                            // Another distribution's own counts are a claim: only the door's stand.
+                            if let Some(at) = row
+                                .attributes
+                                .iter()
+                                .position(|(key, _)| key == crate::contract::SCRUBBED)
+                            {
+                                row.attributes.remove(at);
+                                row.sent.retain(|key| key != crate::contract::SCRUBBED);
+                                row.units = span::units_of(&row);
+                            }
+                            scrub_fields(&mut row, &mut fields, scrub);
+                        }
                         batch
                             .scores
                             .extend(scores_of(one, &row, project_id, received_at));
@@ -159,6 +183,47 @@ pub fn read(
     }
     hold_foreign(&mut batch);
     Ok(batch)
+}
+
+/// Before foreign staging too, so the earliest durable copy is already scrubbed.
+fn scrub_fields(
+    row: &mut SpanRow,
+    fields: &mut Vec<(String, String)>,
+    policy: crate::handler::privacy::DoorScrub,
+) {
+    let switches = telmoni::scrub::Switches {
+        secrets: policy.door_scrub_secrets,
+        pii: policy.door_scrub_pii,
+    };
+    if !switches.any() || fields.is_empty() {
+        return;
+    }
+    let mut counts = telmoni::scrub::Counts::new();
+    fields.retain_mut(
+        |(field, text)| match telmoni::scrub::scrub(text, switches) {
+            Some((scrubbed, found)) => {
+                *text = scrubbed;
+                for (kind, count) in found {
+                    *counts.entry(kind).or_default() += count;
+                }
+                true
+            }
+            None => {
+                *counts.entry(format!("dropped:{field}")).or_default() += 1;
+                false
+            }
+        },
+    );
+    if !counts.is_empty() {
+        row.attributes.push((
+            crate::contract::SCRUBBED.into(),
+            serde_json::json!(counts).to_string(),
+        ));
+        if !row.sent.iter().any(|key| key == crate::contract::SCRUBBED) {
+            row.sent.push(crate::contract::SCRUBBED.into());
+        }
+        row.units = span::units_of(row);
+    }
 }
 
 /// A kept span's scores, from its evaluation events: the agent's own span's
@@ -316,6 +381,208 @@ mod tests {
     }
 
     #[test]
+    fn door_scrubbing_matches_the_corpus_before_foreign_staging() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../sdk/fixtures/canary.json"))
+                .expect("the corpus");
+        let project = ProjectId::new();
+        for case in fixture["cases"].as_array().expect("cases") {
+            for (mode, switches) in fixture["modes"].as_object().expect("modes") {
+                let policy = crate::handler::privacy::DoorScrub {
+                    door_scrub_secrets: switches["scrub_secrets"].as_bool().expect("switch"),
+                    door_scrub_pii: switches["scrub_pii"].as_bool().expect("switch"),
+                };
+                let mut one = ours(1, None);
+                one.attributes = vec![kv(
+                    "gen_ai.system_instructions",
+                    case["text"].as_str().expect("text"),
+                )];
+                let request = ExportTraceServiceRequest {
+                    resource_spans: vec![ResourceSpans {
+                        scope_spans: vec![scoped("foreign", vec![one])],
+                        ..ResourceSpans::default()
+                    }],
+                };
+                let batch = read(
+                    &request,
+                    &project,
+                    Utc::now(),
+                    None,
+                    &|id| id.into(),
+                    true,
+                    policy,
+                )
+                .expect("batch");
+                assert!(batch.rows.is_empty());
+                assert_eq!(batch.held.len(), 1);
+                let (row, fields) = &batch.held[0];
+                assert_eq!(
+                    fields[0].1,
+                    case["expect"][mode]["text"].as_str().expect("expected"),
+                    "{} {mode}",
+                    case["name"]
+                );
+                let counts = row
+                    .attributes
+                    .iter()
+                    .find(|(key, _)| key == contract::SCRUBBED)
+                    .map_or_else(
+                        || serde_json::json!({}),
+                        |(_, value)| {
+                            serde_json::from_str::<serde_json::Value>(value).expect("counts")
+                        },
+                    );
+                assert_eq!(counts, case["expect"][mode]["scrubbed"]);
+            }
+        }
+    }
+
+    /// Another distribution's own `telmoni.scrubbed` is dropped, found or not, switches on or off.
+    #[test]
+    fn a_foreign_spans_own_scrub_counts_are_never_kept() {
+        let mut one = ours(1, None);
+        one.attributes = vec![
+            kv("gen_ai.system_instructions", "nothing to find here"),
+            kv(contract::SCRUBBED, r#"{"secret:forged":9}"#),
+        ];
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![scoped("foreign", vec![one])],
+                ..ResourceSpans::default()
+            }],
+        };
+        for on in [true, false] {
+            let policy = crate::handler::privacy::DoorScrub {
+                door_scrub_secrets: on,
+                door_scrub_pii: on,
+            };
+            let batch = read(
+                &request,
+                &ProjectId::new(),
+                Utc::now(),
+                None,
+                &|id| id.into(),
+                true,
+                policy,
+            )
+            .expect("batch");
+            let (row, _) = &batch.held[0];
+            assert!(
+                row.attributes
+                    .iter()
+                    .all(|(key, _)| key != contract::SCRUBBED),
+                "switches {on}"
+            );
+            assert!(row.sent.iter().all(|key| key != contract::SCRUBBED));
+        }
+    }
+
+    #[test]
+    fn mixed_resources_keep_sdk_content_and_obey_disabled_switches() {
+        let text = "email: person@example.com password=very-private-password";
+        let mut one = ours(1, Some("invoke_agent"));
+        one.attributes.push(kv("gen_ai.system_instructions", text));
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![
+                ResourceSpans {
+                    resource: Some(Resource {
+                        attributes: vec![kv(contract::DISTRO_NAME, "telmoni")],
+                        ..Resource::default()
+                    }),
+                    scope_spans: vec![scoped(contract::SCOPE, vec![one.clone()])],
+                    ..ResourceSpans::default()
+                },
+                ResourceSpans {
+                    scope_spans: vec![scoped(
+                        contract::SCOPE,
+                        vec![Span {
+                            span_id: vec![2; 8],
+                            ..one
+                        }],
+                    )],
+                    ..ResourceSpans::default()
+                },
+            ],
+        };
+        let project = ProjectId::new();
+        let policy = crate::handler::privacy::DoorScrub {
+            door_scrub_secrets: true,
+            door_scrub_pii: true,
+        };
+        let batch = read(
+            &request,
+            &project,
+            Utc::now(),
+            None,
+            &|id| id.into(),
+            true,
+            policy,
+        )
+        .expect("batch");
+        assert_eq!(batch.content[0].fields[0].1, text);
+        assert!(!batch.content[1].fields[0].1.contains("person@example.com"));
+        assert!(
+            !batch.content[1].fields[0]
+                .1
+                .contains("very-private-password")
+        );
+        let off = crate::handler::privacy::DoorScrub {
+            door_scrub_secrets: false,
+            door_scrub_pii: false,
+        };
+        let pii_only = read(
+            &request,
+            &project,
+            Utc::now(),
+            None,
+            &|id| id.into(),
+            true,
+            crate::handler::privacy::DoorScrub {
+                door_scrub_secrets: false,
+                door_scrub_pii: true,
+            },
+        )
+        .expect("personal data only");
+        assert!(
+            pii_only.content[1].fields[0]
+                .1
+                .contains("very-private-password")
+        );
+        assert!(
+            !pii_only.content[1].fields[0]
+                .1
+                .contains("person@example.com")
+        );
+        let batch = read(
+            &request,
+            &project,
+            Utc::now(),
+            None,
+            &|id| id.into(),
+            true,
+            off,
+        )
+        .expect("batch");
+        assert!(
+            batch
+                .content
+                .iter()
+                .all(|content| content.fields[0].1 == text)
+        );
+        let batch = read(
+            &request,
+            &project,
+            Utc::now(),
+            None,
+            &|id| id.into(),
+            false,
+            policy,
+        )
+        .expect("batch");
+        assert!(batch.content.is_empty());
+    }
+
+    #[test]
     fn every_span_is_read_under_its_resource_and_scope() {
         let request = ExportTraceServiceRequest {
             resource_spans: vec![
@@ -352,7 +619,16 @@ mod tests {
         let project = ProjectId::new();
         let now = Utc::now().trunc_subsecs(6);
         let keep = |id: &str| id.to_owned();
-        let batch = read(&request, &project, now, None, &keep, false).expect("spans");
+        let batch = read(
+            &request,
+            &project,
+            now,
+            None,
+            &keep,
+            false,
+            Default::default(),
+        )
+        .expect("spans");
 
         let kinds: Vec<(String, SpanKind)> = batch
             .rows
@@ -452,12 +728,20 @@ mod tests {
         let project = ProjectId::new();
         let keep = |id: &str| id.to_owned();
         let times = |received_at| -> Vec<_> {
-            read(&request, &project, received_at, None, &keep, false)
-                .expect("spans")
-                .rows
-                .iter()
-                .map(|row| (row.started_at, row.ended_at))
-                .collect()
+            read(
+                &request,
+                &project,
+                received_at,
+                None,
+                &keep,
+                false,
+                Default::default(),
+            )
+            .expect("spans")
+            .rows
+            .iter()
+            .map(|row| (row.started_at, row.ended_at))
+            .collect()
         };
 
         let year = chrono::Duration::days(365);
@@ -519,12 +803,20 @@ mod tests {
          -> Vec<_> {
             let arrived = at(SENT) - ahead;
             let sender = named.then_some(SenderClock { sent_at, arrived });
-            read(request, &project, arrived, sender, &keep, false)
-                .expect("spans")
-                .rows
-                .iter()
-                .map(|row| (row.started_at, row.ended_at))
-                .collect()
+            read(
+                request,
+                &project,
+                arrived,
+                sender,
+                &keep,
+                false,
+                Default::default(),
+            )
+            .expect("spans")
+            .rows
+            .iter()
+            .map(|row| (row.started_at, row.ended_at))
+            .collect()
         };
 
         let request = export(SENT - SECOND);
@@ -595,8 +887,16 @@ mod tests {
             }],
         };
         let keep = |id: &str| id.to_owned();
-        let batch =
-            read(&request, &ProjectId::new(), Utc::now(), None, &keep, false).expect("spans");
+        let batch = read(
+            &request,
+            &ProjectId::new(),
+            Utc::now(),
+            None,
+            &keep,
+            false,
+            Default::default(),
+        )
+        .expect("spans");
         assert_eq!(batch.report.refused.len(), 1);
         let dropped = &batch.report.dropped;
         assert_eq!(
@@ -626,7 +926,16 @@ mod tests {
             }],
         };
         assert_eq!(
-            read(&too_many, &project, Utc::now(), None, &keep, false).unwrap_err(),
+            read(
+                &too_many,
+                &project,
+                Utc::now(),
+                None,
+                &keep,
+                false,
+                Default::default()
+            )
+            .unwrap_err(),
             BatchError::TooManySpans(BATCH_SPANS_MAX + 1)
         );
     }

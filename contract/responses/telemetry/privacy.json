@@ -1,5 +1,9 @@
 {
   "days": 30,
+  "door_scrub": {
+    "door_scrub_pii": false,
+    "door_scrub_secrets": true
+  },
   "retention": {
     "max_span_days": 360,
     "rollup_months": 13,

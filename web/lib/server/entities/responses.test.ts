@@ -62,7 +62,7 @@ import { RollupsSchema } from "./dashboards";
 import { FieldInventorySchema } from "./field-inventory";
 import { LimitsSchema } from "./limits";
 import { FeedSchema } from "./notification-feed";
-import { PrivacyPostureSchema } from "./privacy";
+import { DoorScrubSchema, PrivacyPostureSchema } from "./privacy";
 import {
   DashboardViewListSchema,
   FacetsSchema,
@@ -141,6 +141,7 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/limits.json": LimitsSchema,
   "telemetry/mutes.json": MuteListSchema,
   "telemetry/privacy.json": PrivacyPostureSchema,
+  "telemetry/door-scrub.json": DoorScrubSchema,
   "telemetry/rollups.json": RollupsSchema,
   "telemetry/trace.json": TraceDetailSchema,
   "telemetry/traces.json": TraceListSchema,

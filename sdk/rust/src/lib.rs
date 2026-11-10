@@ -103,7 +103,9 @@ mod propagation;
 mod records;
 mod sampler;
 mod scores;
-mod scrub;
+// The server scans other distributions' content with these; no part of the SDK's API.
+#[doc(hidden)]
+pub mod scrub;
 mod traces;
 pub mod transport;
 mod warnings;

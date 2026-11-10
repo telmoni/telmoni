@@ -98,6 +98,7 @@ vi.mock("@/lib/server/data", async () => {
       spans: 400,
       sent: projectId === PLATFORM ? [{ attribute: "telmoni.scrubbed", spans: 12 }] : [],
       retention: { span_days: 30, max_span_days: 360, rollup_months: 13 },
+      door_scrub: { door_scrub_secrets: true, door_scrub_pii: false },
     }),
     fetchAuditEvents: async (projectId: string) => ({
       kind: "ok",
@@ -169,7 +170,7 @@ describe("DataSheetPage", () => {
 
     const platform = screen.getByRole("link", { name: "Platform" }).closest("[data-slot=card]") as HTMLElement;
     expect(within(platform).getByText("On: content kept, sealed")).toBeInTheDocument();
-    expect(within(platform).getByText(/12 of its 400 spans of the last 30 days arrived with something scrubbed/)).toBeInTheDocument();
+    expect(within(platform).getByText(/12 of its 400 spans of the last 30 days carry counts from SDK or door scrubbing/)).toBeInTheDocument();
     // The mode's one change, its retention's change passed over.
     expect(within(platform).getAllByRole("row")).toHaveLength(1 + 1 + 1 + 2);
     expect(within(platform).getByText("API key k_01")).toBeInTheDocument();

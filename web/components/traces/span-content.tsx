@@ -235,7 +235,7 @@ export function ScrubbedNote({ attributes }: { attributes: Readonly<Record<strin
   return (
     <div className="grid gap-1 text-xs text-muted-foreground">
       {scrubbed.replaced.length > 0 && (
-        <p>Scrubbed before it left the agent: {scrubbed.replaced.join(", ")}.</p>
+        <p>Scrubbed by the SDK or at the door: {scrubbed.replaced.join(", ")}.</p>
       )}
       {scrubbed.dropped.length > 0 && (
         <p>Dropped, its scrubber failing on it: {scrubbed.dropped.join(", ")}.</p>

@@ -4,10 +4,13 @@ import { z } from "zod";
 import { valueOf } from "./read";
 import { readLane } from "./traces";
 
-// A project's privacy posture: what its spans arrived with over the server's
-// window, by the field inventory's rows, and how long spans and the hourly
-// totals that outlive them are kept. The server holds every number.
+// The server's project policy, shared by reads and writes.
+export const DoorScrubSchema = z.object({ door_scrub_secrets: z.boolean(), door_scrub_pii: z.boolean() }).strict();
+export type DoorScrub = z.infer<typeof DoorScrubSchema>;
+
+// What spans carried in the server's window and how long they are kept.
 export const PrivacyPostureSchema = z.object({
+  door_scrub: DoorScrubSchema,
   days: z.number().int(),
   since: z.string(),
   spans: z.number().int(),

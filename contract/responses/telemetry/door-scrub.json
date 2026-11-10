@@ -1,0 +1,4 @@
+{
+  "door_scrub_pii": false,
+  "door_scrub_secrets": true
+}

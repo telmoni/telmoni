@@ -67,7 +67,7 @@ export function readersByProject(events: readonly AuditEvent[]): Map<string, Rea
   );
 }
 
-/** How many of the spans the posture counted arrived scrubbed by an SDK. */
+/** How many spans carried replacement counts, from an SDK or the door. */
 export function scrubbedSpans(posture: PrivacyPosture): number {
   return posture.sent.find((row) => row.attribute === SCRUBBED)?.spans ?? 0;
 }

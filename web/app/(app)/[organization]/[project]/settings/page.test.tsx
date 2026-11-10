@@ -126,7 +126,7 @@ beforeEach(() => {
     role: Role.Owner,
   };
   mockContentMode = { content_mode: "off", offered: ["off"] };
-  mockPosture = { retention: { span_days: 90, max_span_days: 360, rollup_months: 13 } };
+  mockPosture = { door_scrub: { door_scrub_secrets: true, door_scrub_pii: false }, retention: { span_days: 90, max_span_days: 360, rollup_months: 13 } };
   mockLimits = null;
 });
 

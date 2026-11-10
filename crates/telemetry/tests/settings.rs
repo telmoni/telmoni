@@ -75,6 +75,44 @@ async fn a_project_with_no_settings_keeps_no_content(pool: PgPool) {
     assert_eq!(mode(&state, &ProjectId::new()).await, ContentMode::Off);
 }
 
+/// The first policy is safe and an upsert cannot change another project's policy.
+#[sqlx::test]
+async fn door_policy_defaults_and_isolation(pool: PgPool) {
+    use telmoni_telemetry::handler::privacy::DoorScrub;
+    let state = state(&pool);
+    let organization = OrganizationId::new();
+    let project = ProjectId::new();
+    let other = ProjectId::new();
+    let mut tx = project_scope(&state.db, &project)
+        .await
+        .expect("scope")
+        .bind_organization(&organization)
+        .await
+        .expect("organization");
+    assert_eq!(
+        db::door_scrub(&mut tx, &project).await.expect("defaults"),
+        DoorScrub::default()
+    );
+    let changed = DoorScrub {
+        door_scrub_secrets: false,
+        door_scrub_pii: true,
+    };
+    db::set_door_scrub(&mut tx, &project, &organization, changed)
+        .await
+        .expect("set policy");
+    assert_eq!(
+        db::door_scrub(&mut tx, &project).await.expect("read"),
+        changed
+    );
+    tx.commit().await.expect("commit");
+    let mut tx = project_scope(&state.db, &other).await.expect("other scope");
+    assert_eq!(
+        db::door_scrub(&mut tx, &project).await.expect("isolated"),
+        DoorScrub::default()
+    );
+    tx.commit().await.expect("commit");
+}
+
 /// ⚠ **A project's scope reads its own settings and no other's**, and an
 /// organization's reads its own projects' and writes none of them.
 #[sqlx::test]

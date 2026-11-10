@@ -40,6 +40,8 @@ CREATE TABLE telemetry.project_settings (
     project_id              TEXT        PRIMARY KEY,
     organization_id         TEXT        NOT NULL,
     content_mode            TEXT        NOT NULL DEFAULT 'off',
+    door_scrub_secrets      BOOLEAN     NOT NULL DEFAULT true,
+    door_scrub_pii          BOOLEAN     NOT NULL DEFAULT false,
     -- The key a span's user id is stored under, as its HMAC-SHA-256: sealed
     -- under a data key of the row's own, which TELEMETRY_KEK wraps, as a
     -- connector's grant is sealed under CONNECTOR_KEK. Made by the

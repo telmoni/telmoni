@@ -211,6 +211,15 @@ async fn admit(
     Ok((encoding, gzipped))
 }
 
+/// `work` run where it may hold its thread: a multi-threaded runtime hands the
+/// worker's other tasks on first; a single-threaded one, a test's, has nowhere to.
+fn off_the_reactor<T>(work: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::current().runtime_flavor() {
+        tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(work),
+        _ => work(),
+    }
+}
+
 /// The claimed body, written: the spans read by the contract, the rows put
 /// in ClickHouse under `token` and settled ([`settle_written`]), and the
 /// console told of them; the answer's mode and body on success.
@@ -228,16 +237,21 @@ pub(crate) async fn write(
     let storage = hashing::storage_for(state, key).await?;
     let mut tx = project_scope(&state.db, &key.project_id).await?;
     let content_mode = db::content_mode(&mut tx, &key.project_id).await?;
+    let scrub = db::door_scrub(&mut tx, &key.project_id).await?;
     tx.commit().await?;
     let received_at = Utc::now().trunc_subsecs(6);
-    let mut batch = batch::read(
-        &request,
-        &key.project_id,
-        received_at,
-        sender,
-        &|raw| storage.store(raw),
-        content_mode == ContentMode::On,
-    )
+    // Scanning a full export is CPU's work: the worker's other requests move off it meanwhile.
+    let mut batch = off_the_reactor(|| {
+        batch::read(
+            &request,
+            &key.project_id,
+            received_at,
+            sender,
+            &|raw| storage.store(raw),
+            content_mode == ContentMode::On,
+            scrub,
+        )
+    })
     .map_err(batch_error)?;
     cardinality::hold(
         &state.redis,
@@ -420,6 +434,10 @@ async fn answer_again(
         None,
         &|_| String::new(),
         content_mode == ContentMode::On,
+        crate::handler::privacy::DoorScrub {
+            door_scrub_secrets: false,
+            door_scrub_pii: false,
+        },
     )
     .map_err(batch_error)?;
     cardinality::hold(

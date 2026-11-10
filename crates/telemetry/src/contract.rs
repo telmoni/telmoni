@@ -116,7 +116,7 @@ pub const TAG_PREFIX: &str = "telmoni.tag.";
 pub const CANCELLED: &str = "telmoni.cancelled";
 /// The content fields an SDK cut so its span fits an export, by name.
 pub const CONTENT_CUT: &str = "telmoni.content_cut";
-/// What an SDK's scrubbers replaced in the span's content before it left:
+/// What SDK or door scrubbers replaced in the span's content:
 /// each kind's count, never a value; metadata.
 pub const SCRUBBED: &str = "telmoni.scrubbed";
 /// How many documents a retrieval returned, counted by the SDK from the list
@@ -929,7 +929,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         ReadOn::AnySpan,
         KEPT_ATTRIBUTE,
         Needs::AnyMode,
-        "a JSON object of each kind the SDK's scrubbers replaced in the span's content, \
+        "a JSON object of each kind the SDK or door scrubbers replaced in the span's content, \
          `<family>:<kind>`, to its count, and `dropped:<field>` for a field one failed on; \
          never a value it replaced",
     ),

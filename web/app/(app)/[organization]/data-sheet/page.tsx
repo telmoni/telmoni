@@ -172,6 +172,7 @@ export default async function DataSheetPage() {
                       "Its own hashing key, for user and session ids; and, while its content is on, its own content key.",
                     ],
                     ["Scrubbed", scrubbedWords(posture)],
+                    ["Door scrubbers", posture ? `Secrets ${posture.door_scrub.door_scrub_secrets ? "on" : "off"}; personal data ${posture.door_scrub.door_scrub_pii ? "on" : "off"}. SDK exports keep their developer's policy.` : "Could not be read"],
                   ]}
                 />
                 <ModeHistory changes={changes} name={name} />
@@ -185,7 +186,8 @@ export default async function DataSheetPage() {
           <Inventory inventory={inventory} />
         </Section>
 
-        <Section headingId="sheet-scrubbers" title="What the SDKs scrub before content leaves">
+        <Section headingId="sheet-scrubbers" title="What the SDKs and door scrub">
+          <p>Foreign exporters use the same scanners before content is stored: secrets on and personal data off by default. Owners and admins choose these switches in project Settings. SDK exports keep the developer&apos;s policy; the distribution name is sender-declared, not an authenticated guarantee.</p>
           <Facts
             facts={[
               [
@@ -259,7 +261,7 @@ function scrubbedWords(posture: PrivacyPosture | null): string {
   const spans = scrubbedSpans(posture);
   return spans === 0
     ? `No span of the last ${posture.days} days arrived with anything scrubbed.`
-    : `${spans.toLocaleString("en-US")} of its ${posture.spans.toLocaleString("en-US")} spans of the last ${posture.days} days arrived with something scrubbed by its SDK.`;
+    : `${spans.toLocaleString("en-US")} of its ${posture.spans.toLocaleString("en-US")} spans of the last ${posture.days} days carry counts from SDK or door scrubbing.`;
 }
 
 function ModeHistory({ changes, name }: { changes: ModeChange[] | null; name: (id: string) => string }) {

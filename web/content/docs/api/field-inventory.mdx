@@ -129,7 +129,7 @@ them.
 | `gen_ai.memory.record.count` | any span | `attributes`, under its own name: the records a memory search returned, or another memory operation attempted | any | a whole number, 0 or more; another exporter's is kept as sent, and drawn only as a whole number |
 | `telmoni.retrieval.returned` | a retrieval | `attributes`, under its own name | any | a whole number, 0 or more: the documents the SDK was handed, counted before any content left; another exporter's is kept as sent, and drawn only as a whole number |
 | `server.address` | any span | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
-| `telmoni.scrubbed` | any span | `attributes`, under its own name | any | a JSON object of each kind the SDK's scrubbers replaced in the span's content, `<family>:<kind>`, to its count, and `dropped:<field>` for a field one failed on; never a value it replaced |
+| `telmoni.scrubbed` | any span | `attributes`, under its own name | any | a JSON object of each kind the SDK or door scrubbers replaced in the span's content, `<family>:<kind>`, to its count, and `dropped:<field>` for a field one failed on; never a value it replaced |
 | `service.name` | the resource | `attributes`, under its own name | any | a key up to 128 characters and a value up to 1,024 |
 | `telemetry.sdk.*` | the resource | `attributes`, under its own name | any | what the OpenTelemetry SDK says of itself: its name, language and version |
 | `telemetry.distro.*` | the resource | `attributes`, under its own name | any | what the distribution says of itself: `telmoni` and its version, on everything Telmoni's SDKs send |

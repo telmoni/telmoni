@@ -357,6 +357,12 @@ arrives. The project's **Settings** page shows the mode; the [field
 inventory](/docs/api/field-inventory) lists every attribute ingest reads, and
 what becomes of each.
 
+Project **Settings** also shows **Door scrubbers**: owners and admins can
+choose whether foreign exporters' text is scrubbed for secrets (on by default)
+and personal data (off by default). Each change is audited and applies to
+subsequent exports. SDK exports keep the developer's scrubber policy.
+See [Content](/docs/monitoring/content).
+
 ### Deleting a project
 
 Only the **Owner** can delete a project. Deletion is initiated from the

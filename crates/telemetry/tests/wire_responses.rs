@@ -21,7 +21,7 @@ use telmoni_telemetry::handler::content_mode::{ContentModeSetting, OFFERED};
 use telmoni_telemetry::handler::field_inventory::{FieldInventory, Row};
 use telmoni_telemetry::handler::incidents::{IncidentAnswer, IncidentList};
 use telmoni_telemetry::handler::mutes::MuteList;
-use telmoni_telemetry::handler::privacy::{Posture, Retention, Sent};
+use telmoni_telemetry::handler::privacy::{DoorScrub, Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
 use telmoni_telemetry::handler::traces::{
     FacetValue, FacetValues, Facets, SpanFields, TraceDetail, TraceHistogram, TraceList, TraceSpan,
@@ -753,9 +753,11 @@ fn the_field_inventory_answers_as_the_console_reads() {
 /// A project's privacy posture, one inventory row sent.
 #[test]
 fn the_privacy_posture_answers_as_the_console_reads() {
+    pin("door-scrub", &DoorScrub::default());
     pin(
         "privacy",
         &Posture {
+            door_scrub: Default::default(),
             days: 30,
             since: at(0),
             spans: 1_200,
