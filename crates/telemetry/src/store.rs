@@ -102,11 +102,10 @@ const DELETE_TRACES: &str = "DELETE FROM telemetry.spans
      WHERE project_id = {project:String} AND has({traces:Array(String)}, trace_id)";
 /// The most traces one of those names, about 180 KB of URL.
 const TRACES_PER_DELETE: usize = 5_000;
-/// The longest the client waits for ClickHouse to take a delete down: the
-/// statement answers once the mutation is recorded, not once it has run, so
-/// a healthy server answers at once, and a deletion's budget is not spent on
-/// a stalled one.
+/// Recording a project's deletion does not wait for its masks to be applied.
 const DELETE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Synchronous deletes wait behind merges across every retained partition.
+const DELETE_APPLIED_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A client for the ClickHouse `url` names, as the user and password it
 /// carries, as a DSN does (`http://user:password@host:8123`). The client
@@ -534,7 +533,7 @@ impl Store {
         for some in traces.chunks(TRACES_PER_DELETE) {
             for statement in [DELETE_TRACES, DELETE_TRACE_SCORES] {
                 let delete = self.delete(project, statement, true).param("traces", some);
-                within(DELETE_TIMEOUT, delete.execute()).await?;
+                within(DELETE_APPLIED_TIMEOUT, delete.execute()).await?;
             }
         }
         Ok(())
@@ -552,7 +551,7 @@ impl Store {
             let delete = self
                 .delete(project, DELETE_SESSION_SCORES, true)
                 .param("sessions", some);
-            within(DELETE_TIMEOUT, delete.execute()).await?;
+            within(DELETE_APPLIED_TIMEOUT, delete.execute()).await?;
         }
         Ok(())
     }
@@ -569,7 +568,7 @@ impl Store {
             let delete = self
                 .delete(project, statement, true)
                 .param("cutoff", micros(cutoff));
-            within(DELETE_TIMEOUT, delete.execute()).await?;
+            within(DELETE_APPLIED_TIMEOUT, delete.execute()).await?;
         }
         Ok(())
     }
@@ -774,6 +773,69 @@ pub(crate) async fn within<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Applied masks may outlast the budget for merely recording a deletion.
+    #[tokio::test]
+    async fn synchronous_deletes_wait_for_masks_past_the_recording_deadline() {
+        use std::sync::{Arc, Mutex};
+
+        use axum::{Router, http::StatusCode};
+        use tokio::net::TcpListener;
+
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&calls);
+        let app = Router::new().fallback(move |request: axum::extract::Request| {
+            let seen = Arc::clone(&seen);
+            async move {
+                let url = reqwest::Url::parse(&format!("http://localhost{}", request.uri()))
+                    .expect("the query's URL");
+                let settings: std::collections::HashMap<_, _> = url.query_pairs().collect();
+                let applied = settings.get("lightweight_deletes_sync").expect("sync mode") == "1";
+                let body = axum::body::to_bytes(request.into_body(), 65_536)
+                    .await
+                    .expect("the bound parameters");
+                let body = std::str::from_utf8(&body).expect("the parameters' text");
+                assert!(body.contains("name=\"param_project\"\r\n\r\nproject_a\r\n"));
+                assert_eq!(
+                    settings
+                        .get(PROJECTS_SETTING)
+                        .expect("the policy's projects"),
+                    r#"["project_a"]"#,
+                );
+                seen.lock().expect("the calls").push(applied);
+                if applied {
+                    tokio::time::sleep(Duration::from_secs(11)).await;
+                }
+                StatusCode::OK
+            }
+        });
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("a port");
+        let address = listener.local_addr().expect("its address");
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let store = Store::connect(&format!("http://{address}")).expect("the store");
+        let project = ProjectId::from_trusted("project_a");
+        store
+            .delete_traces(&project, &[Uuid::new_v4().simple().to_string()])
+            .await
+            .expect("the trace and its scores are hidden before answering");
+        store
+            .delete_session_scores(&project, &["session_a".into()])
+            .await
+            .expect("the session's scores are hidden before answering");
+        store
+            .delete_before(&project, Utc::now())
+            .await
+            .expect("the expired spans and scores are hidden before answering");
+        store
+            .delete_project(&project)
+            .await
+            .expect("the project is marked");
+        assert_eq!(
+            *calls.lock().expect("the calls"),
+            [true, true, true, true, true, false, false, false],
+        );
+        server.abort();
+    }
 
     /// A failure of ours is no outage to retry; the store's own is.
     #[test]
