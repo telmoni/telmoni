@@ -26,7 +26,7 @@ fn the_queue_is_bounded_and_drops_are_counted_once() -> Outcome {
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
 
     let trace = telmoni.trace("bot", TraceOptions::default())?;
-    // The run's opening goes at once; the queue is filled after it.
+    // The trace's opening goes at once; the queue is filled after it.
     assert!(transport.wait_for(1), "the trace's opening");
     for n in 0..5 {
         let step = trace.step(&format!("s{n}"))?;

@@ -371,7 +371,7 @@ fn a_trace_is_sent_from_its_start() -> Outcome {
         thread::sleep(Duration::from_millis(1));
     }
     let first = transport.bodies()?;
-    assert_eq!(first.len(), 1, "one body, before the run ends");
+    assert_eq!(first.len(), 1, "one body, before the trace ends");
     let mut body = first.first().ok_or("the opening was not sent")?.clone();
     let [start] = spans_of(&body).try_into().map_err(|_| "one span")?;
     assert_eq!(
@@ -435,7 +435,7 @@ impl From<telmoni::Error> for RateLimited {
     }
 }
 
-/// The run's span as `failure.json`'s README normalizes it.
+/// The agent span as `failure.json`'s README normalizes it.
 fn normalize_failure(span: &Value) -> Result<Value, Failure> {
     let error_type = attributes_of(span)?
         .get("error.type")
@@ -1342,7 +1342,7 @@ fn unavailable_is_retried_three_times_then_dropped() -> Outcome {
     assert_eq!(
         harness.transport.count(),
         4,
-        "three for the first run, then the next trace's own export"
+        "three for the first trace, then the next trace's own export"
     );
     Ok(())
 }

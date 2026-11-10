@@ -27,7 +27,7 @@ describe("GET /api/v1/agent/conversations", () => {
   });
 
   it("lists the person's past conversations on the project", async () => {
-    const conversations = [{ id: "c1", title: "Why did the run fail?" }];
+    const conversations = [{ id: "c1", title: "Why did the trace fail?" }];
     vi.mocked(listAgentConversations).mockResolvedValue(conversations as never);
     const res = await get();
     expect(res.status).toBe(200);

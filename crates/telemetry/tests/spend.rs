@@ -1,4 +1,4 @@
-//! What runs spent, read against a real ClickHouse with the prices Postgres
+//! What traces spent, read against a real ClickHouse with the prices Postgres
 //! holds: each call's cost as reported, else its tokens at the price in force
 //! the day it arrived, priced as the price book prices it, else named.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
@@ -17,7 +17,7 @@ use telmoni_telemetry::rules::evaluate::Window;
 use telmoni_telemetry::spend;
 use telmoni_telemetry::store::{Projects, SpanRow};
 
-/// A call of `run` to `provider`'s `model`, received `at`.
+/// A call of the trace `run` to `provider`'s `model`, received `at`.
 fn call(
     project: &ProjectId,
     run: Uuid,
@@ -86,7 +86,7 @@ async fn price(pool: &PgPool, today: NaiveDate) {
 /// cache past the input pricing no input; a reported cost, a free one among
 /// them, is taken as reported; and a call with neither is named, once.
 #[sqlx::test]
-async fn a_run_is_priced_as_the_price_book_prices_it(pool: PgPool) {
+async fn a_trace_is_priced_as_the_price_book_prices_it(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -266,9 +266,9 @@ async fn a_projects_own_price_comes_before_the_tables(pool: PgPool) {
 }
 
 /// A budget reads the month so far from its first at midnight UTC, scaled by each call's
-/// sample rate; a tag takes the runs whose own span carries it.
+/// sample rate; a tag takes the traces whose agent span carries it.
 #[sqlx::test]
-async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool) {
+async fn a_budget_reads_the_month_so_far_of_the_traces_its_tag_names(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -295,7 +295,7 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
             tagged(other, "billing"),
         ])
         .await
-        .expect("the runs");
+        .expect("the traces");
 
     let month = Window::of(Utc::now(), RuleWindow::Month);
     assert_eq!(
@@ -323,16 +323,16 @@ async fn a_budget_reads_the_month_so_far_of_the_runs_its_tag_names(pool: PgPool)
     assert!((all.total - 17.5).abs() < 1e-12, "{all:?}");
     assert!(
         (all.most - 7.0).abs() < 1e-12,
-        "a run's own never scaled: {all:?}"
+        "a trace's own never scaled: {all:?}"
     );
 }
 
-/// ⚠ A sum over runs reads the full hours from the hourly totals, which
+/// ⚠ A sum over traces reads the full hours from the hourly totals, which
 /// outlive the spans, and the rest from the spans, each call scaled by its
-/// run's sample rate: the spans of an hour gone, its spend stands; the
-/// filters hold on both; a run's own spend is never scaled.
+/// trace's sample rate: the spans of an hour gone, its spend stands; the
+/// filters hold on both; a trace's own spend is never scaled.
 #[sqlx::test]
-async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) {
+async fn a_sum_over_traces_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -349,7 +349,7 @@ async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) 
     };
     ch.store
         .insert_spans(&[
-            // One run in four sent: it stands for four.
+            // One trace in four sent: it stands for four.
             rated(
                 call(
                     &project,
@@ -394,7 +394,7 @@ async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) 
     );
     assert!(
         (runs.most - 3.0).abs() < 1e-12,
-        "a run's own never scaled: {runs:?}"
+        "a trace's own never scaled: {runs:?}"
     );
 
     // The hour's spans purged, as a short retention purges them: the totals keep it.
@@ -432,10 +432,10 @@ async fn a_sum_over_runs_reads_the_hours_the_spans_no_longer_keep(pool: PgPool) 
     assert_eq!(empty, None, "no call, no sum");
 }
 
-/// What each run spent over a window, folded: the window's calls alone,
-/// those the filters admit, and the run that spent the most.
+/// What each trace spent over a window, folded: the window's calls alone,
+/// those the filters admit, and the trace that spent the most.
 #[sqlx::test]
-async fn the_runs_of_a_window_are_folded_by_what_each_spent(pool: PgPool) {
+async fn the_traces_of_a_window_are_folded_by_what_each_spent(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };

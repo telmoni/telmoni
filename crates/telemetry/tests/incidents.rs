@@ -614,9 +614,9 @@ async fn a_rise_past_the_severity_a_member_resolved_opens_it_again(pool: PgPool)
     );
 }
 
-/// ⚠ An incident keeps each connection once and its last twenty runs, one shown again last.
+/// ⚠ An incident keeps each connection once and its last twenty traces, one shown again last.
 #[sqlx::test]
-async fn an_incident_keeps_its_connections_once_and_its_last_twenty_runs(pool: PgPool) {
+async fn an_incident_keeps_its_connections_once_and_its_last_twenty_traces(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -904,7 +904,7 @@ async fn an_empty_window_read_as_zero_is_told_as_zero(pool: PgPool) {
 }
 
 /// ⚠ A budget with no tag sums its window's full hours from the hourly
-/// totals, each call scaled by its run's sample rate, so an hour whose spans
+/// totals, each call scaled by its trace's sample rate, so an hour whose spans
 /// a short retention purged still counts.
 #[sqlx::test]
 async fn a_budget_counts_the_hours_whose_spans_are_gone(pool: PgPool) {
@@ -952,7 +952,7 @@ async fn a_budget_counts_the_hours_whose_spans_are_gone(pool: PgPool) {
     assert_eq!(
         notices[0].metadata["value"],
         json!(8.0),
-        "one run in four, $2 each"
+        "one trace in four, $2 each"
     );
 }
 

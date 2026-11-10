@@ -34,7 +34,7 @@ describe("the windows a page offers", () => {
   });
 });
 
-describe("a window that reaches a run", () => {
+describe("a window that reaches a trace", () => {
   const now = Date.parse("2026-10-11T12:00:00Z");
 
   it("names none while the week a list opens on holds it", () => {

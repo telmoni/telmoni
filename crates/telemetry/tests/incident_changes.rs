@@ -192,17 +192,17 @@ impl Project {
     }
 }
 
-/// A span of `agent`'s run `run` in production, ended `ago` seconds since.
+/// A span of `agent`'s trace `trace` in production, ended `ago` seconds since.
 fn span(
     project: &ProjectId,
     agent: &str,
-    run: Uuid,
+    trace: Uuid,
     kind: SpanKind,
     name: &str,
     ago: i64,
 ) -> SpanRow {
     SpanRow {
-        trace_id: run.simple().to_string(),
+        trace_id: trace.simple().to_string(),
         agent: agent.into(),
         environment: "production".into(),
         ..common::received(
@@ -215,7 +215,7 @@ fn span(
     }
 }
 
-/// A run of `agent` that failed and one that did not: half its runs failed.
+/// A trace of `agent` that failed and one that did not: half its traces failed.
 fn failing(project: &ProjectId, agent: &str) -> Vec<SpanRow> {
     vec![
         SpanRow {
@@ -227,7 +227,7 @@ fn failing(project: &ProjectId, agent: &str) -> Vec<SpanRow> {
     ]
 }
 
-/// An alert on the share of runs failed past `threshold`, read through `filters`.
+/// An alert on the share of traces failed past `threshold`, read through `filters`.
 fn failures(name: &str, filters: &Value, threshold: f64) -> Value {
     json!({
         "name": name, "kind": "agent", "measure": "failures", "aggregation": "avg",
@@ -421,7 +421,7 @@ async fn an_incident_names_what_its_agent_changed_to_in_the_day_before(pool: PgP
     let said = lines(&opened);
     assert!(
         said.get(1)
-            .is_some_and(|run| run.starts_with("The latest failed run: ")),
+            .is_some_and(|line| line.starts_with("The latest failed trace: ")),
         "{}",
         opened.body
     );
@@ -525,7 +525,7 @@ async fn an_incident_with_no_change_names_none(pool: PgPool) {
     assert_eq!(
         said.len(),
         3,
-        "its words, its run and its traces: {}",
+        "its words, its trace and its changes: {}",
         opened.body
     );
     assert!(!opened.body.contains("Changed in"), "{}", opened.body);
@@ -759,7 +759,7 @@ async fn a_notice_names_five_changes_inside_its_bound_and_counts_the_rest(pool: 
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
-    // Names as long as each may be, so the lines, the run and the traces
+    // Names as long as each may be, so the lines, the trace and the changes
     // together would pass the body's bound.
     let agent = "a".repeat(128);
     let project = Project::new(&pool, &ch, |project| {
@@ -1004,7 +1004,7 @@ async fn changes_that_cannot_be_read_leave_the_notice_and_the_incident_standing(
     assert_eq!(
         lines(&opened).len(),
         3,
-        "its words, its run and its traces: {}",
+        "its words, its trace and its changes: {}",
         opened.body
     );
     let incident = project.incident().await;

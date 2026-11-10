@@ -221,7 +221,7 @@ async fn the_rollup_keeps_reported_costs_apart_from_the_tokens_to_price() {
     );
 }
 
-/// Each hour's totals are kept apart by the run's sample rate, 1 where a span
+/// Each hour's totals are kept apart by the trace's sample rate, 1 where a span
 /// named none, so a spend read can scale each row by its own.
 #[tokio::test]
 async fn the_rollup_keeps_each_sample_rate_apart() {
@@ -470,7 +470,7 @@ async fn the_module_user_reaches_nothing_but_its_two_tables() {
         .query_raw(
             "INSERT INTO telemetry.spans_hourly \
              (project_id, hour, agent, kind, model, provider, tool, status, spans, units) \
-             VALUES ('forged', now(), '', 'run', '', '', '', 'ok', 1, 1000000)",
+             VALUES ('forged', now(), '', 'agent', '', '', '', 'ok', 1, 1000000)",
         )
         .execute()
         .await

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricsGroup {
-    /// The agent a span's run is of.
+    /// The agent a span's trace is of.
     Agent,
     /// A model call's model.
     Model,
@@ -23,9 +23,9 @@ pub enum MetricsGroup {
     Release,
     /// One tag key's values.
     Tag,
-    /// The run's end user.
+    /// The trace's end user.
     User,
-    /// The run's session.
+    /// The trace's session.
     Session,
 }
 

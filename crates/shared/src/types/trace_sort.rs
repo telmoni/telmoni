@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub enum TraceSort {
     /// When the trace started: newest first by default.
     Started,
-    /// The run's agent.
+    /// The trace's agent.
     Agent,
     /// The end user, as stored.
     User,

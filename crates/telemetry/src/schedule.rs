@@ -58,10 +58,10 @@ impl Fault {
     }
 }
 
-/// When an agent's runs are due.
+/// When an agent's traces are due.
 #[derive(Debug, Clone)]
 pub enum Schedule {
-    /// Every so many seconds after the last run started.
+    /// Every so many seconds after the last trace started.
     Every(i32),
     /// At each time a cron line names, read in its zone; boxed, since a parsed
     /// line is many times the size of a period.

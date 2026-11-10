@@ -151,7 +151,7 @@ fn json_body(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("a JSON body")
 }
 
-/// An export as our SDK sends one: a model call and its run, one content
+/// An export as our SDK sends one: a model call and its trace, one content
 /// attribute among them, and a user id, from `reporter` deployed to staging.
 fn export_json(span_names: &[&str]) -> Value {
     export_from("reporter", "staging", span_names)
@@ -284,10 +284,10 @@ async fn an_export_is_kept_its_content_dropped_and_its_user_hashed(pool: PgPool)
 }
 
 /// A session's id is kept as a user's is, hashed under the project's key: an
-/// email sent as one is stored nowhere, and its runs still group and filter
+/// email sent as one is stored nowhere, and its traces still group and filter
 /// by the hash, which the id as sent never matches.
 #[sqlx::test]
-async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_runs_still_group(pool: PgPool) {
+async fn an_email_sent_as_a_session_id_is_stored_nowhere_and_its_traces_still_group(pool: PgPool) {
     const EMAIL: &str = "dana.whitfield@example.com";
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
@@ -822,11 +822,11 @@ async fn a_body_that_is_not_an_export_is_invalid(pool: PgPool) {
 }
 
 /// Another exporter's spans are answered as kept and held until their trace
-/// is quiet; then an agent with none above it is a run, its calls and plain
-/// spans its own, the calls of a trace with no run above them a run named by
-/// the service, and a span in no run dropped.
+/// is quiet; then an agent with none above it is the trace's, its calls and plain
+/// spans its own, the calls of a trace with no agent above them a trace named by
+/// the service, and a span in no trace dropped.
 #[sqlx::test]
-async fn another_exporters_spans_are_held_then_placed_in_their_runs(pool: PgPool) {
+async fn another_exporters_spans_are_held_then_placed_in_their_traces(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -1212,7 +1212,7 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
     assert_eq!(memory.7, "2");
     assert!(
         landed.iter().all(|row| row.0 != "44".repeat(8)),
-        "a span above every run is dropped"
+        "a span above every agent is dropped"
     );
 }
 
@@ -1424,12 +1424,12 @@ async fn spans_held_for_a_project_gone_are_deleted(pool: PgPool) {
     assert_eq!(held, 0);
 }
 
-/// A run's spans from two services — a worker continuing the orchestrator's
-/// run under its span, from another deployment — land as one run, under
-/// keys of one project; the same run id under another project's key is that
-/// project's own run, so a forged header reaches no other tenant.
+/// A trace's spans from two services — a worker continuing the orchestrator's
+/// trace under its span, from another deployment — land as one trace, under
+/// keys of one project; the same trace id under another project's key is that
+/// project's own trace, so a forged header reaches no other tenant.
 #[sqlx::test]
-async fn a_runs_spans_from_two_services_land_as_one_run_within_their_project(pool: PgPool) {
+async fn a_traces_spans_from_two_services_land_as_one_trace_within_their_project(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -1489,7 +1489,7 @@ async fn a_runs_spans_from_two_services_land_as_one_run_within_their_project(poo
     assert_eq!(
         common::rows_of(&ch.store, &lane.other).await.0,
         1,
-        "the other project's run of the same id is its own"
+        "the other project's trace of the same id is its own"
     );
 }
 
@@ -1668,7 +1668,7 @@ async fn a_retry_of_an_insert_that_outlasted_its_wait_is_written_once(pool: PgPo
     );
 }
 
-/// An export of spans of one run, the `n`th named `<name> <n>` and carrying
+/// An export of spans of one trace, the `n`th named `<name> <n>` and carrying
 /// `tags[n]`, each span's id from its place.
 fn tagged_export(name: &str, tags: &[Vec<(String, String)>]) -> Vec<u8> {
     let spans: Vec<Value> = tags
@@ -2324,7 +2324,7 @@ fn lane_for_a_month(pool: &PgPool, month: common::PlanMonth) -> (Lane, Arc<commo
     (lane, notices)
 }
 
-/// Past a month with no grace, one run in ten is kept, flagged with its
+/// Past a month with no grace, one trace in ten is kept, flagged with its
 /// rate, and the rest are counted in the answer in the plan's words; the
 /// owners are told once.
 #[sqlx::test]

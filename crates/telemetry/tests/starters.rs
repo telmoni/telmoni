@@ -1,4 +1,4 @@
-//! A project's starter alerts: three made by its first run with no click,
+//! A project's starter alerts: three made by its first trace with no click,
 //! once, each filed as the service's and told to its feed; counted in the
 //! plan's alerts, those past it not made and said so; read every five
 //! minutes; and the failure share's set from the project's history once
@@ -84,7 +84,7 @@ fn lanes(state: Arc<AppState>) -> Router {
     router(state.clone()).nest("/otlp", otlp_router(state))
 }
 
-/// One run exported under `key`, as an SDK sends it.
+/// One trace exported under `key`, as an SDK sends it.
 async fn export(app: &Router, key: &str) {
     let started = Utc::now() - TimeDelta::minutes(5);
     let nanos = |at: chrono::DateTime<Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
@@ -163,7 +163,7 @@ async fn starters_of(
     .expect("the starters read")
 }
 
-/// Whether the project's first run has been answered: its starters made, or
+/// Whether the project's first trace has been answered: its starters made, or
 /// found no room for.
 async fn answered(pool: &PgPool, project: &ProjectId) -> bool {
     sqlx::query_scalar::<_, bool>(
@@ -185,11 +185,11 @@ fn told(notices: &NoticeLog) -> Vec<common::LoggedNotice> {
         .collect()
 }
 
-/// ⚠ A project's first run makes its three starters with no click, each
+/// ⚠ A project's first trace makes its three starters with no click, each
 /// filed as the service's and the feed told once; another export, another
 /// process, or one deleted makes none again.
 #[sqlx::test]
-async fn a_projects_first_run_makes_its_three_starters_once(pool: PgPool) {
+async fn a_projects_first_trace_makes_its_three_starters_once(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
@@ -201,7 +201,7 @@ async fn a_projects_first_run_makes_its_three_starters_once(pool: PgPool) {
     let app = lanes(state.clone());
 
     export(&app, KEYS[0]).await;
-    eventually("the first run makes three starters", || async {
+    eventually("the first trace makes three starters", || async {
         starters_of(&pool, &project).await.len() == 3
     })
     .await;
@@ -305,9 +305,10 @@ async fn an_organizations_two_projects_are_watched_with_four_alerts_still_to_mak
     export(&app, KEYS[0]).await;
     export(&app, KEYS[1]).await;
     for project in [&first, &second] {
-        eventually("each project's first run makes three starters", || async {
-            starters_of(&pool, project).await.len() == 3
-        })
+        eventually(
+            "each project's first trace makes three starters",
+            || async { starters_of(&pool, project).await.len() == 3 },
+        )
         .await;
     }
     for n in 1..=4 {
@@ -338,7 +339,7 @@ async fn a_project_past_the_plans_number_is_made_without_its_starters_and_says_s
     let app = lanes(state);
 
     export(&app, KEYS[0]).await;
-    eventually("the first project's first run is answered", || async {
+    eventually("the first project's first trace is answered", || async {
         answered(&pool, &first).await
     })
     .await;
@@ -360,7 +361,7 @@ async fn a_project_past_the_plans_number_is_made_without_its_starters_and_says_s
     );
 
     export(&app, KEYS[1]).await;
-    eventually("the second project's first run is answered", || async {
+    eventually("the second project's first trace is answered", || async {
         answered(&pool, &second).await
     })
     .await;
@@ -413,7 +414,7 @@ async fn a_projects_own_alerts_cap_withholds_its_starters_past_it(pool: PgPool) 
     .expect("the project's cap");
 
     export(&app, KEYS[0]).await;
-    eventually("the project's first run is answered", || async {
+    eventually("the project's first trace is answered", || async {
         answered(&pool, &first).await
     })
     .await;
@@ -490,10 +491,10 @@ async fn a_starter_is_read_every_five_minutes(pool: PgPool) {
 
 /// ⚠ Once fourteen days stand, the failure share's starter takes the 99th
 /// percentile of its project's hours, as the form suggests; a project with
-/// no run in them keeps the book's number, and one a member edited first
+/// no trace in them keeps the book's number, and one a member edited first
 /// keeps theirs. Each is set once.
 #[sqlx::test]
-async fn the_failing_runs_starter_takes_its_projects_history_once_fourteen_days_stand(
+async fn the_failing_traces_starter_takes_its_projects_history_once_fourteen_days_stand(
     pool: PgPool,
 ) {
     apply_audit_migrations(&pool).await;
@@ -506,7 +507,7 @@ async fn the_failing_runs_starter_takes_its_projects_history_once_fourteen_days_
     let app = lanes(state.clone());
     for (key, project) in KEYS.iter().zip([&busy, &quiet, &edited]) {
         export(&app, key).await;
-        eventually("each first run makes its starters", || async {
+        eventually("each first trace makes its starters", || async {
             starters_of(&pool, project).await.len() == 3
         })
         .await;
@@ -529,26 +530,26 @@ async fn the_failing_runs_starter_takes_its_projects_history_once_fourteen_days_
         .await
         .expect("the starters made fifteen days ago");
 
-    // Twenty hours of the days before today, a quarter of each hour's runs failed.
+    // Twenty hours of the days before today, a quarter of each hour's traces failed.
     let today = Utc::now()
         .duration_trunc(TimeDelta::days(1))
         .expect("a day");
     let mut rows = Vec::new();
     for hour in 1..=20 {
         for n in 0..4 {
-            let mut run = common::received(
+            let mut row = common::received(
                 &busy,
                 SpanKind::Agent,
                 "triage",
                 1_000,
                 today - TimeDelta::hours(hour) + TimeDelta::minutes(n),
             );
-            run.trace_id = Uuid::new_v4().simple().to_string();
-            run.span_id = format!("{:016x}", hour * 4 + n);
+            row.trace_id = Uuid::new_v4().simple().to_string();
+            row.span_id = format!("{:016x}", hour * 4 + n);
             if n == 0 {
-                run.status = SpanStatus::Error;
+                row.status = SpanStatus::Error;
             }
-            rows.push(run);
+            rows.push(row);
         }
     }
     ch.store

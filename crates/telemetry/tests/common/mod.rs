@@ -680,7 +680,7 @@ pub(crate) struct LoggedNotice {
     pub(crate) reminded: bool,
     /// The connections a routed notice was sent to.
     pub(crate) connections: Vec<Uuid>,
-    /// The incident a connector may act on, and the run it shows.
+    /// The incident a connector may act on, and the trace it shows.
     pub(crate) incident: Option<(Uuid, Option<String>)>,
 }
 
@@ -1166,12 +1166,12 @@ pub(crate) async fn rows_of(store: &Store, project: &ProjectId) -> (u64, u64) {
     (spans, hours)
 }
 
-/// Five runs of `project` that each of the trace list's filters tells apart
+/// Five traces of `project` that each of the trace list's filters tells apart
 /// — by status, model, tool, environment, release, tag, prompt, agent, user
 /// and session — the last naming no session.
-pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
+pub(crate) fn varied_traces(project: &ProjectId) -> Vec<SpanRow> {
     let started = |minutes| Utc::now() - chrono::Duration::minutes(minutes);
-    let mut a = run_of(
+    let mut a = trace_of(
         project,
         Uuid::new_v4(),
         "user-a",
@@ -1186,7 +1186,7 @@ pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
     }
     a[1].tags = vec![("team".into(), "search".into())];
     a[0].attributes = vec![("gen_ai.prompt.name".into(), "greeting".into())];
-    let mut b = run_of(
+    let mut b = trace_of(
         project,
         Uuid::new_v4(),
         "user-a",
@@ -1199,7 +1199,7 @@ pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
     for span in &mut b {
         span.release = "v2".into();
     }
-    let mut c = run_of(
+    let mut c = trace_of(
         project,
         Uuid::new_v4(),
         "user-b",
@@ -1221,7 +1221,7 @@ pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
         span_id: format!("{:016x}", 0x303),
         ..c[2].clone()
     };
-    let mut d = run_of(
+    let mut d = trace_of(
         project,
         Uuid::new_v4(),
         "user-c",
@@ -1235,7 +1235,7 @@ pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
     for span in &mut d {
         span.environment = "staging".into();
     }
-    let e = run_of(
+    let e = trace_of(
         project,
         Uuid::new_v4(),
         "user-d",
@@ -1250,7 +1250,7 @@ pub(crate) fn varied_runs(project: &ProjectId) -> Vec<SpanRow> {
     rows
 }
 
-/// Queries the varied runs answer differently, a filter alone or several,
+/// Queries the varied traces answer differently, a filter alone or several,
 /// one admitting none.
 pub(crate) const FILTER_QUERIES: [&str; 16] = [
     "",
@@ -1271,17 +1271,17 @@ pub(crate) const FILTER_QUERIES: [&str; 16] = [
     "?tag=team%3Asearch&agent=billing-bot",
 ];
 
-/// One run of `support-bot` as the users and sessions pages sum it: its run
+/// One trace of `support-bot` as the users and sessions pages sum it: its agent
 /// span, one step and one model call with `tokens`, every span carrying
-/// `user` and `session`, started at `started` and received now, the run
+/// `user` and `session`, started at `started` and received now, the trace
 /// `failed` or not, its span ids from `n`.
 #[expect(
     clippy::too_many_arguments,
-    reason = "eight facts name a run; a struct built at each of the eleven call sites would say the same in more lines"
+    reason = "eight facts name a trace; a struct built at each of the eleven call sites would say the same in more lines"
 )]
-pub(crate) fn run_of(
+pub(crate) fn trace_of(
     project: &ProjectId,
-    run: Uuid,
+    trace: Uuid,
     user: &str,
     session: &str,
     started: DateTime<Utc>,
@@ -1290,7 +1290,7 @@ pub(crate) fn run_of(
     n: u64,
 ) -> [SpanRow; 3] {
     let ids = |row: SpanRow, span: u64, parent: Option<u64>| SpanRow {
-        trace_id: run.simple().to_string(),
+        trace_id: trace.simple().to_string(),
         agent: "support-bot".into(),
         span_id: format!("{span:016x}"),
         parent_span_id: parent.map(|p| format!("{p:016x}")).unwrap_or_default(),

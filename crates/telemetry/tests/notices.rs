@@ -1,5 +1,5 @@
 //! What an alert's notice carries, through the module's router and its loop:
-//! the numbers that crossed it, the run that shows it — its last step, its
+//! the numbers that crossed it, the trace that shows it — its last step, its
 //! error, its steps, its tokens and what it spent, linked — and the traces
 //! the alert read; a recovery the traces alone.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
@@ -133,7 +133,7 @@ impl Project {
     }
 }
 
-/// A span of `run`, ended `ago` seconds since after `millis` of work.
+/// A span of the trace `run`, ended `ago` seconds since after `millis` of work.
 fn span(
     project: &ProjectId,
     run: Uuid,
@@ -159,12 +159,12 @@ fn lines(notice: &LoggedNotice) -> Vec<&str> {
     notice.body.lines().collect()
 }
 
-/// ⚠ A breach names the run that shows it — the latest failed for a
+/// ⚠ A breach names the trace that shows it — the latest failed for a
 /// failures alert, with its last step, its error, its steps and its tokens —
 /// and links it and the traces the alert read; a reminder and the recovery
 /// carry the traces alone.
 #[sqlx::test]
-async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool) {
+async fn a_breach_names_the_trace_that_shows_it_and_links_the_traces(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -202,10 +202,10 @@ async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool)
     let opened = told.first().expect("the breach told");
     assert_eq!(opened.kind, NotificationKind::IncidentOpened);
     let expected = [
-        "The share failed of runs over the last hour is 50%, past the alert threshold of 10%."
+        "The share failed of traces over the last hour is 50%, past the alert threshold of 10%."
             .to_owned(),
         format!(
-            "The latest failed run: last step search, TimeoutError, 2 steps, 1500 tokens and \
+            "The latest failed trace: last step search, TimeoutError, 2 steps, 1500 tokens and \
              $0.00, no price for a call naming no model. {console}/traces/{failed}"
         ),
         format!("Traces: {console}/traces?days=1&status=error"),
@@ -235,7 +235,7 @@ async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool)
     assert!(reminded.body.starts_with("Still: "), "{}", reminded.body);
     assert!(
         !reminded.body.contains("/traces/"),
-        "a reminder names no run: {}",
+        "a reminder names no trace: {}",
         reminded.body
     );
 
@@ -251,15 +251,15 @@ async fn a_breach_names_the_run_that_shows_it_and_links_the_traces(pool: PgPool)
     );
     assert!(
         !said.iter().any(|line| line.contains("/traces/")),
-        "a recovery names no run: {}",
+        "a recovery names no trace: {}",
         resolved.body
     );
     assert_eq!(resolved.metadata.get("trace"), Some(&Value::Null));
 }
 
-/// ⚠ An incident keeps the connectors that heard its notices and the runs they showed.
+/// ⚠ An incident keeps the connectors that heard its notices and the traces they showed.
 #[sqlx::test]
-async fn an_incident_keeps_where_its_notices_went_and_the_runs_they_showed(pool: PgPool) {
+async fn an_incident_keeps_where_its_notices_went_and_the_traces_they_showed(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -314,7 +314,7 @@ async fn an_incident_keeps_where_its_notices_went_and_the_runs_they_showed(pool:
     );
 
     let (status, carrying) = project
-        .send("GET", &format!("{INCIDENTS}?run={failed}"), &Value::Null)
+        .send("GET", &format!("{INCIDENTS}?trace={failed}"), &Value::Null)
         .await;
     assert_eq!(status, StatusCode::OK, "{carrying}");
     assert_eq!(
@@ -325,18 +325,22 @@ async fn an_incident_keeps_where_its_notices_went_and_the_runs_they_showed(pool:
         Some(vec![risen["id"].clone()])
     );
     let (_, none) = project
-        .send("GET", &format!("{INCIDENTS}?run={fine}"), &Value::Null)
+        .send("GET", &format!("{INCIDENTS}?trace={fine}"), &Value::Null)
         .await;
-    assert_eq!(none["incidents"], json!([]), "no notice showed that run");
+    assert_eq!(none["incidents"], json!([]), "no notice showed that trace");
     let (status, _) = project
-        .send("GET", &format!("{INCIDENTS}?run=trip"), &Value::Null)
+        .send("GET", &format!("{INCIDENTS}?trace=trip"), &Value::Null)
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "a run is named by its id");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a trace is named by its id"
+    );
 }
 
-/// ⚠ A notice that reaches nobody keeps no run, as nobody was shown it.
+/// ⚠ A notice that reaches nobody keeps no trace, as nobody was shown it.
 #[sqlx::test]
-async fn a_run_is_kept_where_its_notice_reached_someone(pool: PgPool) {
+async fn a_trace_is_kept_where_its_notice_reached_someone(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -472,11 +476,11 @@ async fn a_reopened_incident_resolved_by_hand_is_told_to_its_connectors(pool: Pg
     );
 }
 
-/// ⚠ A latency breach names the run of its slowest call, one still going
+/// ⚠ A latency breach names the trace of its slowest call, one still going
 /// with its tokens so far, and the traces link keeps the filters the list
 /// has.
 #[sqlx::test]
-async fn a_latency_breach_names_the_run_of_its_slowest_call(pool: PgPool) {
+async fn a_latency_breach_names_the_trace_of_its_slowest_call(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -512,7 +516,7 @@ async fn a_latency_breach_names_the_run_of_its_slowest_call(pool: PgPool) {
         said.get(1).copied(),
         Some(
             format!(
-                "The run of the slowest model call: 0 steps, 42 tokens and $0.00 so far, \
+                "The trace of the slowest model call: 0 steps, 42 tokens and $0.00 so far, \
                  no price for claude-sonnet-5-5 (anthropic). {console}/traces/{slow}"
             )
             .as_str()
@@ -526,11 +530,11 @@ async fn a_latency_breach_names_the_run_of_its_slowest_call(pool: PgPool) {
     );
 }
 
-/// ⚠ The cost cap pages a run while it is going: its calls' costs summed as
+/// ⚠ The cost cap pages a trace while it is going: its calls' costs summed as
 /// they land, reported else priced, its spend in the notice and the models
 /// no price covers named.
 #[sqlx::test]
-async fn a_run_past_its_cost_cap_pages_while_it_runs(pool: PgPool) {
+async fn a_trace_past_its_cost_cap_pages_while_it_is_going(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -586,7 +590,9 @@ async fn a_run_past_its_cost_cap_pages_while_it_runs(pool: PgPool) {
     let said = lines(opened);
     assert_eq!(
         said.first().copied(),
-        Some("The most a run spent over the last day is $3.45, past the alert threshold of $3.00."),
+        Some(
+            "The most a trace spent over the last day is $3.45, past the alert threshold of $3.00."
+        ),
         "{}",
         opened.body
     );
@@ -594,23 +600,23 @@ async fn a_run_past_its_cost_cap_pages_while_it_runs(pool: PgPool) {
         said.get(1).copied(),
         Some(
             format!(
-                "The run that spent the most: last step research, 1 step, 120500 tokens and \
+                "The trace that spent the most: last step research, 1 step, 120500 tokens and \
                  $3.45 so far, no price for ft:gpt-4o:acme (openai). {console}/traces/{dear}"
             )
             .as_str()
         ),
-        "the run has not ended, and the cap read it as it went"
+        "the trace has not ended, and the cap read it as it went"
     );
     let spent = opened
         .metadata
-        .pointer("/run/spent")
+        .pointer("/trace/spent")
         .and_then(Value::as_f64)
-        .expect("the run's spend");
+        .expect("the trace's spend");
     assert!((spent - 3.45).abs() < 1e-9, "{spent}");
-    assert_eq!(opened.metadata.pointer("/run/unpriced"), Some(&json!(1)));
+    assert_eq!(opened.metadata.pointer("/trace/unpriced"), Some(&json!(1)));
 }
 
-/// ⚠ A notice keeps to its bounds whatever its alert's filters and its run's names.
+/// ⚠ A notice keeps to its bounds whatever its alert's filters and its trace's names.
 #[sqlx::test]
 async fn a_notice_keeps_to_its_bounds_past_the_longest_filters_and_names(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -672,9 +678,9 @@ async fn a_notice_keeps_to_its_bounds_past_the_longest_filters_and_names(pool: P
     );
     let step = opened
         .metadata
-        .pointer("/run/last_step")
+        .pointer("/trace/last_step")
         .and_then(Value::as_str)
-        .expect("the run's last step");
+        .expect("the trace's last step");
     assert_eq!(step.chars().count(), 120, "{step}");
-    assert_eq!(opened.metadata.pointer("/run/unpriced"), Some(&json!(5)));
+    assert_eq!(opened.metadata.pointer("/trace/unpriced"), Some(&json!(5)));
 }

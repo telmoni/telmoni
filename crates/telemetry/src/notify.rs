@@ -1684,9 +1684,9 @@ mod tests {
         }
     }
 
-    /// A run's unpriced names are named, a few of them, and the rest counted.
+    /// A trace's unpriced names are named, a few of them, and the rest counted.
     #[test]
-    fn a_runs_unpriced_names_are_named_and_the_rest_counted() {
+    fn a_traces_unpriced_names_are_named_and_the_rest_counted() {
         let name = |provider: &str, model: &str| (provider.to_owned(), model.to_owned());
         assert_eq!(
             unpriced_names(&[name("openai", "ft:gpt-4o:acme")]),

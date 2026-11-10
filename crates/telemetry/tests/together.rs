@@ -1,6 +1,6 @@
 //! Alerts read together: a pass reads every due alert of a project that
-//! shares a kind and a window on the totals, or a measure and a window run by
-//! run, in one query grouped by each alert's filters, and each alert's value,
+//! shares a kind and a window on the totals, or a measure and a window trace by
+//! trace, in one query grouped by each alert's filters, and each alert's value,
 //! severity, incident and notice is the one it reads alone.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -35,7 +35,7 @@ const LANE: &str = "/internal/v1/telemetry/rules";
 
 /// Alerts of every shape a pass reads: on the totals, of each kind, folded
 /// each way, filtered by each field or none, read against the window before;
-/// run by run, steps, repeats and stalls, filtered and not; and a cost, read
+/// trace by trace, steps, repeats and stalls, filtered and not; and a cost, read
 /// alone, among them.
 fn mixed() -> Vec<Value> {
     let alert = |name: &str, kind: &str, measure: &str, aggregation: &str, threshold: f64| {
@@ -128,12 +128,12 @@ fn mixed() -> Vec<Value> {
     ]
 }
 
-/// The spans the alerts read: the varied runs, a run that loops on one tool,
+/// The spans the alerts read: the varied traces, a trace that loops on one tool,
 /// one left open past the window before, and retrievals of two sources beside
 /// a tool of one's name.
 fn spans(project: &ProjectId) -> Vec<SpanRow> {
     let now = Utc::now();
-    let mut rows = common::varied_runs(project);
+    let mut rows = common::varied_traces(project);
     let searched = [
         (SpanKind::Retrieval, "docs-index", SpanStatus::Error),
         (SpanKind::Retrieval, "docs-index", SpanStatus::Ok),

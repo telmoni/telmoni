@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Severity;
 
-/// Where a monitor stands: `new` until its agent's first run since it was
+/// Where a monitor stands: `new` until its agent's first trace since it was
 /// made or resumed, then `up`, `late` once a trace due has not started, and
 /// `down` past its grace or after a trace that failed; `paused` while it is
 /// not judged. `[PUBLIC-API]`.
@@ -12,14 +12,14 @@ use crate::Severity;
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorState {
-    /// No run expected yet.
+    /// No trace expected yet.
     #[default]
     New,
-    /// Its runs come when due, and the last ended well.
+    /// Its traces come when due, and the last ended well.
     Up,
-    /// A run due has not started.
+    /// A trace due has not started.
     Late,
-    /// A run due has not started within its grace, or the last one failed.
+    /// A trace due has not started within its grace, or the last one failed.
     Down,
     /// Not judged, by a member's hand.
     Paused,
@@ -52,9 +52,9 @@ impl MonitorState {
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum MonitorCause {
-    /// A run due has not started.
+    /// A trace due has not started.
     Missed,
-    /// Its last run ended in error.
+    /// Its last trace ended in error.
     Failed,
 }
 

@@ -1,5 +1,5 @@
 //! Queries against `auth.project_members` — who else may see an organization's
-//! runs, one seat per person per project.
+//! traces, one seat per person per project.
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

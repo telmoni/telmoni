@@ -1,7 +1,7 @@
 //! What a turn reports: each model call and tool call, timed as the loop
 //! makes them, and how the question ended — sent, as the turn ends, as a trace
 //! of the operator's own project with the SDK, the way any agent reports its
-//! runs ([`crate::report`]). The model and the tools are wrapped rather than
+//! traces ([`crate::report`]). The model and the tools are wrapped rather than
 //! the loop changed, so the loop runs as it did whether anything reports it
 //! or not.
 //!
@@ -98,7 +98,7 @@ pub(crate) enum Step {
 /// One console question, once it has ended.
 #[derive(Debug, Clone)]
 pub(crate) struct TurnRecord {
-    /// A fresh id for the question: its run's.
+    /// A fresh id for the question: its trace's.
     pub(crate) trace_id: Uuid,
     /// The conversation it was asked in.
     pub(crate) conversation_id: Uuid,
@@ -547,7 +547,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn each_call_is_a_step_in_order_and_the_run_is_reported_once() {
+    async fn each_call_is_a_step_in_order_and_the_trace_is_reported_once() {
         let capture = Capture::default();
         ask(client(&capture), "list_members", |recorder| {
             let record = recorder.record();

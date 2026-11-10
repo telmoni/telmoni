@@ -120,7 +120,7 @@ pub(crate) struct Made {
 /// The starters made in one transaction: claimed on the settings row first,
 /// so they are made once whatever replicas race, then under the
 /// organization's chain lock, which every alert's making takes, so two
-/// projects' first runs never both take the plan's last place. Each is filed
+/// projects' first traces never both take the plan's last place. Each is filed
 /// as the service's, and the project's feed is told after the commit.
 ///
 /// # Errors

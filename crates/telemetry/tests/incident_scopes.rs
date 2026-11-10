@@ -181,7 +181,7 @@ async fn an_organizations_scope_reads_its_incidents_and_writes_none(pool: PgPool
     let state = common::state(&pool, auth);
     let app = router(state.clone());
     let slow = alert(&app, &organization, &first, "Slow calls").await;
-    let failed = alert(&app, &organization, &second, "Failed runs").await;
+    let failed = alert(&app, &organization, &second, "Failed traces").await;
     let their_alert = alert(&app, &elsewhere, &theirs, "Slow calls").await;
     let mut ours = vec![
         incident(&pool, &organization, &first, slow, "open", 2).await,

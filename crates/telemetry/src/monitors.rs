@@ -226,7 +226,7 @@ pub async fn monitor<B: HasProject>(
     .await
 }
 
-/// A new monitor of the project, `new` until its agent's first run.
+/// A new monitor of the project, `new` until its agent's first trace.
 pub async fn insert<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -311,7 +311,7 @@ pub async fn delete<B: HasProject>(
 }
 
 /// One of the project's monitors paused, judged no more; or, `resume`d,
-/// `new` again until its agent's next run. Its open incident stands either way.
+/// `new` again until its agent's next trace. Its open incident stands either way.
 pub async fn pause<B: HasProject>(
     tx: &mut Scoped<'_, B>,
     project_id: &ProjectId,
@@ -471,9 +471,9 @@ impl Judged {
 }
 
 /// A running monitor judged at `now` from what the latest read found of its
-/// agent's runs. A start newer than the last makes the next run due after it
+/// agent's traces. A start newer than the last makes the next one due after it
 /// and ends a `missed`; an end newer than the last, in error, makes it `down`
-/// (`failed`), and one that ended well ends a `failed`; a cancelled run is
+/// (`failed`), and one that ended well ends a `failed`; a cancelled one is
 /// neither. Then the clock: past its due time and [`LATE_AFTER`] it is
 /// `late`, past its grace `down`, and back inside them, its schedule edited,
 /// `up` again. A `failed` stands until a trace ends well.
@@ -594,7 +594,7 @@ pub async fn tick_at(state: &AppState, now: DateTime<Utc>) -> Result<(), Telmoni
 }
 
 /// Every running monitor judged, a batch at a time: one read of its agents'
-/// runs, then each that moved settled and told.
+/// traces, then each that moved settled and told.
 async fn judge_all(state: &AppState, now: DateTime<Utc>) -> Result<(), TelmoniError> {
     let from = state.monitors_read.from(now);
     let mut after = Uuid::nil();
@@ -856,7 +856,7 @@ mod tests {
     }
 
     /// A nightly monitor at 02:00 UTC with a grace of half an hour, `up`,
-    /// its last run started the night before.
+    /// its last trace started the night before.
     fn nightly() -> (MonitorRow, Schedule) {
         let row = MonitorRow {
             id: Uuid::nil(),
@@ -902,10 +902,10 @@ mod tests {
         }
     }
 
-    /// A run on time keeps it up and moves its due time a day on; none
+    /// A trace on time keeps it up and moves its due time a day on; none
     /// started a minute past due is late, and past its grace down.
     #[test]
-    fn a_run_on_time_late_and_down() {
+    fn a_trace_on_time_late_and_down() {
         let (row, schedule) = nightly();
         let on_time = judge(
             &row,
@@ -936,7 +936,7 @@ mod tests {
         );
     }
 
-    /// A start ends a missed, late or down; a failed run makes it down until
+    /// A start ends a missed, late or down; a failed trace makes it down until
     /// one ends well, and a start alone does not end a failure.
     #[test]
     fn a_start_ends_a_miss_and_a_good_end_a_failure() {
@@ -998,10 +998,10 @@ mod tests {
         assert_eq!((well.state, well.cause), (MonitorState::Up, None));
     }
 
-    /// A cancelled run is neither a failure nor a recovery; an older end
+    /// A cancelled trace is neither a failure nor a recovery; an older end
     /// landing late changes nothing.
     #[test]
-    fn a_cancelled_run_and_an_old_end_change_nothing() {
+    fn a_cancelled_trace_and_an_old_end_change_nothing() {
         let (row, schedule) = nightly();
         let cancelled = judge(
             &row,
@@ -1027,7 +1027,7 @@ mod tests {
         assert_eq!(old.state, MonitorState::Up);
     }
 
-    /// A new monitor waits for its first run, never late; a paused one is
+    /// A new monitor waits for its first trace, never late; a paused one is
     /// not judged.
     #[test]
     fn new_waits_and_paused_is_not_judged() {

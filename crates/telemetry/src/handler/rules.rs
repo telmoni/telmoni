@@ -58,7 +58,7 @@ pub struct Alert {
     pub severity_since: DateTime<Utc>,
     /// The connectors its notices go to.
     pub connectors: Vec<AlertLink>,
-    /// Made by the project's first run rather than a member.
+    /// Made by the project's first trace rather than a member.
     pub starter: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -114,7 +114,7 @@ impl From<RuleRow> for Alert {
 pub struct AlertList {
     /// The project's alerts, by name.
     pub rules: Vec<Alert>,
-    /// The starter alerts its first run found no room for, by measure.
+    /// The starter alerts its first trace found no room for, by measure.
     pub starters_withheld: Vec<RuleMeasure>,
     /// Where any were, the plan's own sentence on what holds more.
     pub starters_detail: Option<String>,

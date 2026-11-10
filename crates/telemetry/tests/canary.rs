@@ -2,8 +2,8 @@
 //! data, `sdk/fixtures/canary.json`, sent through every way out of the server,
 //! each value found only where it may be. With content `off`, nowhere: not
 //! ingest's answer, ClickHouse, a Postgres table in plain text, a log line, a
-//! notice, the run's page, its download or `/v1`. With content `on`, sealed in
-//! Postgres and shown only to a reader of the run's page, its download and
+//! notice, the trace's page, its download or `/v1`. With content `on`, sealed in
+//! Postgres and shown only to a reader of the trace's page, its download and
 //! `/v1`, each read filed. Already scrubbed by an SDK, only its markers and
 //! its counts. Planted in metadata, where the field inventory says.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
@@ -125,7 +125,7 @@ async fn door(pool: &PgPool, mode: ContentMode) -> Door {
     }
 }
 
-/// A failed run whose content fields, its status's message and an attribute
+/// A failed trace whose content fields, its status's message and an attribute
 /// of the application's own carry `text`, beside `named` attributes.
 fn export(text: &str, named: &[(&str, &str)]) -> Vec<u8> {
     let messages =
@@ -146,7 +146,7 @@ fn export(text: &str, named: &[(&str, &str)]) -> Vec<u8> {
     let nanos =
         |at: chrono::DateTime<chrono::Utc>| at.timestamp_nanos_opt().expect("in range").to_string();
     json!({ "resourceSpans": [{ "scopeSpans": [{ "scope": { "name": contract::SCOPE }, "spans": [{
-        "traceId": TRACE, "spanId": SPAN, "name": "canary run", "kind": 1,
+        "traceId": TRACE, "spanId": SPAN, "name": "canary trace", "kind": 1,
         "startTimeUnixNano": nanos(now - chrono::Duration::minutes(2)),
         "endTimeUnixNano": nanos(now - chrono::Duration::minutes(1)),
         "status": { "code": 2, "message": text },
@@ -297,7 +297,7 @@ fn notices_text(notices: &NoticeLog) -> String {
 }
 
 /// ⚠ With content off, no planted value is kept or shown anywhere; with it
-/// on, each is kept sealed and shown only to a reader of the run's page, its
+/// on, each is kept sealed and shown only to a reader of the trace's page, its
 /// download and `/v1`, each read filed, and nowhere else: not ingest's
 /// answer, ClickHouse, Postgres in plain text, a log line or a notice.
 #[sqlx::test]
@@ -318,7 +318,7 @@ async fn the_canary_corpus_is_kept_and_shown_only_where_each_mode_lets_it(pool: 
     let mut answers = Vec::new();
     for door in [&off, &on] {
         answers.push(door.send(export(text, &[])).await);
-        common::eventually("the run is read", || async {
+        common::eventually("the trace is read", || async {
             door.get("/traces").await.1.contains(TRACE)
         })
         .await;
@@ -331,7 +331,7 @@ async fn the_canary_corpus_is_kept_and_shown_only_where_each_mode_lets_it(pool: 
         evaluate::pass(&door.state).await.expect("a pass");
         assert!(
             !door.notices.notices().is_empty(),
-            "the failed run opened an incident and told it"
+            "the failed trace opened an incident and told it"
         );
     }
 
@@ -407,7 +407,7 @@ async fn the_canary_corpus_is_kept_and_shown_only_where_each_mode_lets_it(pool: 
 }
 
 /// ⚠ Content an SDK scrubbed arrives as its markers and its counts alone: the
-/// run's page shows the markers and no planted value, and the span keeps the
+/// trace's page shows the markers and no planted value, and the span keeps the
 /// counts as metadata, which the project's posture counts.
 #[sqlx::test]
 async fn content_an_sdk_scrubbed_arrives_as_its_markers_and_its_counts(pool: PgPool) {
@@ -425,7 +425,7 @@ async fn content_an_sdk_scrubbed_arrives_as_its_markers_and_its_counts(pool: PgP
     let on = door(&pool, ContentMode::On).await;
     on.send(export(scrubbed, &[(contract::SCRUBBED, &counts)]))
         .await;
-    common::eventually("the run is read", || async {
+    common::eventually("the trace is read", || async {
         on.get("/traces").await.1.contains(TRACE)
     })
     .await;
@@ -433,7 +433,10 @@ async fn content_an_sdk_scrubbed_arrives_as_its_markers_and_its_counts(pool: PgP
     let (status, page) = on.get(&format!("/traces/{TRACE}?content=true")).await;
     assert_eq!(status, StatusCode::OK, "{page}");
     for (kind, needle) in &needles {
-        assert!(!page.contains(needle.as_str()), "{kind} on the run's page");
+        assert!(
+            !page.contains(needle.as_str()),
+            "{kind} on the trace's page"
+        );
         assert_eq!(
             on.in_clickhouse(&ch, needle).await,
             0,
@@ -446,13 +449,13 @@ async fn content_an_sdk_scrubbed_arrives_as_its_markers_and_its_counts(pool: PgP
         "[pii: email]",
         "[pii: card]",
     ] {
-        assert!(page.contains(marker), "{marker} on the run's page");
+        assert!(page.contains(marker), "{marker} on the trace's page");
     }
     let shown: Value = serde_json::from_str(&page).expect("the page's answer");
     let span = shown["spans"]
         .as_array()
         .and_then(|spans| spans.iter().find(|span| span["span_id"] == SPAN))
-        .expect("the run's span");
+        .expect("the trace's span");
     assert_eq!(
         serde_json::from_str::<Value>(
             span["attributes"][contract::SCRUBBED]
@@ -520,7 +523,7 @@ async fn a_value_planted_in_metadata_is_kept_where_the_inventory_says(pool: PgPo
         .expect("the export's spans")
         .push(step);
     off.send(body.to_string().into_bytes()).await;
-    common::eventually("the run is read", || async {
+    common::eventually("the trace is read", || async {
         off.get("/traces").await.1.contains(TRACE)
     })
     .await;

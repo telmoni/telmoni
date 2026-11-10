@@ -107,7 +107,7 @@
       "spent": 0.004035
     },
     {
-      "name": "past the spend cap, whatever the run opens next raises",
+      "name": "past the spend cap, whatever the trace opens next raises",
       "max_spend": 0.25,
       "ops": [{ "model_call": 1 }, { "model_call": 0 }, "tool_call"],
       "refused": { "at": 2, "cap": "spend", "limit": 0.25, "used": 0.254035 },
@@ -121,14 +121,14 @@
       "spent": 0.254035
     },
     {
-      "name": "a run at its spend cap is past it",
+      "name": "a trace at its spend cap is past it",
       "max_spend": 0.25,
       "ops": [{ "model_call": 0 }, { "model_call": 5 }],
       "refused": { "at": 1, "cap": "spend", "limit": 0.25, "used": 0.25 },
       "spent": 0.25
     },
     {
-      "name": "a run inside its caps opens what it asks, a retrieval no step",
+      "name": "a trace inside its caps opens what it asks, a retrieval no step",
       "max_steps": 3, "max_spend": 0.25,
       "ops": ["step", "retrieval", { "model_call": 1 }, { "model_call": 3 }, "tool_call", "retrieval", "step", "step"],
       "refused": null,

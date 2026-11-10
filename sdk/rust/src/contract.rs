@@ -192,7 +192,7 @@ pub(crate) const SCRUB_PII_ENV: &str = "TELMONI_SCRUB_PII";
 /// The answer's header naming the project's content mode: off or on.
 pub(crate) const CONTENT_MODE_HEADER: &str = "Telmoni-Content-Mode";
 /// The request's header naming this clock as the export leaves, in nanoseconds
-/// since the epoch, by which ingest moves a run from a clock a zone or a date out.
+/// since the epoch, by which ingest moves a trace from a clock a zone or a date out.
 pub(crate) const SENT_AT_HEADER: &str = "Telmoni-Sent-At";
 
 // ── Ingest's caps, in characters ─────────────────────────────────────────────

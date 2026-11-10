@@ -1,4 +1,4 @@
-//! Members: who else may see an organization's runs, one project at a time.
+//! Members: who else may see an organization's traces, one project at a time.
 
 use std::sync::Arc;
 

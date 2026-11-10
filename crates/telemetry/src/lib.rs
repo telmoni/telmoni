@@ -1,4 +1,4 @@
-//! Telemetry — what an agent's runs leave behind — as a module of the
+//! Telemetry — what an agent's traces leave behind — as a module of the
 //! `telmoni-server` binary. It owns two stores, each for what it is good at:
 //!
 //! - **Postgres**, the `telemetry` schema, connected as the `telemetry` role:
@@ -15,7 +15,7 @@
 //! days and months are dropped, and deleted projects' rows rewritten away, by
 //! [`retention`] (`telmoni-server rotate`), both as the migrator's user, whom
 //! `tenant_isolation` does not hold. The same `migrate` writes the price file
-//! over the model prices ([`prices`]), which every read of what runs spent
+//! over the model prices ([`prices`]), which every read of what traces spent
 //! hands ClickHouse ([`spend`]). Auth reaches it through
 //! [`telmoni_shared::seam::Telemetry`] ([`seam`]) to purge an organization's
 //! or a project's data and move a project's settings; the console through its
@@ -144,7 +144,7 @@ pub struct AppState {
     /// Whether this replica's alert passes are to stop, and the one in hand
     /// ([`rules::evaluate::Stopping`]).
     pub alerts_stopping: rules::evaluate::Stopping,
-    /// Where this replica's last read of the monitors' runs reached
+    /// Where this replica's last read of the monitors' traces reached
     /// ([`monitors`]).
     pub monitors_read: monitors::Read,
     /// Whether this replica's monitor ticks are to stop, and the one in hand.

@@ -1,9 +1,9 @@
-//! An agent's changes: the first run of an agent, in one environment, to
+//! An agent's changes: the first trace of an agent, in one environment, to
 //! carry a release, a model or a prompt's version its traces there had not
 //! carried in the [`NEW_FOR`] before, each a row of `telemetry.changes`. Each
 //! minute the replica that wins the lock reads the spans landed since the
 //! last pass, which `telemetry.reads` keeps: those received since, and the
-//! runs another exporter's held spans landed in since ([`crate::foreign`]).
+//! traces another exporter's held spans landed in since ([`crate::foreign`]).
 //! An agent past [`DAY_SHOWN`] of one kind in a UTC day is marked no further
 //! that day, its last shown one saying so; what it carried past them is
 //! still remembered, `hidden`, so it is not new the next day. The trace
@@ -57,7 +57,7 @@ const OVERLAP: TimeDelta = TimeDelta::minutes(5);
 /// a tick.
 const STEP: TimeDelta = TimeDelta::hours(1);
 
-/// The furthest back a tick reads: a held span keeps its landed run a day.
+/// The furthest back a tick reads: a held span keeps its landed trace a day.
 const CATCH_UP: TimeDelta = TimeDelta::days(1);
 
 /// How far past its receipt a span's start is believed, as the monitors'.
@@ -81,7 +81,7 @@ pub enum Mark {
     /// Drawn and listed, saying its agent's later changes of its kind that
     /// day were not.
     Capped,
-    /// Neither: past its day's cap, or its run's day past retention.
+    /// Neither: past its day's cap, or its trace's day past retention.
     Hidden,
 }
 
@@ -290,7 +290,7 @@ pub async fn newest<S: HasProject>(
 }
 
 /// The changes past `cutoff`, of `projects` or of every project: one whose
-/// run's day it passed is hidden, that run's spans gone, and one no span
+/// trace's day it passed is hidden, that trace's spans gone, and one no span
 /// since carried goes. Answers how many went.
 ///
 /// # Errors
@@ -957,7 +957,7 @@ mod tests {
 
     const NOW: &str = "2026-11-08T12:00:00Z";
 
-    /// A value new to the table is shown, at its start, by its first run.
+    /// A value new to the table is shown, at its start, by its first trace.
     #[test]
     fn a_value_never_carried_is_a_change() {
         let decided = settle(

@@ -1,9 +1,9 @@
 //! An agent's versions side by side, against a real ClickHouse: a release
 //! failing twice as often and scoring lower reads so beside the one before
-//! it; a version is measured on its ended runs alone, and the runs naming
-//! none are a row of their own, last; a run counts under each value its
+//! it; a version is measured on its ended traces alone, and the traces naming
+//! none are a row of their own, last; a trace counts under each value its
 //! spans in the environment asked carry, and is measured whole; a prompt's
-//! versions are read by name and version apart; a score is read once a run
+//! versions are read by name and version apart; a score is read once a trace
 //! and version; the window is held to what the plan and the project keep;
 //! and the lane reads any agent's name, for the project's readers alone.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
@@ -194,7 +194,7 @@ impl Trace<'_> {
         }
     }
 
-    /// The run's own span, which ends it: `millis` long, failed or not.
+    /// The trace's agent span, which ends it: `millis` long, failed or not.
     fn own(&self, from: (&str, &str), millis: i64, failed: bool) -> SpanRow {
         SpanRow {
             status: if failed {
@@ -206,7 +206,7 @@ impl Trace<'_> {
         }
     }
 
-    /// A call inside the run answered by `model`, reporting `cost`.
+    /// A call inside the trace answered by `model`, reporting `cost`.
     fn call(&self, from: (&str, &str), model: &str, cost: f64) -> SpanRow {
         SpanRow {
             model: model.into(),
@@ -215,7 +215,7 @@ impl Trace<'_> {
         }
     }
 
-    /// A step inside the run carrying `attributes`.
+    /// A step inside the trace carrying `attributes`.
     fn step(&self, from: (&str, &str), attributes: &[(&str, &str)]) -> SpanRow {
         SpanRow {
             attributes: attributes
@@ -226,7 +226,7 @@ impl Trace<'_> {
         }
     }
 
-    /// An ended run of one release: its own span and one call.
+    /// An ended trace of one release: its agent span and one call.
     fn ended(&self, from: (&str, &str), millis: i64, cost: f64, failed: bool) -> Vec<SpanRow> {
         vec![
             self.own(from, millis, failed),
@@ -293,7 +293,7 @@ fn first_at(row: &Value) -> DateTime<Utc> {
 }
 
 /// ⚠ The page's question, *did the new release break it*: the newer release
-/// first, failing twice as often and scoring lower, each on its own runs,
+/// first, failing twice as often and scoring lower, each on its own traces,
 /// and nothing of another agent's or another project's among them.
 #[sqlx::test]
 async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPool) {
@@ -380,16 +380,16 @@ async fn a_release_failing_twice_as_often_and_scoring_lower_reads_so(pool: PgPoo
     assert_eq!(
         Some(first_at(old)),
         oldest,
-        "when the first of its runs started"
+        "when the first of its traces started"
     );
 }
 
-/// A version is measured on its ended runs: one whose runs are all still
-/// running has no duration and no spend, never a zero, while its failures
-/// count; a run that cost nothing costs zero; and the runs naming no
+/// A version is measured on its ended traces: one whose traces are all still
+/// going has no duration and no spend, never a zero, while its failures
+/// count; a trace that cost nothing costs zero; and the traces naming no
 /// release are a row of their own, last however new.
 #[sqlx::test]
-async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_last(pool: PgPool) {
+async fn a_version_is_measured_on_its_ended_traces_and_those_naming_none_come_last(pool: PgPool) {
     let Some(l) = lane(&pool, module_path!()).await else {
         return;
     };
@@ -439,19 +439,19 @@ async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_l
     assert_eq!(
         values(&answer),
         ["c", "b", "a", ""],
-        "the newest first seen first, the runs naming none last"
+        "the newest first seen first, the traces naming none last"
     );
     let running = row(&answer, "b");
     assert_eq!(
         (&running["traces"], &running["failed_traces"]),
         (&json!(2), &json!(1)),
-        "a failed span fails a run still running"
+        "a failed span fails a trace still going"
     );
     for measure in ["p50_ms", "p95_ms", "median_spend"] {
         assert_eq!(
             running[measure],
             Value::Null,
-            "{measure}: no run of it has ended"
+            "{measure}: no trace of it has ended"
         );
     }
     let free = row(&answer, "c");
@@ -468,11 +468,11 @@ async fn a_version_is_measured_on_its_ended_runs_and_the_runs_naming_none_come_l
     assert_eq!(answer["more"], false);
 }
 
-/// By model, a run counts under each model one of its calls answered with,
+/// By model, a trace counts under each model one of its calls answered with,
 /// and one that called none under no model; a model named on a span that is
 /// no call is not one.
 #[sqlx::test]
-async fn a_run_counts_under_each_model_it_called(pool: PgPool) {
+async fn a_trace_counts_under_each_model_it_called(pool: PgPool) {
     let Some(l) = lane(&pool, module_path!()).await else {
         return;
     };
@@ -488,7 +488,7 @@ async fn a_run_counts_under_each_model_it_called(pool: PgPool) {
         one.own(PRODUCTION, 1_000, true),
         one.call(PRODUCTION, "gpt-4o-mini", 0.01),
         SpanRow {
-            model: "named-on-the-run".into(),
+            model: "named-on-the-trace".into(),
             ..none.own(PRODUCTION, 1_000, false)
         },
     ])
@@ -499,7 +499,7 @@ async fn a_run_counts_under_each_model_it_called(pool: PgPool) {
     assert_eq!(
         values(&answer),
         ["claude-sonnet-5-5", "gpt-4o-mini", ""],
-        "first seen in one run, so by name"
+        "first seen in one trace, so by name"
     );
     let mini = row(&answer, "gpt-4o-mini");
     assert_eq!(
@@ -507,15 +507,15 @@ async fn a_run_counts_under_each_model_it_called(pool: PgPool) {
         (&json!(2), &json!(1))
     );
     assert_eq!(row(&answer, "claude-sonnet-5-5")["traces"], 1);
-    assert_eq!(row(&answer, "")["traces"], 1, "the run that called none");
+    assert_eq!(row(&answer, "")["traces"], 1, "the trace that called none");
 }
 
-/// ⚠ A run whose spans were sent from two environments counts, in each, by
+/// ⚠ A trace whose spans were sent from two environments counts, in each, by
 /// what its spans there carry — another environment's release, model or
 /// prompt is never set beside this one's — and is measured whole; the
-/// environment most runs were sent from is read where none is asked.
+/// environment most traces were sent from is read where none is asked.
 #[sqlx::test]
-async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: PgPool) {
+async fn a_trace_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: PgPool) {
     let Some(l) = lane(&pool, module_path!()).await else {
         return;
     };
@@ -539,7 +539,7 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
     l.keep(&spans).await;
 
     let answer = l.read(&[("agent", AGENT)]).await;
-    assert_eq!(answer["environment"], "production", "where most runs are");
+    assert_eq!(answer["environment"], "production", "where most traces are");
     assert_eq!(
         answer["environments"],
         json!([
@@ -551,7 +551,7 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
     assert_eq!(values(&answer), ["B"], "no other environment's release");
     let b = row(&answer, "B");
     assert_eq!(b["traces"], 3);
-    assert_eq!(b["p95_ms"], 5_000, "the crossing run, whole");
+    assert_eq!(b["p95_ms"], 5_000, "the crossing trace, whole");
     assert_eq!(b["median_spend"], 0.5);
 
     let read = |environment: &'static str, by: &'static str| {
@@ -585,7 +585,7 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
     assert_eq!(
         values(&read("staging", "model").await),
         ["model-staging", ""],
-        "and the staging run that called none"
+        "and the staging trace that called none"
     );
     let prompts = read("production", "prompt").await;
     assert_eq!(prompts["prompt"], "triage");
@@ -600,14 +600,14 @@ async fn a_run_crossing_environments_counts_by_the_spans_of_the_one_asked(pool: 
     assert_eq!(
         values(&elsewhere),
         [] as [&str; 0],
-        "no run was sent from it"
+        "no trace was sent from it"
     );
 }
 
 /// ⚠ A prompt's versions are those on the spans naming it, name and version
 /// read apart: `triage:blue` at `v2` and `triage` at `blue:v2` are two
 /// prompts, a span naming it with no version is its row with none, another
-/// prompt's version is never its own, and a run that never named it is in
+/// prompt's version is never its own, and a trace that never named it is in
 /// no row.
 #[sqlx::test]
 async fn a_prompts_versions_are_read_by_name_and_version_apart(pool: PgPool) {
@@ -649,7 +649,7 @@ async fn a_prompts_versions_are_read_by_name_and_version_apart(pool: PgPool) {
 
     let default = l.read(&[("agent", AGENT), ("by", "prompt")]).await;
     assert_eq!(default["by"], "prompt");
-    assert_eq!(default["prompt"], "triage", "the prompt most runs name");
+    assert_eq!(default["prompt"], "triage", "the prompt most traces name");
     assert_eq!(
         default["prompts"],
         json!([
@@ -703,13 +703,13 @@ async fn a_prompts_versions_are_read_by_name_and_version_apart(pool: PgPool) {
     assert_eq!(values(&unprompted), [] as [&str; 0]);
 }
 
-/// ⚠ A score is read once a run and version, however many of the run's
-/// spans carry the version, and a run of two versions gives its score to
+/// ⚠ A score is read once a trace and version, however many of the trace's
+/// spans carry the version, and a trace of two versions gives its score to
 /// each; a score taken back, a category, one given before the window, a
 /// session's and another project's are no part of a mean, and the rows show
 /// the five scores given most.
 #[sqlx::test]
-async fn a_score_is_read_once_a_run_and_version(pool: PgPool) {
+async fn a_score_is_read_once_a_trace_and_version(pool: PgPool) {
     let Some(l) = lane(&pool, module_path!()).await else {
         return;
     };
@@ -738,7 +738,7 @@ async fn a_score_is_read_once_a_run_and_version(pool: PgPool) {
     let taken_back = Uuid::new_v4();
     let mut scores = vec![
         a.scored("helpful", 1.0),
-        // One of its spans', which names its run too.
+        // One of its spans', which names its trace too.
         ScoreRow {
             target: ScoreTarget::Span,
             span_id: "00f067aa0ba902b7".into(),
@@ -801,7 +801,7 @@ async fn a_score_is_read_once_a_run_and_version(pool: PgPool) {
             { "name": "helpful", "mean": 0.5, "count": 4 },
             { "name": "passed", "mean": 1.0, "count": 1 },
         ]),
-        "1, 0.5, 0 and 0.5, each once though three of a run's spans carry r1"
+        "1, 0.5, 0 and 0.5, each once though three of a trace's spans carry r1"
     );
     assert_eq!(
         row(&answer, "r2")["scores"],
@@ -814,7 +814,7 @@ async fn a_score_is_read_once_a_run_and_version(pool: PgPool) {
     assert_eq!(
         row(&answer, "r3")["scores"],
         json!([{ "name": "helpful", "mean": 0.5, "count": 1 }]),
-        "the run of two releases, scored under each"
+        "the trace of two releases, scored under each"
     );
 }
 
@@ -866,7 +866,7 @@ async fn settings(pool: &PgPool, l: &Lane, retention_days: Option<i16>) {
     .expect("a settings row");
 }
 
-/// A run of release `release` received `days` ago, scored three days ago
+/// A trace of release `release` received `days` ago, scored three days ago
 /// and now.
 fn kept_for(l: &Lane, release: &'static str, days: i64) -> (Vec<SpanRow>, Vec<ScoreRow>) {
     let run = trace(&l.ours, AGENT, days * 24 * 60);
@@ -881,7 +881,7 @@ fn kept_for(l: &Lane, release: &'static str, days: i64) -> (Vec<SpanRow>, Vec<Sc
 }
 
 /// ⚠ The window is the Agents page's fourteen days, held to the project's
-/// own retention, which the plan's does not know, and to the plan's: a run
+/// own retention, which the plan's does not know, and to the plan's: a trace
 /// or a score either store no longer promises is no part of a row.
 #[sqlx::test]
 async fn the_window_is_held_to_what_the_project_and_the_plan_keep(pool: PgPool) {
@@ -906,7 +906,11 @@ async fn the_window_is_held_to_what_the_project_and_the_plan_keep(pool: PgPool) 
     settings(&pool, &l, Some(2)).await;
     let held = l.read(&[("agent", AGENT)]).await;
     assert_eq!(held["days"], 2, "the project's own two days");
-    assert_eq!(values(&held), ["new"], "a run three days old is past them");
+    assert_eq!(
+        values(&held),
+        ["new"],
+        "a trace three days old is past them"
+    );
     assert_eq!(
         row(&held, "new")["scores"],
         json!([{ "name": "helpful", "mean": 1.0, "count": 1 }]),
@@ -936,7 +940,7 @@ async fn the_window_is_held_to_what_the_project_and_the_plan_keep(pool: PgPool) 
 }
 
 /// The fifty newest versions are named, the answer saying it holds more,
-/// and the runs naming none stay beside them.
+/// and the traces naming none stay beside them.
 #[sqlx::test]
 async fn more_than_fifty_versions_are_cut_to_the_newest_and_say_so(pool: PgPool) {
     let Some(l) = lane(&pool, module_path!()).await else {
@@ -953,7 +957,7 @@ async fn more_than_fifty_versions_are_cut_to_the_newest_and_say_so(pool: PgPool)
 
     let fifty = l.read(&[("agent", AGENT)]).await;
     assert_eq!(fifty["more"], false, "fifty are all named");
-    assert_eq!(rows(&fifty).len(), 51, "and the runs naming none");
+    assert_eq!(rows(&fifty).len(), 51, "and the traces naming none");
 
     l.keep(&[trace(&l.ours, AGENT, 100).own(("production", "r00"), 1_000, false)])
         .await;
@@ -963,7 +967,7 @@ async fn more_than_fifty_versions_are_cut_to_the_newest_and_say_so(pool: PgPool)
     assert_eq!(named.len(), 51);
     assert_eq!(named.first(), Some(&"r50"), "the newest first");
     assert_eq!(named.get(49), Some(&"r01"), "the fiftieth");
-    assert_eq!(named.last(), Some(&""), "the runs naming none, kept");
+    assert_eq!(named.last(), Some(&""), "the traces naming none, kept");
     assert!(!named.contains(&"r00"), "the oldest is the one left out");
 }
 

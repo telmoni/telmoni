@@ -154,7 +154,7 @@ pub const V1_LANES: &[V1Lane] = &[
             summary: "The project's traces",
             description: "A page of the project's traces in the window, \
                           filtered and sorted by the same query the console's \
-                          Runs page sends, with how many the filter admits: \
+                          Traces page sends, with how many the filter admits: \
                           each filter is a parameter of its own, repeated for \
                           more than one value, as the API reference lists. The \
                           window reaches back no further than the plan keeps \

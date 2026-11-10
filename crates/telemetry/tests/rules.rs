@@ -992,24 +992,24 @@ async fn a_score_alert_reads_its_scores_and_a_drop_against_the_day_before(pool: 
     assert_eq!(shown, std::slice::from_ref(&lowest.trace_id));
 }
 
-/// A span of `run`'s, of `agent`, received at `at`.
-fn of_run(
+/// A span of `trace`'s, of `agent`, received at `at`.
+fn of_trace(
     project: &ProjectId,
-    run: Uuid,
+    trace: Uuid,
     agent: &str,
     kind: SpanKind,
     name: &str,
     at: DateTime<Utc>,
 ) -> telmoni_telemetry::store::SpanRow {
     telmoni_telemetry::store::SpanRow {
-        trace_id: run.simple().to_string(),
+        trace_id: trace.simple().to_string(),
         agent: agent.into(),
         span_id: format!("{:016x}", at.timestamp_micros()),
         ..common::received(project, kind, name, 100, at)
     }
 }
 
-/// The runs `name`'s incidents showed.
+/// The traces `name`'s incidents showed.
 async fn shown_by(pool: &PgPool, name: &str) -> Vec<Uuid> {
     sqlx::query_scalar(
         "SELECT unnest(i.traces) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
@@ -1018,14 +1018,14 @@ async fn shown_by(pool: &PgPool, name: &str) -> Vec<Uuid> {
     .bind(name)
     .fetch_all(pool)
     .await
-    .expect("the incident's runs")
+    .expect("the incident's traces")
 }
 
-/// ⚠ A run that calls one tool twelve times in a row, model calls between,
+/// ⚠ A trace that calls one tool twelve times in a row, model calls between,
 /// opens an incident on its repeats, its notice naming the agent, the tool and
-/// the runs that did so; and its steps are read whole, as they land.
+/// the traces that did so; and its steps are read whole, as they land.
 #[sqlx::test]
-async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: PgPool) {
+async fn a_trace_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
@@ -1039,7 +1039,7 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
     let mut rows = Vec::new();
     for n in 0..12 {
         let at = now - TimeDelta::minutes(40) + TimeDelta::seconds(n * 20);
-        rows.push(of_run(
+        rows.push(of_trace(
             &project,
             looping,
             "support-agent",
@@ -1047,7 +1047,7 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
             "chat",
             at,
         ));
-        rows.push(of_run(
+        rows.push(of_trace(
             &project,
             looping,
             "support-agent",
@@ -1058,7 +1058,7 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
     }
     for n in 0..2 {
         let at = now - TimeDelta::minutes(30) + TimeDelta::seconds(n);
-        rows.push(of_run(
+        rows.push(of_trace(
             &project,
             looping,
             "support-agent",
@@ -1074,7 +1074,7 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
     {
         let at =
             now - TimeDelta::minutes(20) + TimeDelta::seconds(i64::try_from(n).expect("a few"));
-        rows.push(of_run(
+        rows.push(of_trace(
             &project,
             broken,
             "support-agent",
@@ -1091,7 +1091,7 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
         json!({ "name": "Loops", "kind": "agent", "measure": "repeats", "aggregation": "max",
             "filters": { "agent": ["support-agent"] }, "window": "hour", "operator": "gte",
             "alert_threshold": 12, "warning_threshold": 6 }),
-        json!({ "name": "Long runs", "kind": "agent", "measure": "steps", "aggregation": "max",
+        json!({ "name": "Long traces", "kind": "agent", "measure": "steps", "aggregation": "max",
             "window": "hour", "operator": "gt", "alert_threshold": 100 }),
     ] {
         let made = request(
@@ -1123,9 +1123,9 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
     assert_eq!(loops["value"], json!(12.0), "{loops}");
     assert_eq!(loops["severity"], "alert");
     assert_eq!(
-        of("Long runs")["value"],
+        of("Long traces")["value"],
         json!(2.0),
-        "the looping run's two steps"
+        "the looping trace's two steps"
     );
     assert_eq!(shown_by(&pool, "Loops").await, [looping]);
     let told = notices.notices();
@@ -1135,7 +1135,7 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
         .expect("the loop told");
     assert!(
         opened.body.contains(
-            "The most times a run called one tool in a row over the last hour is 12, past the \
+            "The most times a trace called one tool in a row over the last hour is 12, past the \
              alert threshold of 12."
         ),
         "{}",
@@ -1143,18 +1143,18 @@ async fn a_run_calling_one_tool_twelve_times_in_a_row_opens_an_incident(pool: Pg
     );
     assert!(
         opened.body.contains(
-            "1 run of support-agent called search 12 or more times in a row, this one 12: "
+            "1 trace of support-agent called search 12 or more times in a row, this one 12: "
         ),
         "{}",
         opened.body
     );
 }
 
-/// A run that sent its opening and nothing more, quiet past the window, is
+/// A trace that sent its opening and nothing more, quiet past the window, is
 /// counted open, no step needed; one whose own span followed its opening is
 /// not.
 #[sqlx::test]
-async fn a_run_with_only_its_opening_counts_as_left_open(pool: PgPool) {
+async fn a_trace_with_only_its_opening_counts_as_left_open(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
@@ -1165,15 +1165,15 @@ async fn a_run_with_only_its_opening_counts_as_left_open(pool: PgPool) {
     let quiet = Utc::now() - TimeDelta::minutes(90);
     let (opened, ended) = (Uuid::new_v4(), Uuid::new_v4());
     let agent = "nightly-triage";
-    let at = |run, kind, name, when| telmoni_telemetry::store::SpanRow {
+    let at = |trace, kind, name, when| telmoni_telemetry::store::SpanRow {
         units: 0,
-        ..of_run(&project, run, agent, kind, name, when)
+        ..of_trace(&project, trace, agent, kind, name, when)
     };
     ch.store
         .insert_spans(&[
             at(opened, SpanKind::TraceStart, "telmoni.trace.start", quiet),
             at(ended, SpanKind::TraceStart, "telmoni.trace.start", quiet),
-            of_run(
+            of_trace(
                 &project,
                 ended,
                 agent,
@@ -1211,11 +1211,11 @@ async fn a_run_with_only_its_opening_counts_as_left_open(pool: PgPool) {
     assert_eq!(shown_by(&pool, "Stalls").await, [opened]);
 }
 
-/// ⚠ A run whose spans landed and whose own has not, quiet past the window,
+/// ⚠ A trace whose spans landed and whose own has not, quiet past the window,
 /// opens an incident showing it; one that ended, or is still going, does
 /// not; and its own span landing resolves it.
 #[sqlx::test]
-async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
+async fn a_trace_left_open_past_the_window_opens_an_incident(pool: PgPool) {
     apply_audit_migrations(&pool).await;
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
@@ -1229,8 +1229,8 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
     let (stalled, ended, going) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
     let agent = "support-agent";
     let rows = vec![
-        of_run(&project, stalled, agent, SpanKind::Step, "plan", quiet),
-        of_run(
+        of_trace(&project, stalled, agent, SpanKind::Step, "plan", quiet),
+        of_trace(
             &project,
             stalled,
             agent,
@@ -1238,8 +1238,8 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
             "chat",
             quiet + TimeDelta::seconds(5),
         ),
-        of_run(&project, ended, agent, SpanKind::Step, "plan", quiet),
-        of_run(
+        of_trace(&project, ended, agent, SpanKind::Step, "plan", quiet),
+        of_trace(
             &project,
             ended,
             agent,
@@ -1247,8 +1247,8 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
             "answer",
             quiet + TimeDelta::minutes(5),
         ),
-        of_run(&project, going, agent, SpanKind::Step, "plan", quiet),
-        of_run(
+        of_trace(&project, going, agent, SpanKind::Step, "plan", quiet),
+        of_trace(
             &project,
             going,
             agent,
@@ -1288,21 +1288,21 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
     let opened = told.first().expect("the stall told");
     assert!(
         opened.body.contains(
-            "The count of runs left open and quiet for over an hour is 1, past the alert \
+            "The count of traces left open and quiet for over an hour is 1, past the alert \
              threshold of 1."
         ),
         "{}",
         opened.body
     );
     assert!(
-        opened.body.contains("The run quiet longest: "),
+        opened.body.contains("The trace quiet longest: "),
         "{}",
         opened.body
     );
 
     // Its own span lands at last: nothing is left open, and the incident resolves.
     ch.store
-        .insert_spans(&[of_run(
+        .insert_spans(&[of_trace(
             &project,
             stalled,
             agent,
@@ -1311,7 +1311,7 @@ async fn a_run_left_open_past_the_window_opens_an_incident(pool: PgPool) {
             now,
         )])
         .await
-        .expect("the run span is kept");
+        .expect("the agent span is kept");
     sqlx::query("UPDATE telemetry.rules SET evaluated_at = NULL")
         .execute(&pool)
         .await

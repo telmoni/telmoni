@@ -658,7 +658,7 @@ impl TraceRow {
 }
 
 /// What a list's facets answer: each filter's values among the window's
-/// runs, each counted in the list's own rows under every other filter.
+/// traces, each counted in the list's own rows under every other filter.
 #[derive(Debug, Default, Serialize)]
 pub struct Facets {
     /// How many days back they read.
@@ -1058,7 +1058,7 @@ impl<L: Listing> Listed<L> {
     }
 }
 
-/// A page of one list of the project's runs in the window, filtered and
+/// A page of one list of the project's traces in the window, filtered and
 /// sorted as the query says, with how many the filter admits.
 pub(crate) async fn list_page<L: Listing>(
     state: &AppState,
@@ -1092,7 +1092,7 @@ pub(crate) async fn list_page<L: Listing>(
     })
 }
 
-/// One list's facets: each filter's values among the project's runs in the
+/// One list's facets: each filter's values among the project's traces in the
 /// window, and how many of the list's rows carry each under every other
 /// filter.
 pub(crate) async fn facets_page<L: Listing>(
@@ -1196,7 +1196,7 @@ pub async fn get_rollups(
 }
 
 /// `GET /internal/v1/telemetry/traces/facets` — each filter's values among the
-/// project's traces in the window, and how many runs carry each under every
+/// project's traces in the window, and how many carry each under every
 /// other filter.
 pub async fn get_facets(
     State(state): State<Arc<AppState>>,

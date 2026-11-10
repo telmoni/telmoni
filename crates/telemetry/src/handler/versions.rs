@@ -29,14 +29,14 @@ pub struct Versions {
     pub days: u16,
     pub by: ChangeKind,
     /// The environment the rows are of: the one asked for, else the one
-    /// most of the agent's runs were sent from.
+    /// most of the agent's traces were sent from.
     pub environment: String,
-    /// The agent's environments, the most runs first.
+    /// The agent's environments, the most traces first.
     pub environments: Vec<Choice>,
     /// The prompt whose versions the rows are, where they are a prompt's:
-    /// the one asked for, else the one most runs name.
+    /// the one asked for, else the one most traces name.
     pub prompt: Option<String>,
-    /// The prompts the agent's runs name in the environment, read where the
+    /// The prompts the agent's traces name in the environment, read where the
     /// rows are a prompt's.
     pub prompts: Vec<Choice>,
     /// The newest first seen first, the traces that carried none last.

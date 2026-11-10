@@ -1079,7 +1079,7 @@ mod tests {
 
     /// The cost cap reads each trace's calls as they land, so it filters as they do.
     #[test]
-    fn the_cost_cap_is_a_runs_cost_filtered_as_its_calls_are() {
+    fn the_cost_cap_is_a_traces_cost_filtered_as_its_calls_are() {
         let cap = || RuleInput {
             kind: SpanKind::Agent,
             measure: RuleMeasure::Cost,

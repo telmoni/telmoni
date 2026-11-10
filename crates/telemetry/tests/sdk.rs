@@ -34,7 +34,7 @@ use telmoni_telemetry::{otlp_router, router, v1_router};
 const INGEST_KEY: &str = "tm_sdk_ingest";
 
 #[sqlx::test]
-async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_read_it(
+async fn a_trace_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_read_it(
     pool: PgPool,
 ) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
@@ -210,7 +210,7 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(spans[2]["name"], "list_members");
     assert_eq!(spans[2]["status"], "ok");
 
-    // The list sums it as any run.
+    // The list sums it as any trace.
     let response = app
         .clone()
         .oneshot(request(
@@ -242,7 +242,7 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     assert_eq!(trace["environments"], serde_json::json!(["staging"]));
     assert_eq!(trace["releases"], serde_json::json!(["2026.10.18"]));
 
-    // The record's score rode on the run's span; the two sent after it, to
+    // The record's score rode on the agent span; the two sent after it, to
     // `/v1/scores`, the session's by its id as sent, found by the id as stored.
     let response = app
         .clone()
@@ -282,11 +282,11 @@ async fn a_run_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lanes_
     );
 }
 
-/// A live run's retrieval and memory search, opened with the SDK, land as
+/// A live trace's retrieval and memory search, opened with the SDK, land as
 /// retrievals named by their sources, with what each asked for and how many
-/// came back, and the list counts them beside the run's tool call.
+/// came back, and the list counts them beside the trace's tool call.
 #[sqlx::test]
-async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
+async fn a_live_traces_retrievals_land_named_by_their_sources(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -353,7 +353,7 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
         trace_id
     })
     .await
-    .expect("the run ran");
+    .expect("the trace ran");
 
     let request = |path: String| {
         Request::builder()
@@ -398,7 +398,7 @@ async fn a_live_runs_retrievals_land_named_by_their_sources(pool: PgPool) {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let spans = detail["spans"].as_array().expect("the run was recorded");
+    let spans = detail["spans"].as_array().expect("the trace was recorded");
     let span = |name: &str, kind: &str| {
         spans
             .iter()

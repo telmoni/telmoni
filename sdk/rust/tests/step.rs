@@ -84,7 +84,7 @@ fn a_failing_step_records_the_error_type_and_returns_the_err() -> Outcome {
     );
     assert!(
         only(&spans, "invoke_agent ")?.get("status").is_none(),
-        "the run itself went on"
+        "the trace itself went on"
     );
     assert!(!harness.transport.text().contains("secret details"));
     Ok(())

@@ -121,7 +121,7 @@ fn each_call_is_counted_as_the_server_counts_it() -> Outcome {
 /// The cap is the process's own count: with every export failing, the third
 /// step of a trace capped at two is refused all the same.
 #[test]
-fn a_cap_stops_a_run_with_the_network_cut() -> Outcome {
+fn a_cap_stops_a_trace_with_the_network_cut() -> Outcome {
     let fixture = load_fixture("guard.json")?;
     let cut = (0..16).map(|_| Err(TransportError::new("ConnectionRefused")));
     let harness = Harness::answering(
@@ -154,7 +154,7 @@ fn a_cap_stops_a_run_with_the_network_cut() -> Outcome {
 }
 
 #[test]
-fn a_run_past_a_cap_is_refused_what_it_opens_next() -> Outcome {
+fn a_trace_past_a_cap_is_refused_what_it_opens_next() -> Outcome {
     let fixture = load_fixture("guard.json")?;
     let calls = field(&fixture, "calls")?.as_array().ok_or("calls")?;
     for spec in field(&fixture, "traces")?.as_array().ok_or("traces")? {
@@ -286,7 +286,7 @@ fn a_refusal_carried_out_by_a_try_closure_is_the_callers_error() -> Outcome {
 
 /// A refusal escaping a trace fails it with its error's type, `telmoni::Error`.
 #[test]
-fn a_refusal_escaping_the_run_fails_it_with_its_type() -> Outcome {
+fn a_refusal_escaping_the_trace_fails_it_with_its_type() -> Outcome {
     let harness = Harness::new()?;
     let escaped = harness.telmoni.try_trace_with(
         "guarded",

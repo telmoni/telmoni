@@ -256,7 +256,7 @@ pub(crate) async fn write(
         .map(|(row, _)| (row.trace_id.clone(), row.span_id.clone()))
         .collect();
     let refused = crate::foreign::hold(state, key, std::mem::take(&mut batch.held)).await?;
-    // Their scores wait under the nil run, as the spans do, until placed.
+    // Their scores wait under the nil trace, as the spans do, until placed.
     let waiting: Vec<crate::scores::ScoreRow> = batch
         .scores
         .iter()
@@ -400,7 +400,7 @@ pub(crate) async fn land(
 /// The answer to an export sent again: its own bytes, the first copy's by
 /// their digest, read by the contract again under the mode the first answer
 /// named, its tags held to the cap again, which keeps the values its first
-/// copy did, and held to what its plan held the first copy to: the same runs
+/// copy did, and held to what its plan held the first copy to: the same traces
 /// sampled out, by the project's key, and its content past the ceiling. Nothing
 /// is kept, so no user id is hashed and no content sealed.
 async fn answer_again(

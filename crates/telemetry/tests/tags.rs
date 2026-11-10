@@ -1,4 +1,4 @@
-//! The trace list sorted by a tag, through the module's own router: runs by
+//! The trace list sorted by a tag, through the module's own router: traces by
 //! each one's value of the key, those without it last either way.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -87,8 +87,8 @@ impl Projects {
         body
     }
 
-    /// The runs the list answers under `query`.
-    async fn runs(&self, query: &str) -> Vec<String> {
+    /// The traces the list answers under `query`.
+    async fn listed(&self, query: &str) -> Vec<String> {
         let list = self.get(&format!("{LANE}{query}")).await;
         list.get("traces")
             .and_then(Value::as_array)
@@ -99,7 +99,7 @@ impl Projects {
     }
 }
 
-/// A run of ours in `session`: its own span carrying `tags`, and a model call
+/// A trace of ours in `session`: its own span carrying `tags`, and a model call
 /// carrying one of its own, as an application's instrumentation may set.
 async fn land_in(
     ch: &common::ClickHouse,
@@ -138,11 +138,11 @@ async fn land_in(
     run
 }
 
-/// A sort by `tag:repo` orders the trace list by each run's value, those
+/// A sort by `tag:repo` orders the trace list by each trace's value, those
 /// without it last either way; the list names the sort, and a key left out
 /// is refused.
 #[sqlx::test]
-async fn a_sort_by_a_tag_orders_runs_those_without_it_last(pool: PgPool) {
+async fn a_sort_by_a_tag_orders_traces_those_without_it_last(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -151,12 +151,18 @@ async fn a_sort_by_a_tag_orders_runs_those_without_it_last(pool: PgPool) {
     let b = land_in(&ch, &p.ours, "s2", &[("repo", "a")]).await;
     let c = land_in(&ch, &p.ours, "s2", &[("repo", "c")]).await;
     let d = land_in(&ch, &p.ours, "s3", &[("team", "core")]).await;
-    let ids = |runs: &[Uuid]| -> Vec<String> {
-        runs.iter().map(|run| run.simple().to_string()).collect()
+    let ids = |traces: &[Uuid]| -> Vec<String> {
+        traces
+            .iter()
+            .map(|trace| trace.simple().to_string())
+            .collect()
     };
 
-    assert_eq!(p.runs("?sort=tag:repo").await, ids(&[b, a, c, d]));
-    assert_eq!(p.runs("?sort=tag:repo&dir=desc").await, ids(&[c, a, b, d]));
+    assert_eq!(p.listed("?sort=tag:repo").await, ids(&[b, a, c, d]));
+    assert_eq!(
+        p.listed("?sort=tag:repo&dir=desc").await,
+        ids(&[c, a, b, d])
+    );
     assert_eq!(
         p.get(&format!("{LANE}?sort=tag:repo")).await["sort"],
         "tag:repo"

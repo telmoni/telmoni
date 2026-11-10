@@ -4,7 +4,7 @@
 //! read over the window that ends then —
 //! the full hours from `spans_hourly`, and from `spans` the part of an hour
 //! at either end; a trace's cost ([`crate::spend`]), steps, repeats and stalls
-//! from `spans` run by run, and an objective's burn from its agent's runs —
+//! from `spans` trace by trace, and an objective's burn from its agent's traces —
 //! and settled in a transaction of its own with the severity it sets and the
 //! incident that moves with it ([`incidents`]), told once that commits.
 //! Before a pass evaluates an organization's alerts it holds them to its
@@ -40,7 +40,7 @@ use crate::store::{Projects, Read, micros, seconds};
 /// How often each alert is evaluated.
 pub const EVERY: Duration = Duration::from_secs(60);
 
-/// How often a starter alert is evaluated: watching from the first run, it
+/// How often a starter alert is evaluated: watching from the first trace, it
 /// need not cost a query a minute ([`crate::starters`]).
 pub const STARTER_EVERY: Duration = Duration::from_secs(5 * 60);
 
@@ -487,7 +487,7 @@ impl Totals {
             (RuleMeasure::Duration, percentile) => at(percentile),
             (RuleMeasure::Tokens, RuleAggregation::Avg) => Some(tokens / spans),
             (RuleMeasure::Tokens, _) => Some(tokens),
-            // Read run by run, from the scores, and from an agent's runs
+            // Read trace by trace, from the scores, and from an agent's traces
             // ([`burns`]), which the totals cannot.
             (
                 RuleMeasure::Cost
@@ -607,12 +607,12 @@ pub async fn totals(
 pub struct Together(HashMap<(Uuid, DateTime<Utc>), Option<f64>>);
 
 /// Alerts one query reads together: those of a project on the totals that
-/// share a kind and a window, or read run by run that share a measure and a
+/// share a kind and a window, or read trace by trace that share a measure and a
 /// window, at one time.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Group {
     Totals(ProjectId, SpanKind, RuleWindow, DateTime<Utc>),
-    Runs(ProjectId, RuleMeasure, RuleWindow, DateTime<Utc>),
+    Traces(ProjectId, RuleMeasure, RuleWindow, DateTime<Utc>),
 }
 
 /// [`Totals`] of the alert at place `i`.
@@ -664,7 +664,7 @@ impl Together {
                         Group::Totals(project, definition.kind, definition.window, at)
                     }
                     RuleMeasure::Steps | RuleMeasure::Repeats | RuleMeasure::Stalled => {
-                        Group::Runs(project, definition.measure, definition.window, at)
+                        Group::Traces(project, definition.measure, definition.window, at)
                     }
                     RuleMeasure::Cost | RuleMeasure::Score | RuleMeasure::Burn => continue,
                 };
@@ -674,7 +674,7 @@ impl Together {
         let mut together = Self::default();
         for (group, members) in groups {
             let at = match &group {
-                Group::Totals(.., at) | Group::Runs(.., at) => *at,
+                Group::Totals(.., at) | Group::Traces(.., at) => *at,
             };
             match group_values(state, &group, &members).await {
                 Ok(values) => {
@@ -759,14 +759,14 @@ async fn group_values(
                 })
                 .collect())
         }
-        Group::Runs(project, measure, window_kind, at) => {
+        Group::Traces(project, measure, window_kind, at) => {
             let sql = match measure {
                 RuleMeasure::Steps => STEPS_TOGETHER_SQL,
                 RuleMeasure::Repeats => REPEATS_TOGETHER_SQL,
                 _ => STALLED_TOGETHER_SQL,
             };
             let window = Window::of(*at, *window_kind);
-            let runs = if *measure == RuleMeasure::Stalled {
+            let scanned = if *measure == RuleMeasure::Stalled {
                 Window::ending(window.from, window_kind.duration())
             } else {
                 window
@@ -774,8 +774,8 @@ async fn group_values(
             let read = state
                 .store
                 .read(&Projects::one(project.clone()), sql)
-                .param("from", micros(runs.from))
-                .param("to", micros(runs.to))
+                .param("from", micros(scanned.from))
+                .param("to", micros(scanned.to))
                 .param("now", micros(window.to));
             let rows: Vec<FoldedAt> = bind_together(read, members).fetch_all().await?;
             let mut folded = vec![Folded::default(); members.len()];
@@ -1266,7 +1266,7 @@ mod tests {
         );
     }
 
-    /// Scores and runs fold as their aggregation says, none where there are none.
+    /// Scores and traces fold as their aggregation says, none where there are none.
     #[test]
     fn a_fold_is_its_aggregation_and_none_without_any() {
         let scores = Folded {

@@ -33,7 +33,7 @@ use crate::rules::db::RuleRow;
 /// rather than opening another.
 pub const REOPEN_WITHIN: TimeDelta = TimeDelta::hours(1);
 
-/// The most runs an incident keeps of those its notices showed, the latest,
+/// The most traces an incident keeps of those its notices showed, the latest,
 /// as the table's CHECK has it.
 pub const TRACES_KEPT: i32 = 20;
 

@@ -36,7 +36,7 @@ use telmoni_telemetry::rules::{Definition, Hours, Link, RuleFilters};
 use telmoni_telemetry::traces::{Bar, ListSort, TraceRow};
 use telmoni_telemetry::versions::{Choice, ScoreMean, Version};
 
-/// A run's own span's turn, as content keeps it: the person's message and
+/// A trace's agent span's turn, as content keeps it: the person's message and
 /// the agent's answer, in the conventions' parts.
 fn turn() -> Vec<SpanFields> {
     vec![SpanFields {
@@ -201,8 +201,8 @@ fn the_changes_answer_as_the_console_reads() {
     );
 }
 
-/// The Agents page's rows: one agent whose last run ended and was priced,
-/// with its newest change of each kind, and one still on its first run,
+/// The Agents page's rows: one agent whose last trace ended and was priced,
+/// with its newest change of each kind, and one still on its first trace,
 /// with no usual cost yet.
 #[test]
 fn the_agents_answer_as_the_console_reads() {
@@ -240,7 +240,7 @@ fn the_agents_answer_as_the_console_reads() {
 }
 
 /// An agent's releases side by side: the newer failing more and scoring
-/// lower, one whose only run has not ended, and the runs that named none.
+/// lower, one whose only trace has not ended, and the traces that named none.
 #[test]
 fn the_versions_answer_as_the_console_reads() {
     let choice = |value: &str, traces| Choice {
@@ -385,7 +385,7 @@ fn the_histogram_answers_as_the_console_reads() {
     );
 }
 
-/// One trace's page: a model call that reported its cost, a retrieval, and the run.
+/// One trace's page: a model call that reported its cost, a retrieval, and the agent span.
 #[test]
 fn a_trace_answers_as_the_console_reads() {
     let span = |span_id: &str, kind, cost: Option<f64>| TraceSpan {
@@ -773,7 +773,7 @@ fn the_privacy_posture_answers_as_the_console_reads() {
 }
 
 /// The dashboards page's totals split by a tag from the spans: a named
-/// value, a run carrying none, and the rest folded.
+/// value, a trace carrying none, and the rest folded.
 #[test]
 fn the_rollups_answer_as_the_console_reads() {
     use telmoni_telemetry::rollups::{Durations, MetricPoint, Metrics, TraceDurations};

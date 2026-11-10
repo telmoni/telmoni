@@ -33,7 +33,7 @@ pub struct RuleRow {
     pub told_at: Option<DateTime<Utc>>,
     /// The connections its last notice reached, so a reminder goes to the rest.
     pub told_to: Vec<Uuid>,
-    /// Made by the project's first run ([`crate::starters`]), and when its
+    /// Made by the project's first trace ([`crate::starters`]), and when its
     /// threshold was settled, by the project's history or a member's edit.
     pub starter: bool,
     pub tuned_at: Option<DateTime<Utc>>,
@@ -180,7 +180,7 @@ pub async fn organization_ahead(
 }
 
 /// A new alert of the project, filed under its organization: a member's, or
-/// a `starter` its first run made.
+/// a `starter` its first trace made.
 pub async fn insert(
     tx: &mut Scoped<'_, ProjectAndOrganization>,
     project_id: &ProjectId,

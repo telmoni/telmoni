@@ -3,8 +3,8 @@
 //! environment; a model seen again inside its 30 days marked not at all, and
 //! past them again; the day's cap, its 24th saying so and what it held back
 //! not taken for new the next day; a prompt's version under its name; an
-//! agent's first run; another exporter's run landed late, marked by its own
-//! first run; a pass after an outage going on from the last; one replica
+//! agent's first trace; another exporter's trace landed late, marked by its own
+//! first trace; a pass after an outage going on from the last; one replica
 //! writing, and a project a move holds left; the purges; and the lanes,
 //! the newest first and held to their project.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
@@ -83,17 +83,17 @@ async fn watched(pool: &PgPool, test: &str) -> Option<Watched> {
     })
 }
 
-/// A span of `kind` of the agent's run `run`, sent from production on
+/// A span of `kind` of the agent's trace `trace`, sent from production on
 /// `release`, received at `received` and started a second before.
 fn sent(
     project: &ProjectId,
-    run: Uuid,
+    trace: Uuid,
     kind: SpanKind,
     release: &str,
     received: DateTime<Utc>,
 ) -> SpanRow {
     SpanRow {
-        trace_id: run.simple().to_string(),
+        trace_id: trace.simple().to_string(),
         agent: AGENT.into(),
         environment: "production".into(),
         release: release.into(),
@@ -101,10 +101,10 @@ fn sent(
     }
 }
 
-/// A model call of run `run` answered by `model`, with `attributes`.
+/// A model call of trace `trace` answered by `model`, with `attributes`.
 fn call(
     project: &ProjectId,
-    run: Uuid,
+    trace: Uuid,
     model: &str,
     attributes: &[(&str, &str)],
     received: DateTime<Utc>,
@@ -115,7 +115,7 @@ fn call(
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .collect(),
-        ..sent(project, run, SpanKind::ModelCall, "", received)
+        ..sent(project, trace, SpanKind::ModelCall, "", received)
     }
 }
 
@@ -156,19 +156,19 @@ async fn stored(pool: &PgPool, project: &ProjectId) -> Vec<Stored> {
     .expect("its changes")
 }
 
-fn row(environment: &str, kind: &str, prompt: Option<&str>, value: &str, run: Uuid) -> Stored {
+fn row(environment: &str, kind: &str, prompt: Option<&str>, value: &str, trace: Uuid) -> Stored {
     (
         environment.into(),
         kind.into(),
         prompt.map(Into::into),
         value.into(),
-        run.simple().to_string(),
+        trace.simple().to_string(),
         "shown".into(),
     )
 }
 
-/// ⚠ The item's first proof: a run on a new release makes one row, by its
-/// run and at its start; the next pass, reading the same spans, makes none;
+/// ⚠ The item's first proof: a trace on a new release makes one row, by its
+/// trace and at its start; the next pass, reading the same spans, makes none;
 /// staging taking it later makes staging's own.
 #[sqlx::test]
 async fn a_new_release_is_marked_once_and_again_in_another_environment(pool: PgPool) {
@@ -198,7 +198,7 @@ async fn a_new_release_is_marked_once_and_again_in_another_environment(pool: PgP
             .fetch_one(&pool)
             .await
             .expect("its time");
-    assert_eq!(changed_at, at("2026-11-02T09:59:59Z"), "the run's start");
+    assert_eq!(changed_at, at("2026-11-02T09:59:59Z"), "the trace's start");
 
     tick(&w, &pool, at("2026-11-02T10:02:00Z")).await;
     assert_eq!(
@@ -488,10 +488,10 @@ async fn a_prompts_version_is_marked_under_its_name(pool: PgPool) {
     );
 }
 
-/// An agent's first run marks what it ran on: its release, its model and
+/// An agent's first trace marks what it ran on: its release, its model and
 /// its prompt's version.
 #[sqlx::test]
-async fn an_agents_first_run_marks_what_it_ran_on(pool: PgPool) {
+async fn an_agents_first_trace_marks_what_it_ran_on(pool: PgPool) {
     let Some(w) = watched(&pool, module_path!()).await else {
         return;
     };
@@ -531,12 +531,12 @@ async fn an_agents_first_run_marks_what_it_ran_on(pool: PgPool) {
     assert_eq!(kinds, ["model", "prompt", "release"]);
 }
 
-/// ⚠ Another exporter's run, received forty minutes before the pass and held
-/// for its parent, lands since the last pass: it is read by its landed run,
-/// and marked by its own first run, though its receipt is long behind the
+/// ⚠ Another exporter's trace, received forty minutes before the pass and held
+/// for its parent, lands since the last pass: it is read by its landed trace,
+/// and marked by its own first trace, though its receipt is long behind the
 /// window. One received as long ago that landed before is not read again.
 #[sqlx::test]
-async fn another_exporters_run_landed_late_is_marked_by_its_own_first_run(pool: PgPool) {
+async fn another_exporters_trace_landed_late_is_marked_by_its_own_first_trace(pool: PgPool) {
     let Some(w) = watched(&pool, module_path!()).await else {
         return;
     };
@@ -726,10 +726,10 @@ async fn kept(
     .expect("a change");
 }
 
-/// Past a cutoff, a change whose run's day it passed is hidden, one no span
+/// Past a cutoff, a change whose trace's day it passed is hidden, one no span
 /// since carried goes, and the rest stay; a project's purge takes its own.
 #[sqlx::test]
-async fn the_purges_hide_a_change_whose_run_went_and_delete_one_no_span_carries(pool: PgPool) {
+async fn the_purges_hide_a_change_whose_trace_went_and_delete_one_no_span_carries(pool: PgPool) {
     let Some(w) = watched(&pool, module_path!()).await else {
         return;
     };

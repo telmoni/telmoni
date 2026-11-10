@@ -106,7 +106,7 @@ fn alert(name: &str) -> Value {
     })
 }
 
-/// An objective: 99% of one agent's runs over 30 days.
+/// An objective: 99% of one agent's traces over 30 days.
 fn objective(name: &str) -> Value {
     json!({
         "name": name,

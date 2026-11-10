@@ -372,7 +372,7 @@ fn a_failed_trace_is_marked_on_its_own_span() -> Outcome {
     Ok(())
 }
 
-/// A record's content, its run's, steps' and calls', leaves only with
+/// A record's content, its trace's, steps' and calls', leaves only with
 /// `capture_content` and the mode `on`.
 /// A call's reasoning effort, which is no content, leaves whatever the mode.
 #[test]
@@ -566,7 +566,7 @@ fn a_record_refused_sends_nothing() -> Outcome {
     Ok(())
 }
 
-/// A record with a time ingest cannot read, the run's, a step's or a call's, is refused whole.
+/// A record with a time ingest cannot read, the trace's, a step's or a call's, is refused whole.
 #[test]
 fn a_record_timed_where_ingest_cannot_read_is_refused() -> Outcome {
     assert_eq!(
@@ -776,7 +776,7 @@ fn a_record_with_a_text_past_ingests_cap_is_refused() -> Outcome {
                 .into(),
             )
         }),
-        // In a step inside a step, which is checked as the run's own are.
+        // In a step inside a step, which is checked as the trace's own are.
         (Text::ModelCallReasoningEffort, 1024, &|n| {
             in_step(
                 StepRecord {
@@ -953,7 +953,11 @@ fn steps_nest_16_deep_and_no_deeper() -> Outcome {
     })?;
     harness.flush()?;
     let spans = harness.spans()?;
-    assert_eq!(spans.len(), 17, "the run and its 16 steps, and no more");
+    assert_eq!(
+        spans.len(),
+        17,
+        "the agent span and its 16 steps, and no more"
+    );
     for (inner, outer) in spans.iter().zip(spans.iter().skip(1)) {
         assert_eq!(
             inner.get("parentSpanId"),
@@ -1093,14 +1097,14 @@ fn a_record_leaves_off_a_tag_ingest_would_drop_before_its_32() -> Outcome {
     Ok(())
 }
 
-/// A record's warnings come before its hold, so a warning sink can record a run itself.
+/// A record's warnings come before its hold, so a warning sink can record a trace itself.
 #[test]
 fn a_records_warnings_come_before_its_hold() -> Outcome {
     let transport = FakeTransport::new([])?;
     let warnings = Warnings::default();
     let sleeps = Sleeps::default();
     let mut hooks = hooks(&transport, &warnings, &sleeps);
-    // A warning records a run on another thread, which a hold taken would stall.
+    // A warning records a trace on another thread, which a hold taken would stall.
     let client: Arc<Mutex<Option<Telmoni>>> = Arc::default();
     let through = Collected::<bool>::default();
     let (shared, noted, warned) = (Arc::clone(&client), through.clone(), warnings.clone());
@@ -1173,7 +1177,7 @@ fn a_record_after_shutdown_is_refused() -> Outcome {
 }
 
 /// A record the queue has no room for is refused whole, before anything is
-/// queued, since its tail — the run's own span first — would otherwise be
+/// queued, since its tail — the agent span first — would otherwise be
 /// dropped; drained, the queue takes it whole.
 #[test]
 fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
@@ -1198,9 +1202,12 @@ fn a_record_the_queue_has_no_room_for_is_refused_whole() -> Outcome {
         ..golden
     };
 
-    // Two steps hold two of the four slots, the run's opening gone first.
+    // Two steps hold two of the four slots, the trace's opening gone first.
     let trace = telmoni.trace("bot", TraceOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening, out of the queue");
+    assert!(
+        transport.wait_for(1),
+        "the trace's opening, out of the queue"
+    );
     for n in 0..2 {
         let step = trace.step(&format!("s{n}"))?;
         step.end();
@@ -1360,7 +1367,7 @@ fn a_record_larger_than_a_batch_is_cut_from_its_own_start() -> Outcome {
         ..golden
     };
     let trace = telmoni.trace("bot", TraceOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening, at once");
+    assert!(transport.wait_for(1), "the trace's opening, at once");
     for n in 0..2 {
         trace.step(&format!("s{n}"))?.end();
     }
@@ -1498,7 +1505,10 @@ fn a_records_room_is_kept_while_it_is_built() -> Outcome {
         ..golden
     };
     let live = Arc::new(telmoni.trace("live", TraceOptions::default())?);
-    assert!(transport.wait_for(1), "the run's opening, out of the queue");
+    assert!(
+        transport.wait_for(1),
+        "the trace's opening, out of the queue"
+    );
     // Room for one step beside the record's three spans.
     let stepping = Arc::clone(&live);
     *lock(&sampler.0) = Some(Box::new(move || {
@@ -1553,7 +1563,7 @@ fn a_record_goes_at_once() -> Outcome {
     };
     let telmoni = Telmoni::with_hooks(keyed(), hooks);
     let live = telmoni.trace("live", TraceOptions::default())?;
-    assert!(transport.wait_for(1), "the run's opening, at once");
+    assert!(transport.wait_for(1), "the trace's opening, at once");
     live.step("live step")?.end();
     telmoni.record_trace(the_record()?)?;
     assert!(transport.wait_for(3), "the record waited for the delay");

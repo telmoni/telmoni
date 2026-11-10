@@ -447,7 +447,7 @@ async fn each_read_of_content_is_a_viewed_row_in_the_organizations_chain(pool: P
         &[TRACE_C.to_owned()],
     )
     .await
-    .expect("a run without content opens to nothing");
+    .expect("a trace without content opens to nothing");
     assert!(nothing.is_empty());
     let unsettled = content::open(
         &door.state,
@@ -1581,10 +1581,10 @@ async fn a_kept_field_is_compressed_before_it_is_sealed(pool: PgPool) {
 
 /// ⚠ A file a message carried, kept once by the hash of its bytes: sealed
 /// for an `on` project and nothing for an `off` one, its bytes counted; named
-/// by the runs whose content cites it; read with its read filed, served so a
+/// by the traces whose content cites it; read with its read filed, served so a
 /// browser runs nothing it holds; and gone with the one trace that named it.
 #[sqlx::test]
-async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(pool: PgPool) {
+async fn a_file_is_kept_once_named_by_its_traces_read_filed_and_erased_with_them(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -1751,7 +1751,7 @@ async fn a_file_is_kept_once_named_by_its_runs_read_filed_and_erased_with_them(p
     assert_eq!(door.held(&pool, &door.organization).await, Some(0));
 }
 
-/// A run's turn of a conversation as an SDK sends it: the run's own span
+/// A trace's turn of a conversation as an SDK sends it: the agent span
 /// with the person's message and the agent's answer, and a model call under
 /// it with the messages it was sent, both in session `session`.
 fn turn_of(session: &str) -> Vec<u8> {
@@ -1889,7 +1889,7 @@ async fn the_trace_page_and_the_download_carry_content_each_read_filed(pool: PgP
 }
 
 /// Another exporter's content waits sealed, never as text, and is kept under
-/// its run once its trace lands, readable as any run's.
+/// its trace once it lands, readable as any trace's.
 #[sqlx::test]
 async fn another_exporters_content_waits_sealed_and_lands_with_its_trace(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
@@ -2057,9 +2057,9 @@ async fn an_end_users_held_trace_goes_whole_with_them(pool: PgPool) {
 }
 
 /// The hourly totals price their calls as the spans do — as reported, else
-/// at the project's own price — and count runs and failed runs.
+/// at the project's own price — and count traces and failed traces.
 #[sqlx::test]
-async fn the_hourly_totals_price_their_calls_and_count_runs(pool: PgPool) {
+async fn the_hourly_totals_price_their_calls_and_count_traces(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -2209,9 +2209,9 @@ async fn a_split_by_tool_names_tools_alone(pool: PgPool) {
 }
 
 /// A split by a tag, an end user or a session reads the spans: each call by
-/// its run's value — the run's own span's tag first, and a run begun before
+/// its trace's value — the agent span's tag first, and a trace begun before
 /// the window still its own — the ten that spent most named and the rest
-/// folded as one, a run carrying none apart, the window no longer than the
+/// folded as one, a trace carrying none apart, the window no longer than the
 /// plan keeps the spans.
 #[sqlx::test]
 async fn a_split_by_tag_user_or_session_reads_the_spans_within_retention(pool: PgPool) {
@@ -2388,9 +2388,9 @@ async fn a_split_by_tag_user_or_session_reads_the_spans_within_retention(pool: P
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-/// The trace list shows and sorts by each run's own spend, never scaled.
+/// The trace list shows and sorts by each trace's own spend, never scaled.
 #[sqlx::test]
-async fn the_list_shows_spend_each_run_its_own(pool: PgPool) {
+async fn the_list_shows_spend_each_trace_its_own(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -2444,7 +2444,7 @@ async fn the_list_shows_spend_each_run_its_own(pool: PgPool) {
         .chain(whole_rows)
         .chain(priced_rows)
         .collect();
-    ch.store.insert_spans(&rows).await.expect("the runs");
+    ch.store.insert_spans(&rows).await.expect("the traces");
 
     let (status, list) = door
         .lane("GET", "/traces?sort=spend&dir=desc", "admin-1", None)
@@ -2468,7 +2468,7 @@ async fn the_list_shows_spend_each_run_its_own(pool: PgPool) {
             (priced.to_string(), 2.0),
             (sampled.to_string(), 1.0)
         ],
-        "each run its own, the costliest first"
+        "each trace its own, the costliest first"
     );
 }
 
@@ -2652,7 +2652,7 @@ async fn a_read_key_reads_traces_content_metrics_and_incidents(pool: PgPool) {
     let (status, _) = door
         .read(&format!("/traces/{TRACE}"), "tm_other_project")
         .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "another project's run");
+    assert_eq!(status, StatusCode::NOT_FOUND, "another project's trace");
 
     for path in ["/traces", "/metrics", "/incidents"] {
         let (status, _) = door.read(path, KEY).await;
@@ -2956,7 +2956,7 @@ const TRACE_D: &str = "7bf92f3577b34da6a3ce929d0e0e4739";
 const SPAN_D: &str = "04f067aa0ba902bb";
 const SPAN_E: &str = "05f067aa0ba902bc";
 
-/// Whether the run is among the project's traces: read from the list, which
+/// Whether `run` is among the project's traces: read from the list, which
 /// opens no content, so waiting for a trace files no read.
 async fn found(door: &Door, run: &str) -> bool {
     let (status, list) = door.lane("GET", "/traces", "admin-1", None).await;
@@ -2974,7 +2974,7 @@ async fn found(door: &Door, run: &str) -> bool {
 /// ⚠ A trace is deleted by an admin alone: the request filed before anything
 /// goes, then its spans gone from every read and its content and bytes gone,
 /// a span it sends after dropped, and the receipt mailed; another trace
-/// stands, and a run not the project's files nothing.
+/// stands, and a trace not the project's files nothing.
 #[sqlx::test]
 async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
@@ -3052,7 +3052,7 @@ async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
         .await;
     assert!(
         !found(&door, TRACE).await,
-        "a span the run sends after is dropped"
+        "a span the trace sends after is dropped"
     );
     assert_eq!(door.kept_traces(&pool).await, [TRACE_B], "and its content");
     assert!(found(&door, TRACE_B).await, "another trace stands");
@@ -3102,7 +3102,7 @@ async fn an_end_user_is_erased_by_the_id_their_spans_carry(pool: PgPool) {
         "other",
     ))
     .await;
-    // A run of the session, unnamed there, that names another user elsewhere.
+    // A trace of the session, unnamed there, that names another user elsewhere.
     door.send(export_of(TRACE_D, SPAN_D, &[(session, "conv-1")], "turn"))
         .await;
     door.send(export_of(TRACE_D, SPAN_E, &[(user, "acme-44")], "tool"))
@@ -3262,8 +3262,8 @@ fn scored_export(trace: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-/// The application's evaluation events land as its spans' scores, the run's
-/// own span's the run's, each once however often its export is sent.
+/// The application's evaluation events land as its spans' scores, the agent
+/// span's the trace's, each once however often its export is sent.
 #[sqlx::test]
 async fn the_applications_evaluation_events_land_once_as_its_spans_scores(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
@@ -3392,8 +3392,8 @@ async fn two_scores_of_one_name_at_one_time_stay_two(pool: PgPool) {
     assert_eq!(versions, ["judge-1", "judge-2"], "{scores}");
 }
 
-/// The application's scores sent after their run ended land once under
-/// their own ids, a run's spans needing no lookup; one score breaking a
+/// The application's scores sent after their trace ended land once under
+/// their own ids, a trace's spans needing no lookup; one score breaking a
 /// score's rules refuses the body whole, and a GET is told to POST.
 #[sqlx::test]
 async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: PgPool) {
@@ -3450,7 +3450,7 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
     let (status, as_sent) = door
         .lane(
             "GET",
-            // Another run: a session's score names the nil run, which would match it.
+            // Another trace: a session's score names the nil trace, which would match it.
             &format!(
                 "/scores?trace_id={}&session_id=conv-1",
                 uuid::Uuid::new_v4()
@@ -3542,11 +3542,11 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
 }
 
 /// A member's comment on a score is content: kept sealed under the score's
-/// run where the project keeps content, opened with the run's content as its
+/// trace where the project keeps content, opened with the trace's content as its
 /// read, replaced by the next, taken back with the score, its bytes given
 /// back; refused on a session's score and where the project keeps none.
 #[sqlx::test]
-async fn a_scores_comment_is_kept_as_its_runs_content(pool: PgPool) {
+async fn a_scores_comment_is_kept_as_its_traces_content(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -3651,11 +3651,11 @@ async fn a_scores_comment_is_kept_as_its_runs_content(pool: PgPool) {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{answer}");
 }
 
-/// A member scores a run, a span and a session, a second score of one name
+/// A member scores a trace, a span and a session, a second score of one name
 /// replacing their first, takes one back, and may not take another's; each
 /// filed in the chain by its name, never its value.
 #[sqlx::test]
-async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
+async fn a_member_scores_a_trace_a_span_and_a_session_each_filed(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -3807,10 +3807,10 @@ async fn a_member_scores_a_run_a_span_and_a_session_each_filed(pool: PgPool) {
     );
 }
 
-/// A run's scores go with it, a project's with its purge, and every score
+/// A trace's scores go with it, a project's with its purge, and every score
 /// past retention with the spans, as the night's purge and a shorter one take them.
 #[sqlx::test]
-async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool) {
+async fn scores_leave_with_their_traces_their_project_and_their_days(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -3902,7 +3902,7 @@ async fn scores_leave_with_their_runs_their_project_and_their_days(pool: PgPool)
 }
 
 /// Another exporter's span's score waits with its span, and lands under its
-/// run once its trace is placed.
+/// trace once it is placed.
 #[sqlx::test]
 async fn another_exporters_score_lands_with_its_trace(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -3957,8 +3957,8 @@ async fn another_exporters_score_lands_with_its_trace(pool: PgPool) {
     assert_eq!(scores[0]["trace_id"], run.to_string());
 }
 
-/// The trace list answers each run's own scores by name and keeps only the
-/// runs a score's bounds admit.
+/// The trace list answers each trace's own scores by name and keeps only the
+/// traces a score's bounds admit.
 #[sqlx::test]
 async fn the_list_carries_its_scores_and_filters_by_one(pool: PgPool) {
     let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
@@ -4013,13 +4013,17 @@ async fn the_list_carries_its_scores_and_filters_by_one(pool: PgPool) {
         .iter()
         .filter_map(|t| t["trace_id"].as_str())
         .collect();
-    assert_eq!(runs, [other], "a run any score of the name admits: {high}");
+    assert_eq!(
+        runs,
+        [other],
+        "a trace any score of the name admits: {high}"
+    );
     let (status, _) = door
         .lane("GET", "/traces?score_min=0.6", "admin-1", None)
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "bounds name their score");
 
-    // Charted over the window: the score's mean on the runs the list admits.
+    // Charted over the window: the score's mean on the traces the list admits.
     let means = |histogram: &Value| -> Vec<f64> {
         histogram["bars"]
             .as_array()
@@ -4041,7 +4045,7 @@ async fn the_list_carries_its_scores_and_filters_by_one(pool: PgPool) {
     assert_eq!(
         means(&charted),
         [0.5],
-        "the admitted run's two scores, by when given: {charted}"
+        "the admitted trace's two scores, by when given: {charted}"
     );
     let (_, plain) = door.lane("GET", "/traces/histogram", "admin-1", None).await;
     assert!(

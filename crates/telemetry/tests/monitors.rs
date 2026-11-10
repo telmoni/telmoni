@@ -1,7 +1,7 @@
 //! Monitors through the module's own router and its loop, on a clock set by
 //! hand: any member makes, edits, pauses and deletes one, each change filed;
-//! and the loop judges each over the run starts and ends ClickHouse holds —
-//! a run on time, one late, one down and recovered, a failed run, a clock
+//! and the loop judges each over the trace starts and ends ClickHouse holds —
+//! a trace on time, one late, one down and recovered, a failed trace, a clock
 //! change in London, and a paused monitor told nothing.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -88,18 +88,18 @@ fn seated() -> (Arc<AuthStub>, OrganizationId, ProjectId) {
     (auth, organization, project)
 }
 
-/// A span of the agent's run `run`, of `kind`, started and received at
+/// A span of the agent's trace `trace`, of `kind`, started and received at
 /// `started`, ending at `ended`.
-fn of_run(
+fn of_trace(
     project: &ProjectId,
-    run: Uuid,
+    trace: Uuid,
     kind: SpanKind,
     started: DateTime<Utc>,
     ended: DateTime<Utc>,
     status: SpanStatus,
 ) -> SpanRow {
     SpanRow {
-        trace_id: run.simple().to_string(),
+        trace_id: trace.simple().to_string(),
         agent: AGENT.into(),
         span_id: format!("{:016x}", started.timestamp_micros()),
         started_at: started,
@@ -112,7 +112,7 @@ fn of_run(
 
 /// A trace's start, sent as it opens.
 fn opening(project: &ProjectId, started: DateTime<Utc>) -> SpanRow {
-    of_run(
+    of_trace(
         project,
         Uuid::new_v4(),
         SpanKind::TraceStart,
@@ -286,11 +286,11 @@ async fn a_member_makes_edits_pauses_and_deletes_a_monitor(pool: PgPool) {
     );
 }
 
-/// ⚠ A nightly run on time keeps it up; none a minute past due is late, past
+/// ⚠ A nightly trace on time keeps it up; none a minute past due is late, past
 /// its grace down, and the next start brings it up: one incident, opened at
 /// warning, raised to alert and resolved, each told once.
 #[sqlx::test]
-async fn a_run_on_time_one_late_and_one_down_and_recovered(pool: PgPool) {
+async fn a_trace_on_time_one_late_and_one_down_and_recovered(pool: PgPool) {
     let Some((ch, state, notices, organization, project)) = watched(&pool, module_path!()).await
     else {
         return;
@@ -358,10 +358,10 @@ async fn a_run_on_time_one_late_and_one_down_and_recovered(pool: PgPool) {
     );
 }
 
-/// ⚠ A run that ends in error makes it down, naming the run; a start alone
-/// leaves it down, and a run that ends well brings it up.
+/// ⚠ A trace that ends in error makes it down, naming the trace; a start alone
+/// leaves it down, and a trace that ends well brings it up.
 #[sqlx::test]
-async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
+async fn a_failed_trace_is_down_until_one_ends_well(pool: PgPool) {
     let Some((ch, state, notices, organization, project)) = watched(&pool, module_path!()).await
     else {
         return;
@@ -377,7 +377,7 @@ async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
     .await;
     let failed = Uuid::new_v4();
     ch.store
-        .insert_spans(&[of_run(
+        .insert_spans(&[of_trace(
             &project,
             failed,
             SpanKind::Agent,
@@ -412,7 +412,7 @@ async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
     );
 
     ch.store
-        .insert_spans(&[of_run(
+        .insert_spans(&[of_trace(
             &project,
             Uuid::new_v4(),
             SpanKind::Agent,
@@ -431,7 +431,7 @@ async fn a_failed_run_is_down_until_one_ends_well(pool: PgPool) {
 }
 
 /// ⚠ At 01:30 in London across the autumn change, the repeated 01:30 is not
-/// due again: the run of the first is the night's.
+/// due again: the trace of the first is the night's.
 #[sqlx::test]
 async fn a_clock_change_in_london_is_due_once(pool: PgPool) {
     let Some((ch, state, _, organization, project)) = watched(&pool, module_path!()).await else {

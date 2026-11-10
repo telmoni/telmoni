@@ -355,8 +355,7 @@ describe("RealtimeListener - membership:changed", () => {
 });
 
 // Ingest's nudge: a page reading the project's spans is drawn again — the
-// trace page for its own trace alone, the Traces list counting instead unless
-// it is empty — and nothing else moves.
+// trace page for its own trace alone — and nothing else moves.
 describe("RealtimeListener - spans:ingested", () => {
   const nudge = (projectId: string, traces: string[] = ["trace_1"], more = false) =>
     MockEventSource.instances[0]!.emit("spans:ingested", {

@@ -1,4 +1,4 @@
-//! Members: who else may see an organization's runs, and at what role.
+//! Members: who else may see an organization's traces, and at what role.
 #![expect(
     clippy::indexing_slicing,
     reason = "a panicking helper is a failing test"

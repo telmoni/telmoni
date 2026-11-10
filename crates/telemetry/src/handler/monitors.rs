@@ -194,7 +194,7 @@ pub async fn get_monitor(
 }
 
 /// `POST /internal/v1/telemetry/monitors` — a new monitor of one of the
-/// project's agents, `new` until that agent's next run; the project's
+/// project's agents, `new` until that agent's next trace; the project's
 /// settings row, which the purges find its monitors by, made with it.
 pub async fn create_monitor(
     State(state): State<Arc<AppState>>,
@@ -369,7 +369,7 @@ pub async fn pause_monitor(
 }
 
 /// `POST /internal/v1/telemetry/monitors/{id}/resume` — one of the project's
-/// paused monitors `new` again, its next run due after its agent's next start.
+/// paused monitors `new` again, its next trace due after its agent's next start.
 pub async fn resume_monitor(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
