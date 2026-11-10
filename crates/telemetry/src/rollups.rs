@@ -69,6 +69,7 @@ const METRICS_SQL: &str = concat!(
     "toUInt64(sum(h.output_tokens)) AS output_tokens, ",
     "toUInt64(sum(h.cache_read_input_tokens)) AS cache_read_input_tokens, ",
     "toUInt64(sum(h.cache_write_input_tokens)) AS cache_write_input_tokens, ",
+    "toUInt64(sum(h.reasoning_output_tokens)) AS reasoning_output_tokens, ",
     "sum((",
     crate::spend::rollup_spent_of!(),
     ") / h.sample_rate) AS spend, ",
@@ -103,7 +104,8 @@ const SPANS_METRICS_SQL: &str = concat!(
     "toUInt64(sum(n_spans)) AS spans, toUInt64(sum(fails)) AS failed, toUInt64(sum(n_traces)) AS traces, ",
     "toUInt64(sum(n_failed_traces)) AS failed_traces, toUInt64(sum(in_tokens)) AS input_tokens, ",
     "toUInt64(sum(out_tokens)) AS output_tokens, toUInt64(sum(cache_read)) AS cache_read_input_tokens, ",
-    "toUInt64(sum(cache_write)) AS cache_write_input_tokens, sum(spent) AS spend, ",
+    "toUInt64(sum(cache_write)) AS cache_write_input_tokens, ",
+    "toUInt64(sum(reasoning)) AS reasoning_output_tokens, sum(spent) AS spend, ",
     "sum(ms_sum) AS duration_ms_sum, ",
     "CAST(quantilesTDigestMerge(0.5, 0.9, 0.99)(ms_digest) AS Array(Float64)) AS quantiles, ",
     "CAST(quantilesTDigestMerge(0.5, 0.95, 0.99)(trace_ms_digest) AS Array(Float64)) AS trace_quantiles ",
@@ -117,7 +119,7 @@ const SPANS_METRICS_SQL: &str = concat!(
     "count() AS n_spans, countIf(s.status = 'error') AS fails, countIf(s.kind = 'agent') AS n_traces, ",
     "countIf(s.kind = 'agent' AND s.status = 'error') AS n_failed_traces, sum(s.input_tokens) AS in_tokens, ",
     "sum(s.output_tokens) AS out_tokens, sum(s.cache_read_input_tokens) AS cache_read, ",
-    "sum(s.cache_write_input_tokens) AS cache_write, sum((",
+    "sum(s.cache_write_input_tokens) AS cache_write, sum(s.reasoning_output_tokens) AS reasoning, sum((",
     crate::spend::spent_of!(),
     ") / ifNull(s.sample_rate, 1)) AS spent, ",
     "sum(",
@@ -157,6 +159,7 @@ struct MetricRow {
     output_tokens: u64,
     cache_read_input_tokens: u64,
     cache_write_input_tokens: u64,
+    reasoning_output_tokens: u64,
     spend: f64,
     duration_ms_sum: f64,
     quantiles: Vec<f64>,
@@ -200,6 +203,7 @@ pub struct MetricPoint {
     pub output_tokens: u64,
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
+    pub reasoning_output_tokens: u64,
     /// What its model calls cost, in US dollars: each as reported, else its
     /// tokens at the project's price or the table's, scaled by its trace's
     /// sample rate.
@@ -390,6 +394,7 @@ fn point(row: MetricRow, grouped: bool) -> MetricPoint {
         output_tokens: row.output_tokens,
         cache_read_input_tokens: row.cache_read_input_tokens,
         cache_write_input_tokens: row.cache_write_input_tokens,
+        reasoning_output_tokens: row.reasoning_output_tokens,
         spend: row.spend,
         duration_ms: Durations {
             avg,

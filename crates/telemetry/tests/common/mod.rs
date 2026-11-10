@@ -1380,6 +1380,7 @@ pub(crate) fn received(
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
         cost: None,
         time_to_first_token: None,
         user_id: String::new(),

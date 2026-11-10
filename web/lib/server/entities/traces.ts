@@ -87,6 +87,17 @@ const HistogramBarSchema = z.object({
   cancelled: z.number(),
   faults: z.partialRecord(z.enum(SpanFault), z.number().int().nonnegative()),
   tokens: z.number(),
+  /** Its traces' model calls' tokens, by the model that spent them. */
+  tokens_by_model: z.record(
+    z.string(),
+    z.object({
+      input_tokens: z.number(),
+      output_tokens: z.number(),
+      cache_read_input_tokens: z.number(),
+      cache_write_input_tokens: z.number(),
+      reasoning_output_tokens: z.number(),
+    }),
+  ),
   /** What its traces' model calls cost, each trace its own. */
   spend: z.number(),
   duration_p50_ms: z.number().nullable(),

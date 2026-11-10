@@ -58,6 +58,7 @@ const point = (spend: number) => ({
   output_tokens: 5,
   cache_read_input_tokens: 0,
   cache_write_input_tokens: 0,
+  reasoning_output_tokens: 0,
   spend,
   trace_duration_ms: { p50: 1, p95: 2, p99: 3 },
 });
@@ -118,8 +119,9 @@ describe("DashboardsPage", () => {
     const charts = screen.getByTestId("charts");
     expect(charts.dataset.bars).toBe("1");
     expect(charts.dataset.firstToken).toBe("1");
-    expect(fetchRollups).toHaveBeenCalledTimes(1);
+    expect(fetchRollups).toHaveBeenCalledTimes(2);
     expect(fetchRollups).toHaveBeenCalledWith("project_1", 7);
+    expect(fetchRollups).toHaveBeenCalledWith("project_1", 7, "model");
 
     const budgets = within(screen.getByRole("region", { name: "Budgets this month" }));
     expect(budgets.getByText("Monthly budget")).toBeInTheDocument();

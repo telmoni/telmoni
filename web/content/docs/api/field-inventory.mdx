@@ -79,8 +79,9 @@ keeps for it alone. It is kept as any tag is, and so are the
 | `gen_ai.provider.name` | a model call | the column `provider` | any | 1 to 128 characters, as the conventions spell it: `openai`, `anthropic`, `gcp.vertex_ai`, `aws.bedrock` |
 | `gen_ai.usage.input_tokens` | a model call | the column `input_tokens` | any | a whole number, 0 or more: every input token, the cache's reads and writes among them |
 | `gen_ai.usage.output_tokens` | a model call | the column `output_tokens` | any | a whole number, 0 or more: every output token, reasoning among them |
+| `gen_ai.usage.reasoning.output_tokens` | a model call | the column `reasoning_output_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cache_read.input_tokens` | a model call | the column `cache_read_input_tokens` | any | a whole number, 0 or more |
-| `gen_ai.usage.cache_write.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
+| `gen_ai.usage.cache_creation.input_tokens` | a model call | the column `cache_write_input_tokens` | any | a whole number, 0 or more |
 | `gen_ai.usage.cost` | a model call | the column `cost` | any | a number, 0 or more: what the call cost in US dollars, as reported; a call without one is [priced by its tokens](/docs/api/ingest#what-a-call-cost) |
 | `gen_ai.response.time_to_first_chunk` | a model call | the column `time_to_first_token` | any | a number of seconds, 0 or more: from the call's request to its answer's first chunk |
 | `gen_ai.conversation.id` | any span | the column `session_id`, as its HMAC-SHA-256 under a key of the project's own, the first 16 bytes in hex | any | 1 to 200 characters |
@@ -102,7 +103,6 @@ current ones.
 | `gen_ai.system` | a model call | read as `gen_ai.provider.name` | any | a name the conventions replaced, read as the current one |
 | `gen_ai.usage.prompt_tokens` | a model call | read as `gen_ai.usage.input_tokens` | any | a name the conventions replaced, read as the current one |
 | `gen_ai.usage.completion_tokens` | a model call | read as `gen_ai.usage.output_tokens` | any | a name the conventions replaced, read as the current one |
-| `gen_ai.usage.cache_creation.input_tokens` | a model call | read as `gen_ai.usage.cache_write.input_tokens` | any | a name the conventions replaced, read as the current one |
 
 ## Kept under their own names
 

@@ -67,6 +67,8 @@ export default async function TracesPage({
     </p>
   );
   const knownTags = facets.kind === "ok" ? facets.facets.tag.values.map((v) => v.value) : [];
+  // The tokens chart's picker offers the window's models, with those its bars name.
+  const models = facets.kind === "ok" ? facets.facets.model.values.map((v) => v.value) : [];
   // An empty, unfiltered window is a first run only where all the plan keeps is empty too.
   const ever =
     access.kind === "ok" && access.list.total === 0 && activeFilters(query).length === 0
@@ -182,7 +184,7 @@ export default async function TracesPage({
           ui.display === "chart" ? (
             histogram.kind === "ok" ? (
               <>
-                <TraceCharts histogram={histogram.histogram} marks={marks} />
+                <TraceCharts histogram={histogram.histogram} marks={marks} models={models} />
                 {unmarked}
               </>
             ) : (
@@ -194,7 +196,7 @@ export default async function TracesPage({
           <>
             {histogram.kind === "ok" && (
               <>
-                <TraceHistogramStrip histogram={histogram.histogram} marks={marks} />
+                <TraceHistogramStrip histogram={histogram.histogram} marks={marks} models={models} />
                 {unmarked}
               </>
             )}

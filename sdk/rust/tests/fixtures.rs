@@ -166,6 +166,7 @@ fn perform(harness: &Harness, scenario: &Value) -> Outcome {
             output_tokens: Some(int(usage, "output_tokens")?),
             cache_read_input_tokens: Some(int(usage, "cache_read_input_tokens")?),
             cache_write_input_tokens: Some(int(usage, "cache_write_input_tokens")?),
+            reasoning_output_tokens: Some(int(usage, "reasoning_output_tokens")?),
             cost: Some(field(usage, "cost")?.as_f64().ok_or("cost")?),
         }),
         output_messages: Some(field(call_spec, "output_messages")?.clone().into()),

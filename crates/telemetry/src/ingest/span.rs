@@ -354,6 +354,7 @@ pub fn map(
         output_tokens: fields.output_tokens.unwrap_or_default(),
         cache_read_input_tokens: fields.cache_read_input_tokens.unwrap_or_default(),
         cache_write_input_tokens: fields.cache_write_input_tokens.unwrap_or_default(),
+        reasoning_output_tokens: fields.reasoning_output_tokens.unwrap_or_default(),
         cost: fields.cost,
         time_to_first_token: fields.time_to_first_token,
         user_id,
@@ -420,6 +421,7 @@ struct Fields {
     output_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
     cache_write_input_tokens: Option<u64>,
+    reasoning_output_tokens: Option<u64>,
     cost: Option<f64>,
     time_to_first_token: Option<f64>,
     user_id: Option<String>,
@@ -515,9 +517,13 @@ impl Fields {
                 self.cache_read_input_tokens =
                     Some(count(value, contract::CACHE_READ_INPUT_TOKENS)?);
             }
-            contract::CACHE_WRITE_INPUT_TOKENS => {
+            contract::CACHE_CREATION_INPUT_TOKENS => {
                 self.cache_write_input_tokens =
-                    Some(count(value, contract::CACHE_WRITE_INPUT_TOKENS)?);
+                    Some(count(value, contract::CACHE_CREATION_INPUT_TOKENS)?);
+            }
+            contract::REASONING_OUTPUT_TOKENS => {
+                self.reasoning_output_tokens =
+                    Some(count(value, contract::REASONING_OUTPUT_TOKENS)?);
             }
             contract::COST => {
                 let cost = number(value)
@@ -939,10 +945,7 @@ mod tests {
                 kv(contract::PROVIDER, s("anthropic")),
                 kv(contract::INPUT_TOKENS, Value::IntValue(1_200)),
                 kv(contract::OUTPUT_TOKENS, Value::IntValue(300)),
-                kv(
-                    "gen_ai.usage.cache_creation.input_tokens",
-                    Value::IntValue(40),
-                ),
+                kv(contract::CACHE_CREATION_INPUT_TOKENS, Value::IntValue(40)),
                 kv(contract::COST, Value::DoubleValue(0.0081)),
                 kv(
                     "gen_ai.response.time_to_first_chunk",
@@ -1042,6 +1045,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn reasoning_is_numeric_metadata_in_every_content_mode() {
+        let project = ProjectId::new();
+        let hash = |id: &str| id.to_owned();
+        for keep_content in [false, true] {
+            let context = Context {
+                keep_content,
+                ..context(&project, &[], &hash)
+            };
+            let mut span = call();
+            span.attributes
+                .push(kv(contract::REASONING_OUTPUT_TOKENS, Value::IntValue(50)));
+            let (row, _) = map(&span, &context, &mut Drops::default()).expect("kept");
+            assert_eq!(row.reasoning_output_tokens, 50);
+            assert_eq!(row.output_tokens, 300);
+            let mut held = serde_json::to_value(&row).expect("held JSON");
+            held.as_object_mut()
+                .expect("row")
+                .remove("reasoning_output_tokens");
+            assert_eq!(
+                serde_json::from_value::<SpanRow>(held)
+                    .expect("an older held row")
+                    .reasoning_output_tokens,
+                0
+            );
+            for value in [Value::IntValue(-1), Value::DoubleValue(1.5), s("50")] {
+                span.attributes.last_mut().expect("reasoning").value =
+                    Some(AnyValue { value: Some(value) });
+                assert!(map(&span, &context, &mut Drops::default()).is_err());
+            }
+        }
+    }
+
     /// A span records each inventory row it and its resource arrived with,
     /// once, what it dropped among them.
     #[test]
@@ -1062,7 +1098,7 @@ mod tests {
         let (row, _) = map(&call(), &on, &mut Drops::default()).expect("kept");
         for sent in [
             contract::AGENT,
-            "gen_ai.usage.cache_creation.input_tokens",
+            contract::CACHE_CREATION_INPUT_TOKENS,
             contract::TAG_FAMILY,
             "gen_ai.input.messages",
             "user.email",
@@ -1108,7 +1144,7 @@ mod tests {
                 row.cache_write_input_tokens
             ),
             (1_200, 300, 40),
-            "the replaced cache name reads as the current one"
+            "the conventions' cache creation count lands directly"
         );
         assert_eq!(row.cost, Some(0.0081));
         assert_eq!(row.time_to_first_token, Some(0.35));

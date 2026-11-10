@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import {
@@ -20,7 +20,16 @@ import {
 } from "@/components/ui/select";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
 import { formatScoreValue } from "@/lib/scores";
-import { FAULT_LABEL, formatCost, formatCount, formatDuration, type ChangeMark } from "@/lib/traces";
+import {
+  FAULT_LABEL,
+  formatCacheShare,
+  formatCost,
+  formatCount,
+  formatDuration,
+  tokenBreakdown,
+  type ChangeMark,
+  type TokenBar,
+} from "@/lib/traces";
 import { SpanFault } from "@/lib/types/enums";
 import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
@@ -73,9 +82,6 @@ const FAULTS: ChartConfig = Object.fromEntries(
     },
   ]),
 );
-const TOKENS: ChartConfig = {
-  tokens: { label: "Tokens", color: "var(--muted-foreground)" },
-};
 const COST: ChartConfig = {
   cost: { label: "Cost", color: "var(--muted-foreground)" },
 };
@@ -86,34 +92,82 @@ const DURATION: ChartConfig = {
   p50: { label: "Median", color: "var(--muted-foreground)" },
   p95: { label: "95th percentile", color: "var(--foreground)" },
 };
+// Five steps of the ink, darkest first, so the stack reads in either theme.
+const ink = (share: number) => `color-mix(in oklab, var(--foreground) ${share}%, var(--background))`;
+const TOKEN_SEGMENTS: ChartConfig = {
+  input: { label: "Input", color: ink(100) },
+  cacheRead: { label: "Cache read", color: ink(80) },
+  cacheWrite: { label: "Cache write", color: ink(60) },
+  output: { label: "Output", color: ink(40) },
+  reasoning: { label: "Reasoning", color: ink(20) },
+};
 
 /** A bar's start as an axis names it: its hour on a day's chart, and its
  *  day on a longer one, whose hours would all read midnight where the axis
  *  has room for a label a day. */
-function tickLabel(iso: string, days: number): string {
+function tickLabel(iso: string, days: number, timeZone?: "UTC"): string {
   const at = new Date(iso);
   return days <= 1
     ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : at.toLocaleDateString([], { month: "short", day: "numeric" });
+    : at.toLocaleDateString([], { month: "short", day: "numeric", timeZone });
 }
 
 /** A bar's start as its tooltip names it. */
-function barLabel(iso: string, seconds: number): string {
+function barLabel(iso: string, seconds: number, timeZone?: "UTC"): string {
   const at = new Date(iso);
   return seconds < 86_400
     ? at.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    : at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+    : at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", timeZone });
+}
+
+/** A bar's tooltip label: its start, and under it each change that began in it. */
+function markedLabel(iso: string, seconds: number, marks: readonly ChangeMark[], timeZone?: "UTC") {
+  const changes = marks.find((mark) => mark.at === iso)?.changes;
+  if (!changes) return barLabel(iso, seconds, timeZone);
+  return (
+    <div className="grid max-w-80 gap-1">
+      {barLabel(iso, seconds, timeZone)}
+      {changes.map((line, i) => (
+        <div key={i} className="flex gap-2 font-normal">
+          <span className="shrink-0 border-l border-dashed border-foreground" aria-hidden="true" />
+          <span className="min-w-0 wrap-break-word">{line}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A tooltip's row: the series' colour and label, and its value as the chart's axis writes it. */
+function tooltipRow(
+  config: ChartConfig,
+  format: (value: number) => string,
+): NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]> {
+  return function Row(raw, name, item) {
+    return (
+      <div className="flex w-full items-center gap-2">
+        <span className="size-2.5 shrink-0 rounded-xs" style={{ background: item.color ?? item.payload?.fill }} />
+        <span className="text-muted-foreground">{config[String(name)]?.label ?? name}</span>
+        <span className="ml-auto tabular-nums">{typeof raw === "number" ? format(raw) : "—"}</span>
+      </div>
+    );
+  };
+}
+
+// Dashed apart from the solid series, and thin, so a bar it crosses stays whole.
+function changeLines(marks: readonly ChangeMark[]) {
+  return marks.map((mark) => (
+    <ReferenceLine key={mark.at} x={mark.at} stroke="var(--foreground)" strokeDasharray="3 3" />
+  ));
 }
 
 /** The histogram's bars as the charts read them, the percentiles `metric`'s. */
-function rows(histogram: TraceHistogram, metric: Metric) {
+function rows(histogram: TraceHistogram, metric: Exclude<Metric, "tokens">) {
   return histogram.bars.map((bar) => ({
     at: bar.at,
     ok: bar.ok,
     error: bar.error,
     cancelled: bar.cancelled,
     ...Object.fromEntries(Object.values(SpanFault).map((fault) => [fault, bar.faults[fault] ?? 0])),
-    tokens: bar.tokens,
     cost: bar.spend,
     p50: metric === "first_token" ? bar.time_to_first_token_p50_ms : bar.duration_p50_ms,
     p95: metric === "first_token" ? bar.time_to_first_token_p95_ms : bar.duration_p95_ms,
@@ -131,7 +185,7 @@ function MetricChart({
 }: {
   histogram: TraceHistogram;
   marks: readonly ChangeMark[];
-  metric: Metric;
+  metric: Exclude<Metric, "tokens">;
   className?: string;
   legend?: boolean;
 }) {
@@ -140,7 +194,6 @@ function MetricChart({
 
   const data = rows(histogram, metric);
   const seconds = histogram.bucket_seconds;
-  const changed = new Map(marks.map((mark) => [mark.at, mark.changes]));
   const lines =
     metric === "duration" || metric === "first_token" || metric === "score" || metric === "faults";
   // Only the classes the window holds: a class nobody met is no line and no legend entry.
@@ -152,8 +205,6 @@ function MetricChart({
       ? TRACES
       : metric === "faults"
         ? Object.fromEntries(faults.map((fault) => [fault, FAULTS[fault]!]))
-        : metric === "tokens"
-        ? TOKENS
         : metric === "cost"
           ? COST
           : metric === "score"
@@ -193,32 +244,9 @@ function MetricChart({
           labelFormatter={(_, payload) => {
             const iso = payload?.[0]?.payload?.at;
             if (typeof iso !== "string") return null;
-            const changes = changed.get(iso);
-            if (!changes) return barLabel(iso, seconds);
-            return (
-              <div className="grid max-w-80 gap-1">
-                {barLabel(iso, seconds)}
-                {changes.map((line, i) => (
-                  <div key={i} className="flex gap-2 font-normal">
-                    <span className="shrink-0 border-l border-dashed border-foreground" aria-hidden="true" />
-                    <span className="min-w-0 wrap-break-word">{line}</span>
-                  </div>
-                ))}
-              </div>
-            );
+            return markedLabel(iso, seconds, marks);
           }}
-          formatter={(raw, name, item) => (
-            <div className="flex w-full items-center gap-2">
-              <span
-                className="size-2.5 shrink-0 rounded-xs"
-                style={{ background: item.color ?? item.payload?.fill }}
-              />
-              <span className="text-muted-foreground">{config[String(name)]?.label ?? name}</span>
-              <span className="ml-auto tabular-nums">
-                {typeof raw === "number" ? value(raw) : "—"}
-              </span>
-            </div>
-          )}
+          formatter={tooltipRow(config, value)}
         />
       }
     />
@@ -235,11 +263,6 @@ function MetricChart({
       tickFormatter={(v: number) => value(v)}
     />
   );
-  // Dashed apart from the solid series, and thin, so a bar it crosses stays whole.
-  const changeLines = marks.map((mark) => (
-    <ReferenceLine key={mark.at} x={mark.at} stroke="var(--foreground)" strokeDasharray="3 3" />
-  ));
-
   return (
     <ChartContainer config={config} className={cn("aspect-auto w-full", className)}>
       {lines ? (
@@ -271,7 +294,7 @@ function MetricChart({
               <Line dataKey="p95" type="monotone" stroke="var(--color-p95)" strokeWidth={1.5} dot={false} connectNulls={false} />
             </>
           )}
-          {changeLines}
+          {changeLines(marks)}
         </LineChart>
       ) : (
         <BarChart data={data} margin={{ left: 0, right: 8, top: 4 }}>
@@ -280,8 +303,8 @@ function MetricChart({
           {yAxis}
           {tooltip}
           {legend && <ChartLegend content={<ChartLegendContent />} />}
-          {metric === "tokens" || metric === "cost" ? (
-            <Bar dataKey={metric} fill={`var(--color-${metric})`} radius={2} />
+          {metric === "cost" ? (
+            <Bar dataKey="cost" fill="var(--color-cost)" radius={2} />
           ) : (
             <>
               <Bar dataKey="ok" stackId="traces" fill="var(--color-ok)" />
@@ -289,7 +312,7 @@ function MetricChart({
               <Bar dataKey="error" stackId="traces" fill="var(--color-error)" radius={[2, 2, 0, 0]} />
             </>
           )}
-          {changeLines}
+          {changeLines(marks)}
         </BarChart>
       )}
     </ChartContainer>
@@ -303,9 +326,11 @@ function MetricChart({
 export function TraceHistogramStrip({
   histogram,
   marks,
+  models,
 }: {
   histogram: TraceHistogram;
   marks: readonly ChangeMark[];
+  models?: readonly string[];
 }) {
   const [picked, setMetric] = useState<Metric>("traces");
   // A score picked, then its filter cleared, falls back to the traces.
@@ -333,7 +358,18 @@ export function TraceHistogramStrip({
         </Select>
       </div>
       {metric === "faults" && <p className="text-muted-foreground">Traces containing each fault; one trace may appear in several categories.</p>}
-      <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-28" legend={metric === "faults"} />
+      {metric === "tokens" ? (
+        <TokenChart
+          bars={histogram.bars}
+          models={models}
+          days={histogram.days}
+          bucketSeconds={histogram.bucket_seconds}
+          marks={marks}
+          className="h-28"
+        />
+      ) : (
+        <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-28" legend={metric === "faults"} />
+      )}
     </div>
   );
 }
@@ -345,9 +381,11 @@ export function TraceHistogramStrip({
 export function TraceCharts({
   histogram,
   marks,
+  models,
 }: {
   histogram: TraceHistogram;
   marks: readonly ChangeMark[];
+  models?: readonly string[];
 }) {
   return (
     <div className="grid gap-page lg:grid-cols-2">
@@ -362,9 +400,130 @@ export function TraceCharts({
             {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
           </h2>
           {metric === "faults" && <p className="text-muted-foreground">Traces containing each fault; categories can overlap.</p>}
-          <MetricChart histogram={histogram} marks={marks} metric={metric} className="h-56" legend={metric !== "tokens" && metric !== "cost"} />
+          {metric === "tokens" ? (
+            <TokenChart
+              bars={histogram.bars}
+              models={models}
+              days={histogram.days}
+              bucketSeconds={histogram.bucket_seconds}
+              marks={marks}
+              className="h-56"
+            />
+          ) : (
+            <MetricChart
+              histogram={histogram}
+              marks={marks}
+              metric={metric}
+              className="h-56"
+              legend={metric !== "cost"}
+            />
+          )}
         </div>
       ))}
+    </div>
+  );
+}
+
+const ALL_MODELS = "all";
+
+// The tokens as five, stacked: input no cache served, the cache's reads and
+// writes, output and reasoning, of every model or the one picked, with the
+// share of input the cache answered beside them. One model at a time, since
+// five segments a model would be read by nobody.
+export function TokenChart({
+  bars,
+  days,
+  bucketSeconds = days <= 1 ? 3_600 : 86_400,
+  marks = [],
+  models: listed = [],
+  timeZone,
+  className,
+}: {
+  bars: readonly TokenBar[];
+  days: number;
+  bucketSeconds?: number;
+  marks?: readonly ChangeMark[];
+  /** Models to offer beside those the bars name. */
+  models?: readonly string[];
+  /** Set where a day's bar starts on the UTC day, as the hourly totals' do. */
+  timeZone?: "UTC";
+  className?: string;
+}) {
+  const inBrowser = useInBrowser();
+  const [picked, setPicked] = useState(ALL_MODELS);
+  const models = [...new Set([...listed, ...bars.flatMap((bar) => Object.keys(bar.tokens_by_model))])].sort();
+  // Prefixed, so a model named as the whole is still its own choice; one that left the window falls back.
+  const choice = (model: string) => `model:${model}`;
+  const selected = models.some((model) => choice(model) === picked) ? picked : ALL_MODELS;
+  const countsOf = (bar: TokenBar) =>
+    Object.entries(bar.tokens_by_model)
+      .filter(([model]) => selected === ALL_MODELS || choice(model) === selected)
+      .map(([, counts]) => counts);
+  const data = bars.map((bar) => ({ at: bar.at, ...tokenBreakdown(countsOf(bar)) }));
+  const totals = tokenBreakdown(bars.flatMap(countsOf));
+  const share = formatCacheShare(totals.cacheShare);
+
+  return (
+    <div className="grid min-w-0 gap-gutter">
+      <div className="flex flex-wrap items-center gap-gutter">
+        {/* One model, or none named, leaves nothing to pick between. */}
+        {models.length > 1 && (
+          <Select value={selected} onValueChange={setPicked}>
+            <SelectTrigger aria-label="Token model">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="start">
+              <SelectItem value={ALL_MODELS}>All models</SelectItem>
+              {models.map((model) => (
+                <SelectItem key={model} value={choice(model)}>
+                  {model || "No model"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <span className="text-muted-foreground tabular-nums">Cache share {share}</span>
+      </div>
+      <p className="sr-only">
+        {formatCount(totals.input)} input, {formatCount(totals.cacheRead)} cache read,{" "}
+        {formatCount(totals.cacheWrite)} cache write, {formatCount(totals.output)} output and{" "}
+        {formatCount(totals.reasoning)} reasoning tokens. Cache share {share}.
+      </p>
+      {inBrowser ? (
+        <ChartContainer config={TOKEN_SEGMENTS} className={cn("aspect-auto w-full", className)}>
+          <BarChart data={data} margin={{ left: 0, right: 8, top: 4 }}>
+            <CartesianGrid vertical={false} />
+            <XAxis
+              dataKey="at"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={6}
+              minTickGap={24}
+              tickFormatter={(iso: string) => tickLabel(iso, days, timeZone)}
+            />
+            <YAxis width="auto" tickLine={false} axisLine={false} allowDecimals={false} tickFormatter={formatCount} />
+            <ChartTooltip
+              cursor={{ fillOpacity: 0.5 }}
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(_, payload) => {
+                    const iso = payload?.[0]?.payload?.at;
+                    return typeof iso === "string" ? markedLabel(iso, bucketSeconds, marks, timeZone) : null;
+                  }}
+                  formatter={tooltipRow(TOKEN_SEGMENTS, formatCount)}
+                />
+              }
+            />
+            <ChartLegend content={<ChartLegendContent />} />
+            {Object.keys(TOKEN_SEGMENTS).map((segment) => (
+              <Bar key={segment} dataKey={segment} stackId="tokens" fill={`var(--color-${segment})`} />
+            ))}
+            {changeLines(marks)}
+          </BarChart>
+        </ChartContainer>
+      ) : (
+        <div className={className} aria-hidden="true" />
+      )}
     </div>
   );
 }

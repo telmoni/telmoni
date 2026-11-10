@@ -53,8 +53,9 @@ pub(crate) const REQUEST_MODEL: &str = "gen_ai.request.model";
 pub(crate) const PROVIDER: &str = "gen_ai.provider.name";
 pub(crate) const INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
 pub(crate) const OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
+pub(crate) const REASONING_OUTPUT_TOKENS: &str = "gen_ai.usage.reasoning.output_tokens";
 pub(crate) const CACHE_READ_INPUT_TOKENS: &str = "gen_ai.usage.cache_read.input_tokens";
-pub(crate) const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_tokens";
+pub(crate) const CACHE_CREATION_INPUT_TOKENS: &str = "gen_ai.usage.cache_creation.input_tokens";
 /// What the call cost in US dollars, as reported: Langfuse's name, since the
 /// conventions have none.
 pub(crate) const COST: &str = "gen_ai.usage.cost";

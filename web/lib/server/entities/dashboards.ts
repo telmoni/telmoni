@@ -16,6 +16,9 @@ const PointSchema = z.object({
   output_tokens: z.number(),
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
+  reasoning_output_tokens: z.number(),
+  value: z.string().optional(),
+  others: z.boolean().optional(),
   spend: z.number(),
   trace_duration_ms: z.object({
     p50: z.number().nullable(),
@@ -41,9 +44,12 @@ export type RollupsAccess =
   | { kind: "unavailable" };
 
 /** The project's hourly totals over the last `days`, by the hour for a day
- *  and by the day for longer. */
-export const fetchRollups = cache(async (projectId: string, days: number): Promise<RollupsAccess> => {
-  const query = new URLSearchParams({ days: String(days), step: days <= 1 ? "hour" : "day" });
-  const read = await readLane("fetchRollups", projectId, `/rollups?${query}`, RollupsSchema);
-  return read.kind === "ok" ? { kind: "ok", rollups: read.value } : read;
-});
+ *  and by the day for longer, and by model where asked. */
+export const fetchRollups = cache(
+  async (projectId: string, days: number, group?: typeof MetricsGroup.Model): Promise<RollupsAccess> => {
+    const query = new URLSearchParams({ days: String(days), step: days <= 1 ? "hour" : "day" });
+    if (group) query.set("group", group);
+    const read = await readLane("fetchRollups", projectId, `/rollups?${query}`, RollupsSchema);
+    return read.kind === "ok" ? { kind: "ok", rollups: read.value } : read;
+  },
+);

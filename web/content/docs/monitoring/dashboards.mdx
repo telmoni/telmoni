@@ -12,7 +12,7 @@ whatever it keeps of the spans:
 | Chart | What it draws |
 |---|---|
 | Spend | What the model calls cost, each as it reported, else its tokens at the project's own price or the price table's ([What a call cost](/docs/api/ingest#what-a-call-cost)), scaled by its trace's [sample rate](/docs/api/ingest#what-is-dropped-at-the-door) where a plan sampled it |
-| Tokens | The model calls' input and output tokens |
+| Tokens | Five exclusive segments: input, cache read, cache write, output and reasoning, for all models or the model the picker selects |
 | Traces | The traces, each in the hour its agent's own span arrived, those that ended well and those that failed |
 | Latency | The traces' durations at the median, the 95th and the 99th percentile |
 | Time to first token | How soon the traces' first model calls began to answer, at the median and the 95th percentile, read from the spans, which alone keep it, so within the project's retention |
@@ -22,6 +22,16 @@ what the month had spent of it when the budget last read it, or **Not read
 yet** for one that has not.
 
 Spend counts every model call the project's spans hold.
+
+The Tokens chart subtracts cache reads and writes from the input segment and
+reasoning from the output segment; the five segments sum to inclusive input
+plus output for consistent provider counts. Subtraction stops at zero if the
+reported subsets exceed their totals. **Cache share** is the window's cache-read
+tokens divided by its input tokens, never an average of call percentages;
+it is **—** where no input was reported. Cache writes are not cache hits.
+The model picker narrows both the segments and this share, and is drawn
+where the window holds more than one model. Where the window's models cannot
+be read whole, the chart draws every model's tokens together, without it.
 
 The same totals, by the hour or the day and split, are
 [`GET /v1/metrics`](/docs/api/reference#get-v1metrics).

@@ -338,11 +338,13 @@ func ConfigFromEnv() Config {
 // from 0 up is sent, a zero among them. Cost is what the call cost in US
 // dollars, where the provider reports it: nil sends none, one below 0 or not
 // finite is left off with one warning, and a call without one is priced by
-// its tokens.
+// its tokens. OpenAI's reasoning is already in completion tokens; Gemini's
+// output is candidates plus thoughts. Anthropic reports no separate reasoning count.
 type Usage struct {
 	InputTokens           int
 	OutputTokens          int
 	CacheReadInputTokens  int
 	CacheWriteInputTokens int
+	ReasoningOutputTokens int
 	Cost                  *float64
 }

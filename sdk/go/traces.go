@@ -851,7 +851,7 @@ func (m *ModelCall) hold(attrs []attribute.KeyValue, answeredAs string, usage []
 			m.held.output = int(kv.Value.AsInt64())
 		case attrCacheReadInputTokens:
 			m.held.cacheRead = int(kv.Value.AsInt64())
-		case attrCacheWriteInputTokens:
+		case attrCacheCreationInputTokens:
 			m.held.cacheWrite = int(kv.Value.AsInt64())
 		case attrCost:
 			cost := kv.Value.AsFloat64()
@@ -952,7 +952,8 @@ func usageAttributes(u *Usage, warn func(name string)) []attribute.KeyValue {
 		{attrInputTokens, u.InputTokens},
 		{attrOutputTokens, u.OutputTokens},
 		{attrCacheReadInputTokens, u.CacheReadInputTokens},
-		{attrCacheWriteInputTokens, u.CacheWriteInputTokens},
+		{attrCacheCreationInputTokens, u.CacheWriteInputTokens},
+		{attrReasoningOutputTokens, u.ReasoningOutputTokens},
 	} {
 		if count.value >= 0 {
 			out = append(out, attribute.Int(count.name, count.value))

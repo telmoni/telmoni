@@ -47,7 +47,34 @@ import {
   tracesHref,
   unfiltered,
   without,
+  tokenBreakdown,
+  formatCacheShare,
 } from "./traces";
+
+describe("token accounting", () => {
+  const usage = {
+    input_tokens: 1000, output_tokens: 400, cache_read_input_tokens: 200,
+    cache_write_input_tokens: 100, reasoning_output_tokens: 150,
+  };
+  it("partitions inclusive totals without charging reasoning twice", () => {
+    const parts = tokenBreakdown([usage]);
+    expect(parts).toEqual({
+      input: 700, cacheRead: 200, cacheWrite: 100, output: 250, reasoning: 150,
+      inputTotal: 1000, outputTotal: 400, cacheShare: 0.2,
+    });
+    expect(parts.input + parts.cacheRead + parts.cacheWrite + parts.output + parts.reasoning).toBe(1400);
+  });
+  it("weights cache share by input and has no share without input", () => {
+    const parts = tokenBreakdown([usage, { ...usage, input_tokens: 9000, cache_read_input_tokens: 0 }]);
+    expect(parts.cacheShare).toBe(0.02);
+    expect(formatCacheShare(tokenBreakdown([]).cacheShare)).toBe("—");
+  });
+  it("uses pricing's saturating residuals for inconsistent counts", () => {
+    expect(tokenBreakdown([{ ...usage, input_tokens: 10, output_tokens: 1 }])).toMatchObject({
+      input: 0, output: 0, cacheRead: 200, cacheWrite: 100, reasoning: 150,
+    });
+  });
+});
 
 const span = (over: Partial<TraceSpan> & Pick<TraceSpan, "span_id" | "kind">) =>
   testSpan({ name: over.kind, ...over });
@@ -449,6 +476,7 @@ const LISTED: Trace = {
   output_tokens: 5,
   cache_read_input_tokens: 0,
   cache_write_input_tokens: 0,
+  reasoning_output_tokens: 0,
   spend: 0,
   models: [],
   tools: [],

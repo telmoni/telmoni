@@ -62,9 +62,12 @@ pub struct DashboardChart {
 
 impl DashboardChart {
     fn checked(self) -> Result<Self, TelmoniError> {
-        if self.group.is_some() && self.measure != ChartMeasure::Spend {
+        if self.group.is_some()
+            && self.measure != ChartMeasure::Spend
+            && !(self.measure == ChartMeasure::Tokens && self.group == Some(MetricsGroup::Model))
+        {
             return Err(TelmoniError::BadRequest(
-                "a chart is split by a group only where it draws spend".into(),
+                "a chart is split by a group where it draws spend, or tokens by model".into(),
             ));
         }
         // A tool call and a span's status carry no spend of their own.
@@ -487,6 +490,11 @@ mod tests {
                 DashboardChart {
                     measure: ChartMeasure::Spend,
                     group: Some(MetricsGroup::User),
+                    tag: None
+                },
+                DashboardChart {
+                    measure: ChartMeasure::Tokens,
+                    group: Some(MetricsGroup::Model),
                     tag: None
                 },
                 DashboardChart {

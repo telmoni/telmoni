@@ -1,4 +1,5 @@
 import type { RollupPoint } from "@/lib/server/entities/dashboards";
+import type { TokenBar, TokenCounts } from "@/lib/traces";
 
 // What the Spend page draws of the project's hourly totals: a bar an hour or
 // a day for each chart.
@@ -14,8 +15,6 @@ export const ROLLUP_GROUP_TOP = 10;
 export type Bar = {
   at: string;
   spend: number;
-  input: number;
-  output: number;
   ok: number;
   failed: number;
   p50: number | null;
@@ -28,12 +27,33 @@ export function barsOf(points: readonly RollupPoint[]): Bar[] {
   return points.map((point) => ({
     at: point.at,
     spend: point.spend,
-    input: point.input_tokens,
-    output: point.output_tokens,
     ok: point.traces - point.failed_traces,
     failed: point.failed_traces,
     p50: point.trace_duration_ms.p50,
     p95: point.trace_duration_ms.p95,
     p99: point.trace_duration_ms.p99,
   }));
+}
+
+/** Each hour's or day's tokens as a bar, oldest first, by model where the
+ *  points are grouped by it and under one name where they are not. A value
+ *  with no token is left out: the totals group every span, and only a model
+ *  call's carries a model. */
+export function tokenBarsOf(points: readonly RollupPoint[]): TokenBar[] {
+  const bars = new Map<string, Map<string, TokenCounts>>();
+  for (const point of points) {
+    const models = bars.get(point.at) ?? new Map<string, TokenCounts>();
+    bars.set(point.at, models);
+    if (point.input_tokens + point.output_tokens === 0) continue;
+    models.set(point.value ?? "", {
+      input_tokens: point.input_tokens,
+      output_tokens: point.output_tokens,
+      cache_read_input_tokens: point.cache_read_input_tokens,
+      cache_write_input_tokens: point.cache_write_input_tokens,
+      reasoning_output_tokens: point.reasoning_output_tokens,
+    });
+  }
+  return [...bars]
+    .map(([at, models]) => ({ at, tokens_by_model: Object.fromEntries(models) }))
+    .sort((a, b) => a.at.localeCompare(b.at));
 }

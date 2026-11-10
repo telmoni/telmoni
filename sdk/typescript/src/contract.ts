@@ -71,8 +71,9 @@ export const PROMPT_VERSION = 'gen_ai.prompt.version';
 export const TIME_TO_FIRST_CHUNK = 'gen_ai.response.time_to_first_chunk';
 export const INPUT_TOKENS = 'gen_ai.usage.input_tokens';
 export const OUTPUT_TOKENS = 'gen_ai.usage.output_tokens';
+export const REASONING_OUTPUT_TOKENS = 'gen_ai.usage.reasoning.output_tokens';
 export const CACHE_READ_INPUT_TOKENS = 'gen_ai.usage.cache_read.input_tokens';
-export const CACHE_WRITE_INPUT_TOKENS = 'gen_ai.usage.cache_write.input_tokens';
+export const CACHE_CREATION_INPUT_TOKENS = 'gen_ai.usage.cache_creation.input_tokens';
 /** What the call cost in US dollars, as reported: Langfuse's name, since the conventions have none. */
 export const COST = 'gen_ai.usage.cost';
 export const SESSION_ID = 'gen_ai.conversation.id';

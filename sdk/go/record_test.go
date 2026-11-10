@@ -70,6 +70,7 @@ type recordItemSpec struct {
 			OutputTokens          int      `json:"output_tokens"`
 			CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
 			CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
+			ReasoningOutputTokens int      `json:"reasoning_output_tokens"`
 			Cost                  *float64 `json:"cost"`
 		} `json:"usage"`
 		ErrorType string `json:"error_type"`
@@ -126,6 +127,7 @@ func itemFrom(spec recordItemSpec) telmoni.RecordItem {
 				OutputTokens:          usage.OutputTokens,
 				CacheReadInputTokens:  usage.CacheReadInputTokens,
 				CacheWriteInputTokens: usage.CacheWriteInputTokens,
+				ReasoningOutputTokens: usage.ReasoningOutputTokens,
 				Cost:                  usage.Cost,
 			}
 		}
@@ -1115,13 +1117,15 @@ func TestARecordedTokenCountBelowZeroIsLeftOffWarnedOfBeforeItsHold(t *testing.T
 	for name, want := range map[string]map[string]any{
 		"chat alone": {
 			"gen_ai.usage.input_tokens":            int64(5),
+			"gen_ai.usage.reasoning.output_tokens": int64(0),
 			"gen_ai.usage.output_tokens":           int64(0),
 			"gen_ai.usage.cache_read.input_tokens": int64(0),
 		},
 		"chat in a step": {
-			"gen_ai.usage.input_tokens":             int64(0),
-			"gen_ai.usage.cache_read.input_tokens":  int64(0),
-			"gen_ai.usage.cache_write.input_tokens": int64(0),
+			"gen_ai.usage.input_tokens":                int64(0),
+			"gen_ai.usage.cache_read.input_tokens":     int64(0),
+			"gen_ai.usage.cache_creation.input_tokens": int64(0),
+			"gen_ai.usage.reasoning.output_tokens":     int64(0),
 		},
 	} {
 		if spans[name] == nil {
@@ -1132,7 +1136,7 @@ func TestARecordedTokenCountBelowZeroIsLeftOffWarnedOfBeforeItsHold(t *testing.T
 		}
 	}
 	want := []string{
-		"telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+		"telmoni: gen_ai.usage.cache_creation.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
 		"telmoni: gen_ai.usage.output_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
 	}
 	if warnings := logs.warnings(); !reflect.DeepEqual(warnings, want) {

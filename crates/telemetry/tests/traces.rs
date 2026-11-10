@@ -36,6 +36,60 @@ const ADMIN: &str = "user_admin";
 const MEMBER: &str = "user_member";
 const STRANGER: &str = "user_stranger";
 
+#[sqlx::test]
+async fn token_models_keep_whole_trace_filters_and_exclude_other_projects(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let trace_id = Uuid::new_v4();
+    let at = Utc::now() - Duration::minutes(1);
+    let first = SpanRow {
+        model: "m".into(),
+        input_tokens: 1000,
+        output_tokens: 400,
+        cache_read_input_tokens: 200,
+        cache_write_input_tokens: 100,
+        reasoning_output_tokens: 150,
+        ..span_at(&p.ours, trace_id, SpanKind::ModelCall, "chat m", at, 100, 2)
+    };
+    let second = SpanRow {
+        model: "n".into(),
+        input_tokens: 9000,
+        output_tokens: 100,
+        ..span_at(&p.ours, trace_id, SpanKind::ModelCall, "chat n", at, 100, 3)
+    };
+    let decoy = SpanRow {
+        project_id: p.theirs.clone(),
+        ..first.clone()
+    };
+    ch.store
+        .insert_spans(&[
+            span_at(&p.ours, trace_id, SpanKind::Agent, "agent", at, 200, 1),
+            first,
+            second,
+            decoy,
+        ])
+        .await
+        .expect("spans land");
+    let histogram = p.get(&format!("{LANE}/histogram?days=1&model=m")).await;
+    let bar = histogram["bars"]
+        .as_array()
+        .expect("bars")
+        .iter()
+        .find(|bar| bar["tokens"].as_u64().unwrap_or(0) > 0)
+        .expect("a token bucket");
+    assert_eq!(bar["tokens"], 10500);
+    assert_eq!(
+        bar["tokens_by_model"]["m"],
+        serde_json::json!({
+            "input_tokens": 1000, "output_tokens": 400, "cache_read_input_tokens": 200,
+            "cache_write_input_tokens": 100, "reasoning_output_tokens": 150,
+        })
+    );
+    assert_eq!(bar["tokens_by_model"]["n"]["input_tokens"], 9000);
+}
+
 /// Fault filters admit whole traces, their facets ignore themselves, and overlapping classes count once each.
 #[sqlx::test]
 async fn faults_filter_whole_traces_and_chart_each_class_once(pool: PgPool) {
@@ -364,6 +418,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 output_tokens: 300,
                 cache_read_input_tokens: 100,
                 cache_write_input_tokens: 50,
+                reasoning_output_tokens: 60,
                 user_id: "user-a".into(),
                 session_id: "conv-1".into(),
                 attributes: vec![
@@ -677,6 +732,7 @@ async fn the_list_sums_each_trace_newest_first_and_names_only_the_projects_own(p
     assert_eq!(report["output_tokens"], 300);
     assert_eq!(report["cache_read_input_tokens"], 100);
     assert_eq!(report["cache_write_input_tokens"], 50);
+    assert_eq!(report["reasoning_output_tokens"], 60);
     assert_eq!(report["models"], serde_json::json!(["claude-sonnet-5-5"]));
     assert_eq!(report["tools"], serde_json::json!(["search_docs"]));
     assert_eq!(report["environments"], serde_json::json!(["production"]));
@@ -959,6 +1015,18 @@ async fn the_histogram_counts_each_trace_in_the_bar_it_started_in(pool: PgPool) 
     let sum = |key: &str| -> u64 { bars.iter().map(|b| b[key].as_u64().expect("a count")).sum() };
     assert_eq!((sum("ok"), sum("error"), sum("cancelled")), (3, 1, 0));
     assert_eq!(sum("tokens"), 1_515);
+    let model_counts: Vec<&Value> = bars
+        .iter()
+        .filter_map(|bar| bar["tokens_by_model"].get("claude-sonnet-5-5"))
+        .collect();
+    assert_eq!(model_counts.len(), 1);
+    assert_eq!(
+        model_counts[0],
+        &serde_json::json!({
+            "input_tokens": 1200, "output_tokens": 300, "cache_read_input_tokens": 100,
+            "cache_write_input_tokens": 50, "reasoning_output_tokens": 60,
+        })
+    );
     let at = |bar: &Value| -> DateTime<Utc> {
         bar["at"]
             .as_str()

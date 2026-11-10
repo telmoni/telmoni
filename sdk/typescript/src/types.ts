@@ -123,13 +123,16 @@ export interface HeaderMethods {
  * goes as a whole number, a fraction cut, one below 0 or past 64 bits left off
  * the call with one warning. `cost` is what the call cost in US dollars, where
  * the provider reports it; one below 0 or not finite is left off with one
- * warning, and a call without one is priced by its tokens.
+ * warning, and a call without one is priced by its tokens. OpenAI's reasoning is
+ * already in completion tokens; Gemini's output is candidates plus thoughts.
+ * Anthropic reports no separate reasoning count.
  */
 export interface Usage {
   inputTokens?: number | undefined;
   outputTokens?: number | undefined;
   cacheReadInputTokens?: number | undefined;
   cacheWriteInputTokens?: number | undefined;
+  reasoningOutputTokens?: number | undefined;
   cost?: number | undefined;
 }
 

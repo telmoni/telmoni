@@ -26,6 +26,21 @@ def calls(transport: FakeTransport) -> list[dict[str, object]]:
     return [s for s in transport.spans() if s["name"].startswith("chat ")]
 
 
+def test_reasoning_survives_partial_usage_updates(
+    telmoni: Telmoni, transport: FakeTransport
+) -> None:
+    with telmoni.trace("bot"), telmoni.model_call("m") as call:
+        call.answered(usage=Usage(output_tokens=7, reasoning_output_tokens=4))
+        call.answered(usage=Usage(reasoning_output_tokens=2))
+        call.answered(usage=Usage(input_tokens=12))
+        call.answered(usage=Usage(reasoning_output_tokens=-1))
+    assert telmoni.flush()
+    attributes = attributes_of(calls(transport)[0])
+    assert attributes["gen_ai.usage.output_tokens"] == 7
+    assert attributes["gen_ai.usage.reasoning.output_tokens"] == 2
+    assert attributes["gen_ai.usage.input_tokens"] == 12
+
+
 def test_a_model_call_carries_the_conventions_names(
     telmoni: Telmoni, transport: FakeTransport
 ) -> None:
@@ -99,7 +114,7 @@ def test_a_token_count_goes_as_a_whole_number_from_0_and_another_is_left_off(
             not {
                 "gen_ai.usage.input_tokens",
                 "gen_ai.usage.cache_read.input_tokens",
-                "gen_ai.usage.cache_write.input_tokens",
+                "gen_ai.usage.cache_creation.input_tokens",
             }
             & typed.keys()
         )

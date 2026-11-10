@@ -11,9 +11,10 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { TokenChart } from "@/components/traces/charts";
 import type { Bar as DashboardBar } from "@/lib/dashboards";
 import { useInBrowser } from "@/lib/in-browser";
-import { formatCost, formatCount, formatDuration } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration, type TokenBar } from "@/lib/traces";
 
 /** One bar of time to first token, which only the spans keep. */
 export type FirstTokenBar = {
@@ -24,10 +25,6 @@ export type FirstTokenBar = {
 
 // The theme's own colours, as the trace list's charts take them.
 const SPEND: ChartConfig = { spend: { label: "Spend", color: "var(--muted-foreground)" } };
-const TOKENS: ChartConfig = {
-  input: { label: "Input", color: "var(--muted-foreground)" },
-  output: { label: "Output", color: "var(--foreground)" },
-};
 const TRACES: ChartConfig = {
   ok: { label: "OK", color: "var(--muted-foreground)" },
   failed: { label: "Failed", color: "var(--destructive)" },
@@ -138,13 +135,17 @@ export function DashboardCharts({
   firstToken,
   hourly,
   firstTokenHourly,
+  tokenBars,
 }: {
   bars: DashboardBar[];
+  /** The tokens by model, or under one name where the grouped totals could not be read whole. */
+  tokenBars: TokenBar[];
   firstToken: FirstTokenBar[];
   hourly: boolean;
   /** Whether the spans' bars, which the histogram sizes to the window, are under a day. */
   firstTokenHourly: boolean;
 }) {
+  const tokensId = useId();
   const sum = (of: (bar: DashboardBar) => number) => bars.reduce((total, bar) => total + of(bar), 0);
   const last = <T,>(rows: readonly T[], of: (row: T) => number | null) =>
     rows.findLast((row) => of(row) !== null) ?? null;
@@ -161,17 +162,16 @@ export function DashboardCharts({
         format={formatCost}
         kind="bars"
       />
-      <Chart
-        title="Tokens"
-        summary={`${formatCount(sum((bar) => bar.input))} input and ${formatCount(
-          sum((bar) => bar.output),
-        )} output over the window.`}
-        config={TOKENS}
-        bars={bars}
-        hourly={hourly}
-        format={formatCount}
-        kind="stacked"
-      />
+      <section
+        aria-labelledby={tokensId}
+        className="grid min-w-0 gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border"
+      >
+        <h2 id={tokensId} className="text-base font-medium">
+          Tokens
+        </h2>
+        {/* Any window past a day draws by the UTC day, whatever its length. */}
+        <TokenChart bars={tokenBars} days={hourly ? 1 : 2} timeZone="UTC" className="h-48" />
+      </section>
       <Chart
         title="Traces"
         summary={`${formatCount(sum((bar) => bar.ok + bar.failed))} traces, ${formatCount(

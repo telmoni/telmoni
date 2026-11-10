@@ -35,6 +35,7 @@
         "gpt-4o-mini"
       ],
       "output_tokens": 340,
+      "reasoning_output_tokens": 0,
       "releases": [
         "1.4.2"
       ],

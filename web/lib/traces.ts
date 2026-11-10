@@ -42,6 +42,48 @@ import {
 /** The list a project's spans are read as, a page of the console. */
 export type ListName = "traces";
 
+/** A call's tokens as they are kept: input with the cache's reads and
+ *  writes, output with reasoning. */
+export type TokenCounts = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_write_input_tokens: number;
+  reasoning_output_tokens: number;
+};
+
+/** One bar's tokens, by the model that spent them. */
+export type TokenBar = { at: string; tokens_by_model: Record<string, TokenCounts> };
+
+/** The counts summed and told apart as five that add up to input and output,
+ *  and the share of input the cache answered, none where there was no input.
+ *  A part past its whole leaves none of the rest, as the price reads it. */
+export function tokenBreakdown(counts: readonly TokenCounts[]) {
+  const sum = (key: keyof TokenCounts) => counts.reduce((total, count) => total + count[key], 0);
+  const inputTotal = sum("input_tokens");
+  const outputTotal = sum("output_tokens");
+  const cacheRead = sum("cache_read_input_tokens");
+  const cacheWrite = sum("cache_write_input_tokens");
+  const reasoning = sum("reasoning_output_tokens");
+  return {
+    input: Math.max(0, inputTotal - cacheRead - cacheWrite),
+    cacheRead,
+    cacheWrite,
+    output: Math.max(0, outputTotal - reasoning),
+    reasoning,
+    inputTotal,
+    outputTotal,
+    cacheShare: inputTotal === 0 ? null : cacheRead / inputTotal,
+  };
+}
+
+const SHARE = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
+
+/** The share of input the cache answered, a dash where there was no input. */
+export function formatCacheShare(share: number | null): string {
+  return share === null ? "—" : SHARE.format(share);
+}
+
 /** The rows a page offers to hold. */
 export const ROWS_PER_PAGE = [25, 50, 100] as const;
 /** The rows a page holds when the URL names none. */

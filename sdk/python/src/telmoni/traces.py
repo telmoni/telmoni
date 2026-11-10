@@ -353,7 +353,7 @@ class ModelCall(Handle):
             int(held.get(contract.INPUT_TOKENS, 0)),
             int(held.get(contract.OUTPUT_TOKENS, 0)),
             int(held.get(contract.CACHE_READ_INPUT_TOKENS, 0)),
-            int(held.get(contract.CACHE_WRITE_INPUT_TOKENS, 0)),
+            int(held.get(contract.CACHE_CREATION_INPUT_TOKENS, 0)),
         )
         cost = held.get(contract.COST)
         if cost is None:
@@ -976,7 +976,8 @@ def _usage(
         (contract.INPUT_TOKENS, usage.input_tokens),
         (contract.OUTPUT_TOKENS, usage.output_tokens),
         (contract.CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens),
-        (contract.CACHE_WRITE_INPUT_TOKENS, usage.cache_write_input_tokens),
+        (contract.CACHE_CREATION_INPUT_TOKENS, usage.cache_write_input_tokens),
+        (contract.REASONING_OUTPUT_TOKENS, usage.reasoning_output_tokens),
     )
     out: dict[str, int | float] = {}
     for key, value in counts:

@@ -87,8 +87,9 @@ const SCORE_KEYS: ReadonlySet<string> = new Set([
 const INTEGERS: ReadonlySet<string> = new Set([
   contract.INPUT_TOKENS,
   contract.OUTPUT_TOKENS,
+  contract.REASONING_OUTPUT_TOKENS,
   contract.CACHE_READ_INPUT_TOKENS,
-  contract.CACHE_WRITE_INPUT_TOKENS,
+  contract.CACHE_CREATION_INPUT_TOKENS,
   contract.RETRIEVAL_TOP_K,
 ]);
 

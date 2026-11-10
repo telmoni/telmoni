@@ -61,12 +61,14 @@ import {
 import {
   KIND_LABEL,
   FAULT_LABEL,
+  formatCacheShare,
   formatCost,
   formatCount,
   formatDuration,
   barsById,
   retrievalCounts,
   retrievalSource,
+  tokenBreakdown,
   shortId,
   spanMillis,
   sessionTracesHref,
@@ -154,6 +156,7 @@ export const TraceMeta = memo(function TraceMeta({
   const { agent, root } = summary;
   const reaching = useWindowReaching(summary.startedAt);
   const tokens = summary.inputTokens + summary.outputTokens;
+  const { cacheShare } = tokenBreakdown(trace.spans.filter((span) => span.kind === SpanKind.ModelCall));
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-gutter gap-y-1.5 text-xs text-muted-foreground">
       <StatusMark status={agent?.status ?? null} detail={agent?.error_type} />
@@ -165,6 +168,7 @@ export const TraceMeta = memo(function TraceMeta({
       >
         {formatCount(tokens)} {tokens === 1 ? "token" : "tokens"}
       </span>
+      {cacheShare !== null && <span className="tabular-nums">Cache share {formatCacheShare(cacheShare)}</span>}
       {trace.spend && (trace.spend.spent > 0 || trace.spend.unpriced.length > 0) && (
         <TraceSpent spend={trace.spend} />
       )}
@@ -722,6 +726,11 @@ function SpanDetail({
                       <span className="text-muted-foreground">
                         ({formatCount(summary.inputTokens)} in, {formatCount(summary.outputTokens)} out)
                       </span>
+                      <span className="block text-muted-foreground">
+                        {formatCount(summary.cacheReadTokens)} cache read,{" "}
+                        {formatCount(summary.cacheWriteTokens)} cache write,{" "}
+                        {formatCount(summary.reasoningTokens)} reasoning
+                      </span>
                     </Field>
                   )}
                   {span.model && (
@@ -771,6 +780,8 @@ function SpanDetail({
                       <Field label="Output tokens">{formatCount(span.output_tokens)}</Field>
                       <Field label="Cache read">{formatCount(span.cache_read_input_tokens)}</Field>
                       <Field label="Cache write">{formatCount(span.cache_write_input_tokens)}</Field>
+                      <Field label="Reasoning">{formatCount(span.reasoning_output_tokens)}</Field>
+                      <Field label="Cache share">{formatCacheShare(tokenBreakdown([span]).cacheShare)}</Field>
                     </>
                   )}
                   {span.cost !== null && <Field label="Cost">{formatCost(span.cost)}</Field>}

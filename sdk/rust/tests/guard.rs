@@ -43,6 +43,7 @@ fn reply(answer: &Value) -> Reply {
         cache_write_input_tokens: optional_int(usage, "cache_write_input_tokens")
             .ok()
             .flatten(),
+        reasoning_output_tokens: None,
         cost: usage.get("cost").and_then(Value::as_f64),
     });
     Reply {
@@ -453,6 +454,7 @@ fn a_call_answered_past_the_spans_attribute_limit_sends_its_last_answer() -> Out
                 output_tokens: Some(chunk),
                 cache_read_input_tokens: Some(0),
                 cache_write_input_tokens: Some(0),
+                reasoning_output_tokens: None,
                 cost: None,
             }),
             ..Reply::default()

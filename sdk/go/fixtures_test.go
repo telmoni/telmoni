@@ -76,6 +76,7 @@ type modelCallSpec struct {
 		OutputTokens          int      `json:"output_tokens"`
 		CacheReadInputTokens  int      `json:"cache_read_input_tokens"`
 		CacheWriteInputTokens int      `json:"cache_write_input_tokens"`
+		ReasoningOutputTokens int      `json:"reasoning_output_tokens"`
 		Cost                  *float64 `json:"cost"`
 	} `json:"usage"`
 	InputMessages  any `json:"input_messages"`
@@ -238,6 +239,7 @@ func perform(t *testing.T, h *harness, fixture traceFixture) {
 			OutputTokens:          callSpec.Usage.OutputTokens,
 			CacheReadInputTokens:  callSpec.Usage.CacheReadInputTokens,
 			CacheWriteInputTokens: callSpec.Usage.CacheWriteInputTokens,
+			ReasoningOutputTokens: callSpec.Usage.ReasoningOutputTokens,
 			Cost:                  callSpec.Usage.Cost,
 		},
 		OutputMessages: callSpec.OutputMessages,

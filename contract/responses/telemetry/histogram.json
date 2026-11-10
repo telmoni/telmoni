@@ -14,7 +14,16 @@
       "spend": 0.063,
       "time_to_first_token_p50_ms": 400.0,
       "time_to_first_token_p95_ms": 1100.0,
-      "tokens": 18000
+      "tokens": 18000,
+      "tokens_by_model": {
+        "gpt-4o-mini": {
+          "cache_read_input_tokens": 3000,
+          "cache_write_input_tokens": 1000,
+          "input_tokens": 12000,
+          "output_tokens": 6000,
+          "reasoning_output_tokens": 2000
+        }
+      }
     },
     {
       "at": "2027-01-15T09:00:00Z",
@@ -28,7 +37,8 @@
       "spend": 0.0,
       "time_to_first_token_p50_ms": null,
       "time_to_first_token_p95_ms": null,
-      "tokens": 0
+      "tokens": 0,
+      "tokens_by_model": {}
     }
   ],
   "bucket_seconds": 3600,

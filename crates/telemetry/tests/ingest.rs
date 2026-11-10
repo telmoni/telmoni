@@ -850,6 +850,7 @@ async fn another_exporters_spans_are_held_then_placed_in_their_traces(pool: PgPo
             ])),
             span(&agent_trace, &"33".repeat(8), &"22".repeat(8), "chat gpt-5", json!([
                 text(contract::OPERATION, "chat"), text(contract::REQUEST_MODEL, "gpt-5"),
+                { "key": contract::REASONING_OUTPUT_TOKENS, "value": { "intValue": "20" } },
             ])),
             span(&calls_trace, &"44".repeat(8), "", "POST /ask", json!([])),
             span(&calls_trace, &"55".repeat(8), &"44".repeat(8), "chat gpt-5", json!([
@@ -882,6 +883,15 @@ async fn another_exporters_spans_are_held_then_placed_in_their_traces(pool: PgPo
             .await
             .expect("held");
     assert_eq!(held, 5);
+    let held_reasoning: i64 = sqlx::query_scalar(
+        "SELECT (row->>'reasoning_output_tokens')::bigint FROM telemetry.held_spans \
+         WHERE span_id = $1",
+    )
+    .bind("33".repeat(8))
+    .fetch_one(&pool)
+    .await
+    .expect("held count");
+    assert_eq!(held_reasoning, 20);
 
     telmoni_telemetry::foreign::land_quiet(&lane.state)
         .await
@@ -958,6 +968,17 @@ async fn another_exporters_spans_are_held_then_placed_in_their_traces(pool: PgPo
         .expect("the calls' trace has an agent's span, written for it");
     assert_eq!(written.2, "checkout");
     assert_eq!(landed.len(), 6, "{landed:?}");
+    let reasoning = ch
+        .store
+        .read(
+            &Projects::one(lane.project.clone()),
+            "SELECT reasoning_output_tokens FROM telemetry.spans \
+             WHERE project_id IN {projects:Array(String)} AND span_id = '3333333333333333'",
+        )
+        .fetch_one::<u64>()
+        .await
+        .expect("landed count");
+    assert_eq!(reasoning, 20);
 
     // Landed, each keeps its trace; a second pass lands nothing again.
     let waiting: i64 =

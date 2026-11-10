@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans
     output_tokens            UInt64,
     cache_read_input_tokens  UInt64,
     cache_write_input_tokens UInt64,
+    reasoning_output_tokens  UInt64,
     -- What a call cost in US dollars as reported, NULL where it reported
     -- none: a read prices those by their tokens, and never writes the price.
     cost                     Nullable(Float64),
@@ -132,6 +133,7 @@ CREATE TABLE IF NOT EXISTS telemetry.spans_hourly
     output_tokens            SimpleAggregateFunction(sum, UInt64),
     cache_read_input_tokens  SimpleAggregateFunction(sum, UInt64),
     cache_write_input_tokens SimpleAggregateFunction(sum, UInt64),
+    reasoning_output_tokens  SimpleAggregateFunction(sum, UInt64),
     cost                     SimpleAggregateFunction(sum, Float64),
     duration_ms_sum          SimpleAggregateFunction(sum, Float64),
     duration_ms              AggregateFunction(quantilesTDigest(0.5, 0.9, 0.99), Float64)
@@ -173,6 +175,7 @@ AS SELECT
     sum(output_tokens) AS output_tokens,
     sum(cache_read_input_tokens) AS cache_read_input_tokens,
     sum(cache_write_input_tokens) AS cache_write_input_tokens,
+    sum(reasoning_output_tokens) AS reasoning_output_tokens,
     sum(ifNull(spans.cost, 0)) AS cost,
     sum(greatest(dateDiff('microsecond', started_at, ended_at), 0) / 1000) AS duration_ms_sum,
     quantilesTDigestState(0.5, 0.9, 0.99)(

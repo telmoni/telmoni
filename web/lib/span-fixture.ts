@@ -24,6 +24,7 @@ export function testSpan(over: Partial<TraceSpan> & Pick<TraceSpan, "span_id">):
     output_tokens: 0,
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
+    reasoning_output_tokens: 0,
     cost: null,
     time_to_first_token: null,
     user_id: "",

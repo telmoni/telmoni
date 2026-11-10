@@ -92,7 +92,8 @@ async fn a_trace_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lane
                         input_tokens: Some(900),
                         output_tokens: Some(80),
                         cache_read_input_tokens: Some(600),
-                        cache_write_input_tokens: Some(0),
+                        cache_write_input_tokens: Some(100),
+                        reasoning_output_tokens: Some(20),
                         cost: Some(0.0042),
                     }),
                     ..ModelCallRecord::new("claude-sonnet-5-5", at(0), at(2_000))
@@ -198,6 +199,8 @@ async fn a_trace_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lane
     assert_eq!(first["provider"], "anthropic");
     assert_eq!(first["input_tokens"], 900);
     assert_eq!(first["cache_read_input_tokens"], 600);
+    assert_eq!(first["reasoning_output_tokens"], 20);
+    assert_eq!(first["cache_write_input_tokens"], 100);
     assert_eq!(first["cost"], 0.0042, "the cost it reported, a column");
     assert_eq!(first["attributes"]["gen_ai.usage.cost"], Value::Null);
     assert_eq!(spans[3]["cost"], Value::Null, "a call that reported none");
@@ -236,11 +239,38 @@ async fn a_trace_recorded_with_the_sdk_lands_through_the_door_and_the_trace_lane
     assert_eq!(trace["tool_calls"], 1);
     assert_eq!(trace["input_tokens"], 1_900);
     assert_eq!(trace["output_tokens"], 140);
+    assert_eq!(trace["reasoning_output_tokens"], 20);
     assert_eq!(trace["ended"], true);
     assert_eq!(trace["user_id"], user);
     assert_eq!(trace["session_id"], stored_session);
     assert_eq!(trace["environments"], serde_json::json!(["staging"]));
     assert_eq!(trace["releases"], serde_json::json!(["2026.10.18"]));
+
+    let response = app
+        .clone()
+        .oneshot(request(
+            "/internal/v1/telemetry/rollups?days=1&group=model".into(),
+        ))
+        .await
+        .expect("the router answers");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("a body")
+        .to_bytes();
+    let metrics: Value = serde_json::from_slice(&bytes).expect("metrics");
+    let point = metrics["points"]
+        .as_array()
+        .expect("points")
+        .iter()
+        .find(|point| point["value"] == "claude-sonnet-5-5")
+        .expect("the model's totals");
+    assert_eq!(point["reasoning_output_tokens"], 20);
+    assert_eq!(point["input_tokens"], 1900);
+    assert_eq!(point["output_tokens"], 140);
+    assert_eq!(point["cache_write_input_tokens"], 100);
 
     // The record's score rode on the agent span; the two sent after it, to
     // `/v1/scores`, the session's by its id as sent, found by the id as stored.

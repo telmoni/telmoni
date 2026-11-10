@@ -131,6 +131,7 @@ fn model_call(generation: &Generation) -> ModelCallRecord {
             output_tokens: Some(count(usage.output_tokens)),
             cache_read_input_tokens: Some(count(usage.cache_read_tokens)),
             cache_write_input_tokens: Some(count(usage.cache_write_tokens)),
+            reasoning_output_tokens: None,
             // No adapter reads a cost, so ingest prices the tokens.
             cost: None,
         }),
@@ -363,6 +364,7 @@ mod tests {
                 output_tokens: Some(120),
                 cache_read_input_tokens: Some(1_500),
                 cache_write_input_tokens: Some(0),
+                reasoning_output_tokens: None,
                 cost: None,
             })
         );

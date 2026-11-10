@@ -16,6 +16,7 @@
       "failed_traces": 1,
       "input_tokens": 4000,
       "output_tokens": 600,
+      "reasoning_output_tokens": 100,
       "spans": 12,
       "spend": 1.25,
       "trace_duration_ms": {
@@ -40,6 +41,7 @@
       "failed_traces": 1,
       "input_tokens": 4000,
       "output_tokens": 600,
+      "reasoning_output_tokens": 100,
       "spans": 12,
       "spend": 0.5,
       "trace_duration_ms": {
@@ -65,6 +67,7 @@
       "input_tokens": 4000,
       "others": true,
       "output_tokens": 600,
+      "reasoning_output_tokens": 100,
       "spans": 12,
       "spend": 0.75,
       "trace_duration_ms": {

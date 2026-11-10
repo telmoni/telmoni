@@ -40,6 +40,7 @@ interface ItemSpec {
       output_tokens: number;
       cache_read_input_tokens: number;
       cache_write_input_tokens: number;
+      reasoning_output_tokens: number;
       cost?: number;
     };
   };
@@ -102,6 +103,7 @@ function itemFrom(spec: ItemSpec): StepRecord | CallRecord {
         outputTokens: call.usage.output_tokens,
         cacheReadInputTokens: call.usage.cache_read_input_tokens,
         cacheWriteInputTokens: call.usage.cache_write_input_tokens,
+        reasoningOutputTokens: call.usage.reasoning_output_tokens,
         cost: call.usage.cost,
       };
     }

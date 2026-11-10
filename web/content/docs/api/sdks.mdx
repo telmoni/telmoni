@@ -343,6 +343,27 @@ loop empties; none on a forced exit (`os._exit`, `process.exit()`,
 pool that terminates its workers, as `with Pool(...)` does as it closes, stops
 them with a signal too, so a task run there flushes before it returns.
 
+### Token counts
+
+Input includes tokens read from and written to the provider's cache. Output
+includes reasoning tokens. Set the reasoning subset where the provider reports it:
+
+| SDK | Usage field |
+|---|---|
+| Python | `Usage(reasoning_output_tokens=...)` |
+| TypeScript | `usage.reasoningOutputTokens` |
+| Go | `Usage.ReasoningOutputTokens` |
+| Rust | `Usage::reasoning_output_tokens` |
+
+OpenAI's `reasoning_tokens` is already included in `completion_tokens`; copy
+both counts without adding them. Gemini reports `thoughtsTokenCount` apart
+from `candidatesTokenCount`: set output to candidates plus thoughts and
+reasoning to thoughts. Anthropic reports no separate reasoning count.
+Missing reasoning is stored as zero. These are counts alone, never reasoning text,
+and remain metadata with content off. Reasoning is priced once, inside output.
+Each count last supplied wins; a partial update preserves the other counts.
+Go supplies all five counts each time its `Usage` is supplied, including zero.
+
 ### A retrieval
 
 A search of a vector store or a memory is a call of its own: open a retrieval
@@ -864,7 +885,7 @@ otherwise than you pay; the SDK alone holds them, so Telmoni's own reads, an
 alert on what each trace spent among them, still price that call by the table.
 A call answered more than once, as a stream's counts arrive, counts as its
 span then holds it: each count and the cost as last given, Go's `Usage` giving
-its four counts each time. An answer given after its call ended is not sent
+its five counts each time. An answer given after its call ended is not sent
 and counts nothing, with one warning; in Rust, `end` takes the call, so none
 can come. A call with neither a cost nor a price is never
 stopped on cost, and under a spend cap the SDK warns once of each such model.

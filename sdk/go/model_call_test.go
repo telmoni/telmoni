@@ -53,19 +53,20 @@ func TestAModelCallCarriesTheConventionsNames(t *testing.T) {
 	if span["name"] != "chat gpt-4o-mini" || span["kind"] != float64(3) {
 		t.Errorf("name %v kind %v, want chat gpt-4o-mini of kind 3", span["name"], span["kind"])
 	}
-	// Go has no None: the four counts of a given Usage travel, a zero among
+	// Go has no None: the five counts of a given Usage travel, a zero among
 	// them.
 	want := map[string]any{
-		"telmoni.agent":                         "bot",
-		"gen_ai.conversation.id":                "conv",
-		"gen_ai.operation.name":                 "chat",
-		"gen_ai.request.model":                  "gpt-4o-mini",
-		"gen_ai.provider.name":                  "openai",
-		"gen_ai.response.model":                 "gpt-4o-mini-2024-07-18",
-		"gen_ai.usage.input_tokens":             int64(12),
-		"gen_ai.usage.output_tokens":            int64(7),
-		"gen_ai.usage.cache_read.input_tokens":  int64(3),
-		"gen_ai.usage.cache_write.input_tokens": int64(0),
+		"telmoni.agent":                            "bot",
+		"gen_ai.conversation.id":                   "conv",
+		"gen_ai.operation.name":                    "chat",
+		"gen_ai.request.model":                     "gpt-4o-mini",
+		"gen_ai.provider.name":                     "openai",
+		"gen_ai.response.model":                    "gpt-4o-mini-2024-07-18",
+		"gen_ai.usage.input_tokens":                int64(12),
+		"gen_ai.usage.output_tokens":               int64(7),
+		"gen_ai.usage.cache_read.input_tokens":     int64(3),
+		"gen_ai.usage.cache_creation.input_tokens": int64(0),
+		"gen_ai.usage.reasoning.output_tokens":     int64(0),
 	}
 	if got := attributesOf(t, span); !reflect.DeepEqual(got, want) {
 		t.Errorf("attributes\n got: %v\nwant: %v", got, want)
@@ -90,6 +91,23 @@ func TestAnswerWithoutUsageOrModelSetsNeither(t *testing.T) {
 	}
 }
 
+// Reasoning is a subset of output, never an extra charge.
+func TestReasoningUsesTheLatestReportedCount(t *testing.T) {
+	h := newHarness(t, testConfig(), nil)
+	ctx, tr := h.client.Trace(context.Background(), "bot", telmoni.TraceOptions{})
+	_, call := tr.ModelCall(ctx, "m", telmoni.ModelCallOptions{})
+	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{OutputTokens: 7, ReasoningOutputTokens: 4}})
+	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{OutputTokens: 7, ReasoningOutputTokens: 2}})
+	call.Answered(telmoni.Answer{Usage: &telmoni.Usage{OutputTokens: 7, ReasoningOutputTokens: -1}})
+	call.End()
+	tr.End()
+	h.flush()
+	attrs := attributesOf(t, calls(t, h)[0])
+	if attrs["gen_ai.usage.reasoning.output_tokens"] != int64(2) || attrs["gen_ai.usage.output_tokens"] != int64(7) {
+		t.Errorf("latest usage = %v", attrs)
+	}
+}
+
 // A token count below zero is left off its call, with one warning per count.
 func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 	h := newHarness(t, testConfig(), nil)
@@ -106,11 +124,12 @@ func TestATokenCountBelowZeroIsLeftOffItsCallWithOneWarning(t *testing.T) {
 		t.Fatalf("want two model calls, got %v", sortedNames(h.transport.spans(t)))
 	}
 	want := map[string]any{
-		"telmoni.agent":                         "bot",
-		"gen_ai.operation.name":                 "chat",
-		"gen_ai.request.model":                  "m",
-		"gen_ai.usage.output_tokens":            int64(7),
-		"gen_ai.usage.cache_write.input_tokens": int64(0),
+		"telmoni.agent":                            "bot",
+		"gen_ai.operation.name":                    "chat",
+		"gen_ai.request.model":                     "m",
+		"gen_ai.usage.output_tokens":               int64(7),
+		"gen_ai.usage.cache_creation.input_tokens": int64(0),
+		"gen_ai.usage.reasoning.output_tokens":     int64(0),
 	}
 	for _, span := range spans {
 		if got := attributesOf(t, span); !reflect.DeepEqual(got, want) {

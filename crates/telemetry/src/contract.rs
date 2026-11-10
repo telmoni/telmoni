@@ -166,10 +166,12 @@ pub const PROVIDER: &str = "gen_ai.provider.name";
 pub const INPUT_TOKENS: &str = "gen_ai.usage.input_tokens";
 /// Every output token.
 pub const OUTPUT_TOKENS: &str = "gen_ai.usage.output_tokens";
+/// Output tokens spent reasoning, inside `output_tokens`.
+pub const REASONING_OUTPUT_TOKENS: &str = "gen_ai.usage.reasoning.output_tokens";
 /// Input tokens read from the provider's cache.
 pub const CACHE_READ_INPUT_TOKENS: &str = "gen_ai.usage.cache_read.input_tokens";
-/// Input tokens written to the provider's cache.
-pub const CACHE_WRITE_INPUT_TOKENS: &str = "gen_ai.usage.cache_write.input_tokens";
+/// Input tokens written to the provider's cache, the conventions' name.
+pub const CACHE_CREATION_INPUT_TOKENS: &str = "gen_ai.usage.cache_creation.input_tokens";
 /// What the call cost in US dollars, as reported: Langfuse's name, since the
 /// conventions have none.
 pub const COST: &str = "gen_ai.usage.cost";
@@ -199,10 +201,6 @@ pub const REPLACED: &[(&str, &str)] = &[
     ("gen_ai.system", PROVIDER),
     ("gen_ai.usage.prompt_tokens", INPUT_TOKENS),
     ("gen_ai.usage.completion_tokens", OUTPUT_TOKENS),
-    (
-        "gen_ai.usage.cache_creation.input_tokens",
-        CACHE_WRITE_INPUT_TOKENS,
-    ),
 ];
 
 /// The name the pinned conventions give `key`: itself, unless they replaced it.
@@ -353,8 +351,9 @@ pub const FIELDS: &[&str] = &[
     PROVIDER,
     INPUT_TOKENS,
     OUTPUT_TOKENS,
+    REASONING_OUTPUT_TOKENS,
     CACHE_READ_INPUT_TOKENS,
-    CACHE_WRITE_INPUT_TOKENS,
+    CACHE_CREATION_INPUT_TOKENS,
     COST,
     TIME_TO_FIRST_CHUNK,
     SESSION_ID,
@@ -730,6 +729,13 @@ pub const INVENTORY: &[InventoryRow] = &[
         "a whole number, 0 or more: every output token, reasoning among them",
     ),
     row(
+        REASONING_OUTPUT_TOKENS,
+        ReadOn::ModelCall,
+        "the column reasoning_output_tokens",
+        Needs::AnyMode,
+        RULE_COUNT,
+    ),
+    row(
         CACHE_READ_INPUT_TOKENS,
         ReadOn::ModelCall,
         "the column cache_read_input_tokens",
@@ -737,7 +743,7 @@ pub const INVENTORY: &[InventoryRow] = &[
         RULE_COUNT,
     ),
     row(
-        CACHE_WRITE_INPUT_TOKENS,
+        CACHE_CREATION_INPUT_TOKENS,
         ReadOn::ModelCall,
         "the column cache_write_input_tokens",
         Needs::AnyMode,
@@ -799,13 +805,6 @@ pub const INVENTORY: &[InventoryRow] = &[
         "gen_ai.usage.completion_tokens",
         ReadOn::ModelCall,
         "read as gen_ai.usage.output_tokens",
-        Needs::AnyMode,
-        RULE_REPLACED,
-    ),
-    row(
-        "gen_ai.usage.cache_creation.input_tokens",
-        ReadOn::ModelCall,
-        "read as gen_ai.usage.cache_write.input_tokens",
         Needs::AnyMode,
         RULE_REPLACED,
     ),

@@ -337,12 +337,15 @@ class Usage:
     goes as a whole number, a fraction cut, one below 0 or past 64 bits left
     off the call with one warning. ``cost`` is what the call cost in US
     dollars, where the provider reports it; one below 0 or not finite is left
-    off with one warning, and a call without one is priced by its tokens."""
+    off with one warning, and a call without one is priced by its tokens.
+    OpenAI's reasoning is already in completion tokens; Gemini's output is
+    candidates plus thoughts. Anthropic reports no separate reasoning count."""
 
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_read_input_tokens: int | None = None
     cache_write_input_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
     cost: float | None = None
 
 

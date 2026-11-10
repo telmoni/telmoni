@@ -24,6 +24,24 @@ function promptsOf(span: JsonSpan): Record<string, unknown> {
 }
 
 describe('a model call', () => {
+  it('keeps the latest reasoning count across partial usage updates', async () => {
+    h.telmoni.trace('bot', (trace) => trace.modelCall('m', (call) => {
+      call.answered({ usage: { outputTokens: 7, reasoningOutputTokens: 4 } });
+      call.answered({ usage: { reasoningOutputTokens: 2 } });
+      call.answered({ usage: { inputTokens: 12 } });
+      call.answered({ usage: { reasoningOutputTokens: -1 } });
+    }));
+    expect(await h.telmoni.flush()).toBe(true);
+    expect(attributesOf(one(calls(h.transport)))).toMatchObject({
+      'gen_ai.usage.output_tokens': 7,
+      'gen_ai.usage.reasoning.output_tokens': 2,
+      'gen_ai.usage.input_tokens': 12,
+    });
+    expect(h.warnings).toEqual([
+      'telmoni: gen_ai.usage.reasoning.output_tokens must be a whole number from 0 within 64 bits; the call is sent without it',
+    ]);
+  });
+
   it("carries the conventions' names", async () => {
     const opened = h.telmoni.trace('bot', { sessionId: 'conv' }, (trace) => {
       trace.modelCall('gpt-4o-mini', { provider: 'openai' }, (call) => {
@@ -112,7 +130,7 @@ describe('a model call', () => {
       expect(typed['gen_ai.usage.output_tokens']).toEqual({ intValue: '12' });
       expect(typed['gen_ai.usage.input_tokens']).toBeUndefined();
       expect(typed['gen_ai.usage.cache_read.input_tokens']).toBeUndefined();
-      expect(typed['gen_ai.usage.cache_write.input_tokens']).toBeUndefined();
+      expect(typed['gen_ai.usage.cache_creation.input_tokens']).toBeUndefined();
     }
     expect(h.warnings).toHaveLength(3);
     expect(h.warnings.every((warning) => warning.includes('must be a whole number from 0 within 64 bits'))).toBe(true);
@@ -135,7 +153,7 @@ describe('a model call', () => {
     expect(typed['gen_ai.usage.input_tokens']).toEqual({ intValue: '12' });
     expect(typed['gen_ai.usage.output_tokens']).toBeUndefined();
     expect(typed['gen_ai.usage.cache_read.input_tokens']).toBeUndefined();
-    expect(typed['gen_ai.usage.cache_write.input_tokens']).toEqual({ intValue: '5' });
+    expect(typed['gen_ai.usage.cache_creation.input_tokens']).toEqual({ intValue: '5' });
     const boxed = one(h.transport.spans().filter((each) => each.name === 'chat n'));
     expect(attributesOf(boxed)['gen_ai.usage.input_tokens']).toBe(7);
     expect(h.warnings).toHaveLength(2);

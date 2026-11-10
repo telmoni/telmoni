@@ -215,6 +215,9 @@ export type TraceSummary = {
   retrievals: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
 };
 
 /** The trace's sums. The tokens are the model calls' alone, as the list sums
@@ -247,5 +250,8 @@ export function summarizeTrace(spans: readonly TraceSpan[]): TraceSummary {
     retrievals: spans.filter((s) => s.kind === SpanKind.Retrieval).length,
     inputTokens: modelCalls.reduce((sum, s) => sum + s.input_tokens, 0),
     outputTokens: modelCalls.reduce((sum, s) => sum + s.output_tokens, 0),
+    cacheReadTokens: modelCalls.reduce((sum, s) => sum + s.cache_read_input_tokens, 0),
+    cacheWriteTokens: modelCalls.reduce((sum, s) => sum + s.cache_write_input_tokens, 0),
+    reasoningTokens: modelCalls.reduce((sum, s) => sum + s.reasoning_output_tokens, 0),
   };
 }

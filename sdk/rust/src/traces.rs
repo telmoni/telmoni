@@ -39,7 +39,9 @@ pub(crate) struct TraceInfo {
 
 /// A model call's tokens as the conventions count them: input with the cache's
 /// reads and writes, output with reasoning; sum a provider's parts first. A
-/// negative count is left off the call with one warning.
+/// negative count is left off the call with one warning. OpenAI's reasoning is
+/// already in completion tokens; Gemini's output is candidates plus thoughts.
+/// Anthropic reports no separate reasoning count.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Usage {
     /// Every input token.
@@ -50,6 +52,8 @@ pub struct Usage {
     pub cache_read_input_tokens: Option<i64>,
     /// Input tokens written to the provider's cache.
     pub cache_write_input_tokens: Option<i64>,
+    /// Output tokens spent reasoning, included in output tokens.
+    pub reasoning_output_tokens: Option<i64>,
     /// What the call cost in US dollars, where the provider reports it; one
     /// below 0 or not finite is left off with one warning, and a call without
     /// one is priced by its tokens.
@@ -65,6 +69,7 @@ impl Usage {
             output_tokens,
             cache_read_input_tokens,
             cache_write_input_tokens,
+            reasoning_output_tokens,
             cost,
         } = self;
         Self {
@@ -72,6 +77,7 @@ impl Usage {
             output_tokens: output_tokens.or(earlier.output_tokens),
             cache_read_input_tokens: cache_read_input_tokens.or(earlier.cache_read_input_tokens),
             cache_write_input_tokens: cache_write_input_tokens.or(earlier.cache_write_input_tokens),
+            reasoning_output_tokens: reasoning_output_tokens.or(earlier.reasoning_output_tokens),
             cost: cost.or(earlier.cost),
         }
     }
@@ -925,6 +931,7 @@ impl ModelCall {
             output_tokens,
             cache_read_input_tokens,
             cache_write_input_tokens,
+            reasoning_output_tokens: _,
             cost,
         } = priced.held;
         let whole = |count: Option<i64>| count.and_then(|n| u64::try_from(n).ok()).unwrap_or(0);
@@ -1266,13 +1273,18 @@ pub(crate) fn usage_attributes(usage: Usage) -> impl Iterator<Item = KeyValue> {
         output_tokens,
         cache_read_input_tokens,
         cache_write_input_tokens,
+        reasoning_output_tokens,
         cost,
     } = usage;
     [
         (contract::INPUT_TOKENS, input_tokens),
         (contract::OUTPUT_TOKENS, output_tokens),
+        (contract::REASONING_OUTPUT_TOKENS, reasoning_output_tokens),
         (contract::CACHE_READ_INPUT_TOKENS, cache_read_input_tokens),
-        (contract::CACHE_WRITE_INPUT_TOKENS, cache_write_input_tokens),
+        (
+            contract::CACHE_CREATION_INPUT_TOKENS,
+            cache_write_input_tokens,
+        ),
     ]
     .into_iter()
     .filter_map(|(key, count)| count.map(|count| KeyValue::new(key, count)))
@@ -1303,9 +1315,10 @@ pub(crate) fn sendable_usage(usage: Usage, warner: &Warner) -> Usage {
             usage.cache_read_input_tokens,
         ),
         cache_write_input_tokens: kept(
-            contract::CACHE_WRITE_INPUT_TOKENS,
+            contract::CACHE_CREATION_INPUT_TOKENS,
             usage.cache_write_input_tokens,
         ),
+        reasoning_output_tokens: kept(contract::REASONING_OUTPUT_TOKENS, usage.reasoning_output_tokens),
         cost: usage.cost.filter(|cost| {
             let dollars = cost.is_finite() && *cost >= 0.0;
             if !dollars {

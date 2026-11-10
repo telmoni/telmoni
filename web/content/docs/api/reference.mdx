@@ -236,6 +236,12 @@ finish reasons indicated refusal or truncation. Its `failed` still counts
 only spans with error status. The trace detail's spans also carry `fault`,
 one of these words or `null`. No error message is used to classify a fault.
 
+Each point's token counts are inclusive: input includes cache reads and writes,
+and output includes `reasoning_output_tokens`. The reasoning count is zero
+where none was reported, is metadata in every content mode, and is priced
+once as output. Cache share is the sum of cache-read input divided by the sum
+of input, unavailable when that denominator is zero.
+
 ### Response
 
 `200 OK` `application/json`
@@ -257,6 +263,7 @@ one of these words or `null`. No error message is used to classify a fault.
       "output_tokens": 98000,
       "cache_read_input_tokens": 120000,
       "cache_write_input_tokens": 4000,
+      "reasoning_output_tokens": 12000,
       "spend": 2.34,
       "duration_ms": { "avg": 1840.5, "p50": 1500, "p90": 3100, "p99": 7400 },
       "trace_duration_ms": { "p50": null, "p95": null, "p99": null }

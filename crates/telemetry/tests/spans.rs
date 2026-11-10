@@ -34,6 +34,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         input_tokens: 1_200,
         output_tokens: 300,
         cache_read_input_tokens: 1_000,
+        reasoning_output_tokens: 50,
         cost: Some(0.0123),
         time_to_first_token: Some(0.42),
         user_id: "9f86d081884c7d659a2feaa0c55ad015".into(),
@@ -79,7 +80,8 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
             "SELECT project_id, received_at, units, agent, trace_id, span_id, \
              parent_span_id, kind, name, started_at, ended_at, status, error_type, fault, model, \
              provider, input_tokens, output_tokens, cache_read_input_tokens, \
-             cache_write_input_tokens, cost, time_to_first_token, user_id, session_id, environment, \
+             cache_write_input_tokens, reasoning_output_tokens, cost, time_to_first_token, \
+             user_id, session_id, environment, \
              release, tags, sample_rate, attributes, sent \
              FROM telemetry.spans \
              WHERE project_id IN {projects:Array(String)} AND kind IN {kinds:Array(String)} \
@@ -90,6 +92,17 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         .await
         .expect("read the spans back");
     assert_eq!(back, [run, call], "a span came back other than it went in");
+    let reasoning = ch
+        .store
+        .read(
+            &only,
+            "SELECT sum(reasoning_output_tokens) FROM telemetry.spans_hourly \
+             WHERE project_id IN {projects:Array(String)}",
+        )
+        .fetch_one::<u64>()
+        .await
+        .expect("reasoning in the hourly totals");
+    assert_eq!(reasoning, 50);
 
     let rollup: Vec<RollupRow> = ch
         .store

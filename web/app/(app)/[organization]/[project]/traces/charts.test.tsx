@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+// The picker's menu scrolls its choice into view, which jsdom has no way to do.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 // Recharts measures the box it draws in, which jsdom has none of: each chart
 // is drawn here as the rows it was handed and the series it draws of them.
@@ -37,7 +42,7 @@ vi.mock("@/components/ui/chart", () => ({
   }) => <div data-testid="tooltip">{labelFormatter?.(undefined, [{ payload: { at: BAR_AT } }])}</div>,
 }));
 
-import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
+import { TokenChart, TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
 
 const BAR_AT = "2026-10-30T09:00:00Z";
 
@@ -54,6 +59,15 @@ const HISTOGRAM = {
       cancelled: 0,
       faults: { rate_limited: 1, timeout: 1 },
       tokens: 1200,
+      tokens_by_model: {
+        "model-a": {
+          input_tokens: 1000,
+          output_tokens: 200,
+          cache_read_input_tokens: 200,
+          cache_write_input_tokens: 100,
+          reasoning_output_tokens: 50,
+        },
+      },
       spend: 0.25,
       duration_p50_ms: 1500,
       duration_p95_ms: 4000,
@@ -71,6 +85,37 @@ function linesOf(name: string): unknown {
 }
 
 describe("TraceCharts", () => {
+  it("narrows all five token segments and the weighted share with the model picker", async () => {
+    const first = HISTOGRAM.bars[0]!;
+    const other = {
+      input_tokens: 9000,
+      output_tokens: 100,
+      cache_read_input_tokens: 0,
+      cache_write_input_tokens: 0,
+      reasoning_output_tokens: 0,
+    };
+    render(
+      <TokenChart
+        days={1}
+        bars={[{ at: first.at, tokens_by_model: { ...first.tokens_by_model, "model-b": other } }]}
+      />,
+    );
+    expect(screen.getByText("Cache share 2%")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Token model" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: "model-a" }));
+    expect(screen.getByText("Cache share 20%")).toBeInTheDocument();
+    expect(JSON.parse(screen.getByTestId("bars").dataset.rows ?? "null")).toEqual([
+      expect.objectContaining({ input: 700, cacheRead: 200, cacheWrite: 100, output: 150, reasoning: 50 }),
+    ]);
+    expect(screen.getAllByTestId("series").map((series) => series.textContent)).toEqual([
+      "input",
+      "cacheRead",
+      "cacheWrite",
+      "output",
+      "reasoning",
+    ]);
+  });
+
   it("draws overlapping fault categories independently of trace status", () => {
     render(<TraceCharts histogram={HISTOGRAM} marks={[]} />);
     expect(linesOf("Traces with faults")).toEqual([expect.objectContaining({ rate_limited: 1, timeout: 1, ok: 3, error: 1 })]);

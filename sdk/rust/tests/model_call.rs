@@ -3,6 +3,46 @@
 
 mod common;
 
+#[test]
+fn reasoning_survives_partial_usage_updates() -> common::Outcome {
+    let harness = common::Harness::new()?;
+    let trace = harness.telmoni.trace("bot", TraceOptions::default())?;
+    let call = trace.model_call("m", ModelCallOptions::default())?;
+    for usage in [
+        Usage {
+            output_tokens: Some(7),
+            reasoning_output_tokens: Some(4),
+            ..Usage::default()
+        },
+        Usage {
+            reasoning_output_tokens: Some(2),
+            ..Usage::default()
+        },
+        Usage {
+            input_tokens: Some(12),
+            ..Usage::default()
+        },
+        Usage {
+            reasoning_output_tokens: Some(-1),
+            ..Usage::default()
+        },
+    ] {
+        call.answered(Reply {
+            usage: Some(usage),
+            ..Reply::default()
+        });
+    }
+    call.end();
+    trace.end();
+    harness.flush()?;
+    let spans = harness.spans()?;
+    let attrs = attributes_of(only(&spans, "chat ")?)?;
+    assert_eq!(attrs["gen_ai.usage.output_tokens"], 7);
+    assert_eq!(attrs["gen_ai.usage.reasoning.output_tokens"], 2);
+    assert_eq!(attrs["gen_ai.usage.input_tokens"], 12);
+    Ok(())
+}
+
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -41,6 +81,7 @@ fn a_model_call_carries_the_conventions_names() -> Outcome {
             output_tokens: Some(7),
             cache_read_input_tokens: Some(3),
             cache_write_input_tokens: None,
+            reasoning_output_tokens: None,
             cost: None,
         }),
         output_messages: None,
@@ -84,6 +125,7 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
             output_tokens: Some(0),
             cache_read_input_tokens: Some(i64::MIN),
             cache_write_input_tokens: Some(i64::MAX),
+            reasoning_output_tokens: None,
             cost: None,
         },
         Usage {
@@ -91,6 +133,7 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
             output_tokens: Some(-1),
             cache_read_input_tokens: Some(0),
             cache_write_input_tokens: Some(-1),
+            reasoning_output_tokens: None,
             cost: None,
         },
     ] {
@@ -123,7 +166,7 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
         [
             json!({
                 "gen_ai.usage.output_tokens": 0,
-                "gen_ai.usage.cache_write.input_tokens": i64::MAX,
+                "gen_ai.usage.cache_creation.input_tokens": i64::MAX,
             }),
             json!({ "gen_ai.usage.cache_read.input_tokens": 0 }),
         ]
@@ -134,7 +177,7 @@ fn a_negative_token_count_is_left_off_with_one_warning() -> Outcome {
             "telmoni: gen_ai.usage.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
             "telmoni: gen_ai.usage.cache_read.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
             "telmoni: gen_ai.usage.output_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
-            "telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+            "telmoni: gen_ai.usage.cache_creation.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
         ]
     );
     Ok(())

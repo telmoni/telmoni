@@ -3,14 +3,14 @@ import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { WindowPicker } from "@/components/window-picker";
-import { barsOf } from "@/lib/dashboards";
+import { barsOf, tokenBarsOf } from "@/lib/dashboards";
 import { fetchAlerts } from "@/lib/server/entities/alerts";
 import { fetchRollups } from "@/lib/server/entities/dashboards";
 import { fetchTraceHistogram } from "@/lib/server/entities/traces";
 import { projectPage } from "@/lib/server/project-page";
 import { MAX_DAYS, OPENING_DAYS, TOTALS_WINDOWS } from "@/lib/list-query";
 import { formatCost, parseTraceQuery } from "@/lib/traces";
-import { RuleAggregation, RuleMeasure, RuleWindow, SpanKind } from "@/lib/types/enums";
+import { MetricsGroup, RuleAggregation, RuleMeasure, RuleWindow, SpanKind } from "@/lib/types/enums";
 
 import { DashboardCharts } from "./_charts";
 
@@ -36,10 +36,11 @@ export default async function DashboardsPage({
   const days = daysOf(query.days);
   const window = parseTraceQuery({ days: String(days) });
 
-  const [totals, alerts, histogram] = await Promise.all([
+  const [totals, alerts, histogram, byModel] = await Promise.all([
     fetchRollups(project.id, days),
     fetchAlerts(project.id),
     fetchTraceHistogram(project.id, window, 0),
+    fetchRollups(project.id, days, MetricsGroup.Model),
   ]);
   const truncated = totals.kind === "ok" && totals.rollups.truncated;
   const budgets =
@@ -95,6 +96,10 @@ export default async function DashboardsPage({
         ) : (
           <DashboardCharts
             bars={barsOf(totals.rollups.points)}
+            // The window's own totals, under no picker, where its models could not be read whole.
+            tokenBars={tokenBarsOf(
+              byModel.kind === "ok" && !byModel.rollups.truncated ? byModel.rollups.points : totals.rollups.points,
+            )}
             firstToken={
               histogram.kind === "ok"
                 ? histogram.histogram.bars.map((bar) => ({

@@ -133,6 +133,14 @@ times to first token, as the menu above the bars picks — each bar an hour, a
 few hours, a day or a week, starting on your own clock. **Chart** shows the
 charts in the table's place, two to a row.
 
+The Tokens chart stacks input, cache read, cache write, output and reasoning.
+Its model picker narrows the chart and **Cache share**, the sum of cache-read
+tokens divided by the sum of input tokens; no input shows **—**. The input
+segment excludes cache reads and writes; the output segment excludes reasoning,
+so consistent counts sum to the same total as inclusive input plus output.
+Subtractions stop at zero for inconsistent counts. Filtering a trace by model
+still admits its whole trace; the chart's picker alone selects a model's counts.
+
 **Fault** filters by a class carried by any span: rate limited, overloaded,
 timeout, context length, unauthorized, invalid output, refused, truncated or
 other. The complete trace remains visible, including its successful calls.
@@ -254,7 +262,7 @@ status and the error's type, its model and provider, the environment and
 release it was sent from, the tool it called — the model, the environment,
 the release and the tool each a link to the list narrowed to them — a
 retrieval's source, how many results it asked for and how many came back, its
-tokens, input, output and cached, the cost it reported, in US dollars, where
+tokens, input, output, cached and reasoning, its cache share, the cost it reported, in US dollars, where
 it reported one, when it started and ended to the
 millisecond, how long it ran and how soon its answer began, when it was
 received, and its ids. The agent's own span adds the

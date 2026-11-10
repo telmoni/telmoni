@@ -594,7 +594,7 @@ pub struct TraceList {
 }
 
 /// A download's header row: the list's fields, in its order.
-const CSV_HEADER: [&str; 27] = [
+const CSV_HEADER: [&str; 28] = [
     "trace_id",
     "agent",
     "user_id",
@@ -616,6 +616,7 @@ const CSV_HEADER: [&str; 27] = [
     "output_tokens",
     "cache_read_input_tokens",
     "cache_write_input_tokens",
+    "reasoning_output_tokens",
     "spend",
     "models",
     "tools",
@@ -631,7 +632,7 @@ impl TraceRow {
     /// The row a download writes for it, under [`CSV_HEADER`]: its times as
     /// RFC 3339, and its models, tools, environments, releases and tags each
     /// one cell, `; ` between them.
-    fn cells(&self) -> [String; 27] {
+    fn cells(&self) -> [String; 28] {
         let time = |t: &DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Micros, true);
         [
             self.trace_id.clone(),
@@ -657,6 +658,7 @@ impl TraceRow {
             self.output_tokens.to_string(),
             self.cache_read_input_tokens.to_string(),
             self.cache_write_input_tokens.to_string(),
+            self.reasoning_output_tokens.to_string(),
             self.spend.to_string(),
             self.models.join("; "),
             self.tools.join("; "),
@@ -827,6 +829,7 @@ pub struct TraceSpan {
     pub output_tokens: u64,
     pub cache_read_input_tokens: u64,
     pub cache_write_input_tokens: u64,
+    pub reasoning_output_tokens: u64,
     /// What it cost in US dollars, as reported; none where it reported none.
     pub cost: Option<f64>,
     /// Seconds to its answer's first token; none where it reported none.
@@ -862,6 +865,7 @@ impl From<SpanRow> for TraceSpan {
             output_tokens: row.output_tokens,
             cache_read_input_tokens: row.cache_read_input_tokens,
             cache_write_input_tokens: row.cache_write_input_tokens,
+            reasoning_output_tokens: row.reasoning_output_tokens,
             cost: row.cost,
             time_to_first_token: row.time_to_first_token,
             user_id: row.user_id,
@@ -1248,6 +1252,11 @@ pub async fn get_histogram(
         utc_offset,
     );
     traces::with_score_means(&mut bars, &means);
+    let tokens =
+        traces::tokens_by_model(&state.store, &projects, &filter, bucket_seconds, utc_offset)
+            .await
+            .map_err(read_failed)?;
+    traces::with_tokens_by_model(&mut bars, tokens);
     Ok(Json(TraceHistogram {
         days: filter.days,
         bucket_seconds,
@@ -1742,6 +1751,7 @@ mod tests {
             output_tokens: 5,
             cache_read_input_tokens: 0,
             cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
             spend: 0.25,
             models: vec!["a".into(), "b".into()],
             tools: vec![],

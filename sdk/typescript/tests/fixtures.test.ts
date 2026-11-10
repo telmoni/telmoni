@@ -41,6 +41,7 @@ interface ModelCallSpec {
     output_tokens: number;
     cache_read_input_tokens: number;
     cache_write_input_tokens: number;
+    reasoning_output_tokens: number;
     cost: number;
   };
   input_messages: unknown;
@@ -147,6 +148,7 @@ async function perform(telmoni: Telmoni, scenario: Scenario): Promise<void> {
                 outputTokens: call.usage.output_tokens,
                 cacheReadInputTokens: call.usage.cache_read_input_tokens,
                 cacheWriteInputTokens: call.usage.cache_write_input_tokens,
+                reasoningOutputTokens: call.usage.reasoning_output_tokens,
                 cost: call.usage.cost,
               },
               timeToFirstToken: call.time_to_first_token,

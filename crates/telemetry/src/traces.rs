@@ -168,6 +168,8 @@ pub struct TraceRow {
     pub cache_read_input_tokens: u64,
     /// Its model calls' cache writes, summed.
     pub cache_write_input_tokens: u64,
+    /// Its model calls' reasoning tokens, included in output tokens.
+    pub reasoning_output_tokens: u64,
     /// What its model calls cost in US dollars, each as reported, else at
     /// its price ([`crate::spend`]); its own, never scaled by a sample rate.
     pub spend: f64,
@@ -290,6 +292,8 @@ pub struct Bar {
     pub faults: std::collections::BTreeMap<String, u64>,
     /// Their input and output tokens, summed.
     pub tokens: u64,
+    /// Inclusive counts of each model's calls, under the whole-trace filters.
+    pub tokens_by_model: std::collections::BTreeMap<String, TokenCounts>,
     /// What their model calls cost, in US dollars, each trace its own.
     pub spend: f64,
     /// Their durations' median, in milliseconds, where it had traces.
@@ -409,6 +413,7 @@ macro_rules! trace_sums {
             "sumIf(output_tokens, kind = 'model_call') AS output_total, ",
             "sumIf(cache_read_input_tokens, kind = 'model_call') AS cache_read_total, ",
             "sumIf(cache_write_input_tokens, kind = 'model_call') AS cache_write_total, ",
+            "sumIf(reasoning_output_tokens, kind = 'model_call') AS reasoning_total, ",
             "input_total + output_total AS tokens, ",
             "sumIf(",
             $crate::spend::spent_of!(),
@@ -495,7 +500,8 @@ macro_rules! list_sql {
             "spans, steps, model_calls, tool_calls, retrievals, errors, ",
             "input_total AS input_tokens, output_total AS output_tokens, ",
             "cache_read_total AS cache_read_input_tokens, ",
-            "cache_write_total AS cache_write_input_tokens, spent AS spend, models, tools, ",
+            "cache_write_total AS cache_write_input_tokens, reasoning_total AS reasoning_output_tokens, ",
+            "spent AS spend, models, tools, ",
             "environments, releases, tag_pairs AS tags ",
             "FROM (",
             traces!(),
@@ -676,6 +682,7 @@ const FACETS_SQL: &str = facets_sql!("count()", "");
 const SPANS_SQL: &str = "SELECT project_id, received_at, units, agent, trace_id, \
      span_id, parent_span_id, kind, name, started_at, ended_at, status, error_type, fault, model, \
      provider, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, \
+     reasoning_output_tokens, \
      cost, time_to_first_token, user_id, session_id, environment, release, tags, sample_rate, \
      attributes, sent \
      FROM telemetry.spans \
@@ -979,6 +986,88 @@ pub async fn score_means(
         .await
 }
 
+/// Inclusive input and output counts and the subsets displayed beside them.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct TokenCounts {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_input_tokens: u64,
+    pub cache_write_input_tokens: u64,
+    pub reasoning_output_tokens: u64,
+}
+
+const TOKENS_BY_MODEL_SQL: &str = concat!(
+    "SELECT intDiv(toUnixTimestamp64Milli(least(greatest(t.first_started_at, ",
+    "now64(6) - toIntervalDay({days:UInt16})), now64(6))) + {shift:Int64}, {bucket:Int64}) ",
+    "* {bucket:Int64} - {shift:Int64} AS at_ms, s.model AS model, ",
+    "sum(s.input_tokens) AS input_tokens, sum(s.output_tokens) AS output_tokens, ",
+    "sum(s.cache_read_input_tokens) AS cache_read_input_tokens, ",
+    "sum(s.cache_write_input_tokens) AS cache_write_input_tokens, ",
+    "sum(s.reasoning_output_tokens) AS reasoning_output_tokens ",
+    "FROM telemetry.spans AS s INNER JOIN (",
+    traces!(),
+    ") AS t ON s.trace_id = t.trace_id ",
+    "WHERE s.project_id IN {projects:Array(String)} AND s.kind = 'model_call' ",
+    "AND s.received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
+    "GROUP BY at_ms, model ORDER BY at_ms, model"
+);
+
+/// One model's counts in a trace-start bucket.
+#[derive(Debug, Row, Deserialize)]
+pub struct ModelTokensRow {
+    pub at_ms: i64,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_input_tokens: u64,
+    pub cache_write_input_tokens: u64,
+    pub reasoning_output_tokens: u64,
+}
+
+/// Counts by model after admitting whole traces, on the histogram's clock.
+///
+/// # Errors
+///
+/// ClickHouse did not answer or stopped the read at its time or memory cap.
+pub async fn tokens_by_model(
+    store: &Store,
+    projects: &Projects,
+    filter: &TraceFilter,
+    bucket_seconds: u32,
+    shift_minutes: i16,
+) -> clickhouse::error::Result<Vec<ModelTokensRow>> {
+    filtered(store.read(projects, TOKENS_BY_MODEL_SQL), filter)
+        .param("bucket", i64::from(bucket_seconds) * 1_000)
+        .param("shift", i64::from(shift_minutes) * 60_000)
+        .fetch_all()
+        .await
+}
+
+/// Merge model counts without changing the histogram's buckets.
+pub fn with_tokens_by_model(bars: &mut [Bar], rows: Vec<ModelTokensRow>) {
+    let mut counts = std::collections::BTreeMap::new();
+    for row in rows {
+        counts
+            .entry(row.at_ms)
+            .or_insert_with(std::collections::BTreeMap::new)
+            .insert(
+                row.model,
+                TokenCounts {
+                    input_tokens: row.input_tokens,
+                    output_tokens: row.output_tokens,
+                    cache_read_input_tokens: row.cache_read_input_tokens,
+                    cache_write_input_tokens: row.cache_write_input_tokens,
+                    reasoning_output_tokens: row.reasoning_output_tokens,
+                },
+            );
+    }
+    for bar in bars {
+        bar.tokens_by_model = counts
+            .remove(&bar.at.timestamp_millis())
+            .unwrap_or_default();
+    }
+}
+
 /// Each bar's mean of the narrowing score set from `means`, by its start.
 pub fn with_score_means(bars: &mut [Bar], means: &[ScoreMeanRow]) {
     for bar in bars {
@@ -1031,6 +1120,7 @@ pub fn bars(
                     cancelled: row.cancelled,
                     faults: row.faults.into_iter().collect(),
                     tokens: row.token_total,
+                    tokens_by_model: std::collections::BTreeMap::new(),
                     spend: row.spend_total,
                     duration_p50_ms: Some(row.duration_p50_ms),
                     duration_p95_ms: Some(row.duration_p95_ms),
@@ -1045,6 +1135,7 @@ pub fn bars(
                     cancelled: 0,
                     faults: std::collections::BTreeMap::new(),
                     tokens: 0,
+                    tokens_by_model: std::collections::BTreeMap::new(),
                     spend: 0.0,
                     duration_p50_ms: None,
                     duration_p95_ms: None,

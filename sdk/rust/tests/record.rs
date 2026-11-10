@@ -106,6 +106,7 @@ fn item_from(spec: &Value) -> Result<RecordItem, Failure> {
                     output_tokens: Some(int(usage, "output_tokens")?),
                     cache_read_input_tokens: Some(int(usage, "cache_read_input_tokens")?),
                     cache_write_input_tokens: Some(int(usage, "cache_write_input_tokens")?),
+                    reasoning_output_tokens: Some(int(usage, "reasoning_output_tokens")?),
                     cost: usage.get("cost").and_then(Value::as_f64),
                 })
             })
@@ -1035,7 +1036,7 @@ fn a_record_leaves_off_tags_past_32_and_negative_counts() -> Outcome {
         let attributes = attributes_of(call)?;
         assert_eq!(attributes.get("gen_ai.usage.input_tokens"), None);
         assert_eq!(
-            attributes.get("gen_ai.usage.cache_write.input_tokens"),
+            attributes.get("gen_ai.usage.cache_creation.input_tokens"),
             None
         );
         assert_eq!(
@@ -1048,7 +1049,7 @@ fn a_record_leaves_off_tags_past_32_and_negative_counts() -> Outcome {
     let mut expected = [
         "telmoni: a trace carries up to 32 tags, the most ingest keeps; the rest are not sent",
         "telmoni: gen_ai.usage.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
-        "telmoni: gen_ai.usage.cache_write.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
+        "telmoni: gen_ai.usage.cache_creation.input_tokens must be a whole number from 0 within 64 bits; the call is sent without it",
     ];
     expected.sort_unstable();
     assert_eq!(warned, expected);

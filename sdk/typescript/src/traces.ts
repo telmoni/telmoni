@@ -317,7 +317,7 @@ export class ModelCall extends Handle {
       input: count(contract.INPUT_TOKENS),
       output: count(contract.OUTPUT_TOKENS),
       cacheRead: count(contract.CACHE_READ_INPUT_TOKENS),
-      cacheWrite: count(contract.CACHE_WRITE_INPUT_TOKENS),
+      cacheWrite: count(contract.CACHE_CREATION_INPUT_TOKENS),
     };
     const reported = held[contract.COST];
     let cost = typeof reported === 'number' ? reported : priced(this.#prices, this.#provider, this.#model, tokens);
@@ -884,6 +884,7 @@ const USAGE_KEYS = [
   'outputTokens',
   'cacheReadInputTokens',
   'cacheWriteInputTokens',
+  'reasoningOutputTokens',
   'cost',
 ] as const satisfies ReadonlyArray<keyof Usage>;
 
@@ -909,7 +910,8 @@ function usageOf(usage: Usage | undefined, warnOnce: WarnOnce): Attributes {
     [contract.INPUT_TOKENS, usage.inputTokens],
     [contract.OUTPUT_TOKENS, usage.outputTokens],
     [contract.CACHE_READ_INPUT_TOKENS, usage.cacheReadInputTokens],
-    [contract.CACHE_WRITE_INPUT_TOKENS, usage.cacheWriteInputTokens],
+    [contract.CACHE_CREATION_INPUT_TOKENS, usage.cacheWriteInputTokens],
+    [contract.REASONING_OUTPUT_TOKENS, usage.reasoningOutputTokens],
   ] as const) {
     if (!isSet(value)) continue;
     const count = whole(value, 0, 2 ** 63);

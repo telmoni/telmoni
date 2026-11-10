@@ -142,6 +142,7 @@ export const TraceSchema = z.object({
   output_tokens: z.number(),
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
+  reasoning_output_tokens: z.number(),
   /** What its model calls cost in US dollars, reported or priced: its own,
    *  never scaled by a sample rate. */
   spend: z.number(),
@@ -178,6 +179,7 @@ export const TraceSpanSchema = z.object({
   output_tokens: z.number(),
   cache_read_input_tokens: z.number(),
   cache_write_input_tokens: z.number(),
+  reasoning_output_tokens: z.number(),
   /** What it cost in US dollars, as reported; null where it reported none. */
   cost: z.number().nullable(),
   /** Seconds to its answer's first token; null where it reported none. */

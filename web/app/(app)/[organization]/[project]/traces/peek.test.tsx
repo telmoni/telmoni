@@ -48,6 +48,7 @@ function trace(traceId: string, tags: Record<string, string> = {}) {
         output_tokens: 0,
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 0,
+        reasoning_output_tokens: 0,
         cost: null,
         time_to_first_token: null,
         user_id: "",

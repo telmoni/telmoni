@@ -321,6 +321,9 @@ pub struct SpanRow {
     pub cache_read_input_tokens: u64,
     /// Input tokens written to the provider's cache.
     pub cache_write_input_tokens: u64,
+    /// Output tokens spent reasoning, included in output tokens.
+    #[serde(default)]
+    pub reasoning_output_tokens: u64,
     /// What it cost in US dollars, as reported; `None` where it reported none.
     pub cost: Option<f64>,
     /// Seconds from its start to its answer's first token; `None` where it
