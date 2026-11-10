@@ -3008,7 +3008,7 @@ async fn a_deleted_trace_is_filed_then_gone_from_both_stores(pool: PgPool) {
         .lane("DELETE", &format!("/traces/{TRACE}"), "member-1", None)
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "a member deletes nothing");
-    let stranger = "0191a3b4-7c2e-7d3f-8e4a-000000000000";
+    let stranger = "0191a3b47c2e7d3f8e4a000000000000";
     let (status, _) = door
         .lane("DELETE", &format!("/traces/{stranger}"), "admin-1", None)
         .await;
@@ -3453,7 +3453,7 @@ async fn the_applications_late_scores_land_once_and_a_bad_one_keeps_none(pool: P
             // Another trace: a session's score names the nil trace, which would match it.
             &format!(
                 "/scores?trace_id={}&session_id=conv-1",
-                uuid::Uuid::new_v4()
+                uuid::Uuid::new_v4().simple()
             ),
             "admin-1",
             None,
@@ -3901,8 +3901,8 @@ async fn scores_leave_with_their_traces_their_project_and_their_days(pool: PgPoo
     .await;
 }
 
-/// Another exporter's span's score waits with its span, and lands under its
-/// trace once it is placed.
+/// Another exporter's span's score is kept under its trace as it arrives,
+/// and read with the trace once its span is placed.
 #[sqlx::test]
 async fn another_exporters_score_lands_with_its_trace(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -3931,12 +3931,13 @@ async fn another_exporters_score_lands_with_its_trace(pool: PgPool) {
         .read(
             &Projects::one(door.project.clone()),
             "SELECT count() FROM telemetry.scores FINAL WHERE project_id IN {projects:Array(String)} \
-             AND trace_id = ''",
+             AND trace_id = {trace:String}",
         )
+        .param("trace", TRACE)
         .fetch_one()
         .await
         .expect("counted");
-    assert_eq!(waiting, 1, "the score waits with its span");
+    assert_eq!(waiting, 1, "the score is kept under its span's trace");
 
     sqlx::query("UPDATE telemetry.held_spans SET received_at = now() - interval '2 minutes'")
         .execute(&pool)

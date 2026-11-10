@@ -256,7 +256,7 @@ pub(crate) async fn write(
         .map(|(row, _)| (row.trace_id.clone(), row.span_id.clone()))
         .collect();
     let refused = crate::foreign::hold(state, key, std::mem::take(&mut batch.held)).await?;
-    // Their scores wait under the nil trace, as the spans do, until placed.
+    // Their scores are written now, under the trace their spans name.
     let waiting: Vec<crate::scores::ScoreRow> = batch
         .scores
         .iter()

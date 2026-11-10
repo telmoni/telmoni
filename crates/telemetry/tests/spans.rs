@@ -89,7 +89,7 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         .fetch_all()
         .await
         .expect("read the spans back");
-    assert_eq!(back, [call, run], "a span came back other than it went in");
+    assert_eq!(back, [run, call], "a span came back other than it went in");
 
     let rollup: Vec<RollupRow> = ch
         .store
@@ -107,6 +107,16 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
         rollup,
         [
             (
+                "agent".into(),
+                String::new(),
+                "ok".into(),
+                String::new(),
+                1,
+                1,
+                0,
+                0
+            ),
+            (
                 "model_call".into(),
                 String::new(),
                 "ok".into(),
@@ -119,16 +129,6 @@ async fn an_insert_with_no_setting_lands_in_spans_and_the_hourly_rollup() {
             (
                 "retrieval".into(),
                 "docs-index".into(),
-                "ok".into(),
-                String::new(),
-                1,
-                1,
-                0,
-                0
-            ),
-            (
-                "agent".into(),
-                String::new(),
                 "ok".into(),
                 String::new(),
                 1,

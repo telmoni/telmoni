@@ -1067,11 +1067,15 @@ async fn a_trace_is_its_spans_in_order_and_another_projects_is_not_here(pool: Pg
 
     // Another project's trace: not found here, as one that never was.
     let (status, body) = p
-        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{d}")))
+        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{}", d.simple())))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     let (status, _) = p
-        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{}", Uuid::new_v4())))
+        .send(p.request(
+            MEMBER,
+            &p.ours,
+            &format!("{LANE}/{}", Uuid::new_v4().simple()),
+        ))
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -1081,7 +1085,7 @@ async fn a_trace_is_its_spans_in_order_and_another_projects_is_not_here(pool: Pg
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 
     let (status, _) = p
-        .send(p.request(STRANGER, &p.ours, &format!("{LANE}/{a}")))
+        .send(p.request(STRANGER, &p.ours, &format!("{LANE}/{}", a.simple())))
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }

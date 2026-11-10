@@ -1011,14 +1011,18 @@ fn of_trace(
 
 /// The traces `name`'s incidents showed.
 async fn shown_by(pool: &PgPool, name: &str) -> Vec<Uuid> {
-    sqlx::query_scalar(
+    let shown: Vec<String> = sqlx::query_scalar(
         "SELECT unnest(i.traces) FROM telemetry.incidents i JOIN telemetry.rules r ON r.id = i.rule_id
           WHERE r.name = $1",
     )
     .bind(name)
     .fetch_all(pool)
     .await
-    .expect("the incident's traces")
+    .expect("the incident's traces");
+    shown
+        .iter()
+        .map(|id| Uuid::parse_str(id).expect("a trace's id"))
+        .collect()
 }
 
 /// ⚠ A trace that calls one tool twelve times in a row, model calls between,

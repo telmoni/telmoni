@@ -206,7 +206,8 @@ async fn a_breach_names_the_trace_that_shows_it_and_links_the_traces(pool: PgPoo
             .to_owned(),
         format!(
             "The latest failed trace: last step search, TimeoutError, 2 steps, 1500 tokens and \
-             $0.00, no price for a call naming no model. {console}/traces/{failed}"
+             $0.00, no price for a call naming no model. {console}/traces/{}",
+            failed.simple()
         ),
         format!("Traces: {console}/traces?days=1&status=error"),
     ];
@@ -314,7 +315,11 @@ async fn an_incident_keeps_where_its_notices_went_and_the_traces_they_showed(poo
     );
 
     let (status, carrying) = project
-        .send("GET", &format!("{INCIDENTS}?trace={failed}"), &Value::Null)
+        .send(
+            "GET",
+            &format!("{INCIDENTS}?trace={}", failed.simple()),
+            &Value::Null,
+        )
         .await;
     assert_eq!(status, StatusCode::OK, "{carrying}");
     assert_eq!(
@@ -325,7 +330,11 @@ async fn an_incident_keeps_where_its_notices_went_and_the_traces_they_showed(poo
         Some(vec![risen["id"].clone()])
     );
     let (_, none) = project
-        .send("GET", &format!("{INCIDENTS}?trace={fine}"), &Value::Null)
+        .send(
+            "GET",
+            &format!("{INCIDENTS}?trace={}", fine.simple()),
+            &Value::Null,
+        )
         .await;
     assert_eq!(none["incidents"], json!([]), "no notice showed that trace");
     let (status, _) = project
@@ -517,7 +526,8 @@ async fn a_latency_breach_names_the_trace_of_its_slowest_call(pool: PgPool) {
         Some(
             format!(
                 "The trace of the slowest model call: 0 steps, 42 tokens and $0.00 so far, \
-                 no price for claude-sonnet-5-5 (anthropic). {console}/traces/{slow}"
+                 no price for claude-sonnet-5-5 (anthropic). {console}/traces/{}",
+                slow.simple()
             )
             .as_str()
         ),
@@ -601,7 +611,8 @@ async fn a_trace_past_its_cost_cap_pages_while_it_is_going(pool: PgPool) {
         Some(
             format!(
                 "The trace that spent the most: last step research, 1 step, 120500 tokens and \
-                 $3.45 so far, no price for ft:gpt-4o:acme (openai). {console}/traces/{dear}"
+                 $3.45 so far, no price for ft:gpt-4o:acme (openai). {console}/traces/{}",
+                dear.simple()
             )
             .as_str()
         ),
@@ -672,7 +683,7 @@ async fn a_notice_keeps_to_its_bounds_past_the_longest_filters_and_names(pool: P
         opened.body
     );
     assert!(
-        opened.body.contains(&format!("/traces/{run}")),
+        opened.body.contains(&format!("/traces/{}", run.simple())),
         "{}",
         opened.body
     );

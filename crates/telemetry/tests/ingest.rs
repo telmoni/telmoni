@@ -1210,9 +1210,11 @@ async fn another_exporters_retrievals_land_as_retrievals_named_by_their_source(p
         ("retrieval", "preferences", calls_trace.as_str())
     );
     assert_eq!(memory.7, "2");
-    assert!(
-        landed.iter().all(|row| row.0 != "44".repeat(8)),
-        "a span above every agent is dropped"
+    let root = of(&"44".repeat(8));
+    assert_eq!(
+        (root.1.as_str(), root.3.as_str(), root.4.as_str()),
+        ("span", "checkout", calls_trace.as_str()),
+        "a root with no agent above it is kept, the service's"
     );
 }
 
