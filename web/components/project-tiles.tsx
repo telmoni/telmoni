@@ -42,7 +42,7 @@ export function ProjectTiles({
             <Card className="flex flex-row items-center gap-0 overflow-hidden p-0 transition-colors hover:bg-accent focus-within:bg-accent">
               <Link
                 href={projectPath(organization, project.slug)}
-                className="flex min-w-0 flex-1 items-center justify-between gap-gutter py-gutter pr-1 pl-gutter text-sm focus-visible:outline-none"
+                className="flex min-w-0 flex-1 items-center justify-between gap-gutter py-gutter pr-1 pl-gutter text-sm"
               >
                 <span className="min-w-0 truncate font-medium">{project.name}</span>
                 <span className="flex shrink-0 items-center gap-gutter">

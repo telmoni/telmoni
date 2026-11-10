@@ -56,7 +56,7 @@ export function AccessibilitySettings({ supportEmail }: { supportEmail: string |
           </Row>
           <Row
             label={<Label htmlFor="a11y-focus-rings">Show focus</Label>}
-            hint="On by default. Draw a ring around whatever has keyboard focus, so you can see where you are. It shows when you move with the keyboard and in a field you type in, never when you click a button or a link."
+            hint="On by default. Your browser's own outline around whatever has keyboard focus, so you can see where you are. It shows when you move with the keyboard, never when you click a button or a link."
           >
             <Switch id="a11y-focus-rings" checked={focusRings} onCheckedChange={setFocusRings} />
           </Row>

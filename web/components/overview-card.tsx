@@ -64,7 +64,7 @@ export function OverviewCard({
         <Link
           key={link.href}
           href={link.href}
-          className="flex items-center gap-gutter border-t border-border py-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+          className="flex items-center gap-gutter border-t border-border py-gutter text-sm transition-colors hover:bg-accent focus-visible:bg-accent"
         >
           <ArrowRight className="size-icon shrink-0" aria-hidden="true" />
           {link.label}

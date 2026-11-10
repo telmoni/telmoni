@@ -263,7 +263,7 @@ export function SurfaceCard({
 }) {
   return (
     <div data-component="surface-card" className="flex h-full min-w-0 flex-col gap-4">
-      <div tabIndex={0} role="region" aria-label={`${title} preview`} className="group relative aspect-[4/5] w-full overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-foreground text-background select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <div tabIndex={0} role="region" aria-label={`${title} preview`} className="group relative aspect-[4/5] w-full overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-foreground text-background select-none">
         {preview}
       </div>
       <div className="flex flex-1 flex-col gap-1.5">
@@ -430,7 +430,7 @@ export function SdkVideoPlaceholder() {
         <div className="my-1" />
         <p>
           <span className="text-brand-unit">await</span>{" "}
-          <span className="text-background">telmoni.run</span>(
+          <span className="text-background">telmoni.trace</span>(
         </p>
         <p className="pl-3">
           <span className="text-brand-positive">&quot;support-bot&quot;</span>,
@@ -445,7 +445,7 @@ export function SdkVideoPlaceholder() {
         </p>
         <p className="pl-3">
           <span className="text-brand-unit">async</span> (
-          <span className="text-background">run</span>) =&gt; {"{ /* ... */ }"}
+          <span className="text-background">trace</span>) =&gt; {"{ /* ... */ }"}
         </p>
         <p>{");"}</p>
       </div>

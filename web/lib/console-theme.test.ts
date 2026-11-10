@@ -13,35 +13,32 @@ function block(selector: string): string {
   return CSS.slice(at, CSS.indexOf("\n}", at));
 }
 
-// One global outline replaces component rings, so focus is drawn only once.
+// Keyboard focus is the browser's own outline; the console draws no ring of
+// its own, and hides the outline only on an explicit saved choice.
 describe("the focus indicator", () => {
-  const RULE = "*:focus,\n*:focus-visible";
+  const RULE = "html.a11y-no-focus-rings *:focus-visible";
 
-  it("resets component outlines and rings before drawing the shared indicator", () => {
-    const rule = block(RULE);
-    expect(rule, "an outline still draws on focus").toMatch(/outline:\s*none/);
-    expect(rule, "a component's ring still draws on focus").toMatch(
-      /--tw-ring-shadow:\s*0 0 #0000/,
+  it("is the browser's outline, with no ring drawn over it", () => {
+    const rules = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rules, "a focus rule draws a ring of its own").not.toMatch(
+      /:focus-visible[^{]*\{[^}]*box-shadow/,
     );
-    expect(rule, "a ring offset still draws on focus").toMatch(
-      /--tw-ring-offset-shadow:\s*0 0 #0000/,
-    );
-  });
-
-  it("draws keyboard focus unless it was explicitly turned off", () => {
-    expect(block("html:not(.a11y-no-focus-rings) *:focus-visible")).toMatch(
-      /box-shadow:\s*0 0 0 1px var\(--color-foreground\)/,
+    expect(rules, "a focus rule replaces the browser's outline").not.toMatch(
+      /:focus-visible[^{]*\{[^}]*outline:\s*\d/,
     );
   });
 
-  // Tailwind's `focus-visible:ring-*` utilities sit in `@layer utilities` and
-  // beat any layered rule regardless of specificity. Wrap this in a `@layer`
-  // and six primitives get their rings back with nothing else changing —
-  // exactly the kind of edit that looks harmless.
+  it("hides keyboard focus only when it was explicitly turned off", () => {
+    expect(block(RULE)).toMatch(/outline:\s*none/);
+  });
+
+  // Tailwind's `focus-visible:outline-*` utilities sit in `@layer utilities`
+  // and beat any layered rule regardless of specificity, so a layered opt-out
+  // would lose to the first component that names one.
   //
-  // Brace depth, not indentation: the first version of this test matched
-  // `\n*:focus,` and passed happily with the rule nested one line under
-  // `@layer base {`, because the rule still began its own line at column 0.
+  // Brace depth, not indentation: an earlier version of this test matched
+  // the rule at the start of a line and passed happily with it nested one
+  // line under `@layer base {`.
   it("sits outside @layer, or the utilities would win", () => {
     const at = CSS.indexOf(`${RULE} {`);
     const before = CSS.slice(0, at).replace(/\/\*[\s\S]*?\*\//g, "");

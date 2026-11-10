@@ -54,9 +54,8 @@
 
   --border: oklch(0.912 0.002 286);
   --input: oklch(0.9 0.004 250);
-  /* Focus no longer spends this token: the one focus rule below draws a ring
-     and a field's border in the text colour. It stays for shadcn's charts
-     and any primitive that still names it. */
+  /* Focus spends none of this: keyboard focus is the browser's own outline.
+     It stays for shadcn's charts and any primitive that still names it. */
   --ring: oklch(0.8 0 0);
 
   --brand-positive: oklch(0.56 0.17 145);
@@ -400,56 +399,39 @@
 .theme-sharp [class*="**:rounded"] * {
   border-radius: 0;
 }
-
-*:focus,
-*:focus-visible {
-  outline: none;
-  --tw-ring-shadow: 0 0 #0000;
-  --tw-ring-offset-shadow: 0 0 #0000;
+/* The browser's `auto` focus outline rounds its own corners whatever the
+   element's radius; a solid one follows the corners, so the sharp theme
+   takes that, at the width the auto ring draws. */
+.theme-sharp *:focus-visible {
+  outline-style: solid;
+  outline-width: 2px;
 }
 
 /* ── Accessibility settings (`lib/accessibility.ts`, Account › Accessibility) ──
    Classes on `<html>`, set before first paint by the boot script in
-   `app/layout.tsx`. Unlayered, as the focus rule above is, so they beat
-   Tailwind's utilities whatever their specificity. */
+   `app/layout.tsx`. Unlayered, so they beat Tailwind's utilities whatever
+   their specificity. */
 
-/* Keyboard focus is shown by default, as Claude and Gemini show it: a thin
-   ring hugging the control in the text colour, with a faint glow, never a
-   heavy outline standing off it; only an explicit saved choice hides it. The
-   outline stays, transparent, so a forced-colours display, which drops box
-   shadows, still draws one. */
-html:not(.a11y-no-focus-rings) *:focus-visible {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-  box-shadow:
-    0 0 0 1px var(--color-foreground),
-    0 0 6px 1px color-mix(in oklab, var(--color-foreground) 12%, transparent);
-  /* Drawn at once: a control that transitions every property (a button's
-     `transition-all`) would otherwise grow the ring in over its duration. */
-  transition-property: color, background-color, border-color, opacity, box-shadow;
+/* Keyboard focus is the browser's own outline, drawn where the browser draws
+   it, as you move with the keyboard and never as you click; the console draws
+   no ring of its own. Only an explicit saved choice hides it. */
+html.a11y-no-focus-rings *:focus-visible {
+  outline: none;
 }
-/* Inside a box that clips what stands past it, the ring is drawn inside. */
-html:not(.a11y-no-focus-rings) :is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"], [data-slot="card"] table, [data-slot="table-scroll"]) *:focus-visible,
-html:not(.a11y-no-focus-rings) :is([data-slot="card"], [data-slot="card"] > a, [data-slot="table-scroll"]):focus-visible {
+/* Inside a box that clips what stands past it, the outline is drawn inside. */
+:is(#console-sidebar, [role="menu"], [role="listbox"], [data-segmented], [data-slot="dialog-body"], [data-slot="alert-dialog-body"], [data-slot="card"] table, [data-slot="table-scroll"]) *:focus-visible,
+:is([data-slot="card"], [data-slot="card"] > a, [data-slot="table-scroll"]):focus-visible {
   outline-offset: -2px;
-  box-shadow: inset 0 0 0 1px var(--color-foreground);
 }
-/* A field you type in shows its focus as its own border turning the text
-   colour, however it was reached, and no ring around it: clicking into it is
-   where you type, not a place to find. The agent's composer is one field with
-   more inside it, so its box takes the border. */
-html:not(.a11y-no-focus-rings) :is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select):focus-visible {
-  box-shadow: none;
-  border-color: var(--color-foreground);
-}
+/* The agent's composer is one field with more inside it, so its box shows
+   the focus its textarea has. */
 html:not(.a11y-no-focus-rings) [data-focus-box]:has(> textarea:focus-visible) {
   border-color: var(--color-foreground);
 }
 /* What takes the focus only to hand it on, a menu, a dialog or a panel as it
    opens or a heading a page lands on, draws nothing, however it was opened. */
-html:not(.a11y-no-focus-rings) :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], h1, h2, h3, main)[tabindex="-1"]:focus-visible {
-  outline-color: transparent;
-  box-shadow: none;
+:is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], h1, h2, h3, main)[tabindex="-1"]:focus-visible {
+  outline: none;
 }
 
 /* Reduce motion: every animation and transition finishes at once rather than
