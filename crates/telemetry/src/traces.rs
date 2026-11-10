@@ -311,6 +311,9 @@ macro_rules! trace_status {
 /// Whether the trace's sums pass one filter, each admitting every trace
 /// while it is empty: what the list keeps and the facets flag.
 macro_rules! admits {
+    (agent) => {
+        "(empty({agents:Array(String)}) OR has({agents:Array(String)}, trace_agent))"
+    };
     (user) => {
         "(empty({users:Array(String)}) OR has({users:Array(String)}, trace_user_id))"
     };
@@ -422,18 +425,19 @@ macro_rules! window {
 }
 
 /// The traces the filter admits, a row each: what the list pages through,
-/// counts, buckets and downloads. The agent's filter is read off the spans,
-/// each of which names its agent, so another agent's trace is never summed;
-/// the rest are read off the sums.
+/// counts, buckets and downloads. Every filter is read off the sums, the
+/// agent's too: a trace holding another exporter's nested agent is summed
+/// whole, under its own agent, as the facets count it.
 macro_rules! traces {
     () => {
         concat!(
             "SELECT ",
             trace_sums!(),
             window!(),
-            "AND (empty({agents:Array(String)}) OR has({agents:Array(String)}, agent)) ",
             "GROUP BY trace_id ",
             "HAVING ",
+            admits!(agent),
+            " AND ",
             admits!(user),
             " AND ",
             admits!(session),
@@ -592,8 +596,7 @@ macro_rules! facets_sql {
             "arraySort(groupUniqArrayIf(model, kind = 'model_call' AND model != '')) AS models, ",
             "arraySort(groupUniqArrayIf(name, kind = 'tool_call')) AS tools, ",
             $crate::traces::trace_carries!(),
-            ", toUInt8(empty({agents:Array(String)}) OR has({agents:Array(String)}, trace_agent)) ",
-            "AS m_agent, ",
+            ", toUInt8(", $crate::traces::admits!(agent), ") AS m_agent, ",
             "toUInt8(", $crate::traces::admits!(user), ") AS m_user, ",
             "toUInt8(", $crate::traces::admits!(session), ") AS m_session, ",
             "toUInt8(", $crate::traces::admits!(status), ") AS m_status, ",

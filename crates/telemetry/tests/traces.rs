@@ -1,10 +1,10 @@
-//! The trace lanes against a real ClickHouse: the list sums each run's spans
+//! The trace lanes against a real ClickHouse: the list sums each trace's spans
 //! into one row, newest first, filtered by any of its columns — by several
 //! values of one — sorted by any, paged and counted, and names only the
-//! project's own runs; the facets count each value under the other filters,
-//! the histogram each run in the bar it started in, and a download is the
-//! list's rows as a file; a trace is its run's spans in the order they
-//! started, and another project's run id is a 404 here; a query a parameter
+//! project's own traces; the facets count each value under the other filters,
+//! the histogram each trace in the bar it started in, and a download is the
+//! list's rows as a file; a trace is its spans in the order they
+//! started, and another project's trace id is a 404 here; a query a parameter
 //! does not take is a 400 that echoes none of it.
 #![expect(clippy::expect_used, reason = "test scaffolding")]
 
@@ -164,7 +164,7 @@ fn owned(pairs: &[(&str, u64)]) -> Vec<(String, u64)> {
     pairs.iter().map(|(v, n)| ((*v).to_owned(), *n)).collect()
 }
 
-/// The runs a list answers, in its order.
+/// The traces a list answers, in its order.
 fn ids(list: &Value) -> Vec<Uuid> {
     list["traces"]
         .as_array()
@@ -210,7 +210,7 @@ fn span_at(
     }
 }
 
-/// Three runs of ours — one whose run span has not arrived — and one of
+/// Three traces of ours — one whose agent span has not arrived — and one of
 /// another project's, with one of each kind of span among them; A sent from
 /// production, B from staging, C from no deployment named.
 struct Seeded {
@@ -241,7 +241,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
     let b_start = now - Duration::minutes(5);
     let c_start = now - Duration::minutes(1);
     let rows = vec![
-        // Run A: a report, one user's, four spans, its tool call failed.
+        // Trace A: a report, one user's, four spans, its tool call failed.
         deployed(
             SpanRow {
                 user_id: "user-a".into(),
@@ -328,7 +328,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             "production",
             "2026.10.17",
         ),
-        // Run B: a support bot's, ended in error, a cheaper model, from
+        // Trace B: a support bot's, ended in error, a cheaper model, from
         // staging, its call tagged and prompted.
         deployed(
             SpanRow {
@@ -370,7 +370,7 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
             "staging",
             "2026.10.18",
         ),
-        // Run C: still running — its model call arrived, its run span has not.
+        // Trace C: still going — its model call arrived, its agent span has not.
         SpanRow {
             agent: "zeta".into(),
             model: "gpt-x".into(),
@@ -385,24 +385,24 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
                 7,
             )
         },
-        // Run D: another project's.
+        // Trace D: another project's.
         span_at(&p.theirs, d, SpanKind::Agent, "nightly-report", now, 300, 8),
     ];
     ch.store.insert_spans(&rows).await.expect("the spans land");
     Seeded { a, b, c, d }
 }
 
-/// Each agent as its Agents page reads it: its runs, those that failed, the
+/// Each agent as its Agents page reads it: its traces, those that failed, the
 /// one that started last and what it cost, and the median of what its ended
-/// runs cost, the newest last run first; another project's agent is not here.
+/// traces cost, the newest last trace first; another project's agent is not here.
 #[sqlx::test]
-async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool: PgPool) {
+async fn the_agents_lane_reads_each_agents_last_trace_against_its_usual_cost(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
     let p = projects(&pool);
     let now = Utc::now().trunc_subsecs(6);
-    // A run of `agent` started `minutes` ago, its one call costing `cost`;
+    // A trace of `agent` started `minutes` ago, its one call costing `cost`;
     // ended where it carries its own span, failed where `failed`.
     let run =
         |project: &ProjectId, agent: &str, minutes: i64, cost: f64, ended: bool, failed: bool| {
@@ -444,7 +444,7 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
     let (nightly, support) = (&agents[0], &agents[1]);
     assert_eq!(
         nightly["agent"], "nightly-report",
-        "the newest last run first"
+        "the newest last trace first"
     );
     assert_eq!(nightly["traces"], 1);
     assert_eq!(nightly["last_trace_id"], running.simple().to_string());
@@ -453,7 +453,7 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
     assert_eq!(
         nightly["usual_spend"],
         Value::Null,
-        "no run of it has ended"
+        "no trace of it has ended"
     );
     assert_eq!(support["agent"], "support-bot");
     assert_eq!(support["traces"], 3);
@@ -468,9 +468,9 @@ async fn the_agents_lane_reads_each_agents_last_run_against_its_usual_cost(pool:
     );
 }
 
-/// A run's retrievals are counted beside its tool calls, neither in the other.
+/// A trace's retrievals are counted beside its tool calls, neither in the other.
 #[sqlx::test]
-async fn the_list_counts_a_runs_retrievals_beside_its_tool_calls(pool: PgPool) {
+async fn the_list_counts_a_traces_retrievals_beside_its_tool_calls(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -524,8 +524,51 @@ async fn the_list_counts_a_runs_retrievals_beside_its_tool_calls(pool: PgPool) {
     assert_eq!(report["tools"], serde_json::json!(["docs-index"]));
 }
 
+/// A trace holding a nested agent's spans is listed whole under its own agent, never under the nested one.
 #[sqlx::test]
-async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(pool: PgPool) {
+async fn the_agent_filter_keeps_a_trace_whole_under_its_own_agent(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let id = Uuid::new_v4();
+    let start = Utc::now().trunc_subsecs(6) - Duration::minutes(2);
+    let named = |agent: &str, row: SpanRow| SpanRow {
+        agent: agent.into(),
+        ..row
+    };
+    let rows = [
+        named(
+            "planner",
+            span_at(&p.ours, id, SpanKind::Agent, "planner", start, 1_000, 1),
+        ),
+        named(
+            "planner",
+            span_at(&p.ours, id, SpanKind::Span, "researcher", start, 500, 2),
+        ),
+        named(
+            "researcher",
+            SpanRow {
+                input_tokens: 40,
+                output_tokens: 2,
+                ..span_at(&p.ours, id, SpanKind::ModelCall, "chat", start, 100, 3)
+            },
+        ),
+    ];
+    ch.store.insert_spans(&rows).await.expect("the spans land");
+
+    let list = p.list("?agent=planner").await;
+    let report = trace(&list, id);
+    assert_eq!(report["ended"], true);
+    assert_eq!(report["spans"], 3);
+    assert_eq!(report["input_tokens"], 40);
+    assert!(ids(&p.list("?agent=researcher").await).is_empty());
+    let facets = p.get(&format!("{LANE}/facets?agent=planner")).await;
+    assert_eq!(values(&facets, "agent"), owned(&[("planner", 1)]));
+}
+
+#[sqlx::test]
+async fn the_list_sums_each_trace_newest_first_and_names_only_the_projects_own(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -568,7 +611,7 @@ async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(po
     assert_eq!(bot["ended"], true);
     assert_eq!(bot["duration_ms"], 500);
 
-    // A run whose own span has not arrived is listed from what has, as
+    // A trace whose agent span has not arrived is listed from what has, as
     // still running, its status from its spans.
     let running = trace(&list, c);
     assert_eq!(running["ended"], false);
@@ -582,7 +625,7 @@ async fn the_list_sums_each_run_newest_first_and_names_only_the_projects_runs(po
         let (status, _) = p.send(p.request(user, &p.ours, LANE)).await;
         assert_eq!(status, StatusCode::OK, "{user}");
     }
-    // Theirs, read by their own owner, is their one run and none of ours: the
+    // Theirs, read by their own owner, is their one trace and none of ours: the
     // row policy and the read's own WHERE each name the projects.
     let (status, body) = p.send(p.request("user_other", &p.theirs, LANE)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -608,7 +651,7 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
     assert_eq!(ids(&p.list("?tool=search_docs").await), [a]);
     assert!(ids(&p.list("?agent=nobody").await).is_empty());
     assert_eq!(ids(&p.list("?model=gpt-x&status=error").await), [b]);
-    // The deployment, a tag and a prompt: a run carries each where any of
+    // The deployment, a tag and a prompt: a trace carries each where any of
     // its spans does, the tag as key:value.
     assert_eq!(ids(&p.list("?environment=production").await), [a]);
     assert_eq!(
@@ -639,10 +682,10 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
             .list("?prompt=triage-v2&prompt_version=triage-v2%3A9")
             .await)
         .is_empty(),
-        "a name's runs, and none on that version"
+        "a name's traces, and none on that version"
     );
-    // A filter given again admits a run matching any of its values; an empty
-    // value, a form's untouched field, admits every run.
+    // A filter given again admits a trace matching any of its values; an empty
+    // value, a form's untouched field, admits every trace.
     assert_eq!(ids(&p.list("?agent=support-bot&agent=zeta").await), [c, b]);
     assert_eq!(ids(&p.list("?status=error&status=ok").await), [c, b, a]);
     assert_eq!(ids(&p.list("?user=user-a&user=user-b").await), [b, a]);
@@ -707,7 +750,7 @@ async fn the_list_filters_by_any_column_and_sorts_by_any(pool: PgPool) {
     assert_eq!(one_day["days"], 1);
 }
 
-/// Each facet names its values among the project's runs and how many runs
+/// Each facet names its values among the project's traces and how many
 /// carry each, counted under every filter but its own: a value beside a
 /// ticked one still says what ticking it would add, and a ticked value comes
 /// first.
@@ -725,7 +768,7 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
     assert_eq!(
         values(&all, "agent"),
         owned(&[("nightly-report", 1), ("support-bot", 1), ("zeta", 1)]),
-        "another project's run is not counted"
+        "another project's trace is not counted"
     );
     assert_eq!(values(&all, "status"), owned(&[("ok", 2), ("error", 1)]));
     assert_eq!(
@@ -741,7 +784,7 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
     assert_eq!(
         values(&all, "environment"),
         owned(&[("production", 1), ("staging", 1)]),
-        "a run from no deployment named is no value"
+        "a trace from no deployment named is no value"
     );
     assert_eq!(
         values(&all, "release"),
@@ -750,7 +793,7 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
     assert_eq!(
         values(&all, "tag"),
         owned(&[("team:search", 1), ("team:support", 1)]),
-        "a tag as key:value, wherever on the run it was"
+        "a tag as key:value, wherever on the trace it was"
     );
     assert_eq!(values(&all, "prompt"), owned(&[("triage-v2", 2)]));
     assert_eq!(
@@ -802,17 +845,17 @@ async fn the_facets_count_each_value_under_every_other_filter(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// The histogram counts each run in the bar its first span started in, the
+/// The histogram counts each trace in the bar its first span started in, the
 /// bars starting on the reader's clock and running from the window's opening
 /// to now, the empty ones with no durations.
 #[sqlx::test]
-async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
+async fn the_histogram_counts_each_trace_in_the_bar_it_started_in(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
     let p = projects(&pool);
     let Seeded { a, b, c, .. } = seed(&ch, &p).await;
-    // Run E, at :55 five hours back: the last bar, or a shift the wrong way, misplaces it.
+    // Trace E, at :55 five hours back: the last bar, or a shift the wrong way, misplaces it.
     let hour = (Utc::now() - Duration::hours(5))
         .timestamp()
         .div_euclid(3_600)
@@ -856,7 +899,7 @@ async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
         );
     }
 
-    // Each run in the reader's hour it started in, by the list's starts.
+    // Each trace in the reader's hour it started in, by the list's starts.
     let list = p.list("").await;
     let started = |run: Uuid| -> DateTime<Utc> {
         trace(&list, run)["started_at"]
@@ -892,7 +935,7 @@ async fn the_histogram_counts_each_run_in_the_bar_it_started_in(pool: PgPool) {
     let empty = bars
         .iter()
         .find(|b| b["ok"] == 0 && b["error"] == 0 && b["cancelled"] == 0)
-        .expect("an hour no run started in");
+        .expect("an hour no trace started in");
     assert_eq!(empty["duration_p50_ms"], Value::Null);
 
     let failed = p
@@ -926,7 +969,7 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
     let text = String::from_utf8(body).expect("UTF-8");
     let text = text.strip_prefix('\u{feff}').expect("the byte-order mark");
     let lines: Vec<&str> = text.split("\r\n").filter(|l| !l.is_empty()).collect();
-    assert_eq!(lines.len(), 4, "the header and a row a run");
+    assert_eq!(lines.len(), 4, "the header and a row a trace");
     assert!(
         lines[0]
             .starts_with("trace_id,agent,user_id,session_id,ended,status,error_type,started_at")
@@ -963,7 +1006,7 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
     assert_eq!(
         rows[0]["content"],
         serde_json::json!([]),
-        "a run that kept none"
+        "a trace that kept none"
     );
 
     for query in ["?format=xlsx", "?run=not-a-run", "?page=2"] {
@@ -975,7 +1018,7 @@ async fn a_download_is_the_lists_rows_as_csv_or_json(pool: PgPool) {
 }
 
 #[sqlx::test]
-async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here(pool: PgPool) {
+async fn a_trace_is_its_spans_in_order_and_another_projects_is_not_here(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -1022,7 +1065,7 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(tool["status"], "error");
     assert_eq!(tool["error_type"], "TimeoutError");
 
-    // Another project's run: not found here, as a run that never was.
+    // Another project's trace: not found here, as one that never was.
     let (status, body) = p
         .send(p.request(MEMBER, &p.ours, &format!("{LANE}/{d}")))
         .await;
@@ -1033,7 +1076,7 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     let (status, body) = p
-        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/not-a-run")))
+        .send(p.request(MEMBER, &p.ours, &format!("{LANE}/not-a-trace")))
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
 
@@ -1043,11 +1086,11 @@ async fn a_trace_is_its_runs_spans_in_order_and_another_projects_run_is_not_here
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
-/// ⚠ A trace carries what its run spent as an alert on its cost reads it: a
+/// ⚠ A trace carries what it spent as an alert on its cost reads it: a
 /// call's cost as reported, else its tokens at the table's price, and the
 /// models priced by neither.
 #[sqlx::test]
-async fn a_trace_carries_what_its_run_spent_and_the_models_no_price_covers(pool: PgPool) {
+async fn a_trace_carries_what_it_spent_and_the_models_no_price_covers(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
@@ -1101,16 +1144,16 @@ async fn a_trace_carries_what_its_run_spent_and_the_models_no_price_covers(pool:
     );
 }
 
-/// A run's time to first token is its first model call's that reported one: it
-/// sorts the slowest first, a run with none last either way, and its bar charts
-/// the runs' median.
+/// A trace's time to first token is its first model call's that reported one: it
+/// sorts the slowest first, a trace with none last either way, and its bar charts
+/// the traces' median.
 #[sqlx::test]
-async fn a_runs_time_to_first_token_is_its_first_model_calls(pool: PgPool) {
+async fn a_traces_time_to_first_token_is_its_first_model_calls(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
         return;
     };
     let p = projects(&pool);
-    // At a minute's start, so no hour's bar parts the runs.
+    // At a minute's start, so no hour's bar parts the traces.
     let minute = (Utc::now() - Duration::minutes(1))
         .timestamp()
         .div_euclid(60)
@@ -1159,7 +1202,7 @@ async fn a_runs_time_to_first_token_is_its_first_model_calls(pool: PgPool) {
     assert!((medians[0] - 500.0).abs() < 1e-6, "{medians:?}");
 }
 
-/// A run whose spans hold more units than a page shows is cut where they pass, and says so.
+/// A trace whose spans hold more units than a page shows is cut where they pass, and says so.
 #[sqlx::test]
 async fn a_trace_of_wide_spans_is_cut_where_their_units_pass_the_cap(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
