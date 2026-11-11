@@ -305,7 +305,7 @@ An organization Owner or Admin can create a new project from the organization's
 4. The project is created immediately. Its API keys and connectors are its own.
    With **On** chosen, a code is mailed to the Owner, and the project keeps
    content once it is typed in the panel. If the message does not arrive,
-   choose **Resend code**; **Keep it off** opens the project with content off
+   choose **Resend code** once its 30 seconds are counted down; **Keep it off** opens the project with content off
    instead.
 
 A deployment may hold each organization to a number of projects, whatever its
@@ -554,7 +554,7 @@ Only the **Owner** can delete an organization. Deletion is performed from the
 
 1. Request a 6-digit confirmation code, which is emailed to the Owner's address
    and remains valid for 15 minutes. Five wrong guesses burn it; **Resend
-   code** issues another. The console sends at most three codes an hour and
+   code** issues another, 30 seconds after the last. The console sends at most three codes an hour and
    takes ten attempts an hour. On a self-hosted deployment, the code goes out
    only when the operator has configured mail (`SMTP_URL`); without it, the
    organization cannot be deleted from the console.

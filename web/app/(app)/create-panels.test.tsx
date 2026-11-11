@@ -51,6 +51,7 @@ function panels(notice?: React.ReactNode) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   role = "owner";
   creating = null;
 });
@@ -147,6 +148,7 @@ describe("New project", () => {
       () => new Promise((resolve) => { sent = resolve; }),
     );
     updateContentModeAction.mockResolvedValue({ ok: true });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     panels();
     fireEvent.click(screen.getByRole("radio", { name: "On" }));
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Support agent" } });
@@ -154,7 +156,10 @@ describe("New project", () => {
     const code = await screen.findByLabelText(/sent to/);
     fireEvent.change(code, { target: { value: "123456" } });
     const confirm = screen.getByRole("button", { name: "Keep content" });
-    const resend = screen.getByRole("button", { name: "Resend code" });
+    const resend = screen.getByRole("button", { name: /^Resend code in \d+s$/ });
+    expect(resend).toBeDisabled();
+    act(() => { vi.advanceTimersByTime(30_000); });
+    expect(resend).toHaveTextContent(/^Resend code$/);
     fireEvent.click(resend);
     await waitFor(() => expect(requestContentModeCodeAction).toHaveBeenCalledTimes(2));
     expect(resend).toBeDisabled();
@@ -166,7 +171,8 @@ describe("New project", () => {
     await act(async () => { sent({ ok: true }); });
     expect(code).toHaveValue("");
     expect(confirm).toBeDisabled();
-    expect(resend).toBeEnabled();
+    expect(resend).toHaveTextContent("Resend code in 30s");
+    expect(resend).toBeDisabled();
     fireEvent.change(code, { target: { value: "654321" } });
     fireEvent.click(confirm);
     await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/support-agent"));

@@ -199,7 +199,7 @@ export function CreateProjectPanel({
                   onType={flow.type}
                   disabled={flow.sending || flow.confirming}
                 />
-                <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
+                <ResendCodeButton sending={flow.sending} confirming={flow.confirming} resendIn={flow.resendIn} onResend={flow.sendCode} />
               </div>
             )}
             {made && flow.error && (

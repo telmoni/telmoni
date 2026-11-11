@@ -53,6 +53,7 @@ describe("DoorScrubForm", () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   updateContentModeAction.mockResolvedValue({ ok: true });
 });
 
@@ -169,11 +170,14 @@ describe("ContentModeForm", () => {
     requestContentModeCodeAction.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
       ok: false, error: "Please wait before requesting another code.",
     });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     render(form({ offered: [ContentMode.Off, ContentMode.On] }));
     fireEvent.click(radio("On"));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send confirmation code" })); });
     const field = screen.getByLabelText(/code sent to/);
     fireEvent.change(field, { target: { value: "123456" } });
+    expect(screen.getByRole("button", { name: "Resend code in 30s" })).toBeDisabled();
+    act(() => { vi.advanceTimersByTime(30_000); });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Resend code" })); });
     expect(screen.getByRole("alert")).toHaveTextContent("Please wait before requesting another code.");
     expect(field).toHaveValue("123456");

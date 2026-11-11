@@ -10,6 +10,7 @@ import { CONFIRMATION_CODE_LENGTH, codeTyped, isConfirmationCode } from "@/lib/c
 import { signOut } from "@/lib/auth/sign-out";
 import { emailPosture } from "@/lib/sign-in-method";
 import { useAction } from "@/lib/use-action";
+import { useResendWait } from "@/lib/use-code-confirmed";
 
 import {
   confirmEmailChangeAction,
@@ -43,6 +44,7 @@ export function ChangeEmail({
   // button's own label logic; one line under both.
   const sendCodes = useAction();
   const change = useAction();
+  const wait = useResendWait();
   const error = change.error ?? sendCodes.error;
   const sending = sendCodes.pending;
   const confirming = change.pending;
@@ -57,7 +59,8 @@ export function ChangeEmail({
   const canSend =
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) &&
     trimmed.toLowerCase() !== email.toLowerCase() &&
-    !sending;
+    !sending &&
+    wait.left === 0;
   const canConfirm =
     isConfirmationCode(currentCode) && isConfirmationCode(newCode) && !confirming;
 
@@ -69,6 +72,7 @@ export function ChangeEmail({
         setSentTo(res.email ?? trimmed);
         setCurrentCode("");
         setNewCode("");
+        wait.start();
       },
     );
   };
@@ -152,7 +156,11 @@ export function ChangeEmail({
           </div>
           <div>
             <Button type="submit" variant="filled" disabled={!canSend}>
-              {sending ? "Sending…" : "Send confirmation codes"}
+              {sending
+                ? "Sending…"
+                : wait.left > 0
+                  ? `Send confirmation codes in ${wait.left}s`
+                  : "Send confirmation codes"}
             </Button>
           </div>
         </form>
@@ -192,10 +200,10 @@ export function ChangeEmail({
             <Button
               type="button"
               variant="outline"
-              disabled={sending || confirming}
+              disabled={sending || confirming || wait.left > 0}
               onClick={send}
             >
-              Resend codes
+              {wait.left > 0 ? `Resend codes in ${wait.left}s` : "Resend codes"}
             </Button>
             {/* The deletion flow has no equivalent and this one needs it:
                 without a way back, a typo'd address has no escape but a reload,

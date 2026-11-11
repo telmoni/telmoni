@@ -89,7 +89,7 @@ export function DeleteOrganizationForm({
             <Button type="submit" variant="destructive" disabled={!flow.canConfirm}>
               {flow.confirming ? "Deleting…" : "Delete this organization"}
             </Button>
-            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
+            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} resendIn={flow.resendIn} onResend={flow.sendCode} />
           </div>
         </form>
       )}

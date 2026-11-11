@@ -600,6 +600,17 @@ async fn a_caller_cannot_mail_the_world_from_one_account(pool: PgPool) {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::ACCEPTED, "press {i}");
+        // Past the resend wait, so only the daily cap can refuse.
+        sqlx::query(
+            "UPDATE auth.confirmation_codes
+                SET created_at = created_at - make_interval(secs => $2::int)
+              WHERE user_id = $1",
+        )
+        .bind(USER)
+        .bind(confirmation_codes::RESEND_WAIT_SECS)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
 
     let resp = app

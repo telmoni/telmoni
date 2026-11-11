@@ -6,7 +6,7 @@
 //! transaction as the act it authorizes, so a replay cannot authorize a second.
 //! Every code is the PERSON's: it is their inbox that proves it.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use telmoni_shared::db::tenant_session::{HasPerson, Person, Scoped};
 use telmoni_shared::{OrganizationId, ProjectId, TelmoniError, TenantError, UserId};
 use uuid::Uuid;
@@ -260,46 +260,52 @@ pub async fn register_failure<B: HasPerson>(
     Ok(burned.unwrap_or(false))
 }
 
-/// How many codes of one purpose this person has been issued since `since`.
-/// ⚠ Counts ISSUES, not failures: a lane that mails an address the caller
-/// typed is a relay pointed at strangers unless something caps it.
-pub async fn count_since(
-    tx: &mut Scoped<'_, Person>,
-    user_id: &UserId,
-    purpose: Purpose,
-    since: DateTime<Utc>,
-) -> sqlx::Result<i64> {
-    sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM auth.confirmation_codes
-          WHERE user_id = $1 AND purpose = $2 AND created_at > $3",
-    )
-    .bind(user_id)
-    .bind(purpose.as_str())
-    .bind(since)
-    .fetch_one(tx.conn())
-    .await
-}
-
 /// The most codes, or links, of one purpose a person is sent in a day.
 pub const DAILY_MAX: i64 = 5;
 
-/// Refused past [`DAILY_MAX`] of `purpose` in the last day: every code and
-/// link mailed to a person is held here, whatever a console holds back.
+/// The least time between two codes, or links, of one purpose: the console's
+/// Resend button counts it down.
+pub const RESEND_WAIT_SECS: i32 = 30;
+
+/// Refused past [`DAILY_MAX`] of `purpose` in the last day, or within
+/// [`RESEND_WAIT_SECS`] of the last: every code and link mailed to a person is
+/// held here, whatever a console holds back.
+///
+/// ⚠ Counts ISSUES, not failures: a lane that mails an address the caller
+/// typed is a relay pointed at strangers unless something caps it.
 ///
 /// # Errors
 ///
-/// `429` with a day's `Retry-After` past the cap; Postgres failing.
+/// `429` with a day's `Retry-After` past the cap, or the seconds left of the
+/// wait; Postgres failing.
 pub async fn admit_one_more(
     tx: &mut Scoped<'_, Person>,
     user_id: &UserId,
     purpose: Purpose,
 ) -> Result<(), TelmoniError> {
-    let since = Utc::now() - Duration::days(1);
-    if count_since(tx, user_id, purpose, since).await? >= DAILY_MAX {
+    let (sent, wait): (i64, Option<i64>) = sqlx::query_as(
+        "SELECT count(*),
+                ceil(extract(epoch FROM max(created_at)
+                     + make_interval(secs => $3::int) - now()))::bigint
+           FROM auth.confirmation_codes
+          WHERE user_id = $1 AND purpose = $2 AND created_at > now() - interval '1 day'",
+    )
+    .bind(user_id)
+    .bind(purpose.as_str())
+    .bind(RESEND_WAIT_SECS)
+    .fetch_one(tx.conn())
+    .await?;
+    if sent >= DAILY_MAX {
         // A full day, matching the rolling window: a shorter `Retry-After`
         // would be a promise the next press cannot keep.
         return Err(TenantError::RateLimited {
             retry_after_secs: 24 * 60 * 60,
+        }
+        .into());
+    }
+    if let Some(secs) = wait.filter(|s| *s > 0) {
+        return Err(TenantError::RateLimited {
+            retry_after_secs: secs.unsigned_abs(),
         }
         .into());
     }

@@ -1,5 +1,6 @@
 //! The codes auth mails a person to confirm what they asked: five of a
-//! purpose a day, whichever lane asks, held here and not by a console.
+//! purpose a day and a wait between two, whichever lane asks, held here and
+//! not by a console.
 #![expect(clippy::unwrap_used, reason = "test scaffolding: fixture setup")]
 
 use std::sync::{Arc, Mutex};
@@ -9,6 +10,7 @@ use axum::http::{Request, StatusCode};
 use sqlx::PgPool;
 use tower::ServiceExt;
 
+use telmoni_auth::db::confirmation_codes;
 use telmoni_auth::test_provider::{ScriptedProvider, as_person};
 use telmoni_auth::{AppState, Config, router};
 use telmoni_shared::acting::Acting;
@@ -94,6 +96,56 @@ async fn seed(pool: &PgPool) {
     .unwrap();
 }
 
+/// Move every code the owner was sent back past the wait between two.
+async fn wait_out_the_resend(pool: &PgPool) {
+    sqlx::query(
+        "UPDATE auth.confirmation_codes
+            SET created_at = created_at - make_interval(secs => $2::int)
+          WHERE user_id = $1",
+    )
+    .bind(OWNER)
+    .bind(confirmation_codes::RESEND_WAIT_SECS)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A second code straight after the first is refused until the wait is out.
+#[sqlx::test]
+async fn a_second_code_waits_out_the_resend(pool: PgPool) {
+    seed(&pool).await;
+    let outbox = Arc::new(Outbox::default());
+    let app = router(state(&pool, outbox.clone()));
+    let ask = || async {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/internal/v1/me/deletion-code")
+            .header("x-service-secret", SERVICE_SECRET);
+        let request = as_person(request, &pool, OWNER)
+            .await
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(request).await.unwrap()
+    };
+    assert_eq!(ask().await.status(), StatusCode::ACCEPTED);
+    let refused = ask().await;
+    assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry_after: i32 = refused.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        (1..=confirmation_codes::RESEND_WAIT_SECS).contains(&retry_after),
+        "{retry_after}"
+    );
+    assert_eq!(outbox.sent(), 1, "the press inside the wait mailed a code");
+
+    wait_out_the_resend(&pool).await;
+    assert_eq!(ask().await.status(), StatusCode::ACCEPTED);
+    assert_eq!(outbox.sent(), 2);
+}
+
 /// ⚠ The code that takes a project's content mode off `off` is mailed to its
 /// owner five times a day; the sixth asking is refused a day and mails nothing.
 #[sqlx::test]
@@ -117,6 +169,7 @@ async fn a_content_mode_code_is_mailed_five_times_a_day(pool: PgPool) {
         {
             panic!("asking {asked} was refused: {refused}");
         }
+        wait_out_the_resend(&pool).await;
     }
     let refused = state
         .mail_confirmation(&acting, Confirmation::ContentMode(&project))
@@ -156,6 +209,7 @@ async fn a_sixth_deletion_code_of_a_day_is_refused(pool: PgPool) {
             StatusCode::TOO_MANY_REQUESTS
         };
         assert_eq!(status, wanted, "asking {asked}");
+        wait_out_the_resend(&pool).await;
     }
     assert_eq!(outbox.sent(), 5, "the sixth asking mailed a code");
 }

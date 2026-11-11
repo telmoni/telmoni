@@ -51,9 +51,11 @@ export function CodeSentTo({ email }: { email: string }) {
 }
 
 /** Resending and confirming share one busy state across the code forms. */
-export function ResendCodeButton({ sending, confirming, onResend }: {
+export function ResendCodeButton({ sending, confirming, resendIn, onResend }: {
   sending: boolean;
   confirming: boolean;
+  /** Seconds before another code may be asked for. */
+  resendIn: number;
   onResend: () => void;
 }) {
   return (
@@ -61,10 +63,10 @@ export function ResendCodeButton({ sending, confirming, onResend }: {
       type="button"
       variant="outline"
       className="w-fit"
-      disabled={sending || confirming}
+      disabled={sending || confirming || resendIn > 0}
       onClick={onResend}
     >
-      {sending ? "Sending…" : "Resend code"}
+      {sending ? "Sending…" : resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
     </Button>
   );
 }

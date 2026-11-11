@@ -2,6 +2,10 @@
  *  (`confirmation_code_length` in the wire contract). */
 export const CONFIRMATION_CODE_LENGTH = 6;
 
+/** The least wait between two codes of one purpose, which auth refuses
+ *  inside (`RESEND_WAIT_SECS` in `confirmation_codes.rs`). */
+export const RESEND_WAIT_SECONDS = 30;
+
 const CODE = new RegExp(`^\\d{${CONFIRMATION_CODE_LENGTH}}$`);
 
 /** What an action answers a code that is not one. */

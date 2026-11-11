@@ -174,7 +174,7 @@ export function ContentModeForm({
             <Button type="submit" variant="filled" disabled={!flow.canConfirm}>
               {flow.confirming ? "Saving..." : "Keep content"}
             </Button>
-            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} onResend={flow.sendCode} />
+            <ResendCodeButton sending={flow.sending} confirming={flow.confirming} resendIn={flow.resendIn} onResend={flow.sendCode} />
           </div>
         </div>
       )}
