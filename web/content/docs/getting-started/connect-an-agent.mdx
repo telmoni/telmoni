@@ -79,8 +79,9 @@ claude plugin install telmoni-observability@telmoni-plugins
 ```
 
 **[Codex](/docs/api/coding-agents#codex):** add the marketplace and the plugin,
-put `TELMONI_API_KEY=tm_…` in `~/.codex/.env`, then start Codex, run `/hooks`
-and trust the plugin's `Stop` and `SessionEnd` hooks.
+put `TELMONI_API_KEY=tm_…` in `~/.codex/.env`, or the key in
+`~/.codex/telmoni.json` as `{"apiKey": "tm_…"}`, a file only you can read, then
+start Codex, run `/hooks` and trust the plugin's `Stop` and `SessionEnd` hooks.
 
 ```sh
 codex plugin marketplace add telmoni/codex-observability-plugin
