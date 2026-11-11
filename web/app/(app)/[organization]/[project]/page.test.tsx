@@ -157,10 +157,11 @@ describe("a project's Agents page", () => {
     );
   });
 
-  it("puts an agent's newest release, model and prompt version under its name, each opening the trace that first carried it", async () => {
+  it("puts each kind's newest change under its agent, including a tool's first call linked to its trace", async () => {
     const release = "0192f3a17c2e7b4d9a61000000000001";
     const model = "0192f3a17c2e7b4d9a61000000000002";
     const prompt = "0192f3a17c2e7b4d9a61000000000003";
+    const tool = "0192f3a17c2e7b4d9a61000000000005";
     // In the server's order, by the kinds' names: the page stands the release first.
     mockAgents = agentsOk(
       [agent("support-bot"), agent("nightly-report")],
@@ -168,6 +169,7 @@ describe("a project's Agents page", () => {
         change("model", "gpt-4o-mini", model, { environment: "" }),
         change("prompt", "3", prompt, { prompt: "triage" }),
         change("release", "1.4.2", release),
+        change("tool", "delete_user", tool),
       ],
     );
     render(await AgentsPage({ params: PARAMS } as never));
@@ -178,6 +180,7 @@ describe("a project's Agents page", () => {
       ["release 1.4.2 in production", `/acme/web/traces?agent=support-bot&peek=${release}`],
       ["model gpt-4o-mini", `/acme/web/traces?agent=support-bot&peek=${model}`],
       ["prompt triage version 3 in production", `/acme/web/traces?agent=support-bot&peek=${prompt}`],
+      ["first call of delete_user in production", `/acme/web/traces?agent=support-bot&peek=${tool}`],
     ]);
     const nightly = within(screen.getByRole("link", { name: "nightly-report" }).closest("td")!);
     expect(nightly.getAllByRole("link")).toHaveLength(1);

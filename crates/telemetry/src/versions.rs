@@ -25,6 +25,37 @@ pub const SCORES_SHOWN: usize = 5;
 /// The most environments or prompts the answer offers, the most traces first.
 pub const CHOICES_MAX: u32 = 50;
 
+/// Tools are changes, but not versions a trace can be compared by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum By {
+    Release,
+    Model,
+    Prompt,
+}
+
+impl TryFrom<ChangeKind> for By {
+    type Error = ();
+
+    fn try_from(kind: ChangeKind) -> Result<Self, Self::Error> {
+        match kind {
+            ChangeKind::Release => Ok(Self::Release),
+            ChangeKind::Model => Ok(Self::Model),
+            ChangeKind::Prompt => Ok(Self::Prompt),
+            ChangeKind::Tool => Err(()),
+        }
+    }
+}
+
+impl From<By> for ChangeKind {
+    fn from(by: By) -> Self {
+        match by {
+            By::Release => Self::Release,
+            By::Model => Self::Model,
+            By::Prompt => Self::Prompt,
+        }
+    }
+}
+
 /// The agent's traces with a span in the environment, a row each as the
 /// trace list sums them, `members` the values those spans carry.
 macro_rules! member_traces {
@@ -127,19 +158,19 @@ macro_rules! prompted_here {
     };
 }
 
-const fn versions_sql(by: ChangeKind) -> &'static str {
+const fn versions_sql(by: By) -> &'static str {
     match by {
-        ChangeKind::Release => versions_sql!(releases!(), here!()),
-        ChangeKind::Model => versions_sql!(models!(), here!()),
-        ChangeKind::Prompt => versions_sql!(prompt_versions!(), prompted_here!()),
+        By::Release => versions_sql!(releases!(), here!()),
+        By::Model => versions_sql!(models!(), here!()),
+        By::Prompt => versions_sql!(prompt_versions!(), prompted_here!()),
     }
 }
 
-const fn scores_sql(by: ChangeKind) -> &'static str {
+const fn scores_sql(by: By) -> &'static str {
     match by {
-        ChangeKind::Release => scores_sql!(releases!(), here!()),
-        ChangeKind::Model => scores_sql!(models!(), here!()),
-        ChangeKind::Prompt => scores_sql!(prompt_versions!(), prompted_here!()),
+        By::Release => scores_sql!(releases!(), here!()),
+        By::Model => scores_sql!(models!(), here!()),
+        By::Prompt => scores_sql!(prompt_versions!(), prompted_here!()),
     }
 }
 
@@ -165,8 +196,8 @@ const PROMPTS_SQL: &str = concat!(
 #[derive(Debug, Clone, Copy)]
 pub struct Of<'a> {
     pub agent: &'a str,
-    /// What its traces are split by: the words a change is kinded by.
-    pub by: ChangeKind,
+    /// Only changes that identify comparable versions.
+    pub(crate) by: By,
     pub environment: &'a str,
     /// The prompt, where the split is by one's versions; empty otherwise.
     pub prompt: &'a str,

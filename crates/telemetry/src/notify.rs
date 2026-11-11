@@ -521,6 +521,7 @@ fn change_line(change: &Change, opened_at: DateTime<Utc>, several: bool) -> Stri
     let what = match change.kind {
         ChangeKind::Release => format!("release {}", clipped(&change.value)),
         ChangeKind::Model => format!("model {}", clipped(&change.value)),
+        ChangeKind::Tool => format!("first call of {}", clipped(&change.value)),
         ChangeKind::Prompt => format!(
             "prompt {} version {}",
             clipped(change.prompt.as_deref().unwrap_or_default()),

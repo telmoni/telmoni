@@ -374,9 +374,11 @@ pub const V1_LANES: &[V1Lane] = &[
             path: "/v1/changes",
             summary: "The project's agents' changes",
             description: "Each first trace of an agent, in one environment, to carry \
-                          a release, a model or a prompt's version its traces there had \
-                          not carried in the 30 days before, the newest first, 500 at \
-                          most, `more` saying the window held more. An agent past 24 \
+                          a release, a model or a prompt's version, or to call a tool \
+                          or read a retrieval source, its traces there had not in the \
+                          30 days before, the newest first, 500 at most, `more` saying \
+                          the window held more. An agent's tools are learned unmarked \
+                          for its first 24 hours in an environment. An agent past 24 \
                           changes of one kind in a UTC day is marked no further that \
                           day, its last shown one `capped`.",
             params: &[

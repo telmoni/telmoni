@@ -176,8 +176,9 @@ first, and once more for whatever arrives in the next 30 seconds.
 ### Changes
 
 A change is the first trace of an agent to carry a release, a model or a
-prompt's version its traces had not carried in the 30 days before: a deploy, a
-prompt edited, or a model a provider moved to under the name you call. Each
+prompt's version its traces had not carried in the 30 days before, or the
+first call of a tool or retrieval source in 30 days: a deploy, a prompt
+edited, a model a provider moved to under the name you call, or a new tool. Each
 is drawn as a line on the bar it fell in, above the list and on **Chart**, one
 line a bar naming every change in it: the agent, what changed and to what, and
 the environment. The lines stand for the agents and environments the list is
@@ -192,6 +193,13 @@ Past 500 changes in the window, the newest 500 are drawn, and the page says so.
 - **Each environment is its own:** a release staging took first is a change
   again when production takes it.
 - **An agent's first trace** marks what it ran on.
+- **An agent's tools are learned for its first 24 hours in an environment,**
+  from the first release, model, prompt version or tool it is seen with
+  there. A tool or retrieval source it uses in those hours is remembered and
+  never marked. After them a name it has not used in 30 days is marked, as
+  *first call of delete_user*; a tool and a retrieval source are one kind, by
+  name, and a failed call counts. An agent that sends no release, model or
+  prompt version starts its 24 hours at its first tool.
 - **A model** is the one a model call answered with; **a prompt's version**
   is a span's `gen_ai.prompt.version` beside its `gen_ai.prompt.name`, so a
   version sent alone, or a name with no version, marks nothing.
@@ -201,7 +209,8 @@ Past 500 changes in the window, the newest 500 are drawn, and the page says so.
 - **An agent past 24 changes of one kind in a UTC day** is marked no further
   that day, its 24th saying so, so a release named after each request floods
   nothing; what it carried past them is still remembered, and is no change the
-  next day. A project keeps up to 1,000 changes a UTC day.
+  next day. A project keeps up to 1,000 tool changes a UTC day, learned names
+  included, and separately 1,000 across releases, models and prompt versions.
 
 Each change is also a line of its agent's row on the
 [Agents page](/docs/workspace/organizations-and-projects#a-projects-agents),

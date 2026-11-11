@@ -933,6 +933,7 @@ const CHANGE_LABEL: Record<ChangeKind, string> = {
   [ChangeKind.Release]: "release",
   [ChangeKind.Model]: "model",
   [ChangeKind.Prompt]: "prompt",
+  [ChangeKind.Tool]: "first call of",
 };
 
 /** What a change changed to, and where, its agent left out:
@@ -944,8 +945,9 @@ export function changeWords(change: Change): string {
       ? `${CHANGE_LABEL[change.kind]} ${change.prompt} version ${change.value}`
       : `${CHANGE_LABEL[change.kind]} ${change.value}`;
   const where = change.environment ? `${what} in ${change.environment}` : what;
+  const later = change.kind === ChangeKind.Tool ? "first calls" : `${CHANGE_LABEL[change.kind]} changes`;
   return change.capped
-    ? `${where}; its later ${CHANGE_LABEL[change.kind]} changes that UTC day are not marked`
+    ? `${where}; its later ${later} that UTC day are not marked`
     : where;
 }
 

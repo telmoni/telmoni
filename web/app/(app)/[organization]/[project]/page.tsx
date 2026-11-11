@@ -54,7 +54,7 @@ export default async function AgentsPage({ params }: PageProps<"/[organization]/
       <PageHeader
         title="Agents"
         action={<ConnectAgentAction />}
-        info={`Every agent that ran in the last ${days} days: its last trace, what that cost against what its traces usually cost, the alerts that watch it, and their open incidents. Under its name, the newest release, model and prompt version it changed to in those days, each opening the trace that first carried it. Versions sets its releases, models and prompt versions side by side.`}
+        info={`Every agent that ran in the last ${days} days: its last trace, what that cost against what its traces usually cost, the alerts that watch it, and their open incidents. Under its name, the newest release, model, prompt version and first tool call marked in those days, each opening its trace. Tool names are learned unmarked for its first 24 hours in an environment. Versions sets its releases, models and prompt versions side by side.`}
       />
       <div className="grid gap-page">
         <section className="grid gap-gutter">

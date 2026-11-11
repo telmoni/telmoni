@@ -20,10 +20,9 @@ const changeFields = {
   capped: z.boolean(),
 };
 
-/** A release or a model an agent changed to, or a prompt's version, which
- *  alone names its prompt, `value` the version. */
+/** Only a prompt's change names its prompt; a tool's value is its name. */
 export const ChangeSchema = z.discriminatedUnion("kind", [
-  z.object({ ...changeFields, kind: z.enum([ChangeKind.Release, ChangeKind.Model]) }),
+  z.object({ ...changeFields, kind: z.enum([ChangeKind.Release, ChangeKind.Model, ChangeKind.Tool]) }),
   z.object({ ...changeFields, kind: z.literal(ChangeKind.Prompt), prompt: z.string() }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;

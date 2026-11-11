@@ -364,7 +364,9 @@ for an ID the project does not hold.
 The project's agents' changes, the ones the **Traces** page marks on its bars:
 each the first trace of an agent, in one environment, to carry a release, a
 model or a prompt's version its traces there had not carried in the 30 days
-before ([Changes](/docs/monitoring/traces#changes)). The newest first, 500 at
+before, or to call a tool or read a retrieval source they had not. An
+agent's tools are learned unmarked for its first 24 hours in an environment
+([Changes](/docs/monitoring/traces#changes)). The newest first, 500 at
 most. It takes:
 
 - `days`: How many days back, 1 to 360; 7 when left out, and no further than
@@ -397,8 +399,9 @@ An unknown parameter, or a value that does not parse, is a `400`.
 }
 ```
 
-- `kind`: `release`, `model` or `prompt`; `value` is the release, the model,
-  or the prompt's version, and `prompt` its name, on a prompt's change alone.
+- `kind`: `release`, `model`, `prompt` or `tool`; `value` is the release, the
+  model, the prompt's version or the tool/source name. `prompt` is its name
+  on a prompt's change alone.
 - `environment`: The environment its spans were sent from, empty where they
   named none.
 - `changed_at`: When the trace that first carried it started; `trace_id` that

@@ -169,8 +169,7 @@ fn the_trace_list_answers_as_the_console_reads() {
     );
 }
 
-/// A change of each kind: a release, a model on a day past its cap, and a
-/// prompt's version under its name.
+/// Each kind, including a capped model and a tool's first call.
 fn changes() -> Vec<Change> {
     let change = |kind, prompt: Option<&str>, value: &str, secs, capped| Change {
         agent: "support".into(),
@@ -183,6 +182,7 @@ fn changes() -> Vec<Change> {
         capped,
     };
     vec![
+        change(ChangeKind::Tool, None, "delete_user", 180, false),
         change(ChangeKind::Prompt, Some("support-reply"), "3", 120, false),
         change(ChangeKind::Model, None, "gpt-4o-mini-2024-07-18", 60, true),
         change(ChangeKind::Release, None, "1.4.2", 0, false),

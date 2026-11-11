@@ -126,9 +126,10 @@ Traces link applies the selected categories.
 ### What changed before it
 
 An incident names each [change](/docs/monitoring/traces#changes) its alert's
-agents made in the 24 hours before it opened: a release, a model or a
-prompt's version their traces had not carried, and how long before, as
-*release 2026.11.3 in production, 14 minutes before*. The newest stands
+agents made in the 24 hours before it opened: a release, a model, a prompt's
+version or the first call of a tool or retrieval source, and how long
+before, as *release 2026.11.3 in production, 14 minutes before* or *first
+call of delete_user in production, 9 minutes before*. The newest stands
 first, 20 at most, and the incident says where there were more. Nothing is
 inferred: Telmoni says what changed and when, and whether it broke anything
 is yours to judge.

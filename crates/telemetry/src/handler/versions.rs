@@ -20,7 +20,7 @@ use crate::handler::agents::AGENTS_DAYS;
 use crate::handler::traces::{read_failed, reader, window_prices};
 use crate::store::Projects;
 use crate::traces::TraceFilter;
-use crate::versions::{self, Choice, Of, Version};
+use crate::versions::{self, By, Choice, Of, Version};
 
 /// One agent's versions over the window.
 #[derive(Debug, Serialize)]
@@ -51,7 +51,7 @@ pub struct Versions {
 #[derive(Debug, PartialEq, Eq)]
 struct Asked {
     agent: String,
-    by: ChangeKind,
+    by: By,
     /// None where the query names none; the one with no name is named empty.
     environment: Option<String>,
     prompt: Option<String>,
@@ -99,15 +99,23 @@ fn asked(pairs: Vec<(String, String)>) -> Result<Asked, TelmoniError> {
     }
     let agent = agent.ok_or_else(|| TelmoniError::BadRequest("agent names the agent".into()))?;
     named("agent", &agent, AGENT_MAX)?;
-    let by = match by {
-        None => ChangeKind::Release,
-        Some(given) => given.parse().map_err(|_| {
+    let by = by
+        .as_deref()
+        .unwrap_or(ChangeKind::Release.as_str())
+        .parse::<ChangeKind>()
+        .ok()
+        .and_then(|kind| By::try_from(kind).ok())
+        .ok_or_else(|| {
             TelmoniError::BadRequest(format!(
                 "by is one of {}",
-                ChangeKind::all().map(ChangeKind::as_str).join(", ")
+                ChangeKind::all()
+                    .into_iter()
+                    .filter(|kind| By::try_from(*kind).is_ok())
+                    .map(ChangeKind::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ))
-        })?,
-    };
+        })?;
     if environment
         .as_deref()
         .is_some_and(|given| given.chars().count() > ENVIRONMENT_MAX)
@@ -162,7 +170,7 @@ pub async fn get_versions(
         .environment
         .or_else(|| environments.first().map(|first| first.value.clone()))
         .unwrap_or_default();
-    let (prompts, prompt) = if asked.by == ChangeKind::Prompt {
+    let (prompts, prompt) = if asked.by == By::Prompt {
         let prompts =
             versions::prompts(&state.store, &projects, &filter, &asked.agent, &environment)
                 .await
@@ -181,7 +189,7 @@ pub async fn get_versions(
         prompt: prompt.as_deref().unwrap_or_default(),
     };
     // A prompt's versions with no prompt to name are none.
-    let (rows, more) = if asked.by == ChangeKind::Prompt && prompt.is_none() {
+    let (rows, more) = if asked.by == By::Prompt && prompt.is_none() {
         (Vec::new(), false)
     } else {
         versions::rows(&state.store, &projects, &filter, &of)
@@ -194,7 +202,7 @@ pub async fn get_versions(
     let (versions, scores) = versions::scored(rows, means);
     Ok(Json(Versions {
         days,
-        by: asked.by,
+        by: asked.by.into(),
         environment,
         environments,
         prompt,
@@ -234,7 +242,7 @@ mod tests {
         ] {
             let read = asked(pairs(&[("agent", agent)])).expect("a name is any text");
             assert_eq!(read.agent, agent);
-            assert_eq!(read.by, ChangeKind::Release, "releases where none is asked");
+            assert_eq!(read.by, By::Release, "releases where none is asked");
             assert_eq!((read.environment, read.prompt), (None, None));
         }
     }
@@ -252,14 +260,15 @@ mod tests {
     #[test]
     fn the_split_is_one_of_its_three_words() {
         for (word, by) in [
-            ("release", ChangeKind::Release),
-            ("model", ChangeKind::Model),
-            ("prompt", ChangeKind::Prompt),
+            ("release", By::Release),
+            ("model", By::Model),
+            ("prompt", By::Prompt),
         ] {
             let read = asked(pairs(&[("agent", "a"), ("by", word)])).expect("a word of its own");
             assert_eq!(read.by, by);
         }
-        assert!(refused(&[("agent", "a"), ("by", "tool")]));
+        assert!(matches!(asked(pairs(&[("agent", "a"), ("by", "tool")])),
+            Err(TelmoniError::BadRequest(detail)) if detail == "by is one of release, model, prompt"));
         assert!(refused(&[("agent", "a"), ("by", "")]));
         assert!(refused(&[
             ("agent", "a"),

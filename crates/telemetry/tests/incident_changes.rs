@@ -344,6 +344,86 @@ fn values(incident: &Value) -> Vec<&str> {
         .collect()
 }
 
+#[sqlx::test]
+async fn an_incident_names_a_tool_detected_by_the_changes_loop(pool: PgPool) {
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let project = Project::new(&pool, &ch, |project| failing(project, SUPPORT)).await;
+    let p = &project.project;
+    sqlx::query(
+        "INSERT INTO telemetry.project_settings (project_id, organization_id) VALUES ($1, $2)",
+    )
+    .bind(p)
+    .bind(&project.organization)
+    .execute(&pool)
+    .await
+    .expect("project settings");
+    changed(
+        &pool,
+        p,
+        release(SUPPORT, "baseline"),
+        Utc::now() - TimeDelta::days(2),
+    )
+    .await;
+    sqlx::query(
+        "UPDATE telemetry.changes SET created_at = now() - interval '2 days' WHERE project_id = $1",
+    )
+    .bind(p)
+    .execute(&pool)
+    .await
+    .expect("an established agent");
+    let tool = span(
+        p,
+        SUPPORT,
+        Uuid::new_v4(),
+        SpanKind::ToolCall,
+        "delete_user",
+        9 * 60,
+    );
+    ch.store
+        .insert_spans(std::slice::from_ref(&tool))
+        .await
+        .expect("tool kept");
+    sqlx::query("INSERT INTO telemetry.reads (name, read_to) VALUES ($1, $2)")
+        .bind(changes::HEARTBEAT)
+        .bind(Utc::now() - TimeDelta::minutes(15))
+        .execute(&pool)
+        .await
+        .expect("detector window");
+    changes::tick_at(&project.state, Utc::now())
+        .await
+        .expect("tool detected");
+    project
+        .make(
+            RULES,
+            &failures("Failing support", &json!({ "agent": [SUPPORT] }), 0.1),
+        )
+        .await;
+    project.evaluate(&pool).await;
+    let incident = project.incident().await;
+    let detected = incident["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .find(|change| change["kind"] == "tool")
+        .expect("the discovered tool");
+    assert_eq!(detected["value"], "delete_user");
+    assert_eq!(detected["trace_id"], tool.trace_id);
+    let notice = project.told("Failing support: alert", 0);
+    assert!(
+        notice.body.contains(&format!(
+            "first call of delete_user in production, {}",
+            ago(&incident, "delete_user")
+        )),
+        "{}",
+        notice.body
+    );
+    let (status, answer) = project.keyed("/incidents").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(answer["incidents"][0]["changes"], incident["changes"]);
+}
+
 /// ⚠ An incident names its agent's changes of the day before it, in its notice and on every lane.
 #[sqlx::test]
 async fn an_incident_names_what_its_agent_changed_to_in_the_day_before(pool: PgPool) {

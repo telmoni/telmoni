@@ -886,12 +886,10 @@ CREATE POLICY maintenance_access ON telemetry.content_held
 GRANT SELECT, INSERT, UPDATE, DELETE ON telemetry.content_held TO telemetry_maintenance;
 
 -- An agent's changes (`changes.rs`): a row the first trace of an agent, in
--- one environment, to carry a release, a model or a prompt's version its
--- traces there had not carried in the 30 days before, written by the loop
--- alone. A row is also what the loop remembers: `hidden` past the day's cap,
--- so a value held back is not taken for new the next day, and once its
--- trace's day is past retention; it goes once no span within retention
--- carries what changed.
+-- one environment, to carry a release, a model, a prompt's version or a
+-- tool's name its traces there had not carried in the 30 days before. A
+-- `hidden` row is memory alone: a change past the day's cap, or a tool
+-- learned in the agent's first 24 hours, so neither is new the next day.
 CREATE TABLE telemetry.changes (
     id          UUID        PRIMARY KEY,
     project_id  TEXT        NOT NULL,
@@ -910,7 +908,7 @@ CREATE TABLE telemetry.changes (
     seen_at     TIMESTAMPTZ NOT NULL,
     mark        TEXT        NOT NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT changes_kind_check CHECK (kind IN ('release', 'model', 'prompt')),
+    CONSTRAINT changes_kind_check CHECK (kind IN ('release', 'model', 'prompt', 'tool')),
     CONSTRAINT changes_mark_check CHECK (mark IN ('shown', 'capped', 'hidden')),
     CONSTRAINT changes_prompt_check CHECK ((kind = 'prompt') = (prompt IS NOT NULL)),
     CONSTRAINT changes_agent_check CHECK (char_length(agent) BETWEEN 1 AND 128),

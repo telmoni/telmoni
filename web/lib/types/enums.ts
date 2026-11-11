@@ -79,6 +79,7 @@ export const ChangeKind = {
   Release: "release",
   Model:   "model",
   Prompt:  "prompt",
+  Tool:    "tool",
 } as const;
 export type ChangeKind = typeof ChangeKind[keyof typeof ChangeKind];
 

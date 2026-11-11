@@ -38,7 +38,8 @@
     "ChangeKind": [
       "release",
       "model",
-      "prompt"
+      "prompt",
+      "tool"
     ],
     "ChartMeasure": [
       "spend",

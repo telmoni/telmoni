@@ -1,14 +1,5 @@
-//! An agent's changes: the first trace of an agent, in one environment, to
-//! carry a release, a model or a prompt's version its traces there had not
-//! carried in the [`NEW_FOR`] before, each a row of `telemetry.changes`. Each
-//! minute the replica that wins the lock reads the spans landed since the
-//! last pass, which `telemetry.reads` keeps: those received since, and the
-//! traces another exporter's held spans landed in since ([`crate::foreign`]).
-//! An agent past [`DAY_SHOWN`] of one kind in a UTC day is marked no further
-//! that day, its last shown one saying so; what it carried past them is
-//! still remembered, `hidden`, so it is not new the next day. The trace
-//! list's charts, the Agents page and `/v1/changes` read them
-//! ([`crate::handler::changes`]).
+//! An agent's observed changes, remembered and capped in `telemetry.changes`.
+//! Tool names are learned silently for [`LEARN_FOR`] before being marked.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -39,11 +30,13 @@ pub const EVERY: Duration = Duration::from_secs(60);
 /// How long a value its traces carried is remembered as theirs.
 pub const NEW_FOR: TimeDelta = TimeDelta::days(30);
 
+/// How long an agent's tools are learned, unmarked, from its first row in an environment.
+pub const LEARN_FOR: TimeDelta = TimeDelta::hours(24);
+
 /// The changes of one kind an agent's UTC day shows.
 pub const DAY_SHOWN: i64 = 24;
 
-/// The rows a project's UTC day keeps, shown or not, so agents named after
-/// each request write no more.
+/// Rows per project UTC day, separately for tools and the other kinds.
 pub const DAY_ROWS_MAX: i64 = 1_000;
 
 /// The most changes a list answers.
@@ -508,12 +501,9 @@ struct SeenRow {
     last_received: DateTime<Utc>,
 }
 
-/// Each release, model call's model and prompt version with its name the
-/// window's spans carried, by agent and environment: when it first started,
-/// believed no further than [`SKEW_MAX_SECS`] past its receipt, and the
-/// trace that did, taken together so the time is that trace's; and when it
-/// first and last arrived. Aliased apart from the columns, which ClickHouse
-/// resolves after an alias of the same name.
+/// What the window's spans carried, by agent and environment: each value's
+/// first start, held to [`SKEW_MAX_SECS`] past its receipt, with its trace.
+/// Aliased apart from the columns, which ClickHouse resolves after an alias.
 const SEEN_SQL: &str = concat!(
     "SELECT project_id, agent, environment, ",
     "tupleElement(c, 1) AS what, tupleElement(c, 2) AS named, tupleElement(c, 3) AS carried, ",
@@ -526,7 +516,8 @@ const SEEN_SQL: &str = concat!(
     "tuple('release', '', release), ",
     "tuple('model', '', if(kind = 'model_call', model, '')), ",
     "tuple('prompt', attributes['gen_ai.prompt.name'], ",
-    "if(attributes['gen_ai.prompt.name'] != '', attributes['gen_ai.prompt.version'], ''))",
+    "if(attributes['gen_ai.prompt.name'] != '', attributes['gen_ai.prompt.version'], '')), ",
+    "tuple('tool', '', if(kind IN ('tool_call', 'retrieval'), name, ''))",
     "]) AS c ",
     "WHERE project_id IN {projects:Array(String)} AND agent != '' AND (",
     "(received_at >= {from:DateTime64(6, 'UTC')} AND received_at < {to:DateTime64(6, 'UTC')}) ",
@@ -642,8 +633,24 @@ async fn write(
         .into_iter()
         .map(|(identity, id, seen_at)| (identity, Remembered { id, seen_at }))
         .collect();
+    let agents: Vec<&str> = candidates
+        .iter()
+        .map(|candidate| candidate.agent.as_str())
+        .collect();
+    let established = sqlx::query_as::<_, (String, String, DateTime<Utc>)>(
+        "SELECT agent, environment, min(created_at) FROM telemetry.changes
+          WHERE project_id = $1 AND agent = ANY($2)
+          GROUP BY agent, environment",
+    )
+    .bind(project_id)
+    .bind(&agents)
+    .fetch_all(tx.conn())
+    .await?
+    .into_iter()
+    .map(|(agent, environment, first)| ((agent, environment), first))
+    .collect();
     let counts = counts(&mut tx, project_id, &candidates, now).await?;
-    let decided = settle(candidates, &remembered, counts, now);
+    let decided = settle(candidates, &remembered, &established, counts, now);
     apply(&mut tx, project_id, decided).await?;
     tx.commit().await?;
     Ok(())
@@ -671,7 +678,7 @@ pub(crate) struct Day {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Counts {
     pub(crate) days: HashMap<(String, ChangeKind, NaiveDate), Day>,
-    pub(crate) rows: HashMap<NaiveDate, i64>,
+    pub(crate) rows: HashMap<(NaiveDate, bool), i64>,
 }
 
 /// What the table holds of the UTC days `candidates` could be changes on.
@@ -718,7 +725,10 @@ async fn counts(
     .await?;
     let mut counts = Counts::default();
     for (agent, kind, day, rows, shown, capped, newest, newest_at) in rows {
-        *counts.rows.entry(day).or_default() += rows;
+        *counts
+            .rows
+            .entry((day, kind == ChangeKind::Tool))
+            .or_default() += rows;
         counts.days.insert(
             (agent, kind, day),
             Day {
@@ -778,15 +788,14 @@ pub(crate) struct Decided {
     pub(crate) capped: Vec<Uuid>,
 }
 
-/// The decision, with no store: in the order the candidates started, one
-/// the table remembers carried within [`NEW_FOR`] of its first arrival is
-/// no change, its `seen_at` moved at most each [`SEEN_EVERY`]; any other is,
-/// at its start held to `now`, shown until its agent's day has
-/// [`DAY_SHOWN`] of its kind, then hidden, the day's newest shown marked
-/// `capped` once; none past the project's [`DAY_ROWS_MAX`] for the day.
+/// The decision, with no store: a value remembered within [`NEW_FOR`] is no
+/// change; any other is shown until its agent's day has [`DAY_SHOWN`] of its
+/// kind, then hidden, the newest shown marked `capped`. A tool in its agent's
+/// first [`LEARN_FOR`] is hidden, learned, and caps nothing.
 pub(crate) fn settle(
     candidates: Vec<Candidate>,
     remembered: &HashMap<String, Remembered>,
+    established: &HashMap<(String, String), DateTime<Utc>>,
     mut counts: Counts,
     now: DateTime<Utc>,
 ) -> Decided {
@@ -813,14 +822,21 @@ pub(crate) fn settle(
         }
         let changed_at = candidate.first_at.min(now);
         let date = changed_at.date_naive();
-        let rows = counts.rows.entry(date).or_default();
+        let tool = candidate.kind == ChangeKind::Tool;
+        let rows = counts.rows.entry((date, tool)).or_default();
         if *rows >= DAY_ROWS_MAX {
             continue;
         }
         *rows += 1;
         let key = (candidate.agent.clone(), candidate.kind, date);
         let day = counts.days.entry(key.clone()).or_default();
-        let mark = if day.shown < DAY_SHOWN {
+        let learning = tool
+            && established
+                .get(&(candidate.agent.clone(), candidate.environment.clone()))
+                .is_none_or(|first| candidate.first_received < *first + LEARN_FOR);
+        let mark = if learning {
+            Mark::Hidden
+        } else if day.shown < DAY_SHOWN {
             day.shown += 1;
             Mark::Shown
         } else {
@@ -963,6 +979,7 @@ mod tests {
         let decided = settle(
             vec![release("v2", "2026-11-08T10:00:00Z")],
             &HashMap::new(),
+            &HashMap::new(),
             Counts::default(),
             at(NOW),
         );
@@ -988,6 +1005,7 @@ mod tests {
         let decided = settle(
             vec![candidate.clone()],
             &seen_20_days_ago,
+            &HashMap::new(),
             Counts::default(),
             at(NOW),
         );
@@ -1004,6 +1022,7 @@ mod tests {
         let decided = settle(
             vec![candidate.clone()],
             &seen_this_hour,
+            &HashMap::new(),
             Counts::default(),
             at(NOW),
         );
@@ -1019,6 +1038,7 @@ mod tests {
         let decided = settle(
             vec![candidate],
             &seen_31_days_ago,
+            &HashMap::new(),
             Counts::default(),
             at(NOW),
         );
@@ -1033,7 +1053,13 @@ mod tests {
             .map(|n| release(&format!("v{n:02}"), &format!("2026-11-08T10:{n:02}:00Z")))
             .collect();
         candidates.reverse();
-        let decided = settle(candidates, &HashMap::new(), Counts::default(), at(NOW));
+        let decided = settle(
+            candidates,
+            &HashMap::new(),
+            &HashMap::new(),
+            Counts::default(),
+            at(NOW),
+        );
         let marks: Vec<Mark> = decided.new.iter().map(|new| new.mark).collect();
         assert_eq!(marks.len(), 25);
         assert!(marks[..23].iter().all(|mark| *mark == Mark::Shown));
@@ -1056,16 +1082,28 @@ mod tests {
                     newest_shown: Some((newest, at("2026-11-08T09:00:00Z"))),
                 },
             )]),
-            rows: HashMap::from([(day(NOW), DAY_SHOWN)]),
+            rows: HashMap::from([((day(NOW), false), DAY_SHOWN)]),
         };
         let candidates = vec![
             release("v25", "2026-11-08T10:00:00Z"),
             release("v26", "2026-11-08T10:01:00Z"),
         ];
-        let decided = settle(candidates.clone(), &HashMap::new(), full(false), at(NOW));
+        let decided = settle(
+            candidates.clone(),
+            &HashMap::new(),
+            &HashMap::new(),
+            full(false),
+            at(NOW),
+        );
         assert!(decided.new.iter().all(|new| new.mark == Mark::Hidden));
         assert_eq!(decided.capped, [newest]);
-        let decided = settle(candidates, &HashMap::new(), full(true), at(NOW));
+        let decided = settle(
+            candidates,
+            &HashMap::new(),
+            &HashMap::new(),
+            full(true),
+            at(NOW),
+        );
         assert!(decided.capped.is_empty());
     }
 
@@ -1093,7 +1131,13 @@ mod tests {
             )]),
             rows: HashMap::new(),
         };
-        let decided = settle(vec![candidate], &remembered, capped, at(NOW));
+        let decided = settle(
+            vec![candidate],
+            &remembered,
+            &HashMap::new(),
+            capped,
+            at(NOW),
+        );
         assert_eq!(decided.seen, [(id, at("2026-11-08T10:00:00Z"))]);
     }
 
@@ -1102,10 +1146,11 @@ mod tests {
     fn a_projects_day_writes_no_more_than_its_rows() {
         let full = Counts {
             days: HashMap::new(),
-            rows: HashMap::from([(day(NOW), DAY_ROWS_MAX)]),
+            rows: HashMap::from([((day(NOW), false), DAY_ROWS_MAX)]),
         };
         let decided = settle(
             vec![release("v1", "2026-11-08T10:00:00Z")],
+            &HashMap::new(),
             &HashMap::new(),
             full,
             at(NOW),
@@ -1118,6 +1163,7 @@ mod tests {
     fn a_change_is_never_marked_after_the_clock_that_found_it() {
         let decided = settle(
             vec![release("v1", "2026-11-08T12:04:00Z")],
+            &HashMap::new(),
             &HashMap::new(),
             Counts::default(),
             at(NOW),
@@ -1143,6 +1189,144 @@ mod tests {
         staging.environment = "staging".into();
         assert_ne!(staging.identity(), release("v2", NOW).identity());
         assert_eq!(release("v2", NOW).identity().len(), 64);
+    }
+
+    #[test]
+    fn tool_names_are_learned_for_twenty_four_hours() {
+        let tool = Candidate {
+            kind: ChangeKind::Tool,
+            first_at: at(NOW) - TimeDelta::days(2),
+            ..release("delete_user", NOW)
+        };
+        for (age, mark) in [
+            (None, Mark::Hidden),
+            (Some(23), Mark::Hidden),
+            (Some(24), Mark::Shown),
+            (Some(25), Mark::Shown),
+        ] {
+            let established = age
+                .map(|hours| {
+                    (
+                        (tool.agent.clone(), tool.environment.clone()),
+                        at(NOW) - TimeDelta::hours(hours),
+                    )
+                })
+                .into_iter()
+                .collect();
+            let decided = settle(
+                vec![tool.clone()],
+                &HashMap::new(),
+                &established,
+                Counts::default(),
+                at(NOW),
+            );
+            assert_eq!(decided.new[0].mark, mark, "age {age:?}");
+            assert!(decided.capped.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_learned_tool_is_not_new_once_learning_ends() {
+        let candidate = Candidate {
+            kind: ChangeKind::Tool,
+            ..release("lookup", NOW)
+        };
+        let learned = settle(
+            vec![candidate.clone()],
+            &HashMap::new(),
+            &HashMap::new(),
+            Counts::default(),
+            at(NOW),
+        );
+        assert_eq!(learned.new[0].mark, Mark::Hidden);
+        let remembered = HashMap::from([(
+            candidate.identity(),
+            Remembered {
+                id: Uuid::from_u128(1),
+                seen_at: candidate.last_received,
+            },
+        )]);
+        let next = at(NOW) + TimeDelta::hours(25);
+        let established = HashMap::from([(
+            (candidate.agent.clone(), candidate.environment.clone()),
+            at(NOW),
+        )]);
+        let candidate = Candidate {
+            first_at: next,
+            first_received: next,
+            last_received: next,
+            ..candidate
+        };
+        let decided = settle(
+            vec![candidate],
+            &remembered,
+            &established,
+            Counts::default(),
+            next,
+        );
+        assert!(decided.new.is_empty());
+        assert_eq!(decided.seen, [(Uuid::from_u128(1), next)]);
+    }
+
+    #[test]
+    fn learned_tools_do_not_cap_a_day_and_established_tools_do() {
+        let tools: Vec<_> = (0..25)
+            .map(|n| Candidate {
+                kind: ChangeKind::Tool,
+                ..release(
+                    &format!("tool_{n:02}"),
+                    &format!("2026-11-08T10:{n:02}:00Z"),
+                )
+            })
+            .collect();
+        let learned = settle(
+            tools.clone(),
+            &HashMap::new(),
+            &HashMap::new(),
+            Counts::default(),
+            at(NOW),
+        );
+        assert_eq!(learned.new.len(), 25);
+        assert!(learned.new.iter().all(|row| row.mark == Mark::Hidden));
+        assert!(learned.capped.is_empty());
+        let established = HashMap::from([(
+            ("checkout".into(), "production".into()),
+            at(NOW) - TimeDelta::days(2),
+        )]);
+        let marked = settle(
+            tools,
+            &HashMap::new(),
+            &established,
+            Counts::default(),
+            at(NOW),
+        );
+        assert!(marked.new[..23].iter().all(|row| row.mark == Mark::Shown));
+        assert_eq!(marked.new[23].mark, Mark::Capped);
+        assert_eq!(marked.new[24].mark, Mark::Hidden);
+    }
+
+    #[test]
+    fn tool_rows_cannot_fill_the_other_kinds_row_bound() {
+        let full = Counts {
+            days: HashMap::new(),
+            rows: HashMap::from([((day(NOW), true), DAY_ROWS_MAX)]),
+        };
+        let decided = settle(
+            vec![
+                release("v2", NOW),
+                Candidate {
+                    kind: ChangeKind::Tool,
+                    ..release("lookup", NOW)
+                },
+            ],
+            &HashMap::new(),
+            &HashMap::new(),
+            full,
+            at(NOW),
+        );
+        assert_eq!(decided.new.len(), 1);
+        assert_eq!(decided.new[0].candidate.kind, ChangeKind::Release);
+        assert_eq!(decided.new[0].mark, Mark::Shown);
     }
 
     /// The window starts five minutes before the last pass ended, never past

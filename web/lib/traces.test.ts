@@ -708,4 +708,21 @@ describe("an agent's changes marked on the list's charts", () => {
       },
     ]);
   });
+
+  it("names a tool's first call and the later first calls its cap leaves unmarked", () => {
+    const tool: Change = {
+      ...BASE,
+      kind: ChangeKind.Tool,
+      value: "delete_user",
+      changed_at: "2027-01-15T08:00:00Z",
+    };
+    expect(marksOn(BARS, [tool])).toEqual([
+      { at: BARS[1]!.at, changes: ["support: first call of delete_user in production"] },
+    ]);
+    expect(marksOn(BARS, [{ ...tool, capped: true }])).toEqual([
+      { at: BARS[1]!.at, changes: [
+        "support: first call of delete_user in production; its later first calls that UTC day are not marked",
+      ] },
+    ]);
+  });
 });

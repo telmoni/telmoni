@@ -28,7 +28,9 @@ use telmoni_shared::db::project_move;
 use telmoni_shared::db::tenant_session::maintenance_scope;
 use telmoni_shared::middleware::api_key::{ApiKeyGate, refuse_as_problem, require_api_key};
 use telmoni_shared::middleware::service_auth::SERVICE_SECRET_HEADER;
-use telmoni_shared::{ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind};
+use telmoni_shared::{
+    ApiKeyScope, OrganizationId, OrganizationRole, ProjectId, Role, SpanKind, SpanStatus,
+};
 use telmoni_telemetry::db::{self, TelemetryLane};
 use telmoni_telemetry::store::SpanRow;
 use telmoni_telemetry::{AppState, changes, router, v1_reads};
@@ -165,6 +167,123 @@ fn row(environment: &str, kind: &str, prompt: Option<&str>, value: &str, trace: 
         trace.simple().to_string(),
         "shown".into(),
     )
+}
+
+#[sqlx::test]
+async fn established_agents_mark_tools_and_sources_once_in_their_environment(pool: PgPool) {
+    let Some(w) = watched(&pool, module_path!()).await else {
+        return;
+    };
+    let now = Utc::now();
+    let first = now - TimeDelta::days(2);
+    insert(
+        &w,
+        &[call(
+            &w.project,
+            Uuid::new_v4(),
+            "model-a",
+            &[],
+            first - TimeDelta::seconds(10),
+        )],
+    )
+    .await;
+    tick(&w, &pool, first).await;
+    sqlx::query("UPDATE telemetry.changes SET created_at = $2 WHERE project_id = $1")
+        .bind(&w.project)
+        .bind(first)
+        .execute(&pool)
+        .await
+        .expect("the initial observation clock");
+
+    let trace = Uuid::new_v4();
+    let received = now - TimeDelta::seconds(20);
+    let tool = SpanRow {
+        name: "delete_user".into(),
+        status: SpanStatus::Error,
+        ..sent(&w.project, trace, SpanKind::ToolCall, "", received)
+    };
+    let source = SpanRow {
+        name: "knowledge".into(),
+        ..sent(&w.project, trace, SpanKind::Retrieval, "", received)
+    };
+    let same_name = SpanRow {
+        span_id: "2".repeat(16),
+        kind: SpanKind::Retrieval,
+        ..tool.clone()
+    };
+    let staging = SpanRow {
+        environment: "staging".into(),
+        span_id: "3".repeat(16),
+        ..tool.clone()
+    };
+    insert(&w, &[tool, source, same_name, staging]).await;
+    tick(&w, &pool, now).await;
+    let rows = stored(&pool, &w.project).await;
+    let tools: Vec<_> = rows.iter().filter(|row| row.1 == "tool").collect();
+    assert_eq!(tools.len(), 3);
+    for name in ["delete_user", "knowledge"] {
+        let expected = row("production", "tool", None, name, trace);
+        assert!(tools.contains(&&expected), "{tools:?}");
+    }
+    assert!(
+        tools
+            .iter()
+            .any(|row| row.0 == "staging" && row.5 == "hidden")
+    );
+    tick(&w, &pool, now + TimeDelta::minutes(1)).await;
+    assert_eq!(stored(&pool, &w.project).await, rows);
+
+    let (status, answer) = ask(&lanes(&w), &w, "/changes", Some(READ_KEY)).await;
+    assert_eq!(status, StatusCode::OK);
+    let shown: Vec<_> = answer["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .filter(|change| change["kind"] == "tool")
+        .collect();
+    assert_eq!(shown.len(), 2);
+    assert!(
+        shown
+            .iter()
+            .all(|change| change["environment"] == "production")
+    );
+}
+
+#[sqlx::test]
+async fn tool_only_agents_learn_names_for_twenty_four_hours(pool: PgPool) {
+    let Some(w) = watched(&pool, module_path!()).await else {
+        return;
+    };
+    let now = Utc::now();
+    let tool = |name: &str, received| SpanRow {
+        name: name.into(),
+        ..sent(&w.project, Uuid::new_v4(), SpanKind::ToolCall, "", received)
+    };
+    insert(&w, &[tool("lookup", now - TimeDelta::seconds(20))]).await;
+    tick(&w, &pool, now).await;
+    let later = now + TimeDelta::hours(23);
+    insert(&w, &[tool("search", later - TimeDelta::seconds(20))]).await;
+    tick(&w, &pool, later).await;
+    let learned = stored(&pool, &w.project).await;
+    assert_eq!(learned.len(), 2);
+    assert!(learned.iter().all(|row| row.5 == "hidden"));
+    let later = now + TimeDelta::hours(25);
+    let fresh = tool("delete_user", later - TimeDelta::seconds(20));
+    insert(
+        &w,
+        &[
+            tool("lookup", later - TimeDelta::seconds(20)),
+            fresh.clone(),
+        ],
+    )
+    .await;
+    tick(&w, &pool, later).await;
+    let rows = stored(&pool, &w.project).await;
+    assert_eq!(rows.len(), 3);
+    let shown: Vec<_> = rows.iter().filter(|row| row.5 == "shown").collect();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0].3, "delete_user");
+    assert_eq!(shown[0].4, fresh.trace_id);
 }
 
 /// ⚠ The item's first proof: a trace on a new release makes one row, by its
