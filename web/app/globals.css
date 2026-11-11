@@ -921,3 +921,8 @@ html.a11y-more-contrast.dark [data-slot="input"] {
 :where(#nd-sidebar) a[data-active] {
   border-radius: var(--radius-md);
 }
+
+/* A code block's copy button, which Fumadocs leaves at the arrow. */
+figure.shiki button:not(:disabled) {
+  cursor: pointer;
+}
