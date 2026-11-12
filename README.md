@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://telmoni.com">
+  <a href="https://github.com/telmoni/telmoni">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/lockup-color-on-dark.svg">
       <img src=".github/assets/lockup-color-on-light.svg" alt="telmoni" width="360">
@@ -7,11 +7,11 @@
   </a>
   <h3>Privacy-first, open-source monitoring for AI agents</h3>
   <p>
-    <a href="https://telmoni.com/docs"><strong>Docs</strong></a> ·
+    <a href="https://github.com/telmoni/telmoni/tree/main/web/content/docs"><strong>Docs</strong></a> ·
     <a href="#quickstart"><strong>Quickstart</strong></a> ·
-    <a href="https://telmoni.com/docs/self-host/overview"><strong>Self-host</strong></a> ·
+    <a href="https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/overview.mdx"><strong>Self-host</strong></a> ·
     <a href="ARCHITECTURE.md"><strong>Architecture</strong></a> ·
-    <a href="https://telmoni.com/docs/contributing/introduction"><strong>Contribute</strong></a>
+    <a href="https://github.com/telmoni/telmoni/blob/main/web/content/docs/contributing/introduction.mdx"><strong>Contribute</strong></a>
   </p>
   <p>
     <a href="https://github.com/telmoni/telmoni/actions/workflows/ci.yml"><img src="https://github.com/telmoni/telmoni/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -29,17 +29,17 @@ Telmoni is privacy-first, open-source monitoring for the AI agents you run: a Py
 
 ## Features
 
-- **[Alerts](https://telmoni.com/docs/monitoring/alerts)**: a trace that fails, runs long, loops on one tool, takes too many steps, is left open or costs past its cap, and traces that stop arriving, over an hour, a day or a week, against an alert threshold and an optional warning one; each incident told once to the feed and to the Slack channels and webhooks an alert links, acknowledged or muted from Slack, with maintenance windows; and those still open on each project's Agents page.
-- **[Guard](https://telmoni.com/docs/api/sdks#the-guard)**: opt-in caps on a trace's steps and spend, counted in the agent's own process with no call to us, which stop an agent before it overspends.
-- **[Objectives](https://telmoni.com/docs/monitoring/objectives) and [spend](https://telmoni.com/docs/monitoring/dashboards)**: objectives that promise a share of an agent's traces succeed or end in time, paging when the error budget burns too fast; budgets with the day they'll be reached; and spend, tokens, traces, failures and latency, split by agent, model, provider or tag.
-- **[Agent telemetry](https://telmoni.com/docs/api/sdks)**: open a trace around your agent, or install a [coding-agent plugin](https://telmoni.com/docs/api/coding-agents), and each step, model call, tool call and retrieval inside it becomes a span with its timings, status, model, tokens, cost and errors. Any framework that speaks OpenTelemetry works too.
-- **[Private by default](https://telmoni.com/docs/api/field-inventory)**: timings, statuses, counts and names, never content. End-user and session IDs are hashed with a key unique to each project, and the field inventory lists every attribute ingest reads, and what becomes of it.
-- **[Content, when you choose it](https://telmoni.com/docs/monitoring/content)**: prompts, completions, the model's thinking, tool inputs and outputs, images and files, and failures with their stack traces, kept in full only where a project's owner turns its content mode on and the developer's capture switch is on too, sealed under the project's own key, and every read of it in the audit log.
-- **[Traces](https://telmoni.com/docs/monitoring/traces)**: the trace behind every alert, as the tree its spans ran in or as a timeline; filter, sort, chart and download traces, by session and end user too, see new traces the moment they arrive, and see where an agent first ran on a new release, model or prompt version, or first called a tool, marked on the charts.
-- **[Scores](https://telmoni.com/docs/monitoring/scores)**: scores on a trace, a span or a session from your code or a member, alerted on when they drop.
-- **[Organizations and audit](https://telmoni.com/docs/workspace/audit-log)**: owner, admin and member roles, invitations, transfers and scoped API keys; sign-in by password or any OIDC provider; and an audit log hash-chained per organization, exportable.
-- **[Notifications](https://telmoni.com/docs/integrations/notifications)**: an in-app feed, Slack, and webhooks signed with HMAC-SHA256, through a delivery queue that retries.
-- **[Console agent](https://telmoni.com/docs/self-host/agent)**: questions in plain language, answered from the docs, the audit log and the feed with sources cited, on Anthropic or any OpenAI-compatible server such as Ollama, vLLM or OpenRouter.
+- **[Alerts](https://github.com/telmoni/telmoni/blob/main/web/content/docs/monitoring/alerts.mdx)**: a trace that fails, runs long, loops on one tool, takes too many steps, is left open or costs past its cap, and traces that stop arriving, over an hour, a day or a week, against an alert threshold and an optional warning one; each incident told once to the feed and to the Slack channels and webhooks an alert links, acknowledged or muted from Slack, with maintenance windows; and those still open on each project's Agents page.
+- **[Guard](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx#the-guard)**: opt-in caps on a trace's steps and spend, counted in the agent's own process with no call to us, which stop an agent before it overspends.
+- **[Objectives](https://github.com/telmoni/telmoni/blob/main/web/content/docs/monitoring/objectives.mdx) and [spend](https://github.com/telmoni/telmoni/blob/main/web/content/docs/monitoring/dashboards.mdx)**: objectives that promise a share of an agent's traces succeed or end in time, paging when the error budget burns too fast; budgets with the day they'll be reached; and spend, tokens, traces, failures and latency, split by agent, model, provider or tag.
+- **[Agent telemetry](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx)**: open a trace around your agent, or install a [coding-agent plugin](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/coding-agents.mdx), and each step, model call, tool call and retrieval inside it becomes a span with its timings, status, model, tokens, cost and errors. Any framework that speaks OpenTelemetry works too.
+- **[Private by default](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/field-inventory.mdx)**: timings, statuses, counts and names, never content. End-user and session IDs are hashed with a key unique to each project, and the field inventory lists every attribute ingest reads, and what becomes of it.
+- **[Content, when you choose it](https://github.com/telmoni/telmoni/blob/main/web/content/docs/monitoring/content.mdx)**: prompts, completions, the model's thinking, tool inputs and outputs, images and files, and failures with their stack traces, kept in full only where a project's owner turns its content mode on and the developer's capture switch is on too, sealed under the project's own key, and every read of it in the audit log.
+- **[Traces](https://github.com/telmoni/telmoni/blob/main/web/content/docs/monitoring/traces.mdx)**: the trace behind every alert, as the tree its spans ran in or as a timeline; filter, sort, chart and download traces, find a session's or an end user's by the id your app sends, see each session and each agent summed on a page of its own, see new traces the moment they arrive, and see where an agent first ran on a new release, model or prompt version, or first called a tool, marked on the charts.
+- **[Scores](https://github.com/telmoni/telmoni/blob/main/web/content/docs/monitoring/scores.mdx)**: scores on a trace, a span or a session from your code or a member, alerted on when they drop.
+- **[Organizations and audit](https://github.com/telmoni/telmoni/blob/main/web/content/docs/workspace/audit-log.mdx)**: owner, admin and member roles, invitations, transfers and scoped API keys; sign-in by password or any OIDC provider; and an audit log hash-chained per organization, exportable.
+- **[Notifications](https://github.com/telmoni/telmoni/blob/main/web/content/docs/integrations/notifications.mdx)**: an in-app feed, Slack, and webhooks signed with HMAC-SHA256, through a delivery queue that retries.
+- **[Console agent](https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/agent.mdx)**: questions in plain language, answered from the docs, the audit log and the feed with sources cited, on Anthropic or any OpenAI-compatible server such as Ollama, vLLM or OpenRouter.
 
 ## Quickstart
 
@@ -91,7 +91,7 @@ print(answer("Where is my order?"))
 telmoni.flush()
 ```
 
-TypeScript, Go and Rust work the same way; the [SDK docs](https://telmoni.com/docs/api/sdks) show each.
+TypeScript, Go and Rust work the same way; the [SDK docs](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx) show each.
 
 ### 4. See it in the console
 
@@ -101,22 +101,22 @@ The project's **Traces** page shows the trace with its model call, tokens and ti
 
 No images are published: both paths build `server` and `web` from a checkout of this repository, for linux/amd64:
 
-- **[Docker Compose](https://telmoni.com/docs/self-host/docker-compose)**: `deploy/compose/docker-compose.yml` runs the server, the console, PostgreSQL, ClickHouse and Redis on one machine. Copy `deploy/compose/.env.example` to `deploy/compose/.env`, fill its six secrets, then `docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 180`, which builds both images first.
-- **[Kubernetes](https://telmoni.com/docs/self-host/kubernetes)**: the chart in `deploy/charts/telmoni` deploys the server, the console and the migration job, from the images you build and push to your own registry.
+- **[Docker Compose](https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/docker-compose.mdx)**: `deploy/compose/docker-compose.yml` runs the server, the console, PostgreSQL, ClickHouse and Redis on one machine. Copy `deploy/compose/.env.example` to `deploy/compose/.env`, fill its six secrets, then `docker compose -f deploy/compose/docker-compose.yml up -d --build --wait --wait-timeout 180`, which builds both images first.
+- **[Kubernetes](https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/kubernetes.mdx)**: the chart in `deploy/charts/telmoni` deploys the server, the console and the migration job, from the images you build and push to your own registry.
 
-Configuration comes only from the environment ([every setting](https://telmoni.com/docs/self-host/configuration)); [Production](https://telmoni.com/docs/self-host/production) covers OIDC, database role hardening, the reverse proxy and backups. A self-hosted Telmoni phones nothing home: the server calls only the services you configure.
+Configuration comes only from the environment ([every setting](https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/configuration.mdx)); [Production](https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/production.mdx) covers OIDC, database role hardening, the reverse proxy and backups. A self-hosted Telmoni phones nothing home: the server calls only the services you configure.
 
 ## Integrations
 
 | Integration | For | What it does |
 |---|---|---|
-| [SDKs](https://telmoni.com/docs/api/sdks) | Python, TypeScript, Go, Rust | Record an agent's traces, steps, model calls, tool calls and retrievals as spans. |
-| [Coding-agent plugins](https://telmoni.com/docs/api/coding-agents) | Claude Code, Codex, Antigravity | Record each turn of a coding agent you already use as a trace, with no code to write: metadata alone, unless you turn its content on. |
+| [SDKs](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx) | Python, TypeScript, Go, Rust | Record an agent's traces, steps, model calls, tool calls and retrievals as spans. |
+| [Coding-agent plugins](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/coding-agents.mdx) | Claude Code, Codex, Antigravity | Record each turn of a coding agent you already use as a trace, with no code to write: metadata alone, unless you turn its content on. |
 | [CLI](https://github.com/telmoni/telmoni-cli) | macOS, Linux | `telmoni`: sign in from a terminal (device code) or CI (an API key), see who you are, and switch organizations. |
-| [Slack](https://telmoni.com/docs/integrations/slack) | Notifications | A project's notifications, posted to a channel. |
-| [Webhooks](https://telmoni.com/docs/integrations/webhooks) | Notifications | A project's notifications, delivered to your endpoint and signed with HMAC-SHA256. |
-| [OIDC](https://telmoni.com/docs/self-host/configuration) | Any OIDC provider | Single sign-on beside the password form, or instead of it. |
-| [Read API](https://telmoni.com/docs/api/reference) | HTTP, JSON | `/v1`: the organization, traces, metrics, incidents and agents' changes, read with an API key; scores written. |
+| [Slack](https://github.com/telmoni/telmoni/blob/main/web/content/docs/integrations/slack.mdx) | Notifications | A project's notifications, posted to a channel. |
+| [Webhooks](https://github.com/telmoni/telmoni/blob/main/web/content/docs/integrations/webhooks.mdx) | Notifications | A project's notifications, delivered to your endpoint and signed with HMAC-SHA256. |
+| [OIDC](https://github.com/telmoni/telmoni/blob/main/web/content/docs/self-host/configuration.mdx) | Any OIDC provider | Single sign-on beside the password form, or instead of it. |
+| [Read API](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/reference.mdx) | HTTP, JSON | `/v1`: the organization, traces, metrics, incidents and agents' changes, read with an API key; scores written. |
 
 ## How it works
 
@@ -140,7 +140,7 @@ make first-run   # once: env files, dependencies, Postgres and ClickHouse, migra
 make up          # Postgres, ClickHouse, Redis, Mailpit, the server on :8082, the console on :3000
 ```
 
-Sign in with the password form; mail lands in Mailpit at http://localhost:8025. [Developing](https://telmoni.com/docs/contributing/developing#the-platform) has the rest, and [`AGENTS.md`](AGENTS.md) holds the rules the code is held to.
+Sign in with the password form; mail lands in Mailpit at http://localhost:8025. [Developing](https://github.com/telmoni/telmoni/blob/main/web/content/docs/contributing/developing.mdx#the-platform) has the rest, and [`AGENTS.md`](AGENTS.md) holds the rules the code is held to.
 
 <details>
 <summary><strong>Repository layout</strong></summary>
@@ -170,11 +170,11 @@ ARCHITECTURE.md   how it is built, and why, on one page
 
 ## Support and contributing
 
-[The docs](https://telmoni.com/docs) cover self-hosting, the console, the SDKs, the CLI, the API and every [error](https://telmoni.com/docs/errors). For a bug or a feature, [open an issue](https://github.com/telmoni/telmoni/issues/new/choose) from a template; for anything else, [SUPPORT.md](https://github.com/telmoni/.github/blob/main/SUPPORT.md) says which channel handles what. Contributions are welcome: start with the [introduction](https://telmoni.com/docs/contributing/introduction), and read the [AI policy](https://telmoni.com/docs/contributing/ai-policy) and the [Code of Conduct](https://telmoni.com/docs/contributing/code-of-conduct) before opening a pull request.
+[The docs](https://github.com/telmoni/telmoni/tree/main/web/content/docs) cover self-hosting, the console, the SDKs, the CLI, the API and every [error](https://github.com/telmoni/telmoni/blob/main/web/content/docs/errors.mdx). For a bug or a feature, [open an issue](https://github.com/telmoni/telmoni/issues/new/choose) from a template; for anything else, [SUPPORT.md](https://github.com/telmoni/.github/blob/main/SUPPORT.md) says which channel handles what. Contributions are welcome: start with the [introduction](https://github.com/telmoni/telmoni/blob/main/web/content/docs/contributing/introduction.mdx), and read the [AI policy](https://github.com/telmoni/telmoni/blob/main/web/content/docs/contributing/ai-policy.mdx) and the [Code of Conduct](https://github.com/telmoni/telmoni/blob/main/web/content/docs/contributing/code-of-conduct.mdx) before opening a pull request.
 
 ## Security
 
-Please don't report a vulnerability in a public issue. Report it privately from this repository's [Security tab](https://github.com/telmoni/telmoni/security) or to hello@telmoni.com, as the [security policy](https://telmoni.com/docs/legal/security#reporting-a-vulnerability) explains.
+Please don't report a vulnerability in a public issue. Report it privately from this repository's [Security tab](https://github.com/telmoni/telmoni/security) or to hello@telmoni.com, as the [security policy](https://github.com/telmoni/.github/blob/main/SECURITY.md) explains.
 
 ## License
 
