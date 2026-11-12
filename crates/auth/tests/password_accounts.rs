@@ -24,7 +24,7 @@ use http_body_util::BodyExt;
 use sqlx::PgPool;
 use tower::ServiceExt;
 
-use telmoni_auth::db::confirmation_codes::CODE_DIGITS;
+use telmoni_auth::db::confirmation_codes::{CODE_DIGITS, RESEND_WAIT_SECS};
 use telmoni_auth::db::{AuthLane, refresh_tokens};
 use telmoni_auth::default_organization::DefaultOrganization;
 use telmoni_auth::issuer::Issuer;
@@ -281,13 +281,31 @@ async fn me(app: &Router, bearer: &str) -> StatusCode {
         .status()
 }
 
+/// Move every code the person was sent back past the wait between two.
+async fn wait_out_the_resend(pool: &PgPool, user_id: &str) {
+    sqlx::query(
+        "UPDATE auth.confirmation_codes
+            SET created_at = created_at - make_interval(secs => $2::int)
+          WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .bind(RESEND_WAIT_SECS)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[sqlx::test]
 async fn a_sign_up_is_verified_from_its_mail_and_then_signs_in(pool: PgPool) {
     telmoni_shared::test_util::apply_audit_migrations(&pool).await;
-    let (app, outbox) = app(pool);
+    let (app, outbox) = app(pool.clone());
 
     let (uid, token) = sign_up(&app, &outbox, "Ada@Example.com").await;
     assert!(uid.starts_with("user_"), "{uid}");
+
+    // The refused sign-in below re-sends the link, which waits out the one
+    // the sign-up mailed.
+    wait_out_the_resend(&pool, &uid).await;
 
     // Before the link is spent the password is right and the sign-in is
     // still refused, and a fresh link goes out.
