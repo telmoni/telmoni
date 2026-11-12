@@ -11,7 +11,7 @@ import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 const TERMINAL_COMMANDS = [
   {
     label: "curl",
-    command: "curl -fsSL https://telmoni.com/install.sh | sh",
+    command: "curl -fsSL https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh | sh",
   },
   {
     label: "cargo",

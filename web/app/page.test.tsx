@@ -139,7 +139,7 @@ describe("the splash page", () => {
     const installBtn = screen.getByRole("button", { name: /Install/i });
     fireEvent.click(installBtn);
 
-    expect(screen.getByText("curl -fsSL https://telmoni.com/install.sh | sh")).toBeInTheDocument();
+    expect(screen.getByText("curl -fsSL https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh | sh")).toBeInTheDocument();
     expect(screen.getByText("cargo install --locked telmoni-cli")).toBeInTheDocument();
 
     expect(screen.getByRole("link", { name: "Read docs" })).toHaveAttribute(
@@ -168,7 +168,7 @@ describe("the splash page", () => {
       const dialog = screen.getByRole("dialog", { name: "Terminal install commands" });
       expect(dialog).toBeVisible();
       for (const [label, command] of [
-        ["curl", "curl -fsSL https://telmoni.com/install.sh | sh"],
+        ["curl", "curl -fsSL https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh | sh"],
         ["cargo", "cargo install --locked telmoni-cli"],
       ]) {
         const button = screen.getByRole("button", { name: `Copy ${label} install command` });

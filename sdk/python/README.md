@@ -18,11 +18,12 @@ Python 3.10 or later:
 pip install telmoni
 ```
 
-The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
-is not open yet, nor are the docs at telmoni.com/docs. Until they are,
-[run Telmoni yourself](https://github.com/telmoni/telmoni#self-hosting) and
-point `TELMONI_ENDPOINT` at its machine host; the docs read in
-[`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs).
+Telmoni is self-hosted: [run it yourself](https://github.com/telmoni/telmoni#self-hosting)
+and point `TELMONI_ENDPOINT` at your deployment's machine host. The endpoint is
+required, as there is no default: a client with none is refused with a
+`ValueError`. The docs are in
+[`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs),
+and your deployment's console serves them at `/docs`.
 
 ## Quick start
 
@@ -289,7 +290,7 @@ without it, counted as `dropped:<field>`, never as it was.
 
 `Config(endpoint, organization_id, api_key, capture_content, mask, scrub_secrets,
 scrub_pii, sampler, environment, release, prices)`, or `Config.from_env()`, which reads `TELMONI_ENDPOINT`
-(default `https://api.telmoni.com`), `TELMONI_API_KEY`, `TELMONI_ORG`,
+(required, `https://telmoni.example.com` say), `TELMONI_API_KEY`, `TELMONI_ORG`,
 `TELMONI_ENVIRONMENT`, `TELMONI_RELEASE` and `TELMONI_CAPTURE_CONTENT`, a blank
 value counting as unset. `TELMONI_CAPTURE_CONTENT` turns `capture_content` on
 with `1` alone, its blanks about it trimmed; anything else, or nothing, leaves
@@ -331,4 +332,4 @@ sent from this side. Headers that name no trace give `None`, and a step opened
 with it is outside a trace.
 
 The variables, the attributes each span carries, and the other SDKs are
-documented at [telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).
+documented in [`web/content/docs/api/sdks.mdx`](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx).

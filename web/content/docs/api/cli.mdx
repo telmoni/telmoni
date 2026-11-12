@@ -12,13 +12,13 @@ The Telmoni CLI (`telmoni`) is the command-line client for Telmoni: sign in from
     Install the latest release binary.
 
     ```console
-    $ curl -fsSL https://telmoni.com/install.sh | sh
+    $ curl -fsSL https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh | sh
     ```
 
-    The installer downloads the release archive for your platform, checks it against the release's `SHA256SUMS`, and installs `telmoni` into `/usr/local/bin` when that directory is writable or the installer runs as root, and into `~/.local/bin` otherwise. The address redirects to the latest release's copy of the script, and the archive comes from the CLI's GitHub releases. `TELMONI_INSTALL_DRY_RUN=1` prints the download, extract, mv and chmod commands instead of running them. To pin a version or choose the directory, set `TELMONI_VERSION` or `TELMONI_INSTALL_DIR`. The installer creates a missing directory as your user, so the default `~/.local/bin` needs no administrator, and goes through `sudo` or `doas` only to create or write into a directory your user cannot, such as `/usr/local/bin`:
+    The installer downloads the release archive for your platform, checks it against the release's `SHA256SUMS`, and installs `telmoni` into `/usr/local/bin` when that directory is writable or the installer runs as root, and into `~/.local/bin` otherwise. The script and the archive both come from the CLI's GitHub releases. `TELMONI_INSTALL_DRY_RUN=1` prints the download, extract, mv and chmod commands instead of running them. To pin a version or choose the directory, set `TELMONI_VERSION` or `TELMONI_INSTALL_DIR`. The installer creates a missing directory as your user, so the default `~/.local/bin` needs no administrator, and goes through `sudo` or `doas` only to create or write into a directory your user cannot, such as `/usr/local/bin`:
 
     ```console
-    $ curl -fsSL https://telmoni.com/install.sh | TELMONI_VERSION=0.2.0 TELMONI_INSTALL_DIR=/usr/local/bin sh
+    $ curl -fsSL https://github.com/telmoni/telmoni-cli/releases/latest/download/install.sh | TELMONI_VERSION=0.2.0 TELMONI_INSTALL_DIR=/usr/local/bin sh
     ```
 
     Release binaries are built for x86_64 Linux and linked statically, so they run on any distribution, whatever its C library: Alpine and other musl-based systems, and older glibc ones such as RHEL 8, included. On a Mac the installer stops until the macOS build is signed, as it does on ARM64 Linux, so you build from source instead.
@@ -57,19 +57,21 @@ $ telmoni --version
 
 ### 1. Interactive login (Browser & Device Code)
 
-For local development machines, authenticate using the interactive device authorization flow ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)):
+For local development machines, authenticate using the interactive device authorization flow ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)), naming your deployment:
 
 ```console
-$ telmoni login
+$ telmoni login --endpoint https://telmoni.example.com
 ```
 
-The CLI prints a one-time code and the address of the console's device page (`/auth/device`), then opens that page in your browser with the code filled in. It opens the page only when the address is the endpoint's own, or the console beside a machine host — the endpoint's host with its leading `api.` taken off, so `api.telmoni.com` opens a page on `telmoni.com`; a deployment whose console answers anywhere else gets `note: the verification page is not on <endpoint>; open it yourself` instead. For headless environments or SSH sessions where a browser cannot be opened, add `--no-browser`:
+The endpoint is required: there is no default. Give it with `--endpoint`, `TELMONI_ENDPOINT` or `telmoni config set endpoint <URL>`; with none of them set, `telmoni login` exits `1` with an error naming the three.
+
+The CLI prints a one-time code and the address of the console's device page (`/auth/device`), then opens that page in your browser with the code filled in. It opens the page only when the address is the endpoint's own, or the console beside a machine host — the endpoint's host with its leading `api.` taken off, so `api.telmoni.example.com` opens a page on `telmoni.example.com`; a deployment whose console answers anywhere else gets `note: the verification page is not on <endpoint>; open it yourself` instead. For headless environments or SSH sessions where a browser cannot be opened, add `--no-browser`:
 
 ```console
 $ telmoni login --no-browser
 ```
 
-To authenticate against a self-hosted Telmoni instance, supply the `--endpoint` flag (or set `TELMONI_ENDPOINT`): the deployment's machine host, or its console's host where the machine lanes are routed by path ([Self-hosting → Production](/docs/self-host/production#reverse-proxy-configuration)):
+The endpoint is the deployment's machine host, or its console's host where the machine lanes are routed by path ([Self-hosting → Production](/docs/self-host/production#reverse-proxy-configuration)):
 
 ```console
 $ telmoni login --endpoint https://api.telmoni.example.com
@@ -131,7 +133,7 @@ $ telmoni status
 - the endpoint the session belongs to;
 - how many minutes the access token has left.
 
-With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. A key from `TELMONI_API_KEY` or `api_key_helper` is named as such (`API key from TELMONI_API_KEY for …`), and asks at the endpoint `TELMONI_ENDPOINT`, the configuration file or the default names; a saved login it passed over is named after the report, as not in use — `Saved login, not in use: a device sign-in for <email>`, or `Saved login, not in use: a saved API key` — read for that alone, neither refreshed nor changed. Signed out, it prints the endpoint it would sign in to and exits `4`.
+With an API key, it asks `GET /v1/organization` and prints the ID and name of the key's organization, then the endpoint. A key from `TELMONI_API_KEY` or `api_key_helper` is named as such (`API key from TELMONI_API_KEY for …`), and asks at the endpoint `TELMONI_ENDPOINT` or the configuration file names; a saved login it passed over is named after the report, as not in use — `Saved login, not in use: a device sign-in for <email>`, or `Saved login, not in use: a saved API key` — read for that alone, neither refreshed nor changed. Signed out, it prints the endpoint it would sign in to, where one is set, and exits `4`.
 
 With a browser session, `status` also saves the organizations the server answered. If you are no longer in the saved active organization, it replaces it with your [default organization](/docs/settings/account#default-organization), whether or not `TELMONI_ORG` is set.
 
@@ -198,10 +200,10 @@ The CLI stores local preferences in `config.json`, in the same directory as the 
 $ telmoni config list
 ```
 
-To point `telmoni login` at a self-hosted Telmoni instance:
+To save your deployment's endpoint, so `telmoni login` needs no `--endpoint`:
 
 ```console
-$ telmoni config set endpoint https://telmoni.internal.company.com
+$ telmoni config set endpoint https://telmoni.example.com
 ```
 
 To read back a configuration key:
@@ -214,7 +216,7 @@ $ telmoni config get endpoint
 
 | Key | Description | Default |
 |---|---|---|
-| `endpoint` | The Telmoni server URL `telmoni login` signs in to: the machine host | `https://api.telmoni.com` |
+| `endpoint` | Your deployment's URL `telmoni login` signs in to, such as `https://telmoni.example.com` | None: required unless `--endpoint` or `TELMONI_ENDPOINT` names one |
 | `api_key_helper` | A shell command that prints an API key, such as a secret manager's read, run for each command that acts with a key while `TELMONI_API_KEY` is unset or its key declined. The file holds the command, never the key: a value that carries a key itself is refused. | None |
 | `use_api_key_env` | Whether commands at a terminal use the key now in `TELMONI_API_KEY` ahead of the saved login: `true` or `false`, for that key alone. Kept under `api_key_answers` by the key's SHA-256, never the key; read, set and listed only while the variable holds a key. | Asked by the first command that acts with the key |
 | `output_format` | Accepted and stored. No command reads it: use `--json` for JSON output. | None (`config list` shows `(default: text)`) |
@@ -241,7 +243,7 @@ The CLI reads the following environment variables:
 
 | Variable | Description |
 |---|---|
-| `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to (default: `https://api.telmoni.com`, the machine host). It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
+| `TELMONI_ENDPOINT` | The endpoint `telmoni login` signs in to, such as `https://telmoni.example.com`; there is no default. It comes after `--endpoint` and ahead of the `endpoint` configuration key. A saved session keeps the endpoint it signed in to. |
 | `TELMONI_API_KEY` | An API key for each command that acts with one, ahead of any saved login and never saved, for CI/CD runs. At a terminal, a new key is [asked about once](#2-programmatic--ci-login-api-key) first. A blank value counts as unset. |
 | `TELMONI_ORG` | With a browser session, the organization `status`, `whoami` and `logout` act in instead of the active one, by ID or slug, from the list the CLI saved. A script should give the ID, which nothing moves. |
 | `TELMONI_CONFIG_DIR` | The directory the saved login and `config.json` live in, in place of the [default](#credential-storage-paths): an absolute path, or the command stops. Each directory holds a login of its own, so a shell with a value of its own is a second login, on a Mac a second Keychain item. A blank value counts as unset. |

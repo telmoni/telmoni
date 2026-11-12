@@ -15,13 +15,13 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.trace import SpanContext
 
-from conftest import FakeTransport, answer_from, infos_in, load_fixture
+from conftest import ENDPOINT, FakeTransport, answer_from, infos_in, load_fixture
 from telmoni import Config, StepRecord, Telmoni, TraceRecord, WarningInfo, contract
 from telmoni.exporter import Answer
 
 FIXTURE = load_fixture("scores.json")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
-SCORES_URL = "https://api.telmoni.com/v1/scores"
+SCORES_URL = f"{ENDPOINT}/v1/scores"
 
 
 def given(value: Any, kind: str) -> Any:
@@ -98,7 +98,7 @@ def test_a_live_score_is_kept_or_refused_as_the_fixture_says(
     case: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot") as opened:
             opened.score(
@@ -138,7 +138,7 @@ def test_a_late_scores_target_is_kept_or_refused_as_the_fixture_says(
     case: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.score(
             "relevance",
@@ -173,7 +173,7 @@ def test_late_scores_leave_in_one_post_as_the_fixture_says(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         for each in FIXTURE["late"]["scores"]:
             client.score(
@@ -202,7 +202,7 @@ def test_late_scores_leave_in_one_post_as_the_fixture_says(
 
 def test_live_scores_are_the_fixtures_events_without_content() -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot") as opened:
             for each in FIXTURE["live"]["scores"]:
@@ -222,7 +222,7 @@ def test_an_evaluation_events_other_attributes_are_content() -> None:
     """The application's own evaluation event leaves with a score's keys alone,
     and with the rest only under both locks."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot"):
             trace.get_current_span().add_event(
@@ -250,7 +250,11 @@ def test_a_refused_post_is_warned_once_and_never_retried(
 ) -> None:
     problem = b'{"message": "/errors/bad-request: scores[0]: no"}'
     transport = FakeTransport([Answer(400, {}, problem)])
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"),
+        transport=transport,
+        sleep=lambda _: None,
+    )
     try:
         client.score("thumbs", True, session_id="conv-1")
         assert client.flush()
@@ -268,7 +272,9 @@ def test_an_unavailable_post_is_retried_and_sent_once_more(
 ) -> None:
     unavailable = answer_from(load_fixture("answers/unavailable.json"))
     transport = FakeTransport([unavailable, Answer(204, {}, b"")])
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"), transport=transport, sleep=sleeps.append
+    )
     try:
         client.score("thumbs", True, session_id="conv-1")
         assert client.flush()
@@ -286,7 +292,11 @@ def test_a_post_failing_every_attempt_is_dropped_in_its_own_words(
 ) -> None:
     unavailable = answer_from(load_fixture("answers/unavailable.json"))
     transport = FakeTransport([unavailable] * 3)
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"),
+        transport=transport,
+        sleep=lambda _: None,
+    )
     try:
         client.score("thumbs", True, session_id="conv-1")
         assert client.flush()
@@ -306,7 +316,7 @@ def test_a_post_failing_every_attempt_is_dropped_in_its_own_words(
 
 def test_scores_past_a_bodys_cap_go_in_bodies_of_100_in_order() -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         for at in range(101):
             client.score(f"s{at}", at, session_id="conv-1")
@@ -322,7 +332,7 @@ def test_scores_past_a_bodys_cap_go_in_bodies_of_100_in_order() -> None:
 
 def test_late_scores_beside_spans_leave_apart_from_them() -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot") as opened:
             client.score(
@@ -344,7 +354,7 @@ def test_a_score_past_its_spans_cap_or_its_end_is_not_sent(
 ) -> None:
     most = FIXTURE["limits"]["per_span_max"]
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot") as opened:
             for at in range(most + 1):
@@ -372,7 +382,7 @@ def test_a_score_of_the_wrong_type_or_a_range_off_a_number_is_refused(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot") as opened:
             opened.score("relevance", None)  # type: ignore[arg-type]
@@ -399,7 +409,7 @@ def test_a_score_of_the_wrong_type_or_a_range_off_a_number_is_refused(
 
 def test_a_handle_names_its_spans_id() -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot") as opened:
             pass
@@ -437,7 +447,7 @@ def test_a_recorded_score_is_timed_at_its_spans_end(
     sent: list[bytes] = []
     for _ in range(2):
         transport = FakeTransport()
-        client = Telmoni(Config(api_key="k"), transport=transport)
+        client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
         try:
             client.record_trace(record)
             assert client.flush()
@@ -464,7 +474,7 @@ def test_a_recorded_score_is_timed_at_its_spans_end(
 
 
 def test_a_recorded_score_that_is_no_mapping_refuses_the_record() -> None:
-    client = Telmoni(Config(api_key="k"), transport=FakeTransport())
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=FakeTransport())
     try:
         with pytest.raises(TypeError):
             client.record_trace(
@@ -500,7 +510,8 @@ def test_a_score_event_leaves_untouched_by_a_mask_dropping_everything() -> None:
         handed.append(key)
 
     client = Telmoni(
-        Config(api_key="k", capture_content=True, mask=mask), transport=transport
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True, mask=mask),
+        transport=transport,
     )
     try:
         with client.trace("warm"):
@@ -527,7 +538,7 @@ def test_a_score_event_leaves_untouched_by_a_mask_dropping_everything() -> None:
 def test_a_late_scores_trace_in_capitals_is_sent_lowercase() -> None:
     """Read as ``record_trace`` reads a trace's id."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.score("thumbs", True, trace_id="5B7E1C2A9D4F4E8BA6C31F2E3D4C5B6A")
         assert client.flush()
@@ -541,7 +552,7 @@ def test_a_span_trimmed_to_fit_keeps_its_scores_keys(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     big = ReadableSpan(
         name="big",
         context=SpanContext(trace_id=1, span_id=1, is_remote=False),

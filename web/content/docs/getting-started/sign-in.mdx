@@ -4,12 +4,8 @@ description: "Authentication methods in Telmoni, what your first sign-in provisi
 ---
 
 How you sign in depends on the deployment. A self-hosted instance offers a
-password form, an OpenID Connect identity provider, or both. The hosted service
-at telmoni.com has the password form switched off and signs you in through its
-identity provider (listed on the [Subprocessors](https://telmoni.com/docs/legal/subprocessors) page)
-with a one-time code emailed to you, with your Google account or through
-single sign-on — it holds no password — so the native-account sections below
-do not apply there. The CLI signs in through device authorization on either.
+password form, an OpenID Connect identity provider, or both. The CLI signs in
+through device authorization on any of them.
 
 ## Native accounts
 
@@ -78,8 +74,7 @@ Your account records whether your address has been proved, and the console
 reads that record rather than the session. An address counts as verified once
 you confirm it on the page a password sign-up's confirmation link opens, use a
 password reset link, confirm an email change with the code the new address
-received (on the hosted service, it is recorded as its identity provider
-reports it), or sign in through an identity provider that vouches for it; the
+received, or sign in through an identity provider that vouches for it; the
 seeded `ADMIN_EMAIL` account starts verified. A password sign-up on a
 deployment with `VERIFY_EMAIL` off is not verified, and a provider's sign-in
 records what the provider claims, keeping a proof already recorded for the same
@@ -129,9 +124,7 @@ URL](/docs/workspace/organizations-and-projects#name-and-url)). Nothing is asked
 first: you can rename the organization, or change its URL, on its
 **Settings** page whenever you like.
 
-Your name is the one your sign-in supplies. On the hosted service, that is the
-first and last name on your profile at its identity provider. On a self-hosted
-deployment, it is the first and last name you gave the sign-up form, or the
+Your name is the one your sign-in supplies: the first and last name you gave the sign-up form, or the
 given and family names your OpenID Connect provider sends, or its `name` claim
 when it sends neither (as Microsoft Entra ID does until its optional claims are
 configured). It is what members see beside your address; your first
@@ -215,9 +208,7 @@ resetting your password on a self-hosted deployment.
 the session in the database, so an access token still in flight stops working,
 clears the console's cookies, and sends the browser home, or, for a session
 that began at an identity provider that publishes an `end_session_endpoint`,
-through the provider's sign-out page and back to the home page. On the hosted
-service, it goes through its identity provider's sign-out page, which ends
-your session there too. A post from
+through the provider's sign-out page and back to the home page. A post from
 another site, which the browser's Fetch Metadata or `Origin` header gives
 away, is turned back to the home page without signing you out, and so is a
 link to `/auth/logout` from another site. A link from this site, or the address

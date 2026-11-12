@@ -745,7 +745,7 @@ fn images_are_lifted_out_of_messages_only_under_both_locks() -> Outcome {
             .map(|upload| {
                 assert_eq!(upload.header("Authorization"), Some("Bearer k"));
                 json!({
-                    "path": upload.url.strip_prefix(telmoni::DEFAULT_ENDPOINT).unwrap_or(&upload.url),
+                    "path": upload.url.strip_prefix(common::ENDPOINT).unwrap_or(&upload.url),
                     "content_type": upload.header("Content-Type"),
                     "body": base64(&upload.body),
                 })

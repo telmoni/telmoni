@@ -18,11 +18,12 @@ and later.
 npm install telmoni
 ```
 
-The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
-is not open yet, nor are the docs at telmoni.com/docs. Until they are,
-[run Telmoni yourself](https://github.com/telmoni/telmoni#self-hosting) and
-point `TELMONI_ENDPOINT` at its machine host; the docs read in
-[`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs).
+Telmoni is self-hosted: [run it yourself](https://github.com/telmoni/telmoni#self-hosting)
+and point `TELMONI_ENDPOINT` at your deployment's machine host. The endpoint is
+required, as there is no default: a client with none is refused with a
+`TypeError`. The docs are in
+[`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs),
+and your deployment's console serves them at `/docs`.
 
 ## Quick Start
 
@@ -236,7 +237,7 @@ holds it. `trace.spent` reads the count; a continued trace carries no cap.
 
 ```ts
 const telmoni = new Telmoni({
-  endpoint: 'https://api.telmoni.com', // the default
+  endpoint: 'https://telmoni.example.com', // your deployment's; required
   apiKey: 'tm_…',
   organizationId: 'org_…',
   captureContent: false, // the default
@@ -405,5 +406,5 @@ processor })`, where `transport` has `fetch`'s shape, handed an export's
 between retries, handed a signal that aborts once a shutdown gives the retry up,
 and `processor` sizes the queue.
 
-The variables, their fallbacks and the other SDKs are documented at
-[telmoni.com/docs/api/sdks](https://telmoni.com/docs/api/sdks).
+The variables, their fallbacks and the other SDKs are documented in
+[`web/content/docs/api/sdks.mdx`](https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/sdks.mdx).

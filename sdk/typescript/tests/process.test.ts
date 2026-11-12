@@ -18,7 +18,7 @@ function runScript(body: string): { status: number | null; stdout: string } {
     import { Telmoni } from ${JSON.stringify(BUILT)};
     let exports = 0;
     process.on('exit', () => writeSync(1, JSON.stringify({ exports })));
-    const telmoni = new Telmoni({ apiKey: 'telmoni_test_key' }, {
+    const telmoni = new Telmoni({ endpoint: 'https://telmoni.example.com', apiKey: 'telmoni_test_key' }, {
       transport: async () => {
         exports += 1;
         return { status: 200, headers: { get: () => 'off' }, text: async () => '{}' };

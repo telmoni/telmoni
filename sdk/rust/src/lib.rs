@@ -4,10 +4,9 @@
 //! prompts, completions and tool payloads off every span before it leaves the
 //! process unless you ask and the project allows.
 //!
-//! The hosted service at <https://api.telmoni.com>, the default endpoint, is
-//! not open yet. Until it is, run Telmoni yourself
-//! (<https://github.com/telmoni/telmoni#self-hosting>) and point
-//! `TELMONI_ENDPOINT` at its machine host.
+//! Telmoni is self-hosted (<https://github.com/telmoni/telmoni#self-hosting>):
+//! `TELMONI_ENDPOINT`, or [`Config::endpoint`], names your deployment's
+//! endpoint, and there is no default.
 //!
 //! The client owns a tracer provider of its own, built part by part so no
 //! `OTEL_*` variable reaches it, and runs beside whatever OpenTelemetry the
@@ -111,7 +110,7 @@ pub mod transport;
 mod warnings;
 
 pub use client::{Hooks, Telmoni};
-pub use config::{Config, DEFAULT_ENDPOINT, Mask, Price};
+pub use config::{Config, Mask, Price};
 pub use error::{Cap, Error, Text};
 pub use exporter::ContentMode;
 pub use processor::Batching;

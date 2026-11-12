@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Usage } from '../src/index';
-import { type FakeTransport, type Harness, type JsonSpan, answer, attributesOf, harness, one } from './helpers';
+import { ENDPOINT, type FakeTransport, type Harness, type JsonSpan, answer, attributesOf, harness, one } from './helpers';
 
 let h: Harness;
 
@@ -507,7 +507,7 @@ describe('an image in a message', () => {
       await media.telmoni.shutdown();
     }
     const upload = one(media.transport.uploads);
-    expect(upload.url).toBe(`https://api.telmoni.com/v1/media/${createHash('sha256').update(png).digest('hex')}`);
+    expect(upload.url).toBe(`${ENDPOINT}/v1/media/${createHash('sha256').update(png).digest('hex')}`);
     expect(upload.headers['Authorization']).toBe('Bearer k');
     expect(upload.headers['Content-Type']).toBe('image/png');
     expect(Buffer.from(upload.body).equals(png)).toBe(true);

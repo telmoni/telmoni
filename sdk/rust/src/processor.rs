@@ -481,6 +481,7 @@ mod tests {
         let transport = Throttled::default();
         let warner = Arc::new(Warner::new(Box::new(|_, _| {})));
         let config = Config {
+            endpoint: "https://telmoni.example.com".to_owned(),
             api_key: Some("k".to_owned()),
             ..Config::default()
         };

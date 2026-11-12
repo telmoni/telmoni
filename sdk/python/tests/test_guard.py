@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeTransport, attributes_of, load_fixture
+from conftest import ENDPOINT, FakeTransport, attributes_of, load_fixture
 from telmoni import CapExceededError, Config, ModelCall, Price, Telmoni, Trace, Usage
 from telmoni.guard import Guard
 
@@ -23,7 +23,9 @@ CARRIED = Path(__file__).resolve().parents[1] / "src/telmoni/model_prices.json"
 
 
 def client(transport: FakeTransport, prices: list[Price]) -> Telmoni:
-    return Telmoni(Config(api_key="k", prices=prices), transport=transport)
+    return Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", prices=prices), transport=transport
+    )
 
 
 def handed(fixture: dict[str, Any]) -> list[Price]:
@@ -76,7 +78,9 @@ def test_a_cap_stops_a_trace_with_the_network_cut() -> None:
     third step of a trace capped at two is refused all the same."""
     transport = FakeTransport([OSError("unreachable")] * 16)
     telmoni = Telmoni(
-        Config(api_key="k", prices=handed(load_fixture("guard.json"))),
+        Config(
+            endpoint=ENDPOINT, api_key="k", prices=handed(load_fixture("guard.json"))
+        ),
         transport=transport,
         sleep=lambda _: None,
     )
@@ -381,9 +385,9 @@ def test_a_price_handed_is_a_name_and_numbers_from_0() -> None:
         Price(provider="p", model="m", input=1e-6, output=Decimal("NaN")),  # type: ignore[arg-type]
     ):
         with pytest.raises(ValueError):
-            Config(prices=[broken])
+            Config(endpoint=ENDPOINT, prices=[broken])
     with pytest.raises(TypeError):
-        Config(prices=[{"provider": "p"}])  # type: ignore[list-item]
+        Config(endpoint=ENDPOINT, prices=[{"provider": "p"}])  # type: ignore[list-item]
 
 
 def test_a_decimal_cap_and_price_hold_as_a_decimal_cost_does(

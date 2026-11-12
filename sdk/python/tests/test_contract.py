@@ -16,9 +16,8 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import SpanContext
 
-from conftest import FakeTransport, attributes_of, infos_in, load_fixture
+from conftest import ENDPOINT, FakeTransport, attributes_of, infos_in, load_fixture
 from telmoni import (
-    DEFAULT_ENDPOINT,
     Config,
     Secret,
     Telmoni,
@@ -30,9 +29,19 @@ from telmoni import (
 from telmoni.exporter import Answer, _urllib_transport
 
 
-def test_the_default_endpoint_is_the_machine_host() -> None:
-    assert DEFAULT_ENDPOINT == "https://api.telmoni.com"
-    assert Config().endpoint == DEFAULT_ENDPOINT
+def test_no_endpoint_is_refused_as_there_is_no_default() -> None:
+    missing = "no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint"
+    with pytest.raises(ValueError, match=missing):
+        Config()
+    with pytest.raises(ValueError, match=missing):
+        Telmoni()
+    with mock.patch.dict(os.environ, clear=False):
+        os.environ.pop("TELMONI_ENDPOINT")
+        with pytest.raises(ValueError, match=missing):
+            Config.from_env()
+        os.environ["TELMONI_ENDPOINT"] = " "
+        with pytest.raises(ValueError, match=missing):
+            Telmoni.from_env()
 
 
 def test_a_trailing_slash_is_stripped() -> None:
@@ -46,24 +55,27 @@ def test_a_trailing_slash_is_stripped() -> None:
     )
 
 
-def test_a_blank_endpoint_organization_key_environment_or_release_reads_as_unset() -> (
-    None
-):
+def test_a_blank_organization_key_environment_or_release_reads_as_unset() -> None:
     config = Config(
-        endpoint="  ", organization_id=" ", api_key="\t", environment=" ", release=""
+        endpoint=ENDPOINT,
+        organization_id=" ",
+        api_key="\t",
+        environment=" ",
+        release="",
     )
-    assert config.endpoint == DEFAULT_ENDPOINT
     assert config.organization_id is None
     assert config.api_key is None
     assert config.bearer() is None
     assert config.environment is None
     assert config.release is None
-    deployed = Config(environment=" staging ", release="2026.10.18")
+    deployed = Config(endpoint=ENDPOINT, environment=" staging ", release="2026.10.18")
     assert (deployed.environment, deployed.release) == ("staging", "2026.10.18")
 
 
 def test_the_key_is_never_printed_or_serialized() -> None:
-    config = Config(organization_id="org_1", api_key="telmoni_secret_key")
+    config = Config(
+        endpoint=ENDPOINT, organization_id="org_1", api_key="telmoni_secret_key"
+    )
     for printed in (
         repr(config),
         str(config),
@@ -75,7 +87,9 @@ def test_the_key_is_never_printed_or_serialized() -> None:
     assert isinstance(config.api_key, Secret)
     assert config.api_key.expose() == "telmoni_secret_key"
     assert config.bearer() == "telmoni_secret_key"
-    assert Config(api_key=Secret("telmoni_x")).bearer() == "telmoni_x"
+    assert (
+        Config(endpoint=ENDPOINT, api_key=Secret("telmoni_x")).bearer() == "telmoni_x"
+    )
 
 
 def test_a_deployment_named_past_ingests_cap_is_left_off_with_one_warning(
@@ -83,7 +97,9 @@ def test_a_deployment_named_past_ingests_cap_is_left_off_with_one_warning(
 ) -> None:
     """Ingest would read the resource as naming none, without a word."""
     client = Telmoni(
-        Config(api_key="k", environment="e" * 129, release="r" * 128),
+        Config(
+            endpoint=ENDPOINT, api_key="k", environment="e" * 129, release="r" * 128
+        ),
         transport=transport,
     )
     try:
@@ -104,7 +120,7 @@ def test_a_deployment_named_past_ingests_cap_is_left_off_with_one_warning(
 
 def test_from_env_reads_the_six_variables_and_no_other() -> None:
     with mock.patch.dict(os.environ, clear=False):
-        os.environ.pop("TELMONI_ENDPOINT", None)
+        os.environ["TELMONI_ENDPOINT"] = " https://telmoni.example.com/ "
         os.environ["TELMONI_API_KEY"] = ""
         os.environ["TELMONI_ORG"] = "org_2"
         os.environ["TELMONI_ENVIRONMENT"] = "staging"
@@ -114,7 +130,7 @@ def test_from_env_reads_the_six_variables_and_no_other() -> None:
             "deployment.environment.name=leaked,service.version=leaked"
         )
         config = Config.from_env()
-    assert config.endpoint == DEFAULT_ENDPOINT
+    assert config.endpoint == ENDPOINT
     assert config.api_key is None
     assert config.organization_id == "org_2"
     assert config.environment == "staging"
@@ -157,9 +173,14 @@ def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(
     telmoni: Telmoni,
 ) -> None:
     """`str.strip` would take U+001C to U+001F too, which Go and Rust keep."""
-    assert Config(release="\x1c2026.10.18").release == "\x1c2026.10.18"
-    assert Config(release="\x852026.10.18\u3000").release == "2026.10.18"
-    assert Config(environment="\x85").environment is None
+    assert (
+        Config(endpoint=ENDPOINT, release="\x1c2026.10.18").release == "\x1c2026.10.18"
+    )
+    assert (
+        Config(endpoint=ENDPOINT, release="\x852026.10.18\u3000").release
+        == "2026.10.18"
+    )
+    assert Config(endpoint=ENDPOINT, environment="\x85").environment is None
     with pytest.raises(ValueError, match="agent's name"), telmoni.trace("\x85"):
         pass
     with telmoni.trace("\x1c") as trace:
@@ -169,7 +190,7 @@ def test_blank_is_unicodes_white_space_as_go_and_rust_read_it(
 def test_capture_content_that_is_no_bool_is_refused() -> None:
     """A "false" from the environment is truthy, and would let content out."""
     with pytest.raises(TypeError, match="capture_content must be a bool"):
-        Config(capture_content="false")  # type: ignore[arg-type]
+        Config(endpoint=ENDPOINT, capture_content="false")  # type: ignore[arg-type]
 
 
 def test_the_version_is_the_installed_one() -> None:
@@ -180,10 +201,9 @@ def test_the_version_is_the_installed_one() -> None:
 
 def test_the_client_builds_from_env_with_the_real_transport() -> None:
     with mock.patch.dict(os.environ, clear=False):
-        os.environ.pop("TELMONI_ENDPOINT", None)
         client = Telmoni.from_env()
     try:
-        assert client.config.endpoint == DEFAULT_ENDPOINT
+        assert client.config.endpoint == ENDPOINT
         assert client.exporter._transport is _urllib_transport
     finally:
         client.shutdown()
@@ -506,7 +526,7 @@ def _spans(*sizes: int, char: str = "x") -> list[ReadableSpan]:
 def test_an_export_past_ingest_s_1_mib_is_halved_until_each_part_fits() -> None:
     """Ingest refuses it whole, its 413 maybe breaking an upload still going out."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.exporter.export(_spans(*[300_000] * 8))
     finally:
@@ -519,7 +539,7 @@ def test_an_export_past_ingest_s_1_mib_is_halved_until_each_part_fits() -> None:
 def test_the_mebibyte_is_counted_in_the_bytes_sent() -> None:
     """Two bytes a character: past 1 MiB in bytes, short of it in characters."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.exporter.export(_spans(*[200_000] * 4, char="é"))
     finally:
@@ -531,7 +551,7 @@ def test_the_mebibyte_is_counted_in_the_bytes_sent() -> None:
 def test_an_export_past_ingest_s_1000_spans_is_halved_until_each_holds_them() -> None:
     """Ingest refuses it whole; one of 1,000 goes as it is."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.exporter.export(_spans(*[1] * 2001))
     finally:
@@ -568,7 +588,11 @@ def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
     ):
         caplog.clear()
         transport = FakeTransport(list(answers))
-        client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+        client = Telmoni(
+            Config(endpoint=ENDPOINT, api_key="k"),
+            transport=transport,
+            sleep=lambda _: None,
+        )
         try:
             client.exporter.export(_spans(*[1] * 2001))
         finally:
@@ -584,7 +608,7 @@ def test_a_batch_in_parts_ends_at_a_part_that_fails_as_the_rest_would(
 def test_a_list_is_measured_as_ingest_writes_it_its_json() -> None:
     """So a span past 1 MiB for a list of short strings goes without the list."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     (span,) = _spans(1)
     listed = ReadableSpan(
         name=span.name,
@@ -606,7 +630,7 @@ def test_a_number_ingest_cannot_read_never_costs_its_export() -> None:
     """NaN or an infinity, which JSON cannot carry, as null; an int past 64 bits as
     its text."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     context = SpanContext(trace_id=1, span_id=1, is_remote=False)
     odd = ReadableSpan(
         name="odd",
@@ -645,7 +669,7 @@ def test_a_span_alone_past_it_goes_without_what_ingest_drops_for_its_length(
 ) -> None:
     """Rather than lost, since the agent's own span carries the trace's end."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.exporter.export(_spans(100, 1 << 20, 100))
         client.exporter.export(_spans(1 << 20))
@@ -676,7 +700,10 @@ def test_a_span_alone_past_it_goes_without_its_longest_content_named(
     each named in telmoni.content_cut; the rest of the span goes whole."""
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport = FakeTransport([on, on])
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     context = SpanContext(trace_id=1, span_id=1, is_remote=False)
     big = ReadableSpan(
         name="big",
@@ -727,7 +754,7 @@ def test_a_span_whose_own_name_passes_it_is_dropped_with_one_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     context = SpanContext(trace_id=1, span_id=1, is_remote=False)
     named = ReadableSpan(
         name="x" * (1 << 20), context=context, start_time=1, end_time=2
@@ -775,7 +802,7 @@ def test_the_transport_makes_one_tls_context_through_the_hook_urllib_reads(
 def test_a_span_time_past_what_ingest_reads_goes_as_0() -> None:
     """So ingest refuses that span alone, where as is it would refuse the export."""
     transport = FakeTransport()
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     context = SpanContext(trace_id=1, span_id=1, is_remote=False)
     times = [(2**64 - 1, 2**64 - 1), (2**64, -1)]
     try:
@@ -802,16 +829,20 @@ def test_every_endpoint_is_read_as_the_fixture_reads_it() -> None:
     for case in fixture["taken"]:
         assert Config(endpoint=case["given"]).endpoint == case["endpoint"], case
         assert Config(endpoint=case["endpoint"]).endpoint == case["endpoint"], case
+    why = {
+        "missing": "no endpoint is set",
+        "url": "http:// or https://",
+        "cleartext": "unencrypted HTTP",
+    }
     for case in fixture["refused"]:
-        why = "unencrypted HTTP" if case["as"] == "cleartext" else "http:// or https://"
-        with pytest.raises(ValueError, match=why):
+        with pytest.raises(ValueError, match=why[case["as"]]):
             Config(endpoint=case["given"])
 
 
 def test_a_configuration_changed_after_it_was_built_is_checked_again() -> None:
     # The client checks what it is given, as the other SDKs do: a field set
     # after the configuration was built skipped the checks it was built with.
-    config = Config(api_key="k")
+    config = Config(endpoint=ENDPOINT, api_key="k")
     config.endpoint = "http://api.example.com"
     with pytest.raises(ValueError, match="unencrypted HTTP"):
         Telmoni(config)
@@ -833,4 +864,4 @@ def test_a_secret_is_never_pickled_but_copies_as_itself() -> None:
     with pytest.raises(TypeError):
         pickle.dumps(secret)
     with pytest.raises(TypeError):
-        pickle.dumps(Config(api_key="telmoni_x"))
+        pickle.dumps(Config(endpoint=ENDPOINT, api_key="telmoni_x"))

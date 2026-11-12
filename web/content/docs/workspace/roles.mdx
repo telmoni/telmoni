@@ -108,17 +108,13 @@ do and the one you hold:
 
 Every other refusal answers `/errors/authz/forbidden`, and `detail` says what
 is refused and to whom: connectors and the audit log (decided by
-the same role matrix), the console agent, a project's transfer and, on the hosted service,
-billing; and what is the organization's own, decided by your role on it, which `detail`
+the same role matrix), the console agent and a project's transfer; and what is the organization's own, decided by your role on it, which `detail`
 names with the least role that may: its name and URL, creating a project, its roster and
 adding a member from it to a project, which a project Admin who is only a Member of the
 organization may not, its audit log across every project and its export, which its owner
 and admins have, and its deletion and transfer, which are its owner's alone. The server checks every
 request against the caller's roles; nothing is left to the browser.
 
-On the hosted service an organization's plan can refuse too, whatever your
-role: a `402` `/errors/plan/limit-reached`, as a paused organization's
-invitations, and the members it would add to a project, are refused
-([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)),
-and an invitation past Hobby's one member
-([One member on Hobby](https://telmoni.com/docs/workspace/billing#one-member-on-hobby)).
+On a deployment that sells plans, an organization's plan can refuse too,
+whatever your role: a `402` `/errors/plan/limit-reached`. A self-hosted
+deployment never answers it.

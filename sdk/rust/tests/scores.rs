@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use telmoni::transport::{Answer, TransportError};
 use telmoni::{Config, Score, ScoreTarget, StepRecord, Telmoni, TraceOptions, TraceRecord};
 
-const SCORES: &str = "https://api.telmoni.com/v1/scores";
+const SCORES: &str = "https://telmoni.example.com/v1/scores";
 
 /// A fixture's score, its non-finite numbers written as words.
 fn score_of(case: &Value) -> Result<Score, Failure> {

@@ -31,13 +31,13 @@ Send to the lane with OpenTelemetry's own OTLP exporter over HTTP, set from the
 environment, with a [key](/docs/api/api-keys) holding the **ingest** scope:
 
 ```console
-$ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+$ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://telmoni.example.com/otlp/v1/traces
 $ export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer%20tm_..."
 $ export OTEL_SERVICE_NAME=support-bot
 ```
 
-The header's value is URL-encoded, so its space is `%20`. On your own
-deployment, the endpoint is its machine host's. `OTEL_SERVICE_NAME` names the
+The header's value is URL-encoded, so its space is `%20`. The endpoint is your
+deployment's machine host's. `OTEL_SERVICE_NAME` names the
 traces of an application whose model client alone is instrumented.
 
 In Python, install `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http`,
@@ -199,7 +199,7 @@ litellm.callbacks = ["otel"]
 
 ```console
 $ export OTEL_EXPORTER=otlp_http
-$ export OTEL_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+$ export OTEL_ENDPOINT=https://telmoni.example.com/otlp/v1/traces
 $ export OTEL_HEADERS="Authorization=Bearer tm_..."
 $ export OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental
 ```

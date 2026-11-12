@@ -27,8 +27,8 @@ const UNIVERSAL: &[Answer] = &[
 const TITLE: &str = "Telmoni API";
 /// `/v1` is additive only, so this is `1` until a removal forces a `/v2`.
 const VERSION: &str = "1";
-/// The machine host: the server's one public face, where every lane here is served.
-const SERVER: &str = "https://api.telmoni.com";
+/// A placeholder for your deployment's machine host, where every lane here is served.
+const SERVER: &str = "https://telmoni.example.com";
 
 /// Every lane, from the services that serve them.
 fn lanes() -> Vec<Route> {

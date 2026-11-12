@@ -13,14 +13,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-// DefaultEndpoint is the machine host; the console's, https://telmoni.com,
-// serves people.
-const DefaultEndpoint = "https://api.telmoni.com"
-
 // Config is how the SDK reaches Telmoni, and what it sends.
 type Config struct {
-	// Endpoint is the platform's base URL, read as the CLI reads one: blank is
-	// DefaultEndpoint, a host without a scheme gets https://, http:// locally.
+	// Endpoint is your deployment's base URL, required: there is no default.
+	// Read as the CLI reads one: a host without a scheme gets https://, http:// locally.
 	Endpoint       string `json:"endpoint"`
 	OrganizationID string `json:"organization_id,omitempty"`
 	// APIKey is the API key (tm_…) with the ingest scope, held as a Secret
@@ -275,7 +271,7 @@ func endpointOf(given string) string {
 	}
 	endpoint := trimTail(given)
 	if endpoint == "" {
-		return DefaultEndpoint
+		return ""
 	}
 	// https:/host or https//host is a scheme mistyped, not a host: checkEndpoint refuses it.
 	first := endpoint
@@ -299,6 +295,9 @@ func trimTail(text string) string {
 // checkEndpoint refuses an endpoint the SDKs could read two ways, which fails an export
 // or reaches another host, and plain HTTP to another machine, which would bare the key.
 func checkEndpoint(endpoint string) error {
+	if endpoint == "" {
+		return errors.New("telmoni: no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint")
+	}
 	host, ok := hostOf(endpoint)
 	if !ok {
 		return errors.New("telmoni: the endpoint must be an http:// or https:// URL")
@@ -307,11 +306,6 @@ func checkEndpoint(endpoint string) error {
 		return fmt.Errorf("telmoni: refusing to send the API key over unencrypted HTTP to %q; use HTTPS", host)
 	}
 	return nil
-}
-
-// DefaultConfig returns the default SDK configuration.
-func DefaultConfig() Config {
-	return Config{Endpoint: DefaultEndpoint}
 }
 
 // ConfigFromEnv reads TELMONI_ENDPOINT, TELMONI_API_KEY and TELMONI_ORG,

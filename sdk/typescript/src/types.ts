@@ -5,7 +5,7 @@ import type { Sampler } from '@opentelemetry/sdk-trace-base';
  */
 export interface Config {
   /**
-   * Telmoni API endpoint URL (default: `https://api.telmoni.com`).
+   * Your Telmoni deployment's origin, `https://telmoni.example.com` say; required, as there is no default.
    */
   endpoint?: string | undefined;
 

@@ -25,6 +25,8 @@ from telmoni import Config, Telmoni, WarningInfo, contract
 from telmoni.exporter import Answer
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
+ENDPOINT = "https://telmoni.example.com"
+"""The deployment every suite sends to: the SDK has no default."""
 
 
 def load_fixture(name: str) -> Any:
@@ -168,9 +170,10 @@ trace.set_tracer_provider(APP_PROVIDER)
 @pytest.fixture(autouse=True)
 def no_scrub_switches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every configuration left unset reads these: the shell running the suite
-    would otherwise change what each test sends."""
+    would otherwise change what each test sends. The endpoint is the suites'."""
     for name in (contract.SCRUB_SECRETS_ENV, contract.SCRUB_PII_ENV):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TELMONI_ENDPOINT", ENDPOINT)
 
 
 @pytest.fixture
@@ -199,7 +202,9 @@ def sleeps() -> list[float]:
 @pytest.fixture
 def telmoni(transport: FakeTransport, sleeps: list[float]) -> Iterator[Telmoni]:
     client = Telmoni(
-        Config(api_key="telmoni_test_key"), transport=transport, sleep=sleeps.append
+        Config(endpoint=ENDPOINT, api_key="telmoni_test_key"),
+        transport=transport,
+        sleep=sleeps.append,
     )
     yield client
     client.shutdown()

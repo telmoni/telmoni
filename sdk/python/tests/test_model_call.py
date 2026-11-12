@@ -10,7 +10,7 @@ from enum import Enum
 
 import pytest
 
-from conftest import FakeTransport, attributes_of, infos_in, kept
+from conftest import ENDPOINT, FakeTransport, attributes_of, infos_in, kept
 from telmoni import (
     Config,
     ModelCallRecord,
@@ -463,7 +463,13 @@ def test_a_prompt_leaves_as_given_where_content_does_never_masked_or_scrubbed(
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on, on]
     client = Telmoni(
-        Config(api_key="k", capture_content=True, mask=mask, scrub_pii=True),
+        Config(
+            endpoint=ENDPOINT,
+            api_key="k",
+            capture_content=True,
+            mask=mask,
+            scrub_pii=True,
+        ),
         transport=transport,
     )
     try:
@@ -514,7 +520,7 @@ def test_a_content_mode_with_blanks_about_it_is_read_trimmed(
 ) -> None:
     """http.client keeps a header's trailing blanks; every SDK trims them."""
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": " on\t"}, b"{}")]
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot"):
             pass
@@ -532,7 +538,10 @@ def test_a_mode_ingest_does_not_send_keeps_content_home(
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     sealed = Answer(200, {"Telmoni-Content-Mode": "sealed"}, b"{}")
     transport.answers = [on, sealed, sealed]
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     try:
         for _ in range(2):
             with client.trace("bot"):
@@ -555,7 +564,10 @@ def test_content_leaves_only_when_asked_and_the_project_allows(
     # trace flushed before the next opens, the mode each call is encoded under
     # is the same on every machine.
     transport.answers = [kept(), on, on]
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     try:
         with client.trace("bot"):
             pass
@@ -579,7 +591,10 @@ def test_content_goes_as_compact_utf8_json(transport: FakeTransport) -> None:
     """As the other three SDKs send it: no spaces, and no character escaped."""
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on, on]
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     messages = [{"role": "user", "content": "héllo, 世界 🙂"}]
     try:
         with client.trace("bot"):
@@ -602,7 +617,7 @@ def test_content_stays_home_without_capture_content_even_when_allowed(
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on] * 2
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot"):
             pass
@@ -669,7 +684,10 @@ def media_client(transport: FakeTransport) -> Telmoni:
     """A client asked for content whose project keeps it, the mode learned."""
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on] * 4
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     with client.trace("warm"):
         pass
     assert client.flush()

@@ -10,19 +10,16 @@ use crate::contract;
 use crate::scrub::Switches;
 use crate::transport::{host_of, is_this_machine};
 
-/// The machine host; the console's, `https://telmoni.com`, serves people.
-pub const DEFAULT_ENDPOINT: &str = "https://api.telmoni.com";
-
 /// How the SDK reaches Telmoni, and what it sends.
 ///
 /// Built by hand, by [`Config::new`] or by [`Config::from_env`]; the client
-/// normalizes whichever it is given: the endpoint as the CLI reads one,
-/// [`DEFAULT_ENDPOINT`] for a blank one, a blank organization or key unset.
-#[derive(Clone, Serialize, Deserialize)]
+/// normalizes whichever it is given: the endpoint as the CLI reads one, a blank
+/// endpoint, organization or key unset.
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Where the platform is: [`DEFAULT_ENDPOINT`] unless `TELMONI_ENDPOINT`
-    /// says otherwise.
+    /// Your deployment's endpoint (`TELMONI_ENDPOINT`), required: blank, the
+    /// client sends nothing and warns once, as there is no default.
     pub endpoint: String,
     /// The organization (`org_…`, `TELMONI_ORG`).
     pub organization_id: Option<String>,
@@ -122,24 +119,6 @@ impl fmt::Debug for Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            endpoint: DEFAULT_ENDPOINT.to_owned(),
-            organization_id: None,
-            api_key: None,
-            capture_content: false,
-            mask: None,
-            scrub_secrets: None,
-            scrub_pii: None,
-            sampler: None,
-            environment: None,
-            release: None,
-            prices: Vec::new(),
-        }
-    }
-}
-
 impl Config {
     /// A configuration with this endpoint, organization and key, normalized;
     /// the rest as [`Config::default`] has it.
@@ -225,7 +204,7 @@ fn endpoint_of(given: &str) -> String {
     }
     let endpoint = trim_tail(given);
     if endpoint.is_empty() {
-        return DEFAULT_ENDPOINT.to_owned();
+        return String::new();
     }
     // `https:/host` or `https//host` is a scheme mistyped, not a host: the exporter refuses it.
     let first = endpoint.split([':', '/']).next().unwrap_or_default();

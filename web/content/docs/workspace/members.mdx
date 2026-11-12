@@ -49,13 +49,7 @@ now."
 
 Invitations expire automatically after **7 days**.
 
-On the hosted service, an organization on the Hobby plan holds one member,
-its owner: an invitation from it, or from one of its projects, is refused,
-naming Pro. Its **Members** page says so in place of the invite button, and a
-project's under **By email**, closed, while **From the organization** stays
-open to whoever in the organization holds no seat there yet
-([Billing](https://telmoni.com/docs/workspace/billing#one-member-on-hobby)).
-A self-hosted installation holds no organization to a number.
+A self-hosted installation holds no organization to a number of members.
 
 ## Adding a member from the organization
 
@@ -74,8 +68,8 @@ An invitation of theirs to that project is withdrawn by the seat. The seat is
 recorded in the audit log, and the project's **Notifications** page notes who joined.
 
 A project Admin who is only a Member of the organization sees no roster and
-invites by email. Where the `members` feature flag is off, or the organization
-is paused on the hosted service, adding is refused as inviting is, and nobody
+invites by email. Where the `members` feature flag is off, adding is refused
+as inviting is, and nobody
 whose account is being deleted is added.
 
 ## Accepting or declining
@@ -149,9 +143,4 @@ A project can send up to **20 invitations in any 24 hours**,
 withdrawn ones included, and its organization's Owner and Admins can add up to
 **20** of the organization's members to it in any 24 hours, removed ones
 included. Organization invitations have no such count. There is
-no limit on the number of members in an organization or project, apart from
-Hobby's one on the hosted service
-([One member on Hobby](https://telmoni.com/docs/workspace/billing#one-member-on-hobby)).
-On the hosted service, a paused organization sends no invitation until it
-moves to a paid plan
-([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)).
+no limit on the number of members in an organization or project.

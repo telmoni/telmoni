@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeTransport, attributes_of, infos_in
+from conftest import ENDPOINT, FakeTransport, attributes_of, infos_in
 from telmoni import Config, Telmoni, WarningInfo
 from telmoni.exporter import Answer
 
@@ -31,7 +31,10 @@ def warnings_in(caplog: pytest.LogCaptureFixture) -> list[str]:
 def keeping(transport: FakeTransport) -> Iterator[Telmoni]:
     """A client whose content leaves: asked for, and the project's mode on."""
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 8
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     yield client
     client.shutdown()
 
@@ -291,7 +294,8 @@ def test_a_mask_that_takes_documents_out_leaves_the_count(
 
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 8
     client = Telmoni(
-        Config(api_key="k", capture_content=True, mask=mask), transport=transport
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True, mask=mask),
+        transport=transport,
     )
     try:
         with client.trace("bot"), client.retrieval("kb") as found:

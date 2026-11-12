@@ -1,4 +1,4 @@
-export { DEFAULT_ENDPOINT, Telmoni } from './client.js';
+export { Telmoni } from './client.js';
 export { CapExceededError, QueueFullError, ShutdownError } from './errors.js';
 export { Handle, ModelCall, Parent, Retrieval, Step, ToolCall, Trace, currentTrace } from './traces.js';
 export type {

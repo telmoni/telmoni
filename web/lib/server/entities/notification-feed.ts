@@ -23,8 +23,8 @@ const INCIDENT_KINDS: ReadonlySet<string> = new Set([
   NotificationKind.IncidentResolved,
 ]);
 
-// An organization's notice may name the page it is about (`billing_url`, the
-// hosted service's billing page), an address on this console's own origin.
+// An organization's notice may name the page it is about (`billing_url`, a
+// page a console built on this one serves), an address on this console's own origin.
 const PageMetadataSchema = z.object({ billing_url: z.string() });
 
 // Only an incident's notice keeps its metadata, checked, and an organization's

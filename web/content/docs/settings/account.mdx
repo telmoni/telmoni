@@ -11,8 +11,7 @@ belong to.
 ## Profile
 
 The **Profile** card shows your **Name**, **Email**, **Sign-in method** (when
-your sign-in reported one, which a self-hosted OpenID Connect sign-in does
-not), and **User ID**, with a copy button on the ID. With no name on your
+your sign-in reported one, which an OpenID Connect sign-in does not), and **User ID**, with a copy button on the ID. With no name on your
 account, **Name** shows the part of your address before the `@`. The name is
 the one you gave at sign-up, or the one your identity provider sends with each
 sign-in; the console has no field to change it. It appears on your member row,
@@ -24,12 +23,10 @@ renames it.
 
 ## Changing your email address
 
-The **Email** section appears for an account whose address is its own to move:
-a password account on a self-hosted deployment or, on the hosted service, an
-account that signs in with a code emailed to it. The **Password** section
-appears for a password account alone. An account that signs in through Google
-or single sign-on changes its address with that provider, and the sections do
-not appear.
+The **Email** and **Password** sections appear for a password account, whose
+address is its own to move. An account that signs in through an OpenID Connect
+provider changes its address with that provider, and the sections do not
+appear.
 
 Updating your email requires two 6-digit verification codes:
 
@@ -41,32 +38,25 @@ Updating your email requires two 6-digit verification codes:
    **15 minutes**, and five wrong guesses burn them; **Resend codes** issues a
    new pair, 30 seconds after the last, and **Use a different address** starts over. Codes can be
    requested five times a day and three times an hour, **Resend codes**
-   included. On the hosted service, the new address's code comes from its
-   identity provider and follows that provider's expiry and attempt limits.
+   included.
 
-On a self-hosted deployment, an address another account already holds is
-refused with a `409` when you ask for the codes, and again at confirmation if
-another account took it in the meantime. On the hosted service, its identity
-provider decides whether the address is free.
+An address another account already holds is refused with a `409` when you ask
+for the codes, and again at confirmation if another account took it in the
+meantime.
 
 When the email update succeeds:
 - **All active sessions are terminated immediately** (including the current
   session). You must sign in again with your new email address.
-- On a self-hosted deployment, the new address is recorded as verified: the
-  code it received is the proof. On the hosted service, it is recorded as its
-  identity provider reports it.
+- The new address is recorded as verified: the code it received is the proof.
 - Any pending deletion codes or sensitive confirmation codes issued to the old
   email address are invalidated.
 
 ## Resetting your password
 
-Select **Email me a password reset link**. On a self-hosted deployment, a
-single-use link valid for **60 minutes** is emailed to you, at most five a
-day. Using it ends all existing sessions, updates the stored Argon2id password
-hash, and records your address as verified, since the link came from it.
-
-The hosted service holds no password: you sign in with a code emailed to you,
-through Google or through single sign-on, and the section does not appear.
+Select **Email me a password reset link**. A single-use link valid for
+**60 minutes** is emailed to you, at most five a day. Using it ends all
+existing sessions, updates the stored Argon2id password hash, and records your
+address as verified, since the link came from it.
 
 ## Default organization
 

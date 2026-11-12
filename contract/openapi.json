@@ -782,7 +782,7 @@
   ],
   "servers": [
     {
-      "url": "https://api.telmoni.com"
+      "url": "https://telmoni.example.com"
     }
   ]
 }

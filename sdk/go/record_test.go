@@ -248,7 +248,7 @@ func TestTheRecordMatchesTheGoldenExport(t *testing.T) {
 		t.Errorf("the export differs from recorded.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.Export))
 	}
 	for _, req := range h.transport.all() {
-		if req.url != "https://api.telmoni.com/otlp/v1/traces" {
+		if req.url != testEndpoint+"/otlp/v1/traces" {
 			t.Errorf("sent to %s", req.url)
 		}
 		if got := req.header.Get("Authorization"); got != "Bearer "+testKey {

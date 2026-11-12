@@ -19,10 +19,9 @@ Rust 1.88 or later:
 cargo add telmoni
 ```
 
-The hosted service at `https://api.telmoni.com`, the SDK's default endpoint,
-is not open yet, nor are the docs at telmoni.com/docs. Until they are,
-[run Telmoni yourself](https://github.com/telmoni/telmoni#self-hosting) and
-point `TELMONI_ENDPOINT` at its machine host; the docs read in
+Telmoni is self-hosted: [run it yourself](https://github.com/telmoni/telmoni#self-hosting)
+and point `TELMONI_ENDPOINT` at your deployment's endpoint. There is no default:
+with none set, nothing is sent and the first export warns once. The docs read in
 [`web/content/docs`](https://github.com/telmoni/telmoni/tree/main/web/content/docs).
 
 ## Quick start
@@ -251,7 +250,7 @@ as; else nothing. A call answered again counts as its span then holds it.
 
 | Variable | What |
 |---|---|
-| `TELMONI_ENDPOINT` | Where the platform is; `https://api.telmoni.com` unless set. |
+| `TELMONI_ENDPOINT` | Your deployment's endpoint, such as `https://telmoni.example.com`; required. |
 | `TELMONI_API_KEY` | The project's API key, with the `ingest` scope. |
 | `TELMONI_ORG` | The organization (`org_…`). |
 | `TELMONI_ENVIRONMENT` | The deployment this process runs in (`production`, `staging`), sent as `deployment.environment.name`. |

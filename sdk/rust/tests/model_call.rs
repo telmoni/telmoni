@@ -853,7 +853,7 @@ fn an_image_is_put_once_with_its_type_and_key() -> Outcome {
     let upload = uploads.first().ok_or("the upload")?;
     assert_eq!(
         upload.url,
-        format!("https://api.telmoni.com/v1/media/{PNG_SHA256}")
+        format!("{}/v1/media/{PNG_SHA256}", common::ENDPOINT)
     );
     assert_eq!(upload.header("Authorization"), Some("Bearer k"));
     assert_eq!(upload.header("Content-Type"), Some("image/png"));

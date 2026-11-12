@@ -86,7 +86,7 @@ export function absoluteFrom(env: Readonly<Record<string, string | undefined>>, 
  * The key file at `path`, or undefined where there is none. Read as `ssh` reads a key: opened without blocking, so a
  * FIFO cannot hold the hook, and checked on the descriptor it is read from — a regular file, the person's own, no bit of
  * `077`, at most 64 KiB, a JSON object. A field there but empty or no string, or a switch neither true nor false, has
- * the whole file passed over, rather than send the key to the default endpoint in place of the one meant.
+ * the whole file passed over, rather than send the key without the endpoint meant.
  */
 export function readKeyFile(path: string): KeyFile | undefined {
   let fd: number;

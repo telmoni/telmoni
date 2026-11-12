@@ -217,21 +217,23 @@ From a checkout, start Claude Code with the plugin and your key in its
 environment instead; that one session alone loads it, as cloned:
 
 ```sh
-TELMONI_API_KEY=tm_… claude --plugin-dir ./claude-code-observability-plugin
+TELMONI_API_KEY=tm_… TELMONI_ENDPOINT=https://telmoni.example.com claude --plugin-dir ./claude-code-observability-plugin
 ```
 
-In a Claude Code session, set the key with
+In a Claude Code session, set the key and the endpoint with
 `/plugin configure telmoni-observability@telmoni-plugins`. From your shell,
 `claude plugin configure telmoni-observability@telmoni-plugins --values-stdin`
-takes the configuration as JSON (`{"TELMONI_API_KEY": "tm_…"}`); without
+takes the configuration as JSON
+(`{"TELMONI_API_KEY": "tm_…", "TELMONI_ENDPOINT": "https://telmoni.example.com"}`); without
 `--values-stdin` it only lists the options. Claude Code keeps the key with its
 own credentials: in the Keychain on macOS, and in its credentials file
-elsewhere. Left blank, the endpoint is `https://api.telmoni.com`; a self-hosted
-Telmoni gives its own machine host. A `TELMONI_API_KEY` in the environment
+elsewhere. The endpoint is required, your Telmoni's machine host: there is no
+default, and until one is set the plugin sends nothing, its log says so once a
+session, and the hook exits 0, as it does without a key. A `TELMONI_API_KEY` in the environment
 Claude Code starts in — your shell's, or a repository's `.claude/settings.json`
 `env` block — comes before the plugin's own settings, so one checkout can report
-to another project, and goes with the `TELMONI_ENDPOINT` beside it there, or the
-default: a key is never sent to an endpoint named somewhere else, so a
+to another project, and goes with the `TELMONI_ENDPOINT` beside it there, or
+nowhere: a key is never sent to an endpoint named somewhere else, so a
 repository that names its own endpoint gets no one's machine-wide key.
 
 Plugins load as a session starts, so start a new one once the key is set. The
@@ -261,8 +263,8 @@ agy plugin install https://github.com/telmoni/antigravity-observability-plugin
 Antigravity gives a plugin's hooks no settings of their own, so the key goes in
 one of two places. A `TELMONI_API_KEY` in the environment the CLI starts in
 comes first, with the `TELMONI_ENDPOINT` beside it there; else the key file,
-`~/.gemini/config/telmoni.json`, `{"apiKey": "tm_…"}`, with `"endpoint"`
-beside it for a self-hosted Telmoni. The plugin reads the file only while it is
+`~/.gemini/config/telmoni.json`,
+`{"apiKey": "tm_…", "endpoint": "https://telmoni.example.com"}`. The plugin reads the file only while it is
 yours and shut to everyone else: one anyone else can read sends nothing, and
 the log says why. Write it so the key never reaches your shell's history: run
 this, type the JSON, press Enter, then Ctrl-D.
@@ -271,7 +273,9 @@ this, type the JSON, press Enter, then Ctrl-D.
 (umask 077 && cat > ~/.gemini/config/telmoni.json) && chmod 600 ~/.gemini/config/telmoni.json
 ```
 
-Left blank, the endpoint is `https://api.telmoni.com`. A key is never sent to
+The endpoint is required, your Telmoni's machine host: there is no default,
+and until one is set the plugin sends nothing, its log says so once a session,
+and the hook exits 0, as it does without a key. A key is never sent to
 an endpoint named somewhere else. The file is read as each turn ends, so a
 change takes effect from the next turn; a key in the environment is read as the
 CLI starts.
@@ -314,7 +318,7 @@ which Codex loads as it starts, comes first, with the `TELMONI_ENDPOINT` beside
 it there; one exported in your shell reaches `codex exec`, but not always an
 interactive session, which Codex runs in a service that keeps the environment
 it first started with. Else the key file, `~/.codex/telmoni.json`,
-`{"apiKey": "tm_…"}`, with `"endpoint"` beside it for a self-hosted Telmoni,
+`{"apiKey": "tm_…", "endpoint": "https://telmoni.example.com"}`,
 in `CODEX_HOME` where you set one. The plugin reads the file only while it is
 yours and shut to everyone else: one anyone else can read sends nothing, and
 the log says why. Write it so the key never reaches your shell's history: run
@@ -324,7 +328,9 @@ this, type the JSON, press Enter, then Ctrl-D.
 (umask 077 && cat > ~/.codex/telmoni.json) && chmod 600 ~/.codex/telmoni.json
 ```
 
-Left blank, the endpoint is `https://api.telmoni.com`. A key is never sent to
+The endpoint is required, your Telmoni's machine host: there is no default,
+and until one is set the plugin sends nothing, its log says so once a session,
+and the hook exits 0, as it does without a key. A key is never sent to
 an endpoint named somewhere else. The file is read as each turn ends, so a
 change takes effect from the next turn.
 

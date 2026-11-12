@@ -50,14 +50,14 @@ export function PaperHero({
         {(badge !== undefined || eyebrow !== undefined) && (
           <div className="flex flex-wrap items-center gap-gutter">
             {badge !== undefined && (
-              <Badge variant="outline" className="font-mono text-xs">
+              <Badge variant="outline" className="text-xs">
                 {badge}
               </Badge>
             )}
             {eyebrow !== undefined && <p className={EYEBROW}>{eyebrow}</p>}
           </div>
         )}
-        <h1 className="font-mono max-w-[44ch] text-[32px] font-medium leading-[1.15] tracking-tight text-foreground sm:text-[44px] lg:text-[50px]">
+        <h1 className="max-w-[44ch] text-[32px] font-medium leading-[1.15] tracking-tight text-foreground sm:text-[44px] lg:text-[50px]">
           {title}
         </h1>
       </div>
@@ -96,7 +96,7 @@ export function PaperSection({
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-12">
           <div className="flex flex-col gap-2 lg:col-span-3">
             {number !== undefined && (
-              <span className="font-mono text-xs text-muted-foreground tracking-wider">
+              <span className="text-xs text-muted-foreground tracking-wider">
                 [{number}]
               </span>
             )}
@@ -222,7 +222,7 @@ export function StatsProof({
       <dl className="grid grid-cols-2 gap-8 sm:grid-cols-3">
         {stats.map((s) => (
           <div key={s.label} className="flex flex-col gap-2">
-            <dd className="font-mono text-4xl font-normal tracking-tight text-foreground sm:text-5xl">
+            <dd className="text-4xl font-normal tracking-tight text-foreground sm:text-5xl">
               {s.value}
             </dd>
             <dt className="text-sm text-muted-foreground">
@@ -290,7 +290,7 @@ function VideoPlayOverlay() {
       </div>
       <div
         aria-hidden="true"
-        className="pointer-events-none flex items-center justify-between pt-3 font-mono text-[10px] tracking-wider text-background/60"
+        className="pointer-events-none flex items-center justify-between pt-3 font-mono text-xs tracking-wider text-background/60"
       >
         <span className="rounded-md bg-foreground/60 px-1.5 py-0.5 border border-background/10 text-background/90 backdrop-blur-sm">
           VIDEO PREVIEW
@@ -305,7 +305,7 @@ function VideoPlayOverlay() {
 export function ConsoleVideoPlaceholder() {
   return (
     <div className="relative min-h-full w-full p-4 flex flex-col justify-between gap-4 font-sans">
-      <div className="flex items-center justify-between text-[11px] font-mono text-background/60 border-b border-background/10 pb-2.5">
+      <div className="flex items-center justify-between text-xs font-mono text-background/60 border-b border-background/10 pb-2.5">
         <div className="flex items-center gap-2">
           <span className="size-2 rounded-full bg-brand-positive animate-pulse" />
           <span className="text-background/90 font-medium">telmoni console</span>
@@ -317,11 +317,11 @@ export function ConsoleVideoPlaceholder() {
         <div className="rounded-md border border-background/10 bg-background/5 p-3 backdrop-blur-sm">
           <div className="flex items-center justify-between text-xs">
             <span className="font-mono text-background/90 font-medium">agent-coder</span>
-            <span className="rounded-md bg-brand-positive/20 px-1.5 py-0.5 font-mono text-[10px] text-brand-positive border border-brand-positive/30">
+            <span className="rounded-md bg-brand-positive/20 px-1.5 py-0.5 font-mono text-xs text-brand-positive border border-brand-positive/30">
               Active
             </span>
           </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 border-t border-background/10 pt-2 text-[10px] font-mono text-background/60">
+          <div className="mt-2 grid grid-cols-3 gap-2 border-t border-background/10 pt-2 text-xs font-mono text-background/60">
             <div>
               <span className="text-background/40 block">STEPS</span>
               <span className="text-background/80">14 / 50</span>
@@ -338,7 +338,7 @@ export function ConsoleVideoPlaceholder() {
         </div>
 
         <div className="rounded-md border border-background/10 bg-background/5 p-2.5">
-          <div className="flex items-center justify-between text-[11px] font-mono text-background/60">
+          <div className="flex items-center justify-between text-xs font-mono text-background/60">
             <span>Spend ceiling</span>
             <span className="text-background/80">$1.00 / session</span>
           </div>
@@ -357,7 +357,7 @@ export function ConsoleVideoPlaceholder() {
 export function TerminalVideoPlaceholder() {
   return (
     <div className="relative min-h-full w-full p-4 flex flex-col justify-between gap-4 font-mono text-xs">
-      <div className="flex items-center justify-between text-[11px] text-background/60 border-b border-background/10 pb-2.5">
+      <div className="flex items-center justify-between text-xs text-background/60 border-b border-background/10 pb-2.5">
         <div className="flex items-center gap-1.5">
           <span className="size-2 rounded-full bg-background/20" />
           <span className="size-2 rounded-full bg-background/20" />
@@ -366,7 +366,7 @@ export function TerminalVideoPlaceholder() {
         <span className="text-background/40">telmoni — status</span>
       </div>
 
-      <div className="my-auto flex flex-col gap-1.5 text-[11px] leading-relaxed text-background/80">
+      <div className="my-auto flex flex-col gap-1.5 text-xs leading-relaxed text-background/80">
         <p className="text-background">
           <span className="text-brand-positive">$</span> telmoni status
         </p>
@@ -384,13 +384,13 @@ export function TerminalVideoPlaceholder() {
             <span className="text-background/40">Organizations:</span> 2
           </p>
           <p className="text-background/80">
-            <span className="text-background/40">Endpoint:</span> https://api.telmoni.com
+            <span className="text-background/40">Endpoint:</span> https://telmoni.example.com
           </p>
           <p className="text-background/80">
             <span className="text-background/40">Token:</span> expires in 54 minutes
           </p>
         </div>
-        <p className="text-background/40 text-[10px] mt-2">
+        <p className="text-background/40 text-xs mt-2">
           $ telmoni org list{" "}
           <span className="inline-block h-3 w-1.5 bg-background/80 animate-pulse align-middle ml-1" />
         </p>
@@ -405,7 +405,7 @@ export function TerminalVideoPlaceholder() {
 export function SdkVideoPlaceholder() {
   return (
     <div className="relative min-h-full w-full p-4 flex flex-col justify-between gap-4 font-mono text-xs">
-      <div className="flex items-center justify-between text-[11px] text-background/60 border-b border-background/10 pb-2.5">
+      <div className="flex items-center justify-between text-xs text-background/60 border-b border-background/10 pb-2.5">
         <div className="flex items-center gap-1.5">
           <span className="size-2 rounded-full bg-background/20" />
           <span className="size-2 rounded-full bg-background/20" />
@@ -414,7 +414,7 @@ export function SdkVideoPlaceholder() {
         <span className="text-background/40">agent.ts</span>
       </div>
 
-      <div className="my-auto flex flex-col gap-1 text-[11px] leading-relaxed">
+      <div className="my-auto flex flex-col gap-1 text-xs leading-relaxed">
         <p>
           <span className="text-brand-unit">import</span>{" "}
           <span className="text-background">{"{ Telmoni }"}</span>{" "}

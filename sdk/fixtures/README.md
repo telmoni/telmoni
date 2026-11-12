@@ -129,7 +129,7 @@ The guard, which counts a trace's steps and spend in the agent's own process, wi
 
 ## `endpoints.json`
 
-What each SDK makes of an endpoint, configured or from `TELMONI_ENDPOINT`. `taken` lists each as `given` and as the SDK holds it (`endpoint`), which, given again, it holds unchanged. `refused` lists each the SDK refuses — at construction in Python, TypeScript and Go, and in Rust at the first export, which sends nothing — `as` `url`, no endpoint any SDK takes (`the endpoint must be an http:// or https:// URL`), or `cleartext`, plain HTTP to another machine (`refusing to send the API key over unencrypted HTTP`).
+What each SDK makes of an endpoint, configured or from `TELMONI_ENDPOINT`. `taken` lists each as `given` and as the SDK holds it (`endpoint`), which, given again, it holds unchanged. `refused` lists each the SDK refuses — at construction in Python, TypeScript and Go, and in Rust at the first export, which sends nothing — `as` `missing`, none set: blank, slashes alone, or no `TELMONI_ENDPOINT` (`no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint`), since there is no default; `url`, no endpoint any SDK takes (`the endpoint must be an http:// or https:// URL`); or `cleartext`, plain HTTP to another machine (`refusing to send the API key over unencrypted HTTP`).
 
 One rule in all four, written out by each rather than left to its URL parser, since those read shorthand, escapes, credentials and a missing host four ways: Unicode's White_Space trimmed from the ends, as Go and Rust trim; printable ASCII; HTTP or HTTPS, in any case; a host that is a name of letters, digits, dots, hyphens and underscores, in labels of 1 to 63 characters with no hyphen at either end, its last label no number unless the whole is an IPv4 address in four decimal parts, or an IPv6 address in brackets; a port of up to five digits from 1 to 65535, or an empty one; a path of the same plain characters and `~!$&'()*+,;=:@`, with no `.` or `..` segment; and plain HTTP only to this machine: `localhost`, a name under it, 127.0.0.0/8 or `::1`, an IPv4-mapped address read as its IPv4.
 
@@ -157,7 +157,7 @@ Every warning any SDK gives carries one of these kinds, the same in all four:
 | File | Answer | The SDK |
 |---|---|---|
 | `kept.json` | `200`, `Telmoni-Content-Mode: off`, no partial success | logs nothing; its content mode is now `off` |
-| `dropped.json` | `200`, a partial success naming an attribute dropped as content | warns once, naming the attribute, the project's content mode that decides the drop, and the page that says which modes keep content (`https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door`); the same attribute named again is not logged again |
+| `dropped.json` | `200`, a partial success naming an attribute dropped as content | warns once, naming the attribute, the project's content mode that decides the drop, and the page that says which modes keep content (`https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/ingest.mdx#what-is-dropped-at-the-door`); the same attribute named again is not logged again |
 | `unlisted.json` | `200`, a partial success naming a text attribute the inventory does not name | warns once, naming the tag that would keep it |
 | `cardinality.json` | `200`, a partial success naming a tag past its project's cap for the day | warns once, naming the tag, and that tags keep to a few keys of a few values each |
 | `refused.json` | `200`, a partial success refusing one span | warns once with the server's line; never retries |

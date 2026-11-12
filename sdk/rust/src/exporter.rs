@@ -37,7 +37,7 @@ const RETRY_AFTER_MAX_SECS: u64 = 60;
 /// conversation repeats in every call is put once.
 const UPLOADED_MAX: usize = 4096;
 /// Where a dropped content field's warning sends the reader.
-const CONTENT_DOCS: &str = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door";
+const CONTENT_DOCS: &str = "https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/ingest.mdx#what-is-dropped-at-the-door";
 
 /// A project's content mode, as ingest's answers name it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1324,6 +1324,7 @@ mod tests {
     fn exporter(kept: &Kept, warnings: &Warned) -> Exporter {
         let warned = Arc::clone(warnings);
         let config = Config {
+            endpoint: "https://telmoni.example.com".to_owned(),
             api_key: Some("k".to_owned()),
             ..Config::default()
         };
@@ -1655,6 +1656,7 @@ mod tests {
             let warnings = Arc::new(Mutex::new(Vec::new()));
             let warned_to = Arc::clone(&warnings);
             let config = Config {
+                endpoint: "https://telmoni.example.com".to_owned(),
                 api_key: Some("k".to_owned()),
                 ..Config::default()
             };

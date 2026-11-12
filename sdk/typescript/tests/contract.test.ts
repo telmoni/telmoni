@@ -8,20 +8,30 @@ import { inspect } from 'node:util';
 
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CONTENT } from '../src/contract';
 import { ANSWER_MAX, Exporter, directTransport, fetchTransport } from '../src/exporter';
-import { DEFAULT_ENDPOINT, Telmoni, VERSION, type Config, type Warning } from '../src/index';
-import { FakeTransport, answer, harness, loadFixture } from './helpers';
+import { Telmoni, VERSION, type Config, type Warning } from '../src/index';
+import { ENDPOINT, FakeTransport, answer, harness, loadFixture } from './helpers';
 
+// The suite's own deployment, so a shell pointing elsewhere changes nothing.
+beforeEach(() => vi.stubEnv('TELMONI_ENDPOINT', ENDPOINT));
 afterEach(() => vi.unstubAllEnvs());
 
 describe('configuration', () => {
-  it('defaults to the machine host', () => {
-    expect(DEFAULT_ENDPOINT).toBe('https://api.telmoni.com');
-    const client = new Telmoni();
-    expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
+  it('refuses a client with no endpoint, as there is no default', () => {
+    const missing = "no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint";
+    expect(() => new Telmoni()).toThrow(new TypeError(missing));
+    expect(() => new Telmoni({ endpoint: '  ' })).toThrow(new TypeError(missing));
+    vi.stubEnv('TELMONI_ENDPOINT', undefined);
+    expect(() => Telmoni.fromEnv()).toThrow(new TypeError(missing));
+    vi.stubEnv('TELMONI_ENDPOINT', ' ');
+    expect(() => Telmoni.fromEnv()).toThrow(new TypeError(missing));
+  });
+
+  it('sends no content and decides no sampling unless asked', () => {
+    const client = new Telmoni({ endpoint: ENDPOINT });
     expect(client.config.captureContent).toBe(false);
     expect(client.config.sampler).toBeUndefined();
   });
@@ -37,20 +47,19 @@ describe('configuration', () => {
     expect(new Telmoni({ endpoint: 'https://api.telmoni.local/' }).config.endpoint).toBe('https://api.telmoni.local');
   });
 
-  it('reads a blank endpoint, organization, key, environment or release as unset', () => {
-    const client = new Telmoni({ endpoint: '  ', organizationId: ' ', apiKey: '\t', environment: ' ', release: '' });
-    expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
+  it('reads a blank organization, key, environment or release as unset', () => {
+    const client = new Telmoni({ endpoint: ENDPOINT, organizationId: ' ', apiKey: '\t', environment: ' ', release: '' });
     expect(client.config.organizationId).toBeUndefined();
     expect(client.config.apiKey).toBeUndefined();
     expect(client.config.environment).toBeUndefined();
     expect(client.config.release).toBeUndefined();
-    const deployed = new Telmoni({ environment: ' staging ', release: '2026.10.18' });
+    const deployed = new Telmoni({ endpoint: ENDPOINT, environment: ' staging ', release: '2026.10.18' });
     expect(deployed.config.environment).toBe('staging');
     expect(deployed.config.release).toBe('2026.10.18');
   });
 
   it('never prints or serializes the API key', () => {
-    const client = new Telmoni({ apiKey: 'telmoni_secret_key', organizationId: 'org_1' });
+    const client = new Telmoni({ endpoint: ENDPOINT, apiKey: 'telmoni_secret_key', organizationId: 'org_1' });
     for (const printed of [
       inspect(client),
       JSON.stringify(client),
@@ -77,9 +86,9 @@ describe('configuration', () => {
 
   it("reads blank as Unicode's White_Space, as Go and Rust read it", () => {
     // `trim` would take U+FEFF too, and leave U+0085.
-    expect(new Telmoni({ apiKey: 'k', release: '\ufeff2026.10.18' }).config.release).toBe('\ufeff2026.10.18');
-    expect(new Telmoni({ apiKey: 'k', release: '\u00852026.10.18\u3000' }).config.release).toBe('2026.10.18');
-    expect(new Telmoni({ apiKey: 'k', environment: '\u0085' }).config.environment).toBeUndefined();
+    expect(new Telmoni({ endpoint: ENDPOINT, apiKey: 'k', release: '\ufeff2026.10.18' }).config.release).toBe('\ufeff2026.10.18');
+    expect(new Telmoni({ endpoint: ENDPOINT, apiKey: 'k', release: '\u00852026.10.18\u3000' }).config.release).toBe('2026.10.18');
+    expect(new Telmoni({ endpoint: ENDPOINT, apiKey: 'k', environment: '\u0085' }).config.environment).toBeUndefined();
     const h = harness();
     expect(() => h.telmoni.trace('\u0085', () => {})).toThrow("a trace needs its agent's name");
     expect(() => h.telmoni.trace('\ufeff', () => {})).not.toThrow();
@@ -87,17 +96,17 @@ describe('configuration', () => {
 
   it('refuses a captureContent that is no boolean, given or set later', () => {
     // 'false' from the environment is truthy, and would let content out.
-    expect(() => new Telmoni({ apiKey: 'k', captureContent: 'false' as unknown as boolean })).toThrow(
+    expect(() => new Telmoni({ endpoint: ENDPOINT, apiKey: 'k', captureContent: 'false' as unknown as boolean })).toThrow(
       'captureContent must be a boolean',
     );
-    const config = new Telmoni({ apiKey: 'k' }).config as { captureContent: unknown };
+    const config = new Telmoni({ endpoint: ENDPOINT, apiKey: 'k' }).config as { captureContent: unknown };
     expect(() => {
       config.captureContent = 'false';
     }).toThrow(TypeError);
   });
 
   it('reads the eight variables from the environment and no other', () => {
-    vi.stubEnv('TELMONI_ENDPOINT', undefined);
+    vi.stubEnv('TELMONI_ENDPOINT', ' https://telmoni.example.com/ ');
     vi.stubEnv('TELMONI_API_KEY', '');
     vi.stubEnv('TELMONI_ORG', 'org_2');
     vi.stubEnv('TELMONI_ENVIRONMENT', 'staging');
@@ -105,7 +114,7 @@ describe('configuration', () => {
     vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'https://elsewhere.example');
     vi.stubEnv('OTEL_RESOURCE_ATTRIBUTES', 'deployment.environment.name=leaked,service.version=leaked');
     const client = Telmoni.fromEnv();
-    expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
+    expect(client.config.endpoint).toBe(ENDPOINT);
     expect(client.config.apiKey).toBeUndefined();
     expect(client.config.organizationId).toBe('org_2');
     expect(client.config.environment).toBe('staging');
@@ -136,9 +145,9 @@ describe('configuration', () => {
 
   it('takes captureContent set in code over the environment', () => {
     vi.stubEnv('TELMONI_CAPTURE_CONTENT', '1');
-    expect(new Telmoni({ captureContent: false }).config.captureContent).toBe(false);
+    expect(new Telmoni({ endpoint: ENDPOINT, captureContent: false }).config.captureContent).toBe(false);
     vi.stubEnv('TELMONI_CAPTURE_CONTENT', undefined);
-    expect(new Telmoni({ captureContent: true }).config.captureContent).toBe(true);
+    expect(new Telmoni({ endpoint: ENDPOINT, captureContent: true }).config.captureContent).toBe(true);
   });
 
   it.each([
@@ -175,18 +184,18 @@ describe('configuration', () => {
   it('takes scrubSecrets and scrubPii set in code over the environment, which decides them left unset', () => {
     vi.stubEnv('TELMONI_SCRUB_SECRETS', '0');
     vi.stubEnv('TELMONI_SCRUB_PII', '1');
-    expect(new Telmoni({ scrubSecrets: true, scrubPii: false }).config).toMatchObject({ scrubSecrets: true, scrubPii: false });
-    expect(new Telmoni().config).toMatchObject({ scrubSecrets: false, scrubPii: true });
+    expect(new Telmoni({ endpoint: ENDPOINT, scrubSecrets: true, scrubPii: false }).config).toMatchObject({ scrubSecrets: true, scrubPii: false });
+    expect(new Telmoni({ endpoint: ENDPOINT }).config).toMatchObject({ scrubSecrets: false, scrubPii: true });
     vi.stubEnv('TELMONI_SCRUB_SECRETS', undefined);
     vi.stubEnv('TELMONI_SCRUB_PII', undefined);
-    expect(new Telmoni({ scrubSecrets: false, scrubPii: true }).config).toMatchObject({ scrubSecrets: false, scrubPii: true });
-    expect(new Telmoni().config).toMatchObject({ scrubSecrets: true, scrubPii: false });
+    expect(new Telmoni({ endpoint: ENDPOINT, scrubSecrets: false, scrubPii: true }).config).toMatchObject({ scrubSecrets: false, scrubPii: true });
+    expect(new Telmoni({ endpoint: ENDPOINT }).config).toMatchObject({ scrubSecrets: true, scrubPii: false });
   });
 
   it('refuses a scrubSecrets or scrubPii that is no boolean', () => {
     // 'false' from the environment is truthy, and 0 falsy: neither is what the code meant.
-    expect(() => new Telmoni({ scrubSecrets: 0 as unknown as boolean })).toThrow('scrubSecrets must be a boolean');
-    expect(() => new Telmoni({ scrubPii: 'false' as unknown as boolean })).toThrow('scrubPii must be a boolean');
+    expect(() => new Telmoni({ endpoint: ENDPOINT, scrubSecrets: 0 as unknown as boolean })).toThrow('scrubSecrets must be a boolean');
+    expect(() => new Telmoni({ endpoint: ENDPOINT, scrubPii: 'false' as unknown as boolean })).toThrow('scrubPii must be a boolean');
   });
 
   it('holds back every name the server keeps as content, and no other', () => {
@@ -200,12 +209,9 @@ describe('configuration', () => {
   });
 
   it('builds from the environment with the real transport', async () => {
-    // The shell running the suite may point the CLI at a local stack; the
-    // SDK's default is what is under test.
-    vi.stubEnv('TELMONI_ENDPOINT', undefined);
     const client = Telmoni.fromEnv();
     try {
-      expect(client.config.endpoint).toBe(DEFAULT_ENDPOINT);
+      expect(client.config.endpoint).toBe(ENDPOINT);
     } finally {
       await client.shutdown();
     }
@@ -216,14 +222,18 @@ describe('the endpoint', () => {
   it('is read as the fixture reads it: plain HTTP to this machine alone, and a host without a scheme as the CLI reads it', () => {
     const fixture = loadFixture<{
       taken: { given: string; endpoint: string }[];
-      refused: { given: string; as: 'url' | 'cleartext' }[];
+      refused: { given: string; as: 'missing' | 'url' | 'cleartext' }[];
     }>('endpoints.json');
     for (const { given, endpoint } of fixture.taken) {
       expect(new Telmoni({ endpoint: given }).config.endpoint, given).toBe(endpoint);
       expect(new Telmoni({ endpoint }).config.endpoint, `${given}, read twice`).toBe(endpoint);
     }
     for (const { given, as } of fixture.refused) {
-      const why = as === 'cleartext' ? /unencrypted HTTP/ : /the endpoint must be an http:\/\/ or https:\/\/ URL/;
+      const why = {
+        missing: /no endpoint is set; set TELMONI_ENDPOINT/,
+        url: /the endpoint must be an http:\/\/ or https:\/\/ URL/,
+        cleartext: /unencrypted HTTP/,
+      }[as];
       expect(() => new Telmoni({ endpoint: given }), given).toThrow(why);
     }
   });
@@ -551,7 +561,7 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
         }) as unknown as ReadableSpan,
     );
   const exporter = (transport: FakeTransport, warnings: string[], fields: Warning[] = []) =>
-    new Exporter(new Telmoni({ apiKey: 'k' }).config, {
+    new Exporter(new Telmoni({ endpoint: ENDPOINT, apiKey: 'k' }).config, {
       transport: transport.send,
       sleep: () => Promise.resolve(),
       warn: (message, warning) => {
@@ -638,7 +648,7 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
     const transport = new FakeTransport([on, on]);
     const warnings: string[] = [];
     const fields: Warning[] = [];
-    const sender = new Exporter(new Telmoni({ apiKey: 'k', captureContent: true }).config, {
+    const sender = new Exporter(new Telmoni({ endpoint: ENDPOINT, apiKey: 'k', captureContent: true }).config, {
       transport: transport.send,
       sleep: () => Promise.resolve(),
       warn: (message, warning) => {
@@ -687,7 +697,7 @@ describe("an export past ingest's 1 MiB or 1,000 spans", () => {
 describe('a number ingest cannot read', () => {
   it('goes as no value, NaN or an infinity as null and a count past 64 bits as a double, never costing its export', async () => {
     const transport = new FakeTransport();
-    const exporter = new Exporter(new Telmoni({ apiKey: 'k' }).config, {
+    const exporter = new Exporter(new Telmoni({ endpoint: ENDPOINT, apiKey: 'k' }).config, {
       transport: transport.send,
       sleep: () => Promise.resolve(),
       warn: () => {},
@@ -734,7 +744,7 @@ describe('a number ingest cannot read', () => {
 
 describe('a span time', () => {
   it('goes as 0 outside 64 bits of nanoseconds, so ingest refuses that span rather than the whole export', () => {
-    const config = new Telmoni({ apiKey: 'k' }).config;
+    const config = new Telmoni({ endpoint: ENDPOINT, apiKey: 'k' }).config;
     const exporter = new Exporter(config, {
       transport: () => Promise.reject(new Error('never sent')),
       sleep: () => Promise.resolve(),

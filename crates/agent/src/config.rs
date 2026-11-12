@@ -26,9 +26,8 @@ const DEFAULT_PORT: &str = "8082";
 
 /// The SDK's configuration for the agent's own traces, read as the SDK reads
 /// it — `TELMONI_ENDPOINT`, `TELMONI_API_KEY`, `TELMONI_ORG` — with one
-/// difference from a customer's: with no endpoint set, the traces go to this
-/// server's own address, `http://127.0.0.1:$PORT`, never to the SDK's default
-/// of the hosted service, so a server never calls another on its own.
+/// difference from a customer's: with no endpoint set, which the SDK would
+/// refuse, the traces go to this server's own address, `http://127.0.0.1:$PORT`.
 /// `endpoint` and `port` are the raw variables; `sdk` is what the SDK read.
 fn reporting(
     mut sdk: telmoni::Config,
@@ -312,13 +311,12 @@ mod tests {
         assert!("gemini".parse::<Provider>().is_err());
     }
 
-    /// With no endpoint set, the agent's traces go to this server's own port,
-    /// never to the SDK's default; an endpoint set is kept, and one that is
-    /// no URL refuses boot.
+    /// With no endpoint set, the agent's traces go to this server's own port;
+    /// an endpoint set is kept, and one that is no URL refuses boot.
     #[test]
     fn the_traces_go_to_this_server_unless_an_endpoint_is_set() {
         let sdk = || telmoni::Config::new("", None, Some("tm_key".into()));
-        assert_eq!(sdk().endpoint, telmoni::DEFAULT_ENDPOINT);
+        assert_eq!(sdk().endpoint, "");
         let own = reporting(sdk(), None, Some("8083")).unwrap();
         assert_eq!(own.endpoint, "http://127.0.0.1:8083");
         let default_port = reporting(sdk(), None, None).unwrap();

@@ -33,13 +33,13 @@ lets each person mint 5 keys, rotate 10 and revoke 20 a minute.
 your secret manager immediately. Telmoni stores only a SHA-256 hash of the
 token; the plaintext appears in the mint or rotate answer alone.
 
-The dialog that shows a new key shows it twice, each with its own copy
-button: alone, and as the `.env` line the SDKs read it from. One minted with
-**Send spans** comes with a first trace to paste under them: for each
+The dialog shows the new key with a **Copy API key** button. Expand
+**Use in your .env file** to copy the line the SDKs read it from. A key with
+**Send spans** also offers **Send a first trace**: expand it for each
 [SDK](/docs/api/sdks), one block for a terminal that installs it in a new
 directory, sets the key, and sends one trace, `my-agent`, which lists on the
-project's **Traces** page within a minute. On your own deployment, export
-`TELMONI_ENDPOINT`, its machine host, first. The key leaves the screen with
+project's **Traces** page within a minute. Export `TELMONI_ENDPOINT`, your
+deployment's machine host, first: the SDKs have no default. The key leaves the screen with
 the dialog, so save it first.
 
 Every key begins with the prefix `tm_`. The **API keys** page names each by its
@@ -51,7 +51,7 @@ in a configuration file, never enough to use one.
 Include the key as a bearer token in the HTTP `Authorization` header:
 
 ```console
-$ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://api.telmoni.com/v1/organization
+$ curl -H "Authorization: Bearer $TELMONI_API_KEY" https://telmoni.example.com/v1/organization
 ```
 
 Each lane needs its scope: `/v1` the `read` scope (except `POST /v1/scores` and

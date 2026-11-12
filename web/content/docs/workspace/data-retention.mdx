@@ -1,12 +1,11 @@
 ---
 title: "Data retention"
-description: "How long Telmoni keeps each kind of data — telemetry, the organization's records, accounts and sessions, the console agent's data — what ends each window, and what the hosted service keeps in backups and logs."
+description: "How long Telmoni keeps each kind of data — telemetry, the organization's records, accounts and sessions, the console agent's data — and what ends each window."
 ---
 
 Telmoni keeps each kind of data for a window of its own. The windows are the
-platform's: the same on a self-hosted deployment and on the hosted service,
-but for a project's spans and their content, which its owner or an admin may
-keep for fewer days. Deleting a project, an organization or an
+platform's, the same on every deployment, but for a project's spans and their
+content, which its owner or an admin may keep for fewer days. Deleting a project, an organization or an
 account ends every window early for what they held, as
 [Data deletion](/docs/workspace/data-deletion) describes.
 
@@ -23,7 +22,7 @@ hourly totals keep their 13 months whatever the project chose.
 
 | Data | Kept | Then |
 |---|---|---|
-| Spans: every agent, step, model call, tool call and retrieval, as metadata | 360 days after a span arrives, or the fewer days the project chose (on the hosted service, bounded by the plan) | `telmoni-server rotate` drops each day of spans once every span in it is older, and deletes a project's older than its own days |
+| Spans: every agent, step, model call, tool call and retrieval, as metadata | 360 days after a span arrives, or the fewer days the project chose | `telmoni-server rotate` drops each day of spans once every span in it is older, and deletes a project's older than its own days |
 | Hourly totals: spans, units, tokens, the cost calls reported and durations by project, agent, kind, model, provider, tool, status, environment and release, which name no user and no tag | 13 months | `rotate` drops each month of totals once it is older |
 | A deleted project's spans and totals | Until the project is deleted | Marked deleted the moment the project goes, and gone from every read within moments, as the store applies the mark; `rotate` rewrites them off the disk that night |
 | The content a project whose content mode is `on` keeps: each field of a span, sealed under the project's own key, in Postgres | As long as its span | `rotate` deletes it with its span; purged with the project |
@@ -79,20 +78,7 @@ lists. On one whose mode is `on`, it is kept as long as its span, above. An end 
 What the agent sends its model provider is on the account's
 [Privacy page](/docs/settings/privacy#console-agent-data).
 
-## On the hosted service
-
-- **Backups.** The database is backed up daily, with seven days of
-  point-in-time recovery, and thirty daily backups are kept. Telemetry's
-  store is backed up nightly, and none of its backups is kept past thirty
-  days. Deleted data leaves the backups as they expire, within thirty days.
-- **Operational logs** are kept thirty days. They name ids, never addresses.
-- **The console agent's model provider** keeps each request 55 days to detect
-  abuse, as the [Subprocessors](https://telmoni.com/docs/legal/subprocessors) page states.
-
-The hosted service's commitments are in its
-[Privacy Policy](https://telmoni.com/docs/legal/privacy-policy).
-
-## On a self-hosted deployment
+## Backups and logs
 
 The windows above hold as long as `telmoni-server rotate` runs daily and the server's
 sweeps run, as the [production guide](/docs/self-host/production#partition-rotation)

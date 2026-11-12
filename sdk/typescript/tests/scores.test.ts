@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import * as contract from '../src/contract';
 import type { ScoreOptions, ScoreTarget, Trace, TraceRecord } from '../src/index';
 import {
+  ENDPOINT,
   type ExportBody,
   type Harness,
   type JsonAttribute,
@@ -369,7 +370,7 @@ describe('a late score', () => {
       await h.telmoni.shutdown();
     }
     const request = one(h.transport.requests);
-    expect(request.url).toBe('https://api.telmoni.com/v1/scores');
+    expect(request.url).toBe(`${ENDPOINT}/v1/scores`);
     expect(request.headers['Content-Type']).toBe('application/json');
     expect(request.headers['User-Agent']).toMatch(/^telmoni-typescript\//);
     expect(request.headers['Authorization']).toBe('Bearer telmoni_test_key');

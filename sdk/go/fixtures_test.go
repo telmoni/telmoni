@@ -280,7 +280,7 @@ func TestTheTraceMatchesTheGoldenExport(t *testing.T) {
 		t.Errorf("the export differs from trace.json\n got: %s\nwant: %s", pretty(t, got), pretty(t, fixture.Export))
 	}
 	for _, req := range h.transport.all() {
-		if req.url != "https://api.telmoni.com/otlp/v1/traces" {
+		if req.url != testEndpoint+"/otlp/v1/traces" {
 			t.Errorf("sent to %s", req.url)
 		}
 		if got := req.header.Get("Authorization"); got != "Bearer "+testKey {
@@ -710,7 +710,7 @@ func TestImagesAreLiftedOutOfMessagesOnlyUnderBothLocks(t *testing.T) {
 				t.Errorf("%+v: a file put without the key", each)
 			}
 			got = append(got, map[string]any{
-				"path":         strings.TrimPrefix(upload.url, "https://api.telmoni.com"),
+				"path":         strings.TrimPrefix(upload.url, testEndpoint),
 				"content_type": upload.header.Get("Content-Type"),
 				"body":         base64.StdEncoding.EncodeToString(upload.body),
 			})
@@ -1190,8 +1190,8 @@ func TestAFailureEndingInTransportErrorCarriesNoStatus(t *testing.T) {
 // net/http wraps every failure in a *url.Error: each is named by its cause,
 // a timeout apart, and so warned of once each.
 func TestATransportFailureIsNamedByItsCause(t *testing.T) {
-	refused := &url.Error{Op: "Post", URL: "https://api.telmoni.com", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}
-	timedOut := &url.Error{Op: "Post", URL: "https://api.telmoni.com", Err: context.DeadlineExceeded}
+	refused := &url.Error{Op: "Post", URL: testEndpoint, Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}
+	timedOut := &url.Error{Op: "Post", URL: testEndpoint, Err: context.DeadlineExceeded}
 	h := newHarness(t, telmoni.Config{APIKey: telmoni.NewSecret("k")},
 		newFakeTransport(t, refused, refused, refused, timedOut, timedOut, timedOut))
 	aTrace(t, h)

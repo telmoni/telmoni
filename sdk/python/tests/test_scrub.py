@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from opentelemetry import trace
 
-from conftest import FakeTransport, attributes_of, load_fixture
+from conftest import ENDPOINT, FakeTransport, attributes_of, load_fixture
 from telmoni import Config, Telmoni, ToolCallRecord, TraceRecord, contract
 from telmoni.exporter import Answer
 from telmoni.scrub import scrub
@@ -38,6 +38,7 @@ def content_on(
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 4
     client = Telmoni(
         Config(
+            endpoint=ENDPOINT,
             api_key="k",
             capture_content=True,
             scrub_secrets=scrub_secrets,
@@ -283,7 +284,7 @@ def test_secrets_are_scrubbed_unless_the_environment_says_0(
 ) -> None:
     if given is not None:
         monkeypatch.setenv(contract.SCRUB_SECRETS_ENV, given)
-    assert Config().scrub_secrets is on
+    assert Config(endpoint=ENDPOINT).scrub_secrets is on
     assert Config.from_env().scrub_secrets is on
 
 
@@ -305,7 +306,7 @@ def test_personal_data_is_scrubbed_only_where_the_environment_says_1(
 ) -> None:
     if given is not None:
         monkeypatch.setenv(contract.SCRUB_PII_ENV, given)
-    assert Config().scrub_pii is on
+    assert Config(endpoint=ENDPOINT).scrub_pii is on
     assert Config.from_env().scrub_pii is on
 
 
@@ -314,20 +315,20 @@ def test_a_switch_set_in_code_beats_the_environment(
 ) -> None:
     monkeypatch.setenv(contract.SCRUB_SECRETS_ENV, "0")
     monkeypatch.setenv(contract.SCRUB_PII_ENV, "1")
-    config = Config(scrub_secrets=True, scrub_pii=False)
+    config = Config(endpoint=ENDPOINT, scrub_secrets=True, scrub_pii=False)
     assert (config.scrub_secrets, config.scrub_pii) == (True, False)
     monkeypatch.delenv(contract.SCRUB_SECRETS_ENV)
     monkeypatch.delenv(contract.SCRUB_PII_ENV)
-    config = Config(scrub_secrets=False, scrub_pii=True)
+    config = Config(endpoint=ENDPOINT, scrub_secrets=False, scrub_pii=True)
     assert (config.scrub_secrets, config.scrub_pii) == (False, True)
 
 
 def test_a_switch_that_is_no_bool_is_refused() -> None:
     """A "0" from the environment is truthy, and would read as on."""
     with pytest.raises(TypeError, match="scrub_secrets must be a bool or None"):
-        Config(scrub_secrets="0")  # type: ignore[arg-type]
+        Config(endpoint=ENDPOINT, scrub_secrets="0")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="scrub_pii must be a bool or None"):
-        Config(scrub_pii=1)  # type: ignore[arg-type]
+        Config(endpoint=ENDPOINT, scrub_pii=1)  # type: ignore[arg-type]
 
 
 def test_the_environments_switches_reach_what_is_sent(

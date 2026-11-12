@@ -6,7 +6,6 @@ from ._version import __version__
 from .client import Telmoni
 from .guard import CapExceededError
 from .models import (
-    DEFAULT_ENDPOINT,
     Config,
     ModelCallRecord,
     Price,
@@ -22,7 +21,6 @@ from .processor import Batching, QueueFullError, ShutdownError
 from .traces import ModelCall, Retrieval, Step, ToolCall, Trace, current_trace
 
 __all__ = [
-    "DEFAULT_ENDPOINT",
     "Batching",
     "CapExceededError",
     "Config",

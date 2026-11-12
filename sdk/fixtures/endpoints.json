@@ -1,7 +1,7 @@
 {
   "taken": [
     { "given": "https://api.example.com", "endpoint": "https://api.example.com" },
-    { "given": "  https://api.telmoni.com//  ", "endpoint": "https://api.telmoni.com" },
+    { "given": "  https://api.example.com//  ", "endpoint": "https://api.example.com" },
     { "given": "\u0085\u00a0https://api.example.com\u2003/\u3000", "endpoint": "https://api.example.com" },
     { "given": "HTTPS://API.EXAMPLE.COM", "endpoint": "HTTPS://API.EXAMPLE.COM" },
     { "given": "https://api.example.com:443/", "endpoint": "https://api.example.com:443" },
@@ -30,10 +30,13 @@
     { "given": "LOCALHOST:8080", "endpoint": "http://LOCALHOST:8080" },
     { "given": "127.0.0.1:8080", "endpoint": "http://127.0.0.1:8080" },
     { "given": "[::1]:8080", "endpoint": "http://[::1]:8080" },
-    { "given": "[::ffff:127.0.0.1]:4318", "endpoint": "http://[::ffff:127.0.0.1]:4318" },
-    { "given": "/", "endpoint": "https://api.telmoni.com" }
+    { "given": "[::ffff:127.0.0.1]:4318", "endpoint": "http://[::ffff:127.0.0.1]:4318" }
   ],
   "refused": [
+    { "given": "", "as": "missing" },
+    { "given": " \u3000", "as": "missing" },
+    { "given": "/", "as": "missing" },
+    { "given": " // ", "as": "missing" },
     { "given": "ftp://api.example.com", "as": "url" },
     { "given": "file:///tmp/telmoni", "as": "url" },
     { "given": "https://", "as": "url" },

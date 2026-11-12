@@ -225,6 +225,9 @@ export interface Harness {
   sleeps: number[];
 }
 
+/** The deployment every suite sends to: the SDK has no default. */
+export const ENDPOINT = 'https://telmoni.example.com';
+
 /** A client over a fake transport, its warnings and sleeps recorded. */
 export function harness(config: Config = {}, hooks: Hooks = {}, scripted: Array<Answer | Error> = []): Harness {
   const transport = new FakeTransport(scripted);
@@ -232,7 +235,7 @@ export function harness(config: Config = {}, hooks: Hooks = {}, scripted: Array<
   const fields: Warning[] = [];
   const sleeps: number[] = [];
   const telmoni = new Telmoni(
-    { apiKey: 'telmoni_test_key', ...config },
+    { endpoint: ENDPOINT, apiKey: 'telmoni_test_key', ...config },
     {
       transport: transport.send,
       sleep: (seconds) => {

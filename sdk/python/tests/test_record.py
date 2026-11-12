@@ -20,7 +20,7 @@ import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult
 
-from conftest import FakeTransport, attributes_of, infos_in, load_fixture
+from conftest import ENDPOINT, FakeTransport, attributes_of, infos_in, load_fixture
 from telmoni import (
     Config,
     ModelCallRecord,
@@ -152,7 +152,7 @@ def test_the_same_record_sent_again_is_the_same_bytes() -> None:
     # it only now and then.
     for _ in range(20):
         transport = FakeTransport()
-        client = Telmoni(Config(api_key="k"), transport=transport)
+        client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
         try:
             client.record_trace(record)
             assert client.flush()
@@ -188,7 +188,7 @@ def test_a_record_travels_in_exports_of_its_own(transport: FakeTransport) -> Non
     in other exports, so it is the same bytes as when sent alone."""
     record = the_record()
     beside = dataclasses.replace(record, trace_id=uuid.uuid4().hex)
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("live"):
             with client.step("live step"):
@@ -211,7 +211,7 @@ def test_a_record_travels_in_exports_of_its_own(transport: FakeTransport) -> Non
 def test_a_record_larger_than_a_batch_is_cut_from_its_own_start(
     transport: FakeTransport,
 ) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     processor = with_limits(client, transport, max_batch_size=3, schedule_delay_s=60)
     golden = the_record()
     call = ToolCallRecord(name="t", start=golden.start, end=golden.start)
@@ -248,7 +248,7 @@ def spans_in(body: dict[str, Any]) -> list[dict[str, Any]]:
 
 def record_beside_live_steps(transport: FakeTransport) -> None:
     """The record sent while another thread ends a live trace's steps."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     stop = threading.Event()
     try:
         with client.trace("live") as live:
@@ -299,7 +299,7 @@ def test_a_handler_may_record_a_trace_while_a_record_warns(
     )
     warned = dataclasses.replace(golden, inside=[call])
     inner = dataclasses.replace(golden, trace_id=uuid.uuid4().hex, inside=[])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     gate = threading.Lock()
     entered, warning, stuck = threading.Event(), threading.Event(), threading.Event()
 
@@ -371,7 +371,9 @@ def test_a_records_room_is_kept_while_it_is_built(
     """A live step ending while it is built is dropped past the record's
     room, so the queue never holds more than its size."""
     sampler = Hooked()
-    client = Telmoni(Config(api_key="k", sampler=sampler), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", sampler=sampler), transport=transport
+    )
     processor = with_limits(
         client, transport, max_queue_size=4, max_batch_size=100, schedule_delay_s=60
     )
@@ -411,7 +413,7 @@ def test_a_records_room_is_kept_while_it_is_built(
 def test_a_record_goes_at_once(transport: FakeTransport) -> None:
     """Queued behind a live step, it goes in the export after the step's, with
     no flush."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     processor = with_limits(client, transport, schedule_delay_s=60)
     try:
         with client.trace("live"):
@@ -426,7 +428,7 @@ def test_a_record_goes_at_once(transport: FakeTransport) -> None:
 
 def test_a_record_cut_short_sends_nothing(transport: FakeTransport) -> None:
     """Its first call has ended when the next fails; nothing of it is queued."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with (
             mock.patch(
@@ -488,7 +490,8 @@ def test_a_records_content_leaves_only_when_asked_and_the_project_allows(
     answer = Answer(200, {"Telmoni-Content-Mode": mode}, b"{}")
     transport.answers = [answer, answer]
     client = Telmoni(
-        Config(api_key="k", capture_content=capture_content), transport=transport
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=capture_content),
+        transport=transport,
     )
     at = the_record().start
     record = dataclasses.replace(
@@ -796,7 +799,9 @@ def test_a_record_refused_opens_and_sends_nothing(
     sampler = Hooked()
     asked: list[None] = []
     sampler.hook = lambda: asked.append(None)
-    client = Telmoni(Config(api_key="k", sampler=sampler), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", sampler=sampler), transport=transport
+    )
     record = (
         change(the_record())
         if callable(change)
@@ -814,7 +819,7 @@ def test_a_record_refused_opens_and_sends_nothing(
 
 def test_a_step_inside_a_step_goes_under_its_span(transport: FakeTransport) -> None:
     """Each span at its place depth first, each step sent after what it holds."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     record = the_record()
     at = record.start
 
@@ -876,7 +881,7 @@ def test_a_step_inside_a_step_goes_under_its_span(transport: FakeTransport) -> N
 
 def test_steps_nested_16_deep_are_sent(transport: FakeTransport) -> None:
     """The deepest a record takes, each step under the next."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         client.record_trace(dataclasses.replace(the_record(), inside=[nested(16)]))
         assert client.flush()
@@ -890,7 +895,7 @@ def test_steps_nested_16_deep_are_sent(transport: FakeTransport) -> None:
 
 def test_a_record_after_shutdown_is_refused(transport: FakeTransport) -> None:
     """Never answered as sent when it went nowhere."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     client.shutdown()
     with pytest.raises(ShutdownError, match="shut down"):
         client.record_trace(the_record())
@@ -913,9 +918,11 @@ def test_a_record_past_the_default_queue_goes_once_the_queue_is_raised(
     with pytest.raises(
         QueueFullError, match="the queue holds 2048, so raise its size to record it$"
     ):
-        Telmoni(Config(api_key="k"), transport=transport).record_trace(record)
+        Telmoni(
+            Config(endpoint=ENDPOINT, api_key="k"), transport=transport
+        ).record_trace(record)
     client = Telmoni(
-        Config(api_key="k"),
+        Config(endpoint=ENDPOINT, api_key="k"),
         transport=transport,
         batching=Batching(max_queue_size=3_000),
     )
@@ -931,7 +938,7 @@ def test_a_record_the_queue_has_no_room_for_is_refused_whole(
     transport: FakeTransport,
 ) -> None:
     """Refused whole before anything is queued; drained, the queue takes it."""
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     # Room for four spans, and a worker that will not wake until flushed.
     processor = with_limits(
         client, transport, max_queue_size=4, max_batch_size=100, schedule_delay_s=60

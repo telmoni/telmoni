@@ -29,7 +29,7 @@
 #      at /otlp/v1/traces, where the SDKs send; the read API under /v1; the
 #      CLI's sign-in under /cli/v1; Slack's events at /webhooks/v1/slack; the
 #      heartbeat at /heartbeat — on 127.0.0.1:8082; the reverse proxy in front
-#      (telmoni.com/docs/self-host/production) forwards each.
+#      (web/content/docs/self-host/production.mdx) forwards each.
 #
 # Upgrading: check out the newer commit, then `build`, `run --rm migrate` and
 # `up -d --wait --wait-timeout 180`, so a refused migration leaves the running stack as it was.

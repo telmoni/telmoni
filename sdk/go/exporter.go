@@ -45,7 +45,7 @@ const (
 	// over: an image a conversation repeats in every call is put once.
 	uploadedMax = 4096
 	// contentDocs is where a dropped content field's warning sends the reader.
-	contentDocs = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
+	contentDocs = "https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/ingest.mdx#what-is-dropped-at-the-door"
 )
 
 var (

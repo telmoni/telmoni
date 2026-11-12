@@ -26,9 +26,6 @@ import type {
 } from './types.js';
 import { VERSION } from './version.js';
 
-/** The machine host; the console's, `https://telmoni.com`, serves people. */
-export const DEFAULT_ENDPOINT = 'https://api.telmoni.com';
-
 /** The longest a flush waits, about 24.8 days: past it Node fires a timer at once. */
 const FLUSH_MAX_MS = 2 ** 31 - 1;
 
@@ -139,7 +136,7 @@ function endpointOf(given: string | undefined): string {
   const scheme = text.indexOf('://');
   if (scheme >= 0) return text.slice(0, scheme + 3) + trimTail(text.slice(scheme + 3));
   const endpoint = trimTail(text);
-  if (endpoint === '') return DEFAULT_ENDPOINT;
+  if (endpoint === '') return '';
   // `https:/host` or `https//host` is a scheme mistyped, not a host: the check refuses it.
   if (/^https?$/i.test(endpoint.split(/[:/]/, 1)[0] ?? '')) return endpoint;
   const host = hostOf(`http://${endpoint}`);
@@ -152,6 +149,8 @@ function endpointOf(given: string | undefined): string {
  * another host, and plain HTTP to another machine would carry the key bare.
  */
 function checkEndpoint(endpoint: string): void {
+  // No default: an unconfigured client never sends anywhere.
+  if (endpoint === '') throw new TypeError("no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint");
   const host = hostOf(endpoint);
   if (host === undefined) throw new TypeError('the endpoint must be an http:// or https:// URL');
   if (endpoint.slice(0, 7).toLowerCase() === 'http://' && !isThisMachine(host)) {

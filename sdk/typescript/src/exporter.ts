@@ -42,7 +42,8 @@ export const WARNED_MAX = 1024;
 /** How many files put are remembered before the set starts over: an image a conversation repeats in every call is put once. */
 export const UPLOADED_MAX = 4096;
 /** Where a dropped content field's warning sends the reader. */
-const CONTENT_DOCS = 'https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door';
+const CONTENT_DOCS =
+  'https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/ingest.mdx#what-is-dropped-at-the-door';
 
 export const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 const DROPPED = /^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$/;

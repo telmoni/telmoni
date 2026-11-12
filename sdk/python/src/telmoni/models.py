@@ -15,9 +15,6 @@ from . import contract
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace.sampling import Sampler
 
-DEFAULT_ENDPOINT = "https://api.telmoni.com"
-"""The machine host; the console's, ``https://telmoni.com``, serves people."""
-
 
 class Secret:
     """A value that prints as ``<redacted>`` wherever it is shown.
@@ -188,7 +185,7 @@ def endpoint_of(given: str | None) -> str:
         return head + scheme + _trim_tail(tail)
     endpoint = _trim_tail(text)
     if not endpoint:
-        return DEFAULT_ENDPOINT
+        return ""
     # "https:/host" or "https//host" is a scheme mistyped, not a host: the check refuses it.
     if endpoint.split(":", 1)[0].split("/", 1)[0].lower() in ("http", "https"):
         return endpoint
@@ -208,6 +205,11 @@ def _trim_tail(text: str) -> str:
 def check_endpoint(endpoint: str) -> None:
     """An endpoint the SDKs could read two ways fails an export or reaches another
     host, and plain HTTP to another machine would carry the key bare."""
+    # No default: an unconfigured client never sends anywhere.
+    if not endpoint:
+        raise ValueError(
+            "no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint"
+        )
     host = _host_of(endpoint)
     if host is None:
         raise ValueError("the endpoint must be an http:// or https:// URL")
@@ -238,7 +240,8 @@ def replace_surrogates(text: str) -> str:
 class Config:
     """How the SDK reaches Telmoni, and what it sends."""
 
-    endpoint: str = DEFAULT_ENDPOINT
+    # Your deployment's origin; required, as there is no default.
+    endpoint: str = ""
     organization_id: str | None = None
     # Wrapped in a Secret by __post_init__, and out of the repr: a configuration
     # printed, logged or turned into a dict would otherwise carry the key.
@@ -319,7 +322,7 @@ class Config:
         read: the SDK's tracer provider is built part by part.
         """
         return cls(
-            endpoint=os.getenv("TELMONI_ENDPOINT") or DEFAULT_ENDPOINT,
+            endpoint=os.getenv("TELMONI_ENDPOINT") or "",
             api_key=os.getenv("TELMONI_API_KEY"),
             organization_id=os.getenv("TELMONI_ORG"),
             # Only 1: a "false" or a "no" must never let content out.

@@ -65,7 +65,10 @@ WARNED_MAX = 1024
 UPLOADED_MAX = 4096
 """How many files put are remembered before the set starts over: an image a
 conversation repeats in every call is put once."""
-CONTENT_DOCS = "https://telmoni.com/docs/api/ingest#what-is-dropped-at-the-door"
+CONTENT_DOCS = (
+    "https://github.com/telmoni/telmoni/blob/main/web/content/docs/api/ingest.mdx"
+    "#what-is-dropped-at-the-door"
+)
 """Where a dropped content field's warning sends the reader."""
 
 _DROPPED = re.compile(r"^span (\S+) dropped (\S+): (\w+)(?:; (.*))?$")

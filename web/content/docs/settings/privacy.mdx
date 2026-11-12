@@ -32,8 +32,7 @@ last used.
 The agent's search index holds copies of the audit log, activity feed notices,
 connector deliveries, each person's own answered questions and, where the
 deployment indexes it, the documentation. A deployment indexes its own
-documentation unless `DOCS_CORPUS_URL` is `off`, the hosted service
-included. Each copy is kept no longer than its source's own
+documentation unless `DOCS_CORPUS_URL` is `off`. Each copy is kept no longer than its source's own
 retention window:
 - **Audit log**: 730 days
 - **Activity feed notices**: 90 days
@@ -46,9 +45,7 @@ together with the earlier turns of the conversation (up to 20 messages) and
 whatever the agent's tools read to answer it: the passages it retrieved, and the
 member roster, connectors, delivery logs, or audit events it looked up. Search
 queries and the indexed text go to the configured embeddings endpoint, and to
-the rerank endpoint if one is set. On the hosted service, the model and the
-embeddings are Google's Gemini API, on Google's paid terms, as the
-[Subprocessors](https://telmoni.com/docs/legal/subprocessors) page states.
+the rerank endpoint if one is set.
 
 ## Deleting an organization
 
@@ -109,6 +106,5 @@ members.** You must first either:
   resolved and the maintenance windows you set or ended, naming nobody once
   your account is gone.
 - **Authentication**: Your user record is purged and all your sessions end
-  immediately. On a self-hosted deployment, a password account's hash goes
-  with it, while an OpenID Connect provider keeps its own record of you; on
-  the hosted service, your account at its identity provider is deleted too.
+  immediately. A password account's hash goes with it, while an OpenID
+  Connect provider keeps its own record of you.

@@ -523,7 +523,7 @@ func TestAPriceHandedIsANameAndNumbersFrom0(t *testing.T) {
 		{Provider: "p", Model: "m", Input: 1e-6, Output: math.NaN()},
 		{Provider: "p", Model: "m", Input: 1e-6, Output: 1e-6, CacheRead: &bad},
 	} {
-		if _, err := telmoni.New(telmoni.Config{Prices: []telmoni.Price{price}}); err == nil {
+		if _, err := telmoni.New(telmoni.Config{Endpoint: testEndpoint, Prices: []telmoni.Price{price}}); err == nil {
 			t.Errorf("%+v was taken", price)
 		}
 	}

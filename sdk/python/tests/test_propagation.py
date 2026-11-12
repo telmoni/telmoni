@@ -9,7 +9,7 @@ from typing import Any
 
 from opentelemetry import trace
 
-from conftest import FakeTransport, attributes_of, load_fixture
+from conftest import ENDPOINT, FakeTransport, attributes_of, load_fixture
 from telmoni import Config, Telmoni, Trace, current_trace
 from telmoni.propagation import (
     decode_baggage_value,
@@ -90,7 +90,9 @@ def test_a_continued_traces_steps_and_calls_carry_the_callers_agent_under_its_sp
 
     worker_transport = FakeTransport()
     worker = Telmoni(
-        Config(api_key="k"), transport=worker_transport, sleep=lambda _: None
+        Config(endpoint=ENDPOINT, api_key="k"),
+        transport=worker_transport,
+        sleep=lambda _: None,
     )
     try:
         continued = worker.extract(headers)

@@ -33,16 +33,16 @@ import (
 	telmoni "github.com/telmoni/telmoni/sdk/go"
 )
 
-func TestTheDefaultEndpointIsTheMachineHost(t *testing.T) {
-	if telmoni.DefaultEndpoint != "https://api.telmoni.com" {
-		t.Errorf("DefaultEndpoint = %q", telmoni.DefaultEndpoint)
+// There is no default endpoint: a client with none, in code or the environment, is refused.
+func TestAClientWithNoEndpointIsRefused(t *testing.T) {
+	const why = "set TELMONI_ENDPOINT to your deployment's endpoint"
+	if _, err := telmoni.New(telmoni.Config{APIKey: telmoni.NewSecret(testKey)}); err == nil || !strings.Contains(err.Error(), why) {
+		t.Errorf("New(Config{}) = %v, want a refusal naming %q", err, why)
 	}
-	if telmoni.DefaultConfig().Endpoint != telmoni.DefaultEndpoint {
-		t.Errorf("DefaultConfig().Endpoint = %q", telmoni.DefaultConfig().Endpoint)
-	}
-	cfg := mustNew(t, telmoni.Config{}).Config()
-	if cfg.Endpoint != telmoni.DefaultEndpoint {
-		t.Errorf("New(Config{}).Config().Endpoint = %q", cfg.Endpoint)
+	t.Setenv("TELMONI_ENDPOINT", "")
+	os.Unsetenv("TELMONI_ENDPOINT")
+	if _, err := telmoni.NewFromEnv(); err == nil || !strings.Contains(err.Error(), why) {
+		t.Errorf("NewFromEnv() with no TELMONI_ENDPOINT = %v, want a refusal naming %q", err, why)
 	}
 }
 
@@ -80,11 +80,11 @@ func TestATrailingSlashIsStripped(t *testing.T) {
 	}
 }
 
-func TestABlankEndpointOrganizationKeyEnvironmentOrReleaseReadsAsUnset(t *testing.T) {
-	cfg := mustNew(t, telmoni.Config{Endpoint: "  ", OrganizationID: " ", APIKey: telmoni.NewSecret("\t"), Environment: " ", Release: ""}).Config()
-	if cfg.Endpoint != telmoni.DefaultEndpoint {
-		t.Errorf("Endpoint = %q", cfg.Endpoint)
+func TestABlankEndpointIsRefusedAndABlankOrganizationKeyEnvironmentOrReleaseReadsAsUnset(t *testing.T) {
+	if _, err := telmoni.New(telmoni.Config{Endpoint: "  "}); err == nil {
+		t.Error("a blank Endpoint was taken")
 	}
+	cfg := mustNew(t, telmoni.Config{OrganizationID: " ", APIKey: telmoni.NewSecret("\t"), Environment: " ", Release: ""}).Config()
 	if cfg.OrganizationID != "" {
 		t.Errorf("OrganizationID = %q", cfg.OrganizationID)
 	}
@@ -185,7 +185,7 @@ func TestFromEnvReadsTheEightVariablesAndNoOther(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://elsewhere.example")
 	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment.name=leaked,service.version=leaked")
 	cfg := telmoni.ConfigFromEnv()
-	if cfg.Endpoint != telmoni.DefaultEndpoint {
+	if cfg.Endpoint != "" {
 		t.Errorf("Endpoint = %q", cfg.Endpoint)
 	}
 	if key := cfg.APIKey.Expose(); key != "" {
@@ -276,13 +276,13 @@ func TestTheVersionIsTheTagsSemver(t *testing.T) {
 }
 
 func TestTheClientBuildsFromEnvWithTheRealTransport(t *testing.T) {
-	t.Setenv("TELMONI_ENDPOINT", "")
+	t.Setenv("TELMONI_ENDPOINT", testEndpoint)
 	client, err := telmoni.NewFromEnv()
 	if err != nil {
 		t.Fatalf("NewFromEnv: %v", err)
 	}
 	defer func() { _ = client.Shutdown(context.Background()) }()
-	if client.Config().Endpoint != telmoni.DefaultEndpoint {
+	if client.Config().Endpoint != testEndpoint {
 		t.Errorf("Endpoint = %q", client.Config().Endpoint)
 	}
 	if mode := client.ContentMode(); mode != "" {
@@ -421,9 +421,9 @@ func TestEveryEndpointIsReadAsTheFixtureReadsIt(t *testing.T) {
 		_ = client.Shutdown(context.Background())
 	}
 	for _, refused := range fixture.Refused {
-		why := "http:// or https://"
-		if refused.As == "cleartext" {
-			why = "unencrypted HTTP"
+		why := map[string]string{"missing": "set TELMONI_ENDPOINT", "url": "http:// or https://", "cleartext": "unencrypted HTTP"}[refused.As]
+		if why == "" {
+			t.Fatalf("endpoints.json: unknown refusal %q", refused.As)
 		}
 		if _, err := telmoni.New(telmoni.Config{Endpoint: refused.Given}); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("New(%q) = %v, want a refusal naming %q", refused.Given, err, why)
@@ -482,14 +482,14 @@ func TestThisMachineIsReachedThroughNoProxy(t *testing.T) {
 			t.Errorf("%s may go through a proxy", endpoint)
 		}
 	}
-	if transport := telmoni.DefaultClient("https://api.telmoni.com").Transport; transport != nil {
+	if transport := telmoni.DefaultClient(testEndpoint).Transport; transport != nil {
 		t.Errorf("another host is sent through %T, not net/http's default", transport)
 	}
 }
 
 // The ten seconds a request has, its answer's head and body within them.
 func TestTheDefaultClientGivesARequestTenSeconds(t *testing.T) {
-	for _, endpoint := range []string{telmoni.DefaultEndpoint, "http://localhost:7100"} {
+	for _, endpoint := range []string{testEndpoint, "http://localhost:7100"} {
 		if got := telmoni.DefaultClient(endpoint).Timeout; got != 10*time.Second {
 			t.Errorf("%s: Timeout = %v, want 10s", endpoint, got)
 		}

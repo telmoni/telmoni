@@ -23,7 +23,7 @@ from opentelemetry.sdk.trace.sampling import (
 )
 from opentelemetry.trace import Span
 
-from conftest import FakeTransport, SwitchableSampler, attributes_of
+from conftest import ENDPOINT, FakeTransport, SwitchableSampler, attributes_of
 from telmoni import Config, Telmoni
 
 
@@ -118,7 +118,9 @@ def test_a_trace_opened_in_a_span_the_application_does_not_sample_is_still_sent(
 
 
 def test_a_configured_sampler_decides_a_trace(transport: FakeTransport) -> None:
-    client = Telmoni(Config(api_key="k", sampler=ALWAYS_OFF), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", sampler=ALWAYS_OFF), transport=transport
+    )
     try:
         app = trace.get_tracer("the-application")
         with client.trace("bot"), app.start_as_current_span("inside") as inside:
@@ -139,7 +141,7 @@ def test_otel_variables_change_nothing_of_ours(transport: FakeTransport) -> None
         "OTEL_BSP_MAX_QUEUE_SIZE": "1",
     }
     with mock.patch.dict(os.environ, env):
-        client = Telmoni(Config(api_key="k"), transport=transport)
+        client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot", user_id="c", session_id="v", tags={"a": "b"}):
             pass
@@ -175,7 +177,7 @@ def test_our_span_metrics_never_reach_the_applications_meter(
         mock.patch.dict(os.environ, env),
         mock.patch.object(metrics, "get_meter_provider", Counting),
     ):
-        client = Telmoni(Config(api_key="k"), transport=transport)
+        client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
         try:
             with client.trace("bot"):
                 pass

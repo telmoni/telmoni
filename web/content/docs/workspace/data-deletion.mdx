@@ -101,8 +101,7 @@ no organization that has other members
 
 - **Erased:** your sessions, your memberships, the audit log exports you
   started, your conversations with the console agent and your own index
-  rows, your linked Slack accounts, and your record at the identity provider
-  on the hosted service.
+  rows and your linked Slack accounts.
 - **Deleted with you:** every organization you own alone, after the same
   15-minute grace.
 - **Rewritten:** feed notices and other people's agent answers that named
@@ -154,10 +153,6 @@ kept readable, each read in the audit log, until its spans' retention ends.
 
 ## Backups and copies
 
-On the hosted service, deleted data leaves the backups as they expire: the
-database keeps thirty daily backups and telemetry's store nightly ones, and
-nothing older than thirty days is kept of either.
-
 When a project or its organization is deleted, or a project's content is
 deleted as its mode goes `off`, the content's key goes in the same commit:
 each field is sealed under a key of the project's own, so from that moment
@@ -165,6 +160,6 @@ nothing reads the content and no backup taken after holds it, the moment the
 receipt gives as "unreadable since". A backup taken before holds the key
 beside the content, and leaves as it expires, as everything else does; so
 does a deleted trace's or end user's content, whose project's key stays for
-its other content. On a self-hosted deployment, your backups are yours. Files
+its other content. Your deployment's backups are yours. Files
 you downloaded and notices already delivered to your channels are yours too,
 and nothing recalls them.

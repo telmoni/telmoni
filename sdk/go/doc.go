@@ -7,10 +7,9 @@
 // completions and tool payloads off every span before it leaves the process
 // unless the code asks and the project allows.
 //
-// The hosted service at https://api.telmoni.com, the default endpoint, is not
-// open yet. Until it is, run Telmoni yourself
-// (https://github.com/telmoni/telmoni#self-hosting) and point TELMONI_ENDPOINT
-// at its machine host.
+// Telmoni is self-hosted (https://github.com/telmoni/telmoni#self-hosting):
+// TELMONI_ENDPOINT, or Config.Endpoint, names your deployment's endpoint, and
+// there is no default.
 //
 //	client, err := telmoni.NewFromEnv()
 //	if err != nil {

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import FakeTransport, answer_from, infos_in, kept, load_fixture
+from conftest import ENDPOINT, FakeTransport, answer_from, infos_in, kept, load_fixture
 from telmoni import Batching, Config, Telmoni, WarningInfo
 from telmoni.exporter import Answer
 
@@ -21,7 +21,7 @@ def test_the_queue_is_bounded_and_drops_are_counted_once(
 ) -> None:
     # A tiny queue, and a worker that will not wake until flushed.
     client = Telmoni(
-        Config(api_key="k"),
+        Config(endpoint=ENDPOINT, api_key="k"),
         transport=transport,
         batching=Batching(max_queue_size=2, max_batch_size=100, schedule_delay_s=60),
     )
@@ -58,7 +58,7 @@ def test_a_warning_whose_handler_raises_never_ends_the_worker(
             raise RuntimeError("the handler's own")
 
     client = Telmoni(
-        Config(api_key="k"),
+        Config(endpoint=ENDPOINT, api_key="k"),
         transport=transport,
         batching=Batching(max_queue_size=2, max_batch_size=100, schedule_delay_s=60),
     )
@@ -82,7 +82,7 @@ def test_a_warning_whose_handler_raises_never_ends_the_worker(
 
 
 def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     with client.trace("bot"):
         pass
     client.shutdown()
@@ -94,7 +94,7 @@ def test_shutdown_drains_what_is_queued(transport: FakeTransport) -> None:
 def test_a_flush_past_its_cap_waits_rather_than_raising(
     transport: FakeTransport, timeout_s: float
 ) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot"):
             pass
@@ -104,7 +104,7 @@ def test_a_flush_past_its_cap_waits_rather_than_raising(
 
 
 def test_a_flush_of_nan_waits_not_at_all(transport: FakeTransport) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot"):
             pass
@@ -122,7 +122,7 @@ def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
     rate_limited = answer_from(load_fixture("answers/rate-limited.json"))
     transport = FakeTransport([rate_limited] * 10)
     client = Telmoni(
-        Config(api_key="k"),
+        Config(endpoint=ENDPOINT, api_key="k"),
         transport=transport,
         batching=Batching(max_batch_size=1, schedule_delay_s=60),
     )
@@ -142,7 +142,7 @@ def test_shutdown_drains_until_its_deadline_then_sends_nothing_more(
 
 def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> None:
     client = Telmoni(
-        Config(api_key="k"),
+        Config(endpoint=ENDPOINT, api_key="k"),
         transport=transport,
         batching=Batching(max_batch_size=3, schedule_delay_s=60),
     )
@@ -162,7 +162,7 @@ def test_a_batch_fills_and_goes_without_a_flush(transport: FakeTransport) -> Non
 # Forking a process with a thread is what this test is about.
 @pytest.mark.filterwarnings("ignore:This process:DeprecationWarning")
 def test_a_forked_child_gets_a_worker_of_its_own(transport: FakeTransport) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("bot"):
             pass
@@ -204,13 +204,13 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
             file.write(body)
         return kept()
 
-    parent = Telmoni(Config(api_key="k"), transport=transport)
+    parent = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
 
     def record() -> None:
         client = (
             parent
             if built_in == "the parent"
-            else Telmoni(Config(api_key="k"), transport=transport)
+            else Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
         )
         with client.trace("bot"):
             pass
@@ -229,7 +229,7 @@ def test_a_multiprocessing_child_sends_its_queue_as_it_exits(
 def test_a_client_shut_down_is_not_held_by_its_fork_hook(
     transport: FakeTransport,
 ) -> None:
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     processor = weakref.ref(client.processor)
     client.shutdown()
     del client

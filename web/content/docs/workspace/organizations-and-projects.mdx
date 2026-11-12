@@ -76,14 +76,17 @@ URL](#name-and-url)). On these pages,
   `/{organization}/audit-log`, `/{organization}/notifications`,
   `/{organization}/limits` ([its limits](#dividing-its-limits-among-its-projects)),
   `/{organization}/data-sheet` (the [data sheet](/docs/workspace/data-sheet))
-  and `/{organization}/settings`,
-  with `/{organization}/billing` on the hosted service.
+  and `/{organization}/settings`.
 - **Project pages** sit under the organization: `/{organization}/{project}` is
   the project's [agents](#a-projects-agents), each with its last trace, what it
-  cost and the alerts that watch it, with
+  cost and the alerts that watch it, and `/agents` [one agent's own
+  page](#an-agents-page), with
   [`/traces`](/docs/monitoring/traces), **Traces** — every trace
-  of the project's agents, grouped by session or user where asked, and a page
-  for each — [`/alerts`](/docs/monitoring/alerts) — its alerts and
+  of the project's agents, and a page
+  for each — [`/sessions`](/docs/monitoring/sessions), **Sessions** — the
+  traces that share a session, summed, and a page for each —
+  [`/users`](/docs/monitoring/users), **Users** — the traces that were for one
+  end user, summed, and a page for each — [`/alerts`](/docs/monitoring/alerts) — its alerts and
   their incidents — `/objectives` — [`/dashboards`](/docs/monitoring/dashboards),
   **Spend** — its spend, tokens, traces, latency and time to first token over a
   window, and its budgets — and `/api-keys`, `/connectors`,
@@ -171,8 +174,7 @@ Windows and Linux):
   **New project**, **Mint key**, **Invite member** (on a project's **Members**
   page, **Add member**), **New alert** on a project's **Alerts** page, **New objective** on its
   **Objectives** page, or
-  **Export** on the organization's audit log; on the hosted service's
-  **Billing** page, **Plans** or **Manage billing**.
+  **Export** on the organization's audit log.
 - **Next and previous (`j`, `k`), open (`o`)**: With a trace open over the
   [Traces](/docs/monitoring/traces#a-trace) list, open the next row's trace or
   the previous one's. After `g`, `k` is still API keys and `o` a project's Agents.
@@ -180,13 +182,13 @@ Windows and Linux):
   you are in has one, and the sheet (`?`) lists the rows of that sidebar. On a
   project's pages:
   - `g` `o`: Agents
-  - `g` `t`: Traces, `g` `a`: Alerts, `g` `v`: Objectives, `g` `s`: Spend
+  - `g` `t`: Traces, `g` `e`: Sessions, `g` `u`: Users, `g` `a`: Alerts, `g` `v`: Objectives, `g` `s`: Spend
   - `g` `k`: API keys, `g` `c`: Connectors, `g` `m`: Members, `g` `l`: Audit log, `g` `n`: Notifications
   - `g` `,`: Settings, as `⌘,` opens preferences on a Mac
 
   On an organization's pages: `g` `p` Projects, `g` `m` Members, `g` `l`
-  Audit log, `g` `n` Notifications, `g` `i` Limits, `g` `,` Settings, and on
-  the hosted service `g` `b` Billing. On your account's pages: `g` `,`
+  Audit log, `g` `n` Notifications, `g` `i` Limits, `g` `,` Settings. On
+  your account's pages: `g` `,`
   General, `g` `u` Account, `g` `n` Notifications, `g` `a` Accessibility,
   `g` `p` Privacy. A row that is not on the sidebar you are in has no sequence
   there, so `g` `k` on an organization's pages does nothing.
@@ -218,34 +220,64 @@ The foot of the sidebar shows the version of Telmoni the console runs.
 A project opens on its **Agents**, `/{organization}/{project}`, the first row
 of its sidebar, its tab titled by the project's name: every agent that ran
 there in the last 14 days, the one whose last trace started latest first.
-Anyone on the project reads it:
+Anyone on the project reads it. Each agent is a card, two a row on a wide
+screen:
 
-| Column | What it shows |
+| On its card | What it shows |
 |---|---|
-| Agent | Its name, a link to its traces on **Traces**; under it, its newest [change](/docs/monitoring/traces#changes) of each kind in the 14 days — a release, a model, a prompt's version or a first tool call — each naming its environment and opening its trace beside the agent's traces |
-| Last trace | How the trace that started last ended, or **Running**, and when it started, a link that opens it beside the agent's traces on **Traces** |
+| Agent | Its name, a link to [its own page](#an-agents-page); under it, its newest release and first tool call in the 14 days, each a [change](/docs/monitoring/traces#changes) naming its environment and opening its trace's own page; then the models and the prompt versions (`name:version`) its traces carried, the one most traces carried first, two of each named and the rest counted, since an agent may switch models and prompts or route between them |
+| Last trace | How the trace that started last ended, or **Running**, and when it started, a link to that trace's own page |
 | Traces | Its traces over the 14 days, and how many ended in error |
 | Last trace's cost | What that trace cost, priced as **Traces** prices it, and what the agent's ended traces usually cost, their median |
 | Watched by | The [alerts](/docs/monitoring/alerts) that read its traces, those held to it and those over every agent, paused ones aside, and the open incidents of those held to it |
 
-Each row ends in **Versions**, which opens the agent's
+Each card carries **Versions**, beside the name, which opens the agent's
 [versions side by side](#an-agents-versions-side-by-side). The open incidents
-of alerts over every agent, which no one agent's row
-counts, are told once above the table. The page draws itself again as the
+of alerts over every agent, which no one agent's card
+counts, are told once above the cards. The page draws itself again as the
 project's spans land, while it is in view: at once for the first, and once
 more for whatever arrives in the next 30 seconds. A project where no agent
 has run in the 14 days says how to send its first trace. A project's notices are on its
 **Notifications** page, its budgets on **Spend**, and its name, ID and
 [content mode](#a-projects-content-mode) on its **Settings**.
 
+### An agent's page
+
+An agent's name on **Agents** opens its own page, titled by the agent: what
+one agent did over a window of days, where **Traces** is every agent's traces
+to search. It opens on the days **Agents** read, and **the window**, beside
+the title, is the last day, week, 30 or 90 days; **Its traces** opens the
+agent's traces on **Traces** over the same window. Anyone on the project reads
+it:
+
+| Part | What it shows |
+|---|---|
+| Last trace | How the trace that started last ended, or **Running**, when it started and what it cost; **Open it** opens it beside the page |
+| All traces | Its traces over the window, and how many ended in error, with their share |
+| Spend | What its traces cost over the window, priced as **Traces** prices them, and what one usually costs, the median of its ended traces |
+| Watched by | The [alerts](/docs/monitoring/alerts) that read its traces, paused ones aside, and the open incidents of those held to it |
+| Failures | Its traces under each [fault](/docs/monitoring/traces#sort-pages-and-the-window) one of their calls carried — rate limited, timeout and the rest, a trace under every one of its own, whether or not it ended in error — each opening those traces on **Traces**; then its five newest traces that ended in error, by their error's class, each opening beside the page |
+| Changes | Its five newest [changes](/docs/monitoring/traces#changes) in the window — a release, a model, a prompt's version, a tool's first call — each opening the trace that first carried it, and how many came before them |
+| Over the window | Its traces as bars by when they started, on your own clock: how they ended, their faults, tokens, cost, durations, times to first token and output speed, two charts to a row, each change marked on the bar it fell in |
+| Versions | Its [versions side by side](#an-agents-versions-side-by-side), over the page's window |
+| Sessions | The five [sessions](/docs/monitoring/sessions) its traces belonged to that were last heard from, each summed over all of its traces and opening [its own page](/docs/monitoring/sessions#a-sessions-page), with the way to the rest; an agent whose traces name no session says so |
+
+A part that could not be read says so, and the rest stand. An agent with no
+trace in the window says so, and leaves the window to widen. The page draws
+itself again as the project's spans land, as **Agents** does. An agent is
+named in the page's link by a parameter, never in its path, since a name may
+hold a slash or be two dots.
+
 ### An agent's versions, side by side
 
-**Versions** on an agent's row opens a panel beside the page that sets the
+**Versions** on an agent's card opens a panel beside the page that sets the
 agent's versions side by side, to answer whether a new one made its traces fail
-more, run longer, cost more or score lower. Three tabs split its traces:
+more, run longer, cost more or score lower; the agent's own page shows the
+same under **Versions**. Three tabs split its traces:
 **Releases**, **Models**, and **Prompts**, one prompt's versions at a time,
 the prompt most of its traces name first and the others in a picker. The panel
-reads the same 14 days, or as many as your plan and the project's
+reads the same 14 days, and the agent's page its own window, or as many as
+the project's
 [retention](/docs/workspace/data-retention) keep of its spans where that is
 fewer, and says how many.
 
@@ -311,9 +343,7 @@ An organization Owner or Admin can create a new project from the organization's
 A deployment may hold each organization to a number of projects, whatever its
 plan: past it, creating a project, accepting one in a transfer or moving one
 in is refused, the organization keeps every project it already holds, and the
-console names who to write to for more. On the hosted service the number is 50
-([Limits](https://telmoni.com/docs/workspace/billing#limits)); a self-hosted
-deployment sets none.
+console names who to write to for more. A self-hosted deployment sets none.
 
 ### Renaming a project
 
@@ -458,24 +488,16 @@ its **Owner**:
    holding no profanity or slur.
 4. Select **Create organization**. The console opens the new organization's
    **Projects** page; [create its first project](#creating-a-project) there
-   or from the switcher. On the hosted service, a second
-   organization is paid for first, as below: the panel asks for its plan and
-   sends you to the payment page, and the organization opens once the
-   payment is confirmed.
+   or from the switcher.
 
 A deployment may hold each person to a number of organizations they own,
 whatever their plans: past it, creating one, or accepting an organization's
-ownership, is refused, and the console names who to write to for more. On the
-hosted service the number is 10
-([Limits](https://telmoni.com/docs/workspace/billing#limits)); a self-hosted
-deployment sets none. Being a member of other people's organizations is never
+ownership, is refused, and the console names who to write to for more. A
+self-hosted deployment sets none. Being a member of other people's organizations is never
 limited. Creating one leaves your [default organization](/docs/settings/account#default-organization),
 the one a sign-in opens, as it was. An operator who has [closed new
 organizations](/docs/self-host/production#closing-new-organizations) closes this
-too: the switcher offers no **New organization**. On the hosted service, one you
-create while you already own an organization on its free plan is paid for
-before it exists, on Pro or Teams, and created once the payment is confirmed
-([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)).
+too: the switcher offers no **New organization**.
 
 ### Renaming an organization
 
@@ -487,9 +509,7 @@ moves nothing: the organization's URL is its own setting on the same page (see
 ### Transferring organization ownership
 
 An organization has exactly one Owner. The Owner can transfer ownership to any
-organization Admin; on the hosted service, one on the free plan goes only to an
-Admin who owns no organization on it
-([One Hobby organization](https://telmoni.com/docs/workspace/billing#one-hobby-organization)):
+organization Admin:
 
 1. The Owner selects **Transfer ownership** on the Admin's row on the
    organization's **Members** page (`/{organization}/members`) and confirms
@@ -560,8 +580,7 @@ Only the **Owner** can delete an organization. Deletion is performed from the
    organization cannot be deleted from the console.
 2. Enter the confirmation code.
 3. **Access ends immediately**: the organization is closed, all API keys stop
-   authenticating, and member access ceases. On the hosted service, its
-   billing is closed at once; a part that cannot finish is retried every ten
+   authenticating, and member access ceases. A part that cannot finish is retried every ten
    minutes, and the confirmation screen says so when that happens. Your own
    account is untouched, and if this was your last organization, your next
    console page provisions a new one while new organizations are allowed, as

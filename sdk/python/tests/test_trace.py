@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Generator, Iterator
 import pytest
 from opentelemetry import trace
 
-from conftest import FakeTransport, attributes_of, infos_in
+from conftest import ENDPOINT, FakeTransport, attributes_of, infos_in
 from telmoni import Config, Telmoni, WarningInfo, current_trace
 from telmoni.exporter import Answer
 
@@ -102,7 +102,10 @@ def content_kept(transport: FakeTransport) -> Telmoni:
     """A client asked for content whose project keeps it, the mode learned."""
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on] * 4
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     with client.trace("warm"):
         pass
     assert client.flush()
@@ -145,7 +148,7 @@ def test_a_failure_keeps_its_message_home_without_capture_content(
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on, on]
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("warm"):
             pass
@@ -592,7 +595,10 @@ def test_a_traces_own_messages_leave_only_when_asked_and_the_project_allows(
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on, on]
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     try:
         with client.trace("warm"):
             pass
@@ -615,7 +621,7 @@ def test_a_traces_own_messages_stay_home_without_capture_content_even_when_allow
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on, on]
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         with client.trace("warm"):
             pass
@@ -635,7 +641,10 @@ def test_a_traces_answer_after_it_ended_is_not_sent_with_one_warning(
 ) -> None:
     on = Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")
     transport.answers = [on, on]
-    client = Telmoni(Config(api_key="k", capture_content=True), transport=transport)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True),
+        transport=transport,
+    )
     try:
         with client.trace("warm"):
             pass

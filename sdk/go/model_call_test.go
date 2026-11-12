@@ -629,7 +629,7 @@ func TestAnImageIsPutOnceWithItsTypeAndKey(t *testing.T) {
 	}
 	sum := sha256.Sum256(png)
 	upload := uploads[0]
-	if want := "https://api.telmoni.com/v1/media/" + hex.EncodeToString(sum[:]); upload.url != want {
+	if want := testEndpoint + "/v1/media/" + hex.EncodeToString(sum[:]); upload.url != want {
 		t.Errorf("put to %s, want %s", upload.url, want)
 	}
 	if got := upload.header.Get("Authorization"); got != "Bearer k" {

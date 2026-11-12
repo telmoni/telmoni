@@ -50,10 +50,11 @@ Install it with your language's tool:
   </Tab>
 </Tabs>
 
-Set the key where your agent runs:
+Set the key and your deployment's endpoint where your agent runs:
 
 ```console
 $ export TELMONI_API_KEY=tm_...
+$ export TELMONI_ENDPOINT=https://telmoni.example.com
 ```
 
 Then open a trace around your agent's work, with a step, a model call and a tool
@@ -69,7 +70,7 @@ Each plugin records every turn of the coding agent as a trace, with no code. Eac
 needs [Node.js](https://nodejs.org) 22 or later on your `PATH`.
 
 **[Claude Code](/docs/api/coding-agents#claude-code):** add the marketplace and
-the plugin, then set the key in a session with
+the plugin, then set the key and the endpoint in a session with
 `/plugin configure telmoni-observability@telmoni-plugins`, and start a new
 session.
 
@@ -79,8 +80,9 @@ claude plugin install telmoni-observability@telmoni-plugins
 ```
 
 **[Codex](/docs/api/coding-agents#codex):** add the marketplace and the plugin,
-put `TELMONI_API_KEY=tm_…` in `~/.codex/.env`, or the key in
-`~/.codex/telmoni.json` as `{"apiKey": "tm_…"}`, a file only you can read, then
+put `TELMONI_API_KEY=tm_…` and `TELMONI_ENDPOINT` in `~/.codex/.env`, or both in
+`~/.codex/telmoni.json` as `{"apiKey": "tm_…", "endpoint": "https://telmoni.example.com"}`,
+a file only you can read, then
 start Codex, run `/hooks` and trust the plugin's `Stop` and `SessionEnd` hooks.
 
 ```sh
@@ -89,8 +91,9 @@ codex plugin add telmoni-observability@telmoni-plugins
 ```
 
 **[Antigravity](/docs/api/coding-agents#antigravity):** install the plugin, then
-put the key in `~/.gemini/config/telmoni.json` as `{"apiKey": "tm_…"}`, a file
-only you can read, or in `TELMONI_API_KEY` where the CLI starts.
+put the key and the endpoint in `~/.gemini/config/telmoni.json` as
+`{"apiKey": "tm_…", "endpoint": "https://telmoni.example.com"}`, a file only you
+can read, or in `TELMONI_API_KEY` and `TELMONI_ENDPOINT` where the CLI starts.
 
 ```sh
 agy plugin install https://github.com/telmoni/antigravity-observability-plugin
@@ -105,7 +108,7 @@ traces through OpenTelemetry's own OTLP exporter, with no SDK of ours. Set the
 exporter from the environment:
 
 ```console
-$ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://api.telmoni.com/otlp/v1/traces
+$ export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://telmoni.example.com/otlp/v1/traces
 $ export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Bearer%20tm_..."
 $ export OTEL_SERVICE_NAME=support-bot
 ```
@@ -121,7 +124,7 @@ Anything else sends OTLP over HTTP to one endpoint, with the key as a bearer
 token:
 
 ```http
-POST https://api.telmoni.com/otlp/v1/traces
+POST https://telmoni.example.com/otlp/v1/traces
 Authorization: Bearer tm_...
 ```
 
@@ -130,9 +133,9 @@ Each span must carry what places it under its agent:
 
 ---
 
-## On your own deployment
+## Your endpoint
 
-A self-hosted Telmoni takes the same key on its own machine host: set
-`TELMONI_ENDPOINT` to that host for an SDK, give it as the endpoint beside a
+`https://telmoni.example.com` above stands for your deployment's machine host:
+set `TELMONI_ENDPOINT` to it for an SDK, give it as the endpoint beside a
 plugin's key ([Coding agents](/docs/api/coding-agents) says where for each), and
-use it in place of `https://api.telmoni.com` for an exporter.
+use it for an exporter. None of them has a default.

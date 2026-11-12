@@ -10,6 +10,7 @@ import { MEDIA_MAX_BYTES } from '../src/contract';
 import type { Telmoni } from '../src/index';
 import { scrub, scrubbedOf, scrubber } from '../src/scrub';
 import {
+  ENDPOINT,
   type ExportBody,
   type Harness,
   type JsonAttribute,
@@ -186,7 +187,7 @@ describe('trace.json', () => {
     );
     expect(normalize(gathered)).toEqual(fixture.export);
     for (const request of transport.requests) {
-      expect(request.url).toBe('https://api.telmoni.com/otlp/v1/traces');
+      expect(request.url).toBe(`${ENDPOINT}/otlp/v1/traces`);
       expect(request.headers['Authorization']).toBe('Bearer telmoni_test_key');
       expect(request.headers['Content-Type']).toBe('application/json');
       expect(request.headers['User-Agent']).toMatch(/^telmoni-typescript\/\d/);

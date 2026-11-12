@@ -87,21 +87,22 @@ export function KeysActions({
           label="API key"
           description={
             <>
-              Shown once: {PRODUCT_NAME} never stores it. You can always mint another on this page.
+              Copy and save this key before closing. {PRODUCT_NAME} will not show it again.
             </>
           }
           closeLabel="I've saved it"
           onClose={() => setMinted(null)}
         >
           <DialogSection
-            title=".env"
+            title="Use in your .env file"
+            collapsible
             note={
               <>
-                On your own deployment, add <code>TELMONI_ENDPOINT</code>, its machine host.
+                Add <code>TELMONI_ENDPOINT</code> too, this deployment&apos;s machine host: the SDKs have no default.
               </>
             }
           >
-            <CopyBox value={`TELMONI_API_KEY="${minted.token}"`} label="the .env line" />
+            <CopyBox value={`TELMONI_API_KEY="${minted.token}"`} label=".env line" labelVisible />
           </DialogSection>
           {minted.ingest && <FirstTrace token={minted.token} tracesHref={tracesHref} />}
         </PlaintextTokenDialog>
@@ -116,9 +117,11 @@ function FirstTrace({ token, tracesHref }: { token: string; tracesHref: string }
   return (
     <DialogSection
       title="Send a first trace"
+      collapsible
       note={
         <>
-          Paste one into a terminal; its trace lists on the{" "}
+          Export <code>TELMONI_ENDPOINT</code>, this deployment&apos;s machine host, then paste one into a
+          terminal; its trace lists on the{" "}
           {/* A tab of its own: leaving the page would take the key off the screen. */}
           <Link href={tracesHref} target="_blank" rel="noopener" className="underline underline-offset-4">
             Traces

@@ -1350,7 +1350,7 @@ log, a warning or an error.
 
     telmoni = Telmoni(
         Config(
-            endpoint="https://api.telmoni.com",
+            endpoint="https://telmoni.example.com",
             api_key="tm_...",
             organization_id="org_019a0b8c3f2e7d41",
             capture_content=False,
@@ -1365,7 +1365,7 @@ log, a warning or an error.
     import { Telmoni } from 'telmoni';
 
     const telmoni = new Telmoni({
-      endpoint: 'https://api.telmoni.com',
+      endpoint: 'https://telmoni.example.com',
       apiKey: process.env.TELMONI_API_KEY,
       organizationId: 'org_019a0b8c3f2e7d41',
       captureContent: false,
@@ -1377,7 +1377,7 @@ log, a warning or an error.
   <Tab value="Go">
     ```go
     client, err := telmoni.New(telmoni.Config{
-    	Endpoint:       "https://api.telmoni.com",
+    	Endpoint:       "https://telmoni.example.com",
     	APIKey:         telmoni.NewSecret(os.Getenv("TELMONI_API_KEY")),
     	OrganizationID: "org_019a0b8c3f2e7d41",
     	CaptureContent: false,
@@ -1391,7 +1391,7 @@ log, a warning or an error.
     use telmoni::{Config, Telmoni};
 
     let telmoni = Telmoni::new(Config {
-        endpoint: "https://api.telmoni.com".into(),
+        endpoint: "https://telmoni.example.com".into(),
         api_key: std::env::var("TELMONI_API_KEY").ok(),
         organization_id: Some("org_019a0b8c3f2e7d41".into()),
         environment: Some("production".into()),
@@ -1427,7 +1427,7 @@ non-enumerable property, which `console.log` and `JSON.stringify` pass over.
 
 | Variable | Description | Default |
 |---|---|---|
-| `TELMONI_ENDPOINT` | The origin ingest is served on: Telmoni's machine host, or your own deployment's | `https://api.telmoni.com` when unset or blank |
+| `TELMONI_ENDPOINT` | The origin ingest is served on: your deployment's machine host, such as `https://telmoni.example.com` | None: required. With none set, or a blank one, Python, TypeScript and Go refuse to build the client, and Rust sends nothing and warns once |
 | `TELMONI_API_KEY` | An [API key](/docs/api/api-keys) holding the **ingest** scope, created on a project's API keys page | None |
 | `TELMONI_ORG` | The organization's ID (`org_...`), held and not sent: the key names the project | None |
 | `TELMONI_ENVIRONMENT` | The deployment this process runs in — `production`, `staging` — sent as `deployment.environment.name`, up to 128 characters | None: nothing is sent |

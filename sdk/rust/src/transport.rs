@@ -207,9 +207,14 @@ pub(crate) fn is_this_machine(host: &str) -> bool {
     name == "localhost" || name.ends_with(".localhost")
 }
 
-/// Why nothing goes to `endpoint`: one the SDKs could read two ways fails an export or
+/// Why nothing goes to `endpoint`: none set, there being no default; one the SDKs could read two ways fails an export or
 /// reaches another host, and plain HTTP to another machine carries the key in the clear.
 pub(crate) fn refusal(endpoint: &str) -> Option<String> {
+    if endpoint.is_empty() {
+        return Some(
+            "no endpoint is set; set TELMONI_ENDPOINT to your deployment's endpoint".to_owned(),
+        );
+    }
     let Some(host) = host_of(endpoint) else {
         return Some("the endpoint must be an http:// or https:// URL".to_owned());
     };
@@ -430,7 +435,9 @@ mod tests {
         ] {
             assert!(bypasses_proxy(url), "{url}");
         }
-        assert!(!bypasses_proxy("https://api.telmoni.com/otlp/v1/traces"));
+        assert!(!bypasses_proxy(
+            "https://telmoni.example.com/otlp/v1/traces"
+        ));
     }
 
     /// A proxy the environment names, which reqwest takes for this machine too,

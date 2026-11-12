@@ -16,6 +16,7 @@ import pytest
 from opentelemetry import trace
 
 from conftest import (
+    ENDPOINT,
     FIXTURES,
     FakeTransport,
     answer_from,
@@ -105,6 +106,7 @@ def test_the_trace_matches_the_golden_export(
     scenario = fixture["scenario"]
     telmoni = Telmoni(
         Config(
+            endpoint=ENDPOINT,
             api_key="telmoni_test_key",
             capture_content=scenario["capture_content"],
             environment=scenario["environment"],
@@ -142,7 +144,7 @@ def test_the_retrievals_match_the_golden_export(
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
     transport.answers = [mode] * 4
     client = Telmoni(
-        Config(api_key="k", capture_content=case["capture_content"]),
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=case["capture_content"]),
         transport=transport,
     )
     try:
@@ -181,6 +183,7 @@ def test_a_trace_is_sent_from_its_start(transport: FakeTransport) -> None:
     spec = scenario["trace"]
     telmoni = Telmoni(
         Config(
+            endpoint=ENDPOINT,
             api_key="telmoni_test_key",
             environment=scenario["environment"],
             release=scenario["release"],
@@ -262,7 +265,7 @@ def test_a_failure_leaves_in_full_only_under_both_locks(
     # The mode to each export: a trace's spans may leave in more than one.
     transport.answers = [mode] * 4
     client = Telmoni(
-        Config(api_key="k", capture_content=case["capture_content"]),
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=case["capture_content"]),
         transport=transport,
     )
     try:
@@ -298,7 +301,7 @@ def test_the_mode_is_asked_before_the_first_content_it_would_send(
         for given in case["answers"]
     ]
     client = Telmoni(
-        Config(api_key="k", capture_content=case["capture_content"]),
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=case["capture_content"]),
         transport=transport,
     )
     messages = fixture["input_messages"] if case["content"] else None
@@ -347,7 +350,7 @@ def test_images_are_lifted_out_of_messages_only_under_both_locks(
     mode = Answer(200, {"Telmoni-Content-Mode": case["content_mode"]}, b"{}")
     transport.answers = [mode] * 3
     client = Telmoni(
-        Config(api_key="k", capture_content=case["capture_content"]),
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=case["capture_content"]),
         transport=transport,
     )
     try:
@@ -422,7 +425,12 @@ def test_the_mask_answers_each_content_field_only_under_both_locks(
     # The mode to each export: a trace's spans may leave in more than one.
     transport.answers = [mode] * 4
     client = Telmoni(
-        Config(api_key="k", capture_content=case["capture_content"], mask=mask),
+        Config(
+            endpoint=ENDPOINT,
+            api_key="k",
+            capture_content=case["capture_content"],
+            mask=mask,
+        ),
         transport=transport,
     )
     try:
@@ -493,7 +501,8 @@ def test_a_mask_that_raises_is_warned_of_once_and_asked_each_export(
 
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 3
     client = Telmoni(
-        Config(api_key="k", capture_content=True, mask=mask), transport=transport
+        Config(endpoint=ENDPOINT, api_key="k", capture_content=True, mask=mask),
+        transport=transport,
     )
     try:
         a_trace(client)
@@ -518,7 +527,12 @@ def test_a_mask_answering_no_string_sends_the_span_without_the_field(
 ) -> None:
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 3
     client = Telmoni(
-        Config(api_key="k", capture_content=True, mask=lambda key, value: 42),  # type: ignore[arg-type,return-value]
+        Config(
+            endpoint=ENDPOINT,
+            api_key="k",
+            capture_content=True,
+            mask=lambda key, value: 42,  # type: ignore[arg-type,return-value]
+        ),
         transport=transport,
     )
     try:
@@ -541,6 +555,7 @@ def test_a_mask_answering_a_value_unchanged_keeps_its_type(
     transport.answers = [Answer(200, {"Telmoni-Content-Mode": "on"}, b"{}")] * 3
     client = Telmoni(
         Config(
+            endpoint=ENDPOINT,
             api_key="k",
             capture_content=True,
             mask=lambda key, value: "yes" if value == "true" else value,
@@ -563,7 +578,7 @@ def test_a_mask_answering_a_value_unchanged_keeps_its_type(
 
 def test_a_mask_that_is_no_function_is_refused() -> None:
     with pytest.raises(TypeError, match="mask must be callable"):
-        Config(mask="redact")  # type: ignore[arg-type]
+        Config(endpoint=ENDPOINT, mask="redact")  # type: ignore[arg-type]
 
 
 def test_each_attempt_carries_this_clock_as_it_leaves() -> None:
@@ -572,7 +587,9 @@ def test_each_attempt_carries_this_clock_as_it_leaves() -> None:
     transport = FakeTransport([unavailable])
     before = time.time_ns()
     telmoni = Telmoni(
-        Config(api_key="k"), transport=transport, sleep=lambda _: time.sleep(0.005)
+        Config(endpoint=ENDPOINT, api_key="k"),
+        transport=transport,
+        sleep=lambda _: time.sleep(0.005),
     )
     try:
         a_trace(telmoni)
@@ -612,7 +629,9 @@ def a_trace(telmoni: Telmoni) -> None:
 
 def test_kept(sleeps: list[float], caplog: pytest.LogCaptureFixture) -> None:
     transport = FakeTransport([answer_from(load_fixture("answers/kept.json"))])
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"), transport=transport, sleep=sleeps.append
+    )
     try:
         assert client.content_mode is None
         a_trace(client)
@@ -626,7 +645,7 @@ def test_kept(sleeps: list[float], caplog: pytest.LogCaptureFixture) -> None:
 def test_dropped_is_warned_once(caplog: pytest.LogCaptureFixture) -> None:
     dropped = load_fixture("answers/dropped.json")
     transport = FakeTransport([answer_from(dropped)] * 2)
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         a_trace(client)
         a_trace(client)
@@ -641,7 +660,7 @@ def test_unlisted_names_the_tag_that_would_keep_it(
 ) -> None:
     unlisted = load_fixture("answers/unlisted.json")
     transport = FakeTransport([answer_from(unlisted)])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         a_trace(client)
     finally:
@@ -655,7 +674,7 @@ def test_a_tag_past_the_cardinality_cap_is_warned_with_what_keeps_it(
 ) -> None:
     cardinality = load_fixture("answers/cardinality.json")
     transport = FakeTransport([answer_from(cardinality)])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         a_trace(client)
     finally:
@@ -669,7 +688,7 @@ def test_refused_is_warned_once_and_never_retried(
 ) -> None:
     refused = load_fixture("answers/refused.json")
     transport = FakeTransport([answer_from(refused)] * 2)
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         a_trace(client)
         a_trace(client)
@@ -686,7 +705,7 @@ def test_rate_limited_waits_retry_after_and_sends_the_same_bytes(
     transport = FakeTransport(
         [answer_from(load_fixture("answers/rate-limited.json")), kept()]
     )
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
         a_trace(client)
@@ -703,7 +722,9 @@ def test_a_retry_after_past_the_cap_waits_the_cap(
     transport = FakeTransport(
         [answer_from(load_fixture("answers/rate-limited-long.json")), kept()]
     )
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"), transport=transport, sleep=sleeps.append
+    )
     try:
         a_trace(client)
     finally:
@@ -728,7 +749,9 @@ def test_retry_after_is_read_as_text(
             *(limited("9" * 400), kept()),
         ]
     )
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=sleeps.append)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"), transport=transport, sleep=sleeps.append
+    )
     try:
         for _ in range(3):
             a_trace(client)
@@ -745,7 +768,7 @@ def test_unavailable_is_retried_three_times_then_dropped(
     fixture = load_fixture("answers/unavailable.json")
     unavailable = answer_from(fixture)
     transport = FakeTransport([unavailable, unavailable, unavailable, kept()])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
         a_trace(client)
@@ -766,7 +789,11 @@ def test_a_failure_whose_last_attempt_met_no_answer_names_no_status(
     """The last attempt's, as the line names it: the 503s before it are not."""
     unavailable = answer_from(load_fixture("answers/unavailable.json"))
     transport = FakeTransport([unavailable, unavailable, OSError("refused")])
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"),
+        transport=transport,
+        sleep=lambda _: None,
+    )
     try:
         a_trace(client)
     finally:
@@ -783,7 +810,7 @@ def test_forbidden_is_not_retried_and_the_next_batch_is_still_sent(
     fixture = load_fixture("answers/forbidden.json")
     forbidden = answer_from(fixture)
     transport = FakeTransport([forbidden, forbidden])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         a_trace(client)
         a_trace(client)
@@ -803,7 +830,11 @@ def test_each_answer_is_warned_word_for_word(
     """Each answer met on every attempt logs its fixture's line, as the plugins read it."""
     fixture = load_fixture(f"answers/{name}")
     transport = FakeTransport([answer_from(fixture)] * 3)
-    client = Telmoni(Config(api_key="k"), transport=transport, sleep=lambda _: None)
+    client = Telmoni(
+        Config(endpoint=ENDPOINT, api_key="k"),
+        transport=transport,
+        sleep=lambda _: None,
+    )
     try:
         a_trace(client)
     finally:
@@ -819,7 +850,7 @@ def test_an_export_that_raises_is_dropped_in_the_words_plugins_read(
 ) -> None:
     """A transport that raises loses its batch alone, said as the plugins match it."""
     transport = FakeTransport([RuntimeError("the transport broke"), kept()])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     try:
         a_trace(client)
         a_trace(client)
@@ -836,7 +867,7 @@ def test_a_network_failure_is_retried_with_backoff(
     sleeps: list[float], caplog: pytest.LogCaptureFixture
 ) -> None:
     transport = FakeTransport([OSError("refused"), OSError("refused"), kept()])
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
         a_trace(client)
@@ -856,7 +887,7 @@ def test_an_answer_broken_before_its_status_is_retried_like_a_refused_connection
             kept(),
         ]
     )
-    client = Telmoni(Config(api_key="k"), transport=transport)
+    client = Telmoni(Config(endpoint=ENDPOINT, api_key="k"), transport=transport)
     client.exporter._sleep = sleeps.append
     try:
         a_trace(client)

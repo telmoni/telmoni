@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	testKey     = "telmoni_test_key"
-	waitTimeout = 5 * time.Second
+	testKey      = "telmoni_test_key"
+	testEndpoint = "https://telmoni.example.com"
+	waitTimeout  = 5 * time.Second
 )
 
 var fixturesDir = filepath.Join("..", "fixtures")
@@ -459,6 +460,7 @@ type harness struct {
 
 func newHarness(t *testing.T, cfg telmoni.Config, transport *fakeTransport, opts ...telmoni.Option) *harness {
 	t.Helper()
+	cfg = withEndpoint(cfg)
 	if transport == nil {
 		transport = newFakeTransport(t)
 	}
@@ -478,7 +480,15 @@ func newHarness(t *testing.T, cfg telmoni.Config, transport *fakeTransport, opts
 }
 
 func testConfig() telmoni.Config {
-	return telmoni.Config{APIKey: telmoni.NewSecret(testKey)}
+	return telmoni.Config{Endpoint: testEndpoint, APIKey: telmoni.NewSecret(testKey)}
+}
+
+// withEndpoint gives a configuration naming none the test's: there is no default.
+func withEndpoint(cfg telmoni.Config) telmoni.Config {
+	if cfg.Endpoint == "" {
+		cfg.Endpoint = testEndpoint
+	}
+	return cfg
 }
 
 func (h *harness) flush() {
@@ -502,7 +512,7 @@ func (h *harness) shutdown() {
 // mustNew builds a client on the real transport, for tests that send nothing.
 func mustNew(t *testing.T, cfg telmoni.Config) *telmoni.Client {
 	t.Helper()
-	client, err := telmoni.New(cfg)
+	client, err := telmoni.New(withEndpoint(cfg))
 	if err != nil {
 		t.Fatalf("building the client: %v", err)
 	}

@@ -59,9 +59,7 @@ export function footerColumns(
       title: "Resources",
       links: [
         ...(SUPPORT_URL ? [{ label: "Support", href: SUPPORT_URL }] : []),
-        // The legal pages are the hosted service's, not this book's: the
-        // policy is linked where it lives, so a self-hosted console's link
-        // reaches it too.
+        // The policy is the repositories' own, linked where it lives.
         {
           label: "Security",
           href: legalUrl ? `${legalUrl}/security` : SECURITY_POLICY_URL,

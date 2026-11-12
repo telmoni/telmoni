@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 use telmoni::transport::{Answer, Method, Transport, TransportError};
-use telmoni::{Config, DEFAULT_ENDPOINT, Hooks, Telmoni, Warning};
+use telmoni::{Config, Hooks, Telmoni, Warning};
 
 pub(crate) type Failure = Box<dyn Error>;
 pub(crate) type Outcome = Result<(), Failure>;
@@ -289,9 +289,12 @@ pub(crate) fn client(
     Telmoni::with_hooks(config, hooks(transport, warnings, sleeps))
 }
 
-/// The default configuration with a key, as the suites run.
+/// The deployment the suites send to; there is no default.
+pub(crate) const ENDPOINT: &str = "https://telmoni.example.com";
+
+/// The default configuration with an endpoint and a key, as the suites run.
 pub(crate) fn keyed() -> Config {
-    Config::new(DEFAULT_ENDPOINT, None, Some("telmoni_test_key".to_owned()))
+    Config::new(ENDPOINT, None, Some("telmoni_test_key".to_owned()))
 }
 
 /// A client on the fakes, with the fakes beside it.
