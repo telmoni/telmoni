@@ -1,3 +1,4 @@
+import { History } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { AccessDenied } from "@/components/access-denied";
@@ -76,7 +77,7 @@ export function AuditLog({
             {events.length > 0 ? (
               <AuditTable events={events} />
             ) : total === 0 ? (
-              <NoticeCard title="No events yet." body={empty} />
+              <NoticeCard icon={History} title="No events yet." body={empty} />
             ) : (
               <NoticeCard title="No events on this page." body="The log ends before it." />
             )}

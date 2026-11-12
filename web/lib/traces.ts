@@ -34,13 +34,13 @@ import {
 } from "./list-query";
 
 // The trace list's URL is its state: every filter, the sort, the window and
-// the page are query parameters, so a link holds them (`list-query.ts`). One
-// more is its own and never reaches the server: the table or the charts.
+// the page are query parameters, so a link holds them (`list-query.ts`).
 // What this module does is read that URL, write it with one thing changed,
-// and put the server's numbers into words.
+// and put the server's numbers into words. The sessions list and the users
+// list are built from the same parts (`sessions.ts`, `users.ts`).
 
-/** The list a project's spans are read as, a page of the console. */
-export type ListName = "traces";
+/** A list a project's spans are read as, each a page of the console. */
+export type ListName = "traces" | "sessions" | "users";
 
 /** A call's tokens as they are kept: input with the cache's reads and
  *  writes, output with reasoning. */
@@ -81,7 +81,8 @@ export function tokenBreakdown(counts: readonly TokenCounts[]) {
   };
 }
 
-const SHARE = new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 });
+// The console's own language, as `COUNT` is: the share is drawn on the server too.
+const SHARE = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 });
 
 /** The share of input the cache answered, a dash where there was no input. */
 export function formatCacheShare(share: number | null): string {
@@ -128,9 +129,19 @@ export const FILTER_LABEL: Record<FilterKey, string> = {
   prompt_version: "Prompt version",
 };
 
+/** The filters whose values are stored hashed: one is typed as the
+ *  application sent it, and the server answers what it is stored as. */
+export const STORED_ID_FILTERS = ["user", "session"] as const satisfies readonly FilterKey[];
+export type StoredIdFilter = (typeof STORED_ID_FILTERS)[number];
+
 /** The filters whose values are ids, or pairs, too many to tick from a list
- *  alone: the sidebar offers them typed in as well, a tag as `key:value`. */
-export const TYPED_FILTERS: readonly FilterKey[] = ["user", "session", "tag"];
+ *  alone: the sidebar offers them typed in as well, an id as the application
+ *  sent it and a tag as `key:value`. */
+export const TYPED_FILTERS: readonly FilterKey[] = [...STORED_ID_FILTERS, "tag"];
+
+/** The filters a list's sidebar shows before its More is opened: what most
+ *  narrowing starts from. The rest show once opened, or while one is ticked. */
+export const PRIMARY_FILTERS: readonly FilterKey[] = ["agent", "status", "fault", "model", "environment"];
 
 /** The longest value each filter takes, in characters, as the server caps it
  *  (`crates/telemetry/src/contract.rs`); a tag's is its key, colon and value,
@@ -146,13 +157,6 @@ export const FILTER_VALUE_MAX: Record<Exclude<FilterKey, "status" | "fault">, nu
   tag: TAG_KEY_MAX + 1 + TAG_VALUE_MAX,
   prompt: 1_024,
   prompt_version: 1_024 + 1 + 1_024,
-};
-
-/** The trace list's own state beside its query, in its URL: never sent to
- *  the server. */
-export type TraceUi = {
-  /** The charts in place of the table; the table when left out. */
-  display?: "chart";
 };
 
 /** A list left empty, as the URL leaves a filter out. */
@@ -256,72 +260,26 @@ export function tagValues(pairs: readonly string[], key: string): string[] {
   return [...new Set(values)].sort();
 }
 
-/** The trace list's own state from its URL. */
-export function parseTraceUi(searchParams: SearchParams): TraceUi {
-  return compact({
-    display: one(searchParams.display) === "chart" ? ("chart" as const) : undefined,
-  });
-}
-
 /** The list's path with `query` in its URL: `patch` changes some keys, and a
- *  key patched to `undefined` is dropped; `ui`, the page's own, rides along. */
+ *  key patched to `undefined` is dropped. */
 export function tracesHref(
   organization: string,
   project: string,
   query: TraceQuery,
   patch: Partial<TraceQuery> = {},
-  ui: TraceUi = {},
 ): string {
-  return listHref(organization, project, "/traces", { ...query, ...patch, ...ui });
-}
-
-/** What the list groups its traces by: their session or their end user, the
- *  rows sorted by it and each group headed in the table. */
-export type Group = "session" | "user";
-
-/** The group the list stands in: its sort, where that sort is a group's. */
-export function groupOf(query: TraceQuery): Group | undefined {
-  if (query.sort === TraceSort.Session) return "session";
-  if (query.sort === TraceSort.User) return "user";
-  return undefined;
-}
-
-/** The query grouped by `group`, or back to the list's own sort, from the
- *  first page either way. */
-export function groupedBy(query: TraceQuery, group: Group | undefined): TraceQuery {
-  if (!group) {
-    return groupOf(query) ? compact({ ...query, sort: undefined, dir: undefined, page: undefined }) : query;
-  }
-  const sort = group === "session" ? TraceSort.Session : TraceSort.User;
-  return compact({ ...query, sort, dir: SortDirection.Asc, page: undefined });
-}
-
-/** A session's traces on the list, the first to start first: where a trace's
- *  session opens. */
-export function sessionTracesHref(
-  organization: string,
-  project: string,
-  sessionId: string,
-  days?: number,
-): string {
-  return tracesHref(organization, project, {
-    session: [sessionId],
-    sort: TraceSort.Started,
-    dir: SortDirection.Asc,
-    days,
-  });
+  return listHref(organization, project, "/traces", query, patch);
 }
 
 /** `list`'s path with `query` in its URL, as the parts every list shares —
- *  its filters, its pages — write it; `ui` is the trace list's own. */
+ *  its filters, its pages — write it. */
 export function listPageHref(
   list: ListName,
   organization: string,
   project: string,
   query: ListQuery<string>,
-  ui: TraceUi = {},
 ): string {
-  return listHref(organization, project, `/${list}`, { ...query, ...ui });
+  return listHref(organization, project, `/${list}`, query);
 }
 
 /** A trace's own page. */
@@ -470,24 +428,24 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     label: "User",
     sort: TraceSort.User,
     first: SortDirection.Asc,
-    hint: "The end user the tracewas for, as stored: hashed under the project's own key.",
+    hint: "The end user the trace was for, as stored: hashed under the project's own key. It opens the user's page.",
   },
   {
     key: TraceColumn.Session,
     label: "Session",
     sort: TraceSort.Session,
     first: SortDirection.Asc,
-    hint: "The session the tracebelongs to, gen_ai.conversation.id.",
+    hint: "The session the trace belongs to, gen_ai.conversation.id, as stored: hashed under the project's own key. It opens the session's page.",
   },
   {
     key: TraceColumn.Environment,
     label: "Environment",
-    hint: "The deployment the trace's spans were sent from, deployment.environment.name on their resource; each once where the tracecrossed services deployed apart.",
+    hint: "The deployment the trace's spans were sent from, deployment.environment.name on their resource; each once where the trace crossed services deployed apart.",
   },
   {
     key: TraceColumn.Release,
     label: "Release",
-    hint: "The version or commit the trace's spans were sent from, service.version on their resource; each once where the tracecrossed services.",
+    hint: "The version or commit the trace's spans were sent from, service.version on their resource; each once where the trace crossed services.",
   },
   {
     key: TraceColumn.Status,
@@ -499,7 +457,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
   {
     key: TraceColumn.ErrorType,
     label: "Error",
-    hint: "The class of the error the traceended on, never its message: TimeoutError, RateLimitError.",
+    hint: "The class of the error the trace ended on, never its message: TimeoutError, RateLimitError.",
   },
   {
     key: TraceColumn.Steps,
@@ -546,7 +504,7 @@ export const TRACE_COLUMNS: readonly ColumnSpec[] = [
     label: "Spans",
     numeric: true,
     group: "counts",
-    hint: "Every span the tracesent: its own, its steps, its calls and any other.",
+    hint: "Every span the trace sent: its own, its steps, its calls and any other.",
   },
   {
     key: TraceColumn.InputTokens,
@@ -702,8 +660,7 @@ export function listSpec<K extends string, S extends string>(spec: {
     project: string,
     query: ListQuery<S>,
     patch: Partial<ListQuery<S>> = {},
-    ui: TraceUi = {},
-  ): string => listHref(organization, project, spec.path, { ...query, ...ui }, patch);
+  ): string => listHref(organization, project, spec.path, query, patch);
   const current = (query: ListQuery<S>): { sort: S; dir: SortDirection } =>
     sortInForce(sorts, spec.defaultSort, query);
   const presetActive = (query: ListQuery<S>, preset: Preset["id"]): boolean => {
@@ -726,7 +683,7 @@ export function listSpec<K extends string, S extends string>(spec: {
     /** The query the URL carries, every value the server would refuse dropped. */
     parse,
     /** The list's path with `query` in its URL: `patch` changes some keys, and
-     *  a key patched to `undefined` is dropped; `ui`, the page's own, rides along. */
+     *  a key patched to `undefined` is dropped. */
     href,
     /** The sort in force: the URL's, else the server's default. */
     current,
@@ -762,16 +719,15 @@ export function orderedColumns(columns: readonly string[]): TraceColumn[] {
   return TRACES.ordered(columns);
 }
 
-/** The columns a list shows until a person picks others: what it showed
- *  before it offered the rest. */
+/** The columns the list shows until a person picks others: what a trace was
+ *  and what it took, and no id stored as a hash. */
 export const DEFAULT_COLUMNS: readonly TraceColumn[] = [
   TraceColumn.Started,
   TraceColumn.Agent,
-  TraceColumn.User,
-  TraceColumn.Session,
   TraceColumn.Status,
   TraceColumn.Steps,
   TraceColumn.Tokens,
+  TraceColumn.Spend,
   TraceColumn.Duration,
   TraceColumn.Scores,
 ];
@@ -784,14 +740,14 @@ export const TRACE_TABLE: ListTable<TraceColumn, TraceSort> = {
 };
 
 /** The trace list, a tag's among its sorts, the server's default newest
- *  first. Its links are `tracesHref`'s, which carry the page's own state. */
+ *  first. */
 export const TRACES = listSpec<TraceColumn, TraceSort | TagSort>({
   path: "/traces",
   table: TRACE_TABLE,
   sorts: TraceSort,
   defaultSort: TraceSort.Started,
   presets: [
-    { id: "errors", label: "Errors", hint: "Only the traces with failed spans" },
+    { id: "errors", label: "Errors", hint: "Only the traces that ended in error" },
     { id: "slow", label: "Slow", hint: "The longest traces first" },
     { id: "tokens", label: "Tokens", hint: "The traces that used the most tokens first" },
   ],
@@ -799,8 +755,6 @@ export const TRACES = listSpec<TraceColumn, TraceSort | TagSort>({
   readSort: readTagSort,
 });
 
-/** The trace list's columns menu, in its rows. */
-export const COLUMN_MENU: readonly ColumnBlock<TraceColumn, TraceSort | TagSort>[] = TRACES.menu;
 export const currentSort = TRACES.current;
 export const nextSort = TRACES.next;
 
@@ -816,6 +770,8 @@ export function pageCount(total: number, limit: number): number {
 /** Where each list's download is served. */
 const DOWNLOAD_PATH: Record<ListName, string> = {
   traces: "/traces/export",
+  sessions: "/sessions/export",
+  users: "/users/export",
 };
 
 /** The trace list as a file, through the console's own route: its filters
@@ -839,6 +795,10 @@ export function listDownloadHref(
 ): string {
   return listHref(organization, project, DOWNLOAD_PATH[list], {
     ...filtersIn(query),
+    // The score narrows the file as it narrows the list, or the file is wider than its menu says.
+    score: query.score,
+    score_min: query.score_min,
+    score_max: query.score_max,
     sort: query.sort,
     dir: query.dir,
     days: query.days,
@@ -856,6 +816,11 @@ const COUNT = new Intl.NumberFormat("en-US");
 /** A count, grouped as the console's English groups it: `12,345`. */
 export function formatCount(n: number): string {
   return COUNT.format(n);
+}
+
+/** A count and what it counts, one or many: `1 trace`, `12,345 traces`. */
+export function counted(n: number, one: string, many: string): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`;
 }
 
 const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -908,6 +873,17 @@ export const DOWNLOAD_MAX = 10_000;
 /** What each list's rows are, one and many, as the page counts them. */
 export const ROW_NOUN: Record<ListName, readonly [string, string]> = {
   traces: ["trace", "traces"],
+  sessions: ["session", "sessions"],
+  users: ["user", "users"],
+};
+
+/** What each list's score filter keeps, said under it: whose score counts. */
+export const SCORE_FILTER_HINT: Record<ListName, string> = {
+  traces: "Rows with a score of this name, any of its scores within the range given; a yes is 1 and a no 0.",
+  sessions:
+    "Sessions with a score of this name, their own or one of their traces', any within the range given; a yes is 1 and a no 0.",
+  users:
+    "Users with a score of this name on one of their traces or sessions, any within the range given; a yes is 1 and a no 0.",
 };
 
 /** The word the console gives each status. */
@@ -1018,8 +994,8 @@ export function retrievalSource(span: {
   return ids.find((id) => id === span.name) ?? ids[0] ?? null;
 }
 
-/** A trace's id as a row shows it: its first eight characters, enough to tell
- *  two apart, the whole on the trace's own page. */
+/** An id as a row shows it — a trace's, or a session's or a user's as stored:
+ *  its first eight characters, enough to tell two apart, the whole behind it. */
 export function shortId(id: string): string {
   return id.slice(0, 8);
 }

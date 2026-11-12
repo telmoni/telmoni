@@ -1,9 +1,13 @@
+import { Wallet } from "lucide-react";
+import { TraceFirstRun } from "@/components/first-run";
 import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { Row, Rows } from "@/components/rows";
 import { ServiceUnavailable } from "@/components/service-unavailable";
 import { WindowPicker } from "@/components/window-picker";
 import { barsOf, tokenBarsOf } from "@/lib/dashboards";
+import { administers } from "@/lib/roles";
+import { projectPath } from "@/lib/slug";
 import { fetchAlerts } from "@/lib/server/entities/alerts";
 import { fetchRollups } from "@/lib/server/entities/dashboards";
 import { fetchTraceHistogram } from "@/lib/server/entities/traces";
@@ -28,7 +32,7 @@ export default async function DashboardsPage({
   params,
   searchParams,
 }: PageProps<"/[organization]/[project]/dashboards">) {
-  const { project: slug } = await params;
+  const { organization, project: slug } = await params;
   const query = await searchParams;
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
@@ -43,6 +47,10 @@ export default async function DashboardsPage({
     fetchRollups(project.id, days, MetricsGroup.Model),
   ]);
   const truncated = totals.kind === "ok" && totals.rollups.truncated;
+  const ever = totals.kind === "ok" && totals.rollups.points.length === 0 && !truncated
+    ? await fetchRollups(project.id, MAX_DAYS)
+    : null;
+  const firstRun = ever?.kind === "ok" && ever.rollups.points.length === 0 && !ever.rollups.truncated;
   const budgets =
     alerts.kind === "ok"
       ? alerts.alerts.filter(
@@ -60,9 +68,13 @@ export default async function DashboardsPage({
       <PageHeader
         title="Spend"
         info="What the project's agents spend, against this month's budgets, and charts over the window, by the UTC day or, for a day, the hour: spend, tokens, traces and latency from the hourly totals, and first-token timing and output speed from retained spans. Output speed shows each model's median and 5th percentile in tokens/s after the first token. Spend is priced as it is read, the project's own prices first."
-        action={<WindowPicker days={days} windows={TOTALS_WINDOWS} />}
+        action={firstRun ? undefined : <WindowPicker days={days} windows={TOTALS_WINDOWS} />}
       />
       <div className="grid gap-page">
+        {firstRun ? (
+          <TraceFirstRun base={projectPath(organization, slug)} canMint={administers(project.role)} kind="spend" />
+        ) : (
+        <>
         {budgets.length > 0 && (
           // A region named by its heading, which `Section` does not make.
           <section aria-labelledby="budgets" className="grid gap-gutter">
@@ -88,6 +100,7 @@ export default async function DashboardsPage({
           />
         ) : totals.rollups.points.length === 0 ? (
           <NoticeCard
+            icon={Wallet}
             title="Nothing to show yet."
             body={`No trace has landed in the last ${
               totals.rollups.days === 1 ? "day" : `${totals.rollups.days} days`
@@ -119,6 +132,8 @@ export default async function DashboardsPage({
             title="The window holds more than one read answers."
             body="Its oldest days are left out. Choose a shorter window to see them all."
           />
+        )}
+        </>
         )}
       </div>
     </>

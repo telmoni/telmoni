@@ -11,7 +11,7 @@ import type { ColumnSpec } from "@/lib/traces";
 import type { SortDirection } from "@/lib/types/enums";
 import { cn } from "@/lib/utils";
 
-// What the three list tables, their pickers and their downloads share, so a
+// What the list tables, their pickers and their downloads share, so a
 // heading, a row's click or a hint is drawn and read one way.
 
 /** A table's headings: a sortable one a link that sorts by it, the tags' a

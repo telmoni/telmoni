@@ -70,11 +70,13 @@ pub mod schedule;
 pub mod schema;
 pub mod scores;
 pub mod seam;
+pub mod sessions;
 pub mod spend;
 pub mod starters;
 pub mod store;
 pub mod sweep;
 pub mod traces;
+pub mod users;
 pub mod versions;
 
 pub use config::Config;
@@ -235,6 +237,19 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/telemetry/traces/{trace_id}",
             get(handler::traces::get_trace).delete(handler::traces::delete_trace),
         )
+        .route("/telemetry/sessions", get(handler::sessions::list_sessions))
+        .route(
+            "/telemetry/sessions/facets",
+            get(handler::sessions::get_facets),
+        )
+        .route(
+            "/telemetry/sessions/export",
+            get(handler::sessions::export_sessions),
+        )
+        .route("/telemetry/stored-id", post(handler::stored_id::stored_id))
+        .route("/telemetry/users", get(handler::users::list_users))
+        .route("/telemetry/users/facets", get(handler::users::get_facets))
+        .route("/telemetry/users/export", get(handler::users::export_users))
         .route("/telemetry/users/erase", post(handler::users::erase_user))
         .route(
             "/telemetry/views",

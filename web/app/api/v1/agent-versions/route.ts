@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { privateJson, privateProblem } from "@/lib/api/respond";
 import { isProjectId } from "@/lib/ids";
+import { MAX_DAYS, whole } from "@/lib/list-query";
 import { isOneOf } from "@/lib/one-of";
 import { type Ceiling, admit } from "@/lib/server/admit";
 import { fetchVersions } from "@/lib/server/entities/versions";
@@ -10,10 +11,11 @@ import { VERSIONS_BY } from "@/lib/versions";
 /** Reads a person may make in a minute: a tab or a picker changed reads once. */
 const READS: Ceiling = { call: "agent-versions:read", limit: 120 };
 
-// One agent's versions side by side, for the Agents page's panel, which reads
-// them once it is opened. The agent is a parameter, never a path segment: a
-// name is any text, `..` among it. Telemetry decides whether the person may
-// read the project's traces, and what an agent, an environment or a prompt may be.
+// One agent's versions side by side, for the Agents page's panel and the
+// agent's own page, which read them once drawn. The agent is a parameter,
+// never a path segment: a name is any text, `..` among it. Telemetry decides
+// whether the person may read the project's traces, and what an agent, an
+// environment or a prompt may be; days no list reads are left out, for its own.
 export async function GET(request: NextRequest) {
   const gate = await admit(READS);
   if (!gate.ok) return privateProblem(gate.status, gate.error, gate.retryAfter);
@@ -30,6 +32,7 @@ export async function GET(request: NextRequest) {
     by,
     environment: asked.get("environment") ?? undefined,
     prompt: asked.get("prompt") ?? undefined,
+    days: whole(asked.get("days") ?? undefined, MAX_DAYS),
   });
   switch (read.kind) {
     case "ok":

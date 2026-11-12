@@ -250,6 +250,15 @@
       "boolean",
       "category"
     ],
+    "SessionSort": [
+      "last_seen",
+      "first_seen",
+      "traces",
+      "failed_traces",
+      "tokens",
+      "spend",
+      "duration"
+    ],
     "Severity": [
       "unknown",
       "ok",
@@ -303,6 +312,16 @@
       "spend",
       "duration",
       "time_to_first_token"
+    ],
+    "UserSort": [
+      "last_seen",
+      "first_seen",
+      "sessions",
+      "traces",
+      "failed_traces",
+      "tokens",
+      "spend",
+      "duration"
     ]
   },
   "flags": {

@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -21,48 +22,48 @@ import {
   pageCount,
   unfiltered,
   type ListName,
-  type TraceUi,
 } from "@/lib/traces";
 import { cn } from "@/lib/utils";
 
 /** What every list's page carries of its window and its pages. */
 type ListWindow = { days: number; total: number; page: number; limit: number };
 
-/** The trace list's page: the forbidden and unavailable branches, the
- *  window and the filters, what the page says when the window holds nothing
- *  or the page is past the last, the table and the way through its pages.
- *  What differs is handed in: the toolbar, the table, the words, and what the
- *  list draws beside them. A Server Component, so its render props run on
- *  the server. */
+/** A list's page, the traces' or the sessions': the forbidden and unavailable
+ *  branches, the window and the filters, what the page says when the window
+ *  holds nothing or the page is past the last, the table and the way through
+ *  its pages. What differs is handed in: the toolbar, the table, the words,
+ *  and what the list draws beside them. A Server Component, so its render
+ *  props run on the server. */
 export function ListPage<L extends ListWindow>({
   list,
   title,
   info,
+  icon,
   organization,
   slug,
+  projectId,
   gate,
   query,
-  ui = {},
   access,
   facets,
   rows,
   toolbar,
   nothingYet,
   firstRun,
-  instead,
   table,
   children,
 }: {
   list: ListName;
   title: string;
   info: string;
+  /** The list's own, on what it says while the window holds nothing. */
+  icon: LucideIcon;
   organization: string;
   slug: string;
+  projectId: string;
   /** What the project page resolved, for the owner a refusal names. */
   gate: ServerContext;
   query: ListQuery<string>;
-  /** The trace list's own state, carried into its links. */
-  ui?: TraceUi;
   access: { kind: "ok"; list: L } | { kind: "forbidden" } | { kind: "unavailable" };
   facets: Facets | null;
   /** How many rows this page holds. */
@@ -73,8 +74,6 @@ export function ListPage<L extends ListWindow>({
   /** In place of the filters and the list, where the page decided nothing has ever
    *  landed for it: the way to the first. */
   firstRun?: ReactNode;
-  /** Drawn in place of the table and its pages. */
-  instead?: ReactNode;
   table: (list: L) => ReactNode;
   /** Drawn after the list: a row's peek. */
   children?: ReactNode;
@@ -106,7 +105,7 @@ export function ListPage<L extends ListWindow>({
           <>
             Widen the window, or{" "}
             <Link
-              href={listPageHref(list, organization, slug, unfiltered(query), ui)}
+              href={listPageHref(list, organization, slug, unfiltered(query))}
               className="underline underline-offset-4"
             >
               clear the filters
@@ -116,7 +115,7 @@ export function ListPage<L extends ListWindow>({
         }
       />
     ) : (
-      <NoticeCard title="Nothing to show yet." body={nothingYet(days)} />
+      <NoticeCard icon={icon} title="Nothing to show yet." body={nothingYet(days)} />
     );
 
   // Nothing for the filters to work on yet: the page is its first run, with what
@@ -144,55 +143,41 @@ export function ListPage<L extends ListWindow>({
                 list={list}
                 organization={organization}
                 slug={slug}
+                projectId={projectId}
                 query={query}
-                ui={ui}
                 facets={facets}
               />
               <div className={cn("grid min-w-0 flex-1 gap-gutter", LIST_DIMS_WHILE_PENDING)}>
-                <FilterBar
-                  list={list}
-                  organization={organization}
-                  slug={slug}
-                  query={query}
-                  ui={ui}
-                />
-                {none ??
-                  instead ?? (
-                    <>
-                      {rows(listed) > 0 ? (
-                        table(listed)
-                      ) : (
-                        <NoticeCard
-                          title="This page is past the last one."
-                          body={
-                            <Link
-                              href={listPageHref(
-                                list,
-                                organization,
-                                slug,
-                                { ...query, page: lastPage },
-                                ui,
-                              )}
-                              className="underline underline-offset-4"
-                            >
-                              Go to the last page
-                              <LinkPending />
-                            </Link>
-                          }
-                        />
-                      )}
-                      <ListPagination
-                        list={list}
-                        organization={organization}
-                        slug={slug}
-                        query={query}
-                        ui={ui}
-                        total={listed.total}
-                        page={listed.page}
-                        limit={listed.limit}
+                <FilterBar list={list} organization={organization} slug={slug} query={query} />
+                {none ?? (
+                  <>
+                    {rows(listed) > 0 ? (
+                      table(listed)
+                    ) : (
+                      <NoticeCard
+                        title="This page is past the last one."
+                        body={
+                          <Link
+                            href={listPageHref(list, organization, slug, { ...query, page: lastPage })}
+                            className="underline underline-offset-4"
+                          >
+                            Go to the last page
+                            <LinkPending />
+                          </Link>
+                        }
                       />
-                    </>
-                  )}
+                    )}
+                    <ListPagination
+                      list={list}
+                      organization={organization}
+                      slug={slug}
+                      query={query}
+                      total={listed.total}
+                      page={listed.page}
+                      limit={listed.limit}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </section>

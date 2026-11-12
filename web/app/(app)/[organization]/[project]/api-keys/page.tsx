@@ -1,3 +1,4 @@
+import { KeyRound } from "lucide-react";
 import { DataTable, THead, Th, Td } from "@/components/data-table";
 import { LocalTime } from "@/components/local-time";
 
@@ -67,6 +68,7 @@ export default async function ApiKeysPage({
           </p>
           {tokens.length === 0 ? (
             <NoticeCard
+              icon={KeyRound}
               title="No API keys yet."
               body={
                 canManage ? "Mint one to call the API." : "API keys will appear here once minted."

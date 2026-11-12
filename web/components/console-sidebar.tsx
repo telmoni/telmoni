@@ -68,7 +68,7 @@ function NavRow({
           className,
         )}
       >
-        <item.icon className="size-icon" />
+        <item.icon className={cn("size-icon", item.isActive && "text-action")} />
       </Link>
     );
   }
@@ -79,7 +79,7 @@ function NavRow({
       : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground",
     className,
   );
-  const icon = <item.icon className="size-icon shrink-0" />;
+  const icon = <item.icon className={cn("size-icon shrink-0", item.isActive && "text-action")} />;
   const label = (
     <span className="flex flex-1 items-center min-w-0 overflow-hidden pr-1">
       <span className="whitespace-nowrap truncate">{short ?? item.title}</span>

@@ -10,7 +10,7 @@ export function UnlinkSlack({ teamId, workspace }: { teamId: string; workspace: 
   const { pending, run } = useToastAction();
   return (
     <Button
-      variant="destructive"
+      variant="destructiveOutline"
       size="sm"
       disabled={pending}
       aria-label={`Unlink your Slack account in ${workspace}`}

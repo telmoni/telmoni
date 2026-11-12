@@ -418,18 +418,37 @@ pub async fn demote(
     }
 }
 
-/// Some traces' own scores, a row a trace a name: their mean, how many, and a
-/// category's every value.
-const TRACE_SUMMARIES_SQL: &str = "SELECT trace_id, name, any(data_type) AS data_type,
-            avg(value) AS mean, count() AS n, arraySort(groupUniqArrayArray(categories)) AS categories
-       FROM telemetry.scores FINAL
-      WHERE project_id IN {projects:Array(String)} AND has({traces:Array(String)}, trace_id)
-        AND target = 'trace'
-      GROUP BY trace_id, name ORDER BY name";
+/// The own scores of some traces or some sessions (`$target`, each named by
+/// `$key`), a row a name of each: its mean, how many, and a category's every
+/// value.
+macro_rules! summaries_sql {
+    ($key:literal, $target:literal) => {
+        concat!(
+            "SELECT ",
+            $key,
+            " AS scored_id, name, any(data_type) AS data_type, ",
+            "avg(value) AS mean, count() AS n, ",
+            "arraySort(groupUniqArrayArray(categories)) AS categories ",
+            "FROM telemetry.scores FINAL ",
+            "WHERE project_id IN {projects:Array(String)} AND has({ids:Array(String)}, ",
+            $key,
+            ") AND target = '",
+            $target,
+            "' GROUP BY ",
+            $key,
+            ", name ORDER BY name"
+        )
+    };
+}
+
+/// A trace's own: its spans' and its session's are not the trace's.
+const TRACE_SUMMARIES_SQL: &str = summaries_sql!("trace_id", "trace");
+/// A session's own: its traces' are theirs.
+const SESSION_SUMMARIES_SQL: &str = summaries_sql!("session_id", "session");
 
 #[derive(Row, Deserialize)]
 struct SummaryRow {
-    trace_id: String,
+    scored_id: String,
     name: String,
     #[serde(with = "text")]
     data_type: ScoreType,
@@ -462,6 +481,9 @@ impl From<SummaryRow> for Summary {
     }
 }
 
+/// Each list row's own scores by name, keyed by the row's id.
+pub type Summaries = std::collections::BTreeMap<String, Vec<Summary>>;
+
 /// Each of `traces`' own scores, summed by name.
 ///
 /// # Errors
@@ -471,23 +493,47 @@ pub async fn of_traces(
     store: &crate::store::Store,
     projects: &crate::store::Projects,
     traces: &[String],
-) -> clickhouse::error::Result<std::collections::BTreeMap<String, Vec<Summary>>> {
-    let mut by_trace = std::collections::BTreeMap::<String, Vec<Summary>>::new();
-    if traces.is_empty() {
-        return Ok(by_trace);
+) -> clickhouse::error::Result<Summaries> {
+    summaries(store, projects, TRACE_SUMMARIES_SQL, traces).await
+}
+
+/// Each of `sessions`' own scores, summed by name: those given to the
+/// session, never its traces'. The sessions are named as stored.
+///
+/// # Errors
+///
+/// ClickHouse did not answer, or refused the read.
+pub async fn of_sessions(
+    store: &crate::store::Store,
+    projects: &crate::store::Projects,
+    sessions: &[String],
+) -> clickhouse::error::Result<Summaries> {
+    summaries(store, projects, SESSION_SUMMARIES_SQL, sessions).await
+}
+
+/// `sql`'s summaries of `ids`, none read where it names none.
+async fn summaries(
+    store: &crate::store::Store,
+    projects: &crate::store::Projects,
+    sql: &'static str,
+    ids: &[String],
+) -> clickhouse::error::Result<Summaries> {
+    let mut by_id = Summaries::new();
+    if ids.is_empty() {
+        return Ok(by_id);
     }
     let rows: Vec<SummaryRow> = store
-        .read(projects, TRACE_SUMMARIES_SQL)
-        .param("traces", traces)
+        .read(projects, sql)
+        .param("ids", ids)
         .fetch_all()
         .await?;
     for row in rows {
-        by_trace
-            .entry(row.trace_id.clone())
+        by_id
+            .entry(row.scored_id.clone())
             .or_default()
             .push(row.into());
     }
-    Ok(by_trace)
+    Ok(by_id)
 }
 
 /// A trace's scores, and its spans' and its session's, newest first, each
@@ -502,6 +548,24 @@ pub const TRACE_SQL: &str = "SELECT * FROM telemetry.scores FINAL
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A list's rows' own scores are read by what was scored: a trace's
+    /// leave out its spans' and its session's, and a session's its traces'.
+    #[test]
+    fn a_rows_own_scores_are_read_by_what_was_scored() {
+        for (sql, key, target) in [
+            (TRACE_SUMMARIES_SQL, "trace_id", "trace"),
+            (SESSION_SUMMARIES_SQL, "session_id", "session"),
+        ] {
+            assert!(sql.contains(crate::store::PROJECTS_PARAM), "{sql}");
+            let held = format!("has({{ids:Array(String)}}, {key}) AND target = '{target}'");
+            assert!(sql.contains(&held), "{sql}");
+            assert!(
+                sql.ends_with(&format!("GROUP BY {key}, name ORDER BY name")),
+                "{sql}"
+            );
+        }
+    }
 
     fn judgement(data_type: ScoreType) -> Judgement {
         Judgement {

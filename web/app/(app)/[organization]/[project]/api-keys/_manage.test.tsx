@@ -69,6 +69,15 @@ describe("KeysActions", () => {
     });
     const shown = await screen.findByRole("dialog", { name: "Key created" });
     expect(within(shown).getByText("tm_abc123")).toBeInTheDocument();
+    expect(within(shown).getByRole("button", { name: "Copy API key" })).toBeInTheDocument();
+    const env = within(shown).getByText("Use in your .env file");
+    expect(env.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(env);
+    expect(within(shown).getByRole("button", { name: "Copy .env line" })).toBeInTheDocument();
+    expect(within(shown).getByText('TELMONI_API_KEY="tm_abc123"')).toBeInTheDocument();
+    const firstTrace = within(shown).getByText("Send a first trace");
+    expect(firstTrace.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(firstTrace);
     // A key that sends spans comes with each SDK's first trace, the key in it.
     expect(within(shown).getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "Python",

@@ -880,9 +880,10 @@ fn kept_for(l: &Lane, release: &'static str, days: i64) -> (Vec<SpanRow>, Vec<Sc
     )
 }
 
-/// ⚠ The window is the Agents page's fourteen days, held to the project's
-/// own retention, which the plan's does not know, and to the plan's: a trace
-/// or a score either store no longer promises is no part of a row.
+/// ⚠ The window is the days asked, the Agents page's fourteen where none
+/// are, held to the project's own retention, which the plan's does not know,
+/// and to the plan's: a trace or a score either store no longer promises is
+/// no part of a row.
 #[sqlx::test]
 async fn the_window_is_held_to_what_the_project_and_the_plan_keep(pool: PgPool) {
     let Some(l) = lane(&pool, module_path!()).await else {
@@ -896,6 +897,17 @@ async fn the_window_is_held_to_what_the_project_and_the_plan_keep(pool: PgPool) 
     let whole = l.read(&[("agent", AGENT)]).await;
     assert_eq!(whole["days"], 14, "no settings row, and a plan keeping all");
     assert_eq!(values(&whole), ["new", "old"]);
+    let asked = l.read(&[("agent", AGENT), ("days", "2")]).await;
+    assert_eq!(asked["days"], 2, "the days asked");
+    assert_eq!(
+        values(&asked),
+        ["new"],
+        "a trace three days old is past them"
+    );
+    assert_eq!(
+        l.read(&[("agent", AGENT), ("days", "30")]).await["days"],
+        30
+    );
     assert_eq!(
         row(&whole, "new")["scores"],
         json!([{ "name": "helpful", "mean": 0.5, "count": 2 }])
@@ -906,6 +918,11 @@ async fn the_window_is_held_to_what_the_project_and_the_plan_keep(pool: PgPool) 
     settings(&pool, &l, Some(2)).await;
     let held = l.read(&[("agent", AGENT)]).await;
     assert_eq!(held["days"], 2, "the project's own two days");
+    assert_eq!(
+        l.read(&[("agent", AGENT), ("days", "30")]).await["days"],
+        2,
+        "and no more for the asking"
+    );
     assert_eq!(
         values(&held),
         ["new"],
@@ -1017,7 +1034,9 @@ async fn an_agent_is_read_by_any_name_it_has(pool: PgPool) {
         "?agent=a&by=release&by=model".to_owned(),
         "?agent=a&environment=x&environment=y".to_owned(),
         "?agent=a&prompt=".to_owned(),
-        "?agent=a&days=7".to_owned(),
+        "?agent=a&days=0".to_owned(),
+        "?agent=a&days=7&days=30".to_owned(),
+        "?agent=a&limit=7".to_owned(),
     ] {
         assert_eq!(l.status(&query).await, StatusCode::BAD_REQUEST, "{query}");
     }

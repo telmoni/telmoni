@@ -159,7 +159,8 @@ describe("an agent's versions panel", () => {
     expect(within(panel).getByRole("tab", { name: "Releases" })).toHaveAttribute("aria-selected", "true");
 
     const newer = (await within(panel).findByText("1.4.2")).closest("tr")!;
-    expect(asks()).toEqual([{ agent: "support-bot", by: "release", project: "project_1" }]);
+    // Over the days its page read, which the read names.
+    expect(asks()).toEqual([{ agent: "support-bot", by: "release", days: "14", project: "project_1" }]);
     expect(within(panel).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
       "Release",
       "Traces",
@@ -228,7 +229,7 @@ describe("an agent's versions panel", () => {
     await within(panel).findByText("1.4.2");
     const [url] = fetchMock.mock.calls[0]!;
     expect(new URL(url, "http://localhost").pathname).toBe("/api/v1/agent-versions");
-    expect(asks()[0]).toEqual({ agent: "..", by: "release", project: "project_1" });
+    expect(asks()[0]).toEqual({ agent: "..", by: "release", days: "14", project: "project_1" });
   });
 
   it("reads its models, and says a trace counts under each it called", async () => {
@@ -242,7 +243,7 @@ describe("an agent's versions panel", () => {
     await within(panel).findByText("1.4.2");
     fireEvent.mouseDown(within(panel).getByRole("tab", { name: "Models" }), { button: 0 });
     expect(await within(panel).findByText("gpt-4o-mini")).toBeInTheDocument();
-    expect(asks().at(-1)).toEqual({ agent: "support-bot", by: "model", project: "project_1" });
+    expect(asks().at(-1)).toEqual({ agent: "support-bot", by: "model", days: "14", project: "project_1" });
     expect(within(panel).getByRole("columnheader", { name: "Model" })).toBeInTheDocument();
     expect(within(panel).getByText(/A trace counts under every model it called\./)).toBeInTheDocument();
   });
@@ -265,7 +266,13 @@ describe("an agent's versions panel", () => {
 
     fireEvent.change(picker, { target: { value: "1" } });
     await waitFor(() =>
-      expect(asks().at(-1)).toEqual({ agent: "support-bot", by: "release", environment: "", project: "project_1" }),
+      expect(asks().at(-1)).toEqual({
+        agent: "support-bot",
+        by: "release",
+        environment: "",
+        days: "14",
+        project: "project_1",
+      }),
     );
     expect(await within(panel).findByText(/whose spans in \(no environment\)/)).toBeInTheDocument();
     expect(within(panel).getByRole("combobox")).toHaveValue("1");
@@ -310,7 +317,7 @@ describe("an agent's versions panel", () => {
     await within(panel).findByText("1.4.2");
     fireEvent.mouseDown(within(panel).getByRole("tab", { name: "Prompts" }), { button: 0 });
     expect(await within(panel).findByRole("columnheader", { name: "Version" })).toBeInTheDocument();
-    expect(asks().at(-1)).toEqual({ agent: "support-bot", by: "prompt", project: "project_1" });
+    expect(asks().at(-1)).toEqual({ agent: "support-bot", by: "prompt", days: "14", project: "project_1" });
     const picker = within(panel).getByRole("combobox");
     expect(picker).toHaveValue("triage");
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_DAYS } from "@/lib/list-query";
 
 vi.mock("@/components/page-header", () => ({
   PageHeader: ({ title, action }: { title?: string; action?: React.ReactNode }) => (
@@ -10,7 +11,7 @@ vi.mock("@/components/page-header", () => ({
     </div>
   ),
 }));
-vi.mock("@/components/window-picker", () => ({ WindowPicker: () => null }));
+vi.mock("@/components/window-picker", () => ({ WindowPicker: () => <span data-testid="window-picker" /> }));
 // Recharts measures a box jsdom has none of: the charts are their bars' count.
 vi.mock("./_charts", () => ({
   DashboardCharts: ({ bars, firstToken, histogram }: { bars: unknown[]; firstToken: unknown[]; histogram: { days: number; bucket_seconds: number } | null }) => (
@@ -158,11 +159,26 @@ describe("DashboardsPage", () => {
   });
 
   it("says nothing has landed in the window the totals read, and draws no chart", async () => {
-    fetchRollups.mockResolvedValue(rollups([], false, 30));
+    fetchRollups.mockImplementation((_project: string, days: number) =>
+      Promise.resolve(days === MAX_DAYS ? rollups([point(5)], false, MAX_DAYS) : rollups([], false, 30)),
+    );
     render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({ days: "90" }) }));
     expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
     expect(screen.getByText("No trace has landed in the last 30 days.")).toBeInTheDocument();
     expect(screen.queryByTestId("charts")).toBeNull();
+    expect(screen.getByTestId("window-picker")).toBeInTheDocument();
+  });
+
+  it("shows tracing setup instead of charts, budgets and controls before any data arrives", async () => {
+    fetchRollups.mockResolvedValue(rollups([]));
+    render(await DashboardsPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(screen.getByRole("heading", { name: "See what your agents spend" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first trace");
+    expect(screen.getByText(/model name and token usage/)).toBeInTheDocument();
+    expect(screen.queryByTestId("window-picker")).toBeNull();
+    expect(screen.queryByTestId("charts")).toBeNull();
+    expect(screen.queryByText("Budgets this month")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Mint a key" })).toBeNull();
   });
 
   it("says when a read left the window's oldest points out", async () => {

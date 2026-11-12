@@ -5,15 +5,18 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
+import { cn } from "@/lib/utils";
 
 export function CopyButton({
   value,
   label,
   absolute,
+  labelVisible = false,
 }: {
   value: string;
   label: string;
   absolute?: boolean;
+  labelVisible?: boolean;
 }) {
   const { copied, copy } = useCopyToClipboard();
 
@@ -21,8 +24,8 @@ export function CopyButton({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
-      className="text-muted-foreground hover:text-foreground"
+      size={labelVisible ? "sm" : "icon"}
+      className={cn("shrink-0 text-muted-foreground hover:text-foreground", labelVisible && "self-end sm:self-start")}
       aria-label={`Copy ${label}`}
       onClick={async () => {
         const text = absolute ? `${window.location.origin}${value}` : value;
@@ -36,6 +39,7 @@ export function CopyButton({
       ) : (
         <Copy aria-hidden="true" />
       )}
+      {labelVisible && <span>{copied ? "Copied" : `Copy ${label}`}</span>}
     </Button>
   );
 }

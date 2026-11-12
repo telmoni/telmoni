@@ -8,10 +8,17 @@ const MARK: Record<SpanStatus, string> = {
   [SpanStatus.Cancelled]: "bg-muted-foreground/50",
 };
 
-/** How a trace or a span ended, as a square in its colour, as an alert's
- *  severity is (`SeverityMark`): a failure keeps its error's class in words
- *  beside it; `null`, still running, is a muted square that breathes. The
- *  word is the square's title and a screen reader's. */
+/** Status colour and optional live pulse; the caller supplies its accessible label. */
+export function StatusIndicator({ className, live = false }: { className: string; live?: boolean }) {
+  return (
+    <span aria-hidden="true" className="relative inline-flex size-2 shrink-0">
+      {live && <span className={cn("absolute inline-flex size-full rounded-full opacity-75 motion-safe:animate-ping", className)} />}
+      <span className={cn("relative inline-flex size-2 rounded-full", className)} />
+    </span>
+  );
+}
+
+/** A trace's outcome, or live activity, with failures named beside the mark. */
 export function StatusMark({
   status,
   detail,
@@ -27,13 +34,7 @@ export function StatusMark({
       data-slot="status"
       className="inline-flex shrink-0 items-center gap-1.5"
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "size-2 rounded-full",
-          status === null ? "bg-muted-foreground/50 motion-safe:animate-pulse" : MARK[status],
-        )}
-      />
+      <StatusIndicator live={status === null} className={status === null ? "bg-brand-positive" : MARK[status]} />
       <span className="sr-only">{failed ? `${word}: ` : word}</span>
       {failed && <span className="text-brand-negative">{detail}</span>}
     </span>

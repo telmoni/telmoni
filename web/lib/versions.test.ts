@@ -153,6 +153,11 @@ describe("the read's address", () => {
     );
     expect(versionsQuery({ agent: "a", by: "prompt", prompt: "triage:blue" }).get("prompt")).toBe("triage:blue");
   });
+
+  it("asks for the days a page reads, and leaves them to the server where it names none", () => {
+    expect(versionsQuery({ agent: "a", by: "release" }).has("days")).toBe(false);
+    expect(versionsQuery({ agent: "a", by: "release", days: 30 }).toString()).toBe("agent=a&by=release&days=30");
+  });
 });
 
 describe("VersionsSchema", () => {

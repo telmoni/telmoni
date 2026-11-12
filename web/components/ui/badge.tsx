@@ -14,8 +14,10 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
         secondary:
           "bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
-        destructive:
-          "bg-destructive text-destructive-foreground dark:bg-destructive-fill [a&]:hover:bg-destructive/90 dark:[a&]:hover:bg-destructive-fill/90",
+        // Statuses are tinted, not filled: the colour carries, the row stays calm.
+        destructive: "bg-destructive/10 text-destructive",
+        positive: "bg-brand-positive/10 text-brand-positive",
+        warning: "bg-warning/15 text-warning",
         outline:
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",

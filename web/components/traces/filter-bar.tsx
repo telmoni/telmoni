@@ -10,7 +10,6 @@ import {
   unfiltered,
   without,
   type ListName,
-  type TraceUi,
 } from "@/lib/traces";
 
 // The filters in force above a list: a value at a time, each taken off by
@@ -21,14 +20,11 @@ export function FilterBar({
   organization,
   slug,
   query,
-  ui = {},
 }: {
   list: ListName;
   organization: string;
   slug: string;
   query: ListQuery<string>;
-  /** The trace list's own state, which its links carry. */
-  ui?: TraceUi;
 }) {
   const chips = activeFilters(query);
   if (chips.length === 0) return null;
@@ -44,7 +40,7 @@ export function FilterBar({
             {chip.text}
           </span>
           <Link
-            href={listPageHref(list, organization, slug, without(query, chip.filter, chip.value), ui)}
+            href={listPageHref(list, organization, slug, without(query, chip.filter, chip.value))}
             scroll={false}
             aria-label={`Clear ${chip.label.toLowerCase()} ${chip.text}`}
             className="rounded-sm text-muted-foreground hover:text-foreground"
@@ -56,7 +52,7 @@ export function FilterBar({
       ))}
       {chips.length > 0 && (
         <Link
-          href={listPageHref(list, organization, slug, unfiltered(query), ui)}
+          href={listPageHref(list, organization, slug, unfiltered(query))}
           scroll={false}
           className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >

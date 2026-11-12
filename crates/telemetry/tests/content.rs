@@ -1594,6 +1594,136 @@ async fn no_tag_value_or_end_user_id_reaches_a_log_an_error_or_the_audit_chain(p
     assert_eq!(errors.len(), 2, "both refusals were read");
 }
 
+/// ⚠ An id as the application sent it is answered as ingest stored it, to
+/// anyone who reads the project's traces, so a list is narrowed by an id no
+/// page shows; it reaches no log line and no error's detail.
+#[sqlx::test]
+async fn an_id_as_sent_is_answered_as_ingest_stored_it(pool: PgPool) {
+    let Some(_ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let (_logging, logs) = captured_logs();
+    const USER: &str = "end-user-7k2-who-the-agent-served";
+    const SESSION: &str = "thread-9q4-a-customer-opened";
+    let door = door(&pool, ContentMode::Off).await;
+    for (user, role, seat) in [
+        ("admin-1", OrganizationRole::Owner, None),
+        ("member-1", OrganizationRole::Member, Some(Role::Member)),
+    ] {
+        door.auth
+            .seat(user, &door.organization, &door.project, role, seat);
+    }
+    // Before its first export the project has stored no id, and holds no
+    // key: a reader's asking makes none.
+    let asked = Some(json!({ "user_id": USER }));
+    let (status, _) = door.lane("POST", "/stored-id", "member-1", asked).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "nothing is stored yet");
+    let keyed: bool = sqlx::query_scalar(
+        "SELECT hashing_key_ciphertext IS NOT NULL FROM telemetry.project_settings \
+          WHERE project_id = $1",
+    )
+    .bind(&door.project)
+    .fetch_one(&pool)
+    .await
+    .expect("the project's row");
+    assert!(!keyed, "a read made the project's key");
+
+    let named = [(contract::USER_ID, USER), (contract::SESSION_ID, SESSION)];
+    door.send(export_of(TRACE, SPAN, &named, "result")).await;
+    common::eventually("the trace is read", || found(&door, TRACE)).await;
+
+    // An id is read as ingest read it, its NULs dropped before it is hashed.
+    let (_, plain) = door
+        .lane(
+            "POST",
+            "/stored-id",
+            "member-1",
+            Some(json!({ "user_id": USER })),
+        )
+        .await;
+    let (_, with_nul) = door
+        .lane(
+            "POST",
+            "/stored-id",
+            "member-1",
+            Some(json!({ "user_id": USER.replacen('-', "-\0", 1) })),
+        )
+        .await;
+    assert_eq!(plain["stored_id"], with_nul["stored_id"]);
+
+    for (filter, body) in [
+        ("user", json!({ "user_id": USER })),
+        ("session", json!({ "session_id": SESSION })),
+    ] {
+        let (status, answer) = door
+            .lane("POST", "/stored-id", "member-1", Some(body))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{filter}: {answer}");
+        let stored = answer["stored_id"].as_str().expect("the stored id");
+        assert!(
+            stored.len() == 32 && stored.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{filter}: a hash, never the id: {stored}"
+        );
+        for list in ["/traces", "/sessions"] {
+            let path = format!("{list}?{filter}={stored}");
+            let (status, listed) = door.lane("GET", &path, "member-1", None).await;
+            assert_eq!(status, StatusCode::OK, "{path}: {listed}");
+            assert_eq!(listed["total"], 1, "{path}: narrowed to what carries it");
+        }
+    }
+    let (_, unseen) = door
+        .lane(
+            "POST",
+            "/stored-id",
+            "member-1",
+            Some(json!({ "user_id": "nobody" })),
+        )
+        .await;
+    let path = format!(
+        "/traces?user={}",
+        unseen["stored_id"].as_str().expect("a hash")
+    );
+    assert_eq!(
+        door.lane("GET", &path, "member-1", None).await.1["total"],
+        0,
+        "an id no span carries is hashed all the same, and narrows to nothing"
+    );
+
+    let mut errors = Vec::new();
+    for refused in [
+        json!({ "user_id": USER.repeat(8) }),
+        json!({ "session_id": "" }),
+        json!({ "user_id": USER, "session_id": SESSION }),
+        json!({}),
+    ] {
+        let (status, answer) = door
+            .lane("POST", "/stored-id", "member-1", Some(refused))
+            .await;
+        assert!(status.is_client_error(), "{status}: {answer}");
+        errors.push(answer.to_string());
+    }
+    let (status, _) = door
+        .lane(
+            "POST",
+            "/stored-id",
+            "stranger-1",
+            Some(json!({ "user_id": USER })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "nobody outside the project asks"
+    );
+    for (what, text) in [
+        ("an error's detail", errors.join(" ")),
+        ("a log line", logs.text()),
+    ] {
+        assert!(!text.contains(USER), "an end user's id in {what}: {text}");
+        assert!(!text.contains(SESSION), "a session's id in {what}: {text}");
+    }
+}
+
 /// ⚠ A field held small: compressed before it is sealed.
 #[sqlx::test]
 async fn a_kept_field_is_compressed_before_it_is_sealed(pool: PgPool) {

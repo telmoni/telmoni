@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { barsOf, tokenBarsOf } from "./dashboards";
+import { DEFAULT_SPEND_LAYOUT, barsOf, readSpendLayout, tokenBarsOf } from "./dashboards";
+
+describe("personal Spend layouts", () => {
+  it("keeps a saved order, width and hidden charts", () => {
+    const layout = DEFAULT_SPEND_LAYOUT.toReversed().map((row, index) => ({
+      ...row, width: index === 0 ? "full" : "half", visible: index !== 1,
+    }));
+    expect(readSpendLayout(JSON.stringify(layout))).toEqual(layout);
+  });
+
+  it.each([
+    null,
+    "not json",
+    JSON.stringify(DEFAULT_SPEND_LAYOUT.slice(1)),
+    JSON.stringify(DEFAULT_SPEND_LAYOUT.map(() => DEFAULT_SPEND_LAYOUT[0])),
+    JSON.stringify(DEFAULT_SPEND_LAYOUT.map((row) => ({ ...row, width: "invalid" }))),
+    JSON.stringify(DEFAULT_SPEND_LAYOUT.map((row) => ({ ...row, measure: "unknown" }))),
+  ])("uses the complete default layout when stored data is invalid: %s", (stored) => {
+    expect(readSpendLayout(stored)).toEqual(DEFAULT_SPEND_LAYOUT);
+  });
+});
 
 describe("the Spend page's numbers", () => {
   it("draws each hour's traces as those that ended well and those that failed", () => {

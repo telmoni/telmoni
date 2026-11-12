@@ -1,16 +1,13 @@
 "use client";
 
-import { Fragment, type ReactNode, useId, useRef, useState, useTransition } from "react";
+import { Fragment, useId, useRef, useState, useTransition } from "react";
 import {
-  ChartColumnIcon,
   ChevronRightIcon,
   CircleXIcon,
   CoinsIcon,
   Columns3Icon,
   DownloadIcon,
-  GroupIcon,
   RefreshCwIcon,
-  TableIcon,
   TimerIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -29,8 +26,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toggle } from "@/components/ui/toggle";
 import {
   ColumnHint,
@@ -40,48 +35,34 @@ import {
 } from "@/components/traces/list-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WindowPicker } from "@/components/window-picker";
+import type { SessionQuery } from "@/lib/server/entities/sessions";
 import type { ListQuery, TraceQuery } from "@/lib/server/entities/traces";
+import type { UserQuery } from "@/lib/server/entities/users";
+import { SESSIONS } from "@/lib/sessions";
+import { USERS } from "@/lib/users";
 import {
   COLUMNS_PREF,
   type TracePrefs,
 } from "@/lib/trace-prefs";
 import {
-  COLUMN_MENU,
   DOWNLOAD_MAX,
   ROW_NOUN,
   TRACES,
-  TRACE_TABLE,
+  counted,
   formatCount,
-  groupOf,
-  groupedBy,
   listDownloadHref,
   ordered,
-  tracesHref,
   type ColumnBlock,
   type ColumnGroup,
-  type Group,
   type ListName,
   type ListSpec,
   type ListTable,
   type Preset,
-  type TraceUi,
 } from "@/lib/traces";
 import { toggled } from "@/lib/trace-tree";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { useOverflow } from "@/lib/use-overflow";
 import { cn } from "@/lib/utils";
-
-type Common = {
-  organization: string;
-  slug: string;
-  ui: TraceUi;
-  /** How many rows the filters admit. */
-  total: number;
-  /** The window's days, the toolbar's first control. */
-  days: number;
-};
-
-type Props = Common & { query: TraceQuery };
 
 /** Each ready-made query's icon. */
 const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
@@ -90,102 +71,46 @@ const PRESET_ICON: Record<Preset["id"], LucideIcon> = {
   tokens: CoinsIcon,
 };
 
-/** Each list's columns menu, and its rows. */
+/** Each list's columns menu, and its rows: its own scaffold's. */
 const TABLES: Record<ListName, { table: ListTable; menu: readonly ColumnBlock[] }> = {
-  traces: { table: TRACE_TABLE, menu: COLUMN_MENU },
+  traces: TRACES,
+  sessions: SESSIONS,
+  users: USERS,
 };
-
-/** What the list is grouped by, as its control names each. */
-const GROUP_LABEL: Record<Group | "none", string> = {
-  none: "No grouping",
-  session: "By session",
-  user: "By user",
-};
-
-// The trace list's toolbar: every list's (`ListToolbar`), with its grouping
-// and the table or the charts beside its ready-made queries.
-export function TraceToolbar(props: Props) {
-  const { organization, slug, query, ui } = props;
-  return (
-    <ListToolbar
-      {...props}
-      list="traces"
-      extra={(go) => (
-        <>
-          <Select
-            value={groupOf(query) ?? "none"}
-            onValueChange={(value) =>
-              go(
-                tracesHref(
-                  organization,
-                  slug,
-                  groupedBy(query, value === "session" || value === "user" ? value : undefined),
-                  {},
-                  ui,
-                ),
-              )
-            }
-          >
-            <SelectTrigger aria-label="Group by">
-              <GroupIcon />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" align="end">
-              {(["none", "session", "user"] as const).map((value) => (
-                <SelectItem key={value} value={value}>
-                  {GROUP_LABEL[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Tabs
-            value={ui.display ?? "table"}
-            onValueChange={(display) =>
-              go(
-                tracesHref(organization, slug, query, {}, {
-                  ...ui,
-                  display: display === "chart" ? "chart" : undefined,
-                }),
-              )
-            }
-          >
-            <TabsList>
-              <TabsTrigger value="table">
-                <TableIcon />
-                Table
-              </TabsTrigger>
-              <TabsTrigger value="chart">
-                <ChartColumnIcon />
-                Chart
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </>
-      )}
-    />
-  );
-}
 
 /** A list and its query. */
-type ListToolbarProps = Common & {
-  list: "traces";
-  query: TraceQuery;
-  /** What the list shows beside its ready-made queries, given the toolbar's
-   *  way to navigate so the toolbar reads busy while it does. */
-  extra?: (go: (href: string) => void) => ReactNode;
-};
+type ListToolbarProps = {
+  organization: string;
+  slug: string;
+  /** How many rows the filters admit. */
+  total: number;
+  /** The window's days, the toolbar's first control. */
+  days: number;
+} & (
+  | { list: "traces"; query: TraceQuery }
+  | { list: "sessions"; query: SessionQuery }
+  | { list: "users"; query: UserQuery }
+);
 
 // A list's toolbar, one row of shadcn controls at the title row's end: the
-// refresh and the window, the ready-made queries and the list's own, then
-// what every list has (`ListControls`). A
-// control that changes what the list holds changes its URL, and one that
-// changes only how it looks is kept in the browser (`lib/trace-prefs.ts`).
-export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
-  const { organization, slug, ui, days } = props;
+// refresh and the window, the ready-made queries, then its columns and its
+// download (`ListControls`). A control that changes what the list holds
+// changes its URL, and one that changes only how it looks is kept in the
+// browser (`lib/trace-prefs.ts`).
+export function ListToolbar({ total, ...props }: ListToolbarProps) {
+  const { organization, slug, days } = props;
   const { go, pending } = useListNavigation();
   const strip = useRef<HTMLDivElement>(null);
   const overflow = useOverflow(strip);
-  const presets = <Presets spec={TRACES} query={props.query} go={go} at={[organization, slug, ui]} />;
+  // Each list's own scaffold, by its own query's sorts.
+  const presets =
+    props.list === "traces" ? (
+      <Presets spec={TRACES} query={props.query} go={go} at={[organization, slug]} />
+    ) : props.list === "sessions" ? (
+      <Presets spec={SESSIONS} query={props.query} go={go} at={[organization, slug]} />
+    ) : (
+      <Presets spec={USERS} query={props.query} go={go} at={[organization, slug]} />
+    );
 
   return (
     // The room the title leaves, its controls at its end; too narrow for them,
@@ -207,7 +132,6 @@ export function ListToolbar({ extra, total, ...props }: ListToolbarProps) {
         <RefreshControl />
         <WindowPicker days={days} />
         {presets}
-        {extra?.((href) => go(href))}
         <ListControls
           list={props.list}
           organization={organization}
@@ -225,12 +149,12 @@ function Presets<K extends string, S extends string>({
   spec,
   query,
   go,
-  at: [organization, slug, ui],
+  at: [organization, slug],
 }: {
   spec: ListSpec<K, S>;
   query: ListQuery<S>;
   go: (href: string) => void;
-  at: [organization: string, slug: string, ui: TraceUi];
+  at: [organization: string, slug: string];
 }) {
   return spec.presets.map((preset) => {
     const Icon = PRESET_ICON[preset.id];
@@ -241,7 +165,7 @@ function Presets<K extends string, S extends string>({
             variant="outline"
             pressed={spec.presetActive(query, preset.id)}
             onPressedChange={() =>
-              go(spec.href(organization, slug, spec.presetToggled(query, preset.id), {}, ui))
+              go(spec.href(organization, slug, spec.presetToggled(query, preset.id)))
             }
           >
             <Icon />
@@ -446,7 +370,7 @@ function DownloadMenu({ list, organization, slug, query, total }: ListControlsPr
         <DropdownMenuLabel>
           {total > DOWNLOAD_MAX
             ? `The first ${formatCount(DOWNLOAD_MAX)} of ${formatCount(total)} ${many}`
-            : `${formatCount(total)} ${total === 1 ? one : many}, as the list is sorted`}
+            : `${counted(total, one, many)}, as the list is sorted`}
         </DropdownMenuLabel>
         <DownloadItems href={(format) => listDownloadHref(list, organization, slug, query, format)} />
       </DropdownMenuContent>

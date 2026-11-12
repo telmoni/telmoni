@@ -9,9 +9,13 @@ import { ChangeKind } from "@/lib/types/enums";
 import { TraceColumn } from "@/lib/types/traces";
 
 import {
-  COLUMN_MENU,
   DEFAULT_COLUMNS,
+  FILTERS,
+  PRIMARY_FILTERS,
+  STORED_ID_FILTERS,
+  TRACES,
   TRACE_COLUMNS,
+  TYPED_FILTERS,
   activeFilters,
   countOf,
   currentSort,
@@ -20,8 +24,6 @@ import {
   formatCost,
   formatDuration,
   formatOutputSpeed,
-  groupOf,
-  groupedBy,
   isTagPair,
   listDownloadHref,
   listPageHref,
@@ -31,13 +33,11 @@ import {
   parseFilters,
   parseListQuery,
   parseTraceQuery,
-  parseTraceUi,
   presetActive,
   presetToggled,
   retrievalCounts,
   retrievalSource,
   retrievalWords,
-  sessionTracesHref,
   shortId,
   orderedColumns,
   tagKeys,
@@ -196,9 +196,7 @@ describe("the URL as the list's state", () => {
     expect(fits("tag", `${"k".repeat(64)}:${"v".repeat(257)}`)).toBe(false);
   });
 
-  it("reads the page's own state apart from the list's, which the server never sees", () => {
-    expect(parseTraceUi({ display: "chart" })).toEqual({ display: "chart" });
-    expect(parseTraceUi({ display: "table" })).toEqual({});
+  it("reads nothing of a parameter the list has none of, so an old link still opens it", () => {
     expect(parseTraceQuery({ display: "chart" })).toEqual({});
   });
 
@@ -211,9 +209,6 @@ describe("the URL as the list's state", () => {
       tracesHref("acme", "web", { agent: ["nightly-report"], user: ["u1"] }, { user: undefined }),
     ).toBe("/acme/web/traces?agent=nightly-report");
     expect(tracesHref("acme", "web", { user: ["a b&c"] })).toBe("/acme/web/traces?user=a+b%26c");
-    expect(tracesHref("acme", "web", { page: 2 }, {}, { display: "chart" })).toBe(
-      "/acme/web/traces?page=2&display=chart",
-    );
     expect(traceHref("acme", "web", "5d4f5c68-0000-4000-8000-000000000001")).toBe(
       "/acme/web/traces/5d4f5c68-0000-4000-8000-000000000001",
     );
@@ -306,19 +301,21 @@ describe("the URL as the list's state", () => {
     expect(tagValues(pairs, "")).toEqual([]);
   });
 
-  it("offers every column the server names, and shows the list's first nine until a person picks", () => {
+  it("offers every column the server names, and shows what a trace was and took until a person picks", () => {
     expect(TRACE_COLUMNS.map((c) => c.key).sort()).toEqual(Object.values(TraceColumn).sort());
     expect(DEFAULT_COLUMNS).toEqual([
       "started",
       "agent",
-      "user",
-      "session",
       "status",
       "steps",
       "tokens",
+      "spend",
       "duration",
       "scores",
     ]);
+    // An id stored as a hash is a column to ask for, never one to open on.
+    expect(DEFAULT_COLUMNS).not.toContain(TraceColumn.User);
+    expect(DEFAULT_COLUMNS).not.toContain(TraceColumn.Session);
     for (const column of TRACE_COLUMNS) {
       expect(Boolean(column.sort) === Boolean(column.first), column.key).toBe(true);
     }
@@ -330,11 +327,11 @@ describe("the URL as the list's state", () => {
   });
 
   it("files the columns menu as the table's order, the counts and the tokens each one group", () => {
-    const listed = COLUMN_MENU.flatMap((block) =>
+    const listed = TRACES.menu.flatMap((block) =>
       block.kind === "column" ? [block.column.key] : block.columns.map((c) => c.key),
     );
     expect(listed).toEqual(TRACE_COLUMNS.map((c) => c.key));
-    const groups = COLUMN_MENU.flatMap((block) =>
+    const groups = TRACES.menu.flatMap((block) =>
       block.kind === "group" ? [[block.label, block.columns.map((c) => c.key)]] : [],
     );
     expect(groups).toEqual([
@@ -386,32 +383,27 @@ describe("a list's query, its pages and its download", () => {
   });
 
   it("writes a list's page and its download, the download without its page", () => {
-    expect(listPageHref("traces", "acme", "web", { status: ["error"] }, { display: "chart" })).toBe(
-      "/acme/web/traces?status=error&display=chart",
+    expect(listPageHref("traces", "acme", "web", { status: ["error"] })).toBe("/acme/web/traces?status=error");
+    expect(listPageHref("sessions", "acme", "web", { agent: ["zeta"], page: 2 })).toBe(
+      "/acme/web/sessions?agent=zeta&page=2",
     );
     expect(
       listDownloadHref("traces", "acme", "web", { status: ["error"], sort: "tokens", page: 3 }, "csv"),
     ).toBe("/acme/web/traces/export?status=error&sort=tokens&format=csv");
-  });
-
-  it("opens a trace's session as its traces, the first to start first", () => {
-    expect(sessionTracesHref("acme", "web", "conv 1", 30)).toBe(
-      "/acme/web/traces?session=conv+1&sort=started&dir=asc&days=30",
+    expect(listDownloadHref("sessions", "acme", "web", { sort: "spend", page: 3 }, "json")).toBe(
+      "/acme/web/sessions/export?sort=spend&format=json",
     );
+    // ⚠ A score narrowing the list narrows its file too: left out, the file would hold every row.
+    expect(
+      listDownloadHref("users", "acme", "web", { score: "csat", score_min: 0.5, score_max: 1, days: 30 }, "csv"),
+    ).toBe("/acme/web/users/export?score=csat&score_min=0.5&score_max=1&days=30&format=csv");
   });
 
-  it("groups the list by session or user as its sort, from the first page, and back to its own", () => {
-    expect(groupOf({ sort: "session" })).toBe("session");
-    expect(groupOf({ sort: "user", dir: "desc" })).toBe("user");
-    expect(groupOf({ sort: "started" })).toBeUndefined();
-    expect(groupedBy({ status: ["error"], page: 3 }, "session")).toEqual({
-      status: ["error"],
-      sort: "session",
-      dir: "asc",
-    });
-    expect(groupedBy({ sort: "user", dir: "asc", page: 2 }, undefined)).toEqual({});
-    const sorted = { sort: "spend", dir: "desc" } as const;
-    expect(groupedBy(sorted, undefined)).toBe(sorted);
+  it("opens on the filters most narrowing starts from, and types an id as the app sent it", () => {
+    expect(PRIMARY_FILTERS).toEqual(["agent", "status", "fault", "model", "environment"]);
+    expect(STORED_ID_FILTERS).toEqual(["user", "session"]);
+    expect(TYPED_FILTERS).toEqual(["user", "session", "tag"]);
+    for (const filter of [...PRIMARY_FILTERS, ...TYPED_FILTERS]) expect(FILTERS).toContain(filter);
   });
 
   it("keeps a filter's every other query key as it ticks and clears values, from the first page", () => {
@@ -495,14 +487,31 @@ const LISTED: Trace = {
   scores: [],
 };
 
+/** Where a row's user and session open: their own pages. */
+const PAGES = { user: (id: string) => `/users/${id}`, session: (id: string) => `/sessions/${id}` };
+
 describe("a trace's time to first token in the list", () => {
   const column = TRACE_COLUMNS.find((spec) => spec.key === TraceColumn.TimeToFirstToken)!;
   const trace = (ms: number | null): Trace => ({ ...LISTED, time_to_first_token_ms: ms });
 
   it("reads as a duration, and as a dash where none of its calls reported one", () => {
-    expect(cellOf(column, trace(420), {}, null)).toBe("420 ms");
-    const none = cellOf(column, trace(null), {}, null) as ReactElement<{ children: string }>;
+    expect(cellOf(column, trace(420), {}, null, PAGES)).toBe("420 ms");
+    const none = cellOf(column, trace(null), {}, null, PAGES) as ReactElement<{ children: string }>;
     expect(none.props.children).toBe("—");
+  });
+});
+
+describe("a trace's user and session in the list", () => {
+  const cell = (key: TraceColumn, trace: Trace) =>
+    cellOf(TRACE_COLUMNS.find((spec) => spec.key === key)!, trace, { user: ["u1"] }, () => "/narrowed", PAGES) as ReactElement<{
+      id: string;
+      href: string;
+    }>;
+
+  it("each open their own page, never the list narrowed to them, whatever narrows it already", () => {
+    const trace: Trace = { ...LISTED, user_id: "u1", session_id: "s1" };
+    expect(cell(TraceColumn.User, trace).props).toEqual({ id: "u1", href: "/users/u1" });
+    expect(cell(TraceColumn.Session, trace).props).toEqual({ id: "s1", href: "/sessions/s1" });
   });
 });
 
@@ -512,7 +521,7 @@ describe("a trace's retrievals in the list", () => {
   const trace: Trace = { ...LISTED, model_calls: 2, tool_calls: 1, retrievals: 3 };
 
   it("counts them in a column offered beside the tool calls, hidden at first and sorting nothing", () => {
-    expect(cellOf(column, trace, {}, null)).toBe("3");
+    expect(cellOf(column, trace, {}, null, PAGES)).toBe("3");
     expect(column).toMatchObject({ label: "Retrievals", numeric: true, group: "counts" });
     expect(column.sort).toBeUndefined();
     expect(DEFAULT_COLUMNS).not.toContain(TraceColumn.Retrievals);

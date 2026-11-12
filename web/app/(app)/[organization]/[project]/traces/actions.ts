@@ -7,16 +7,18 @@ import { z } from "zod";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { extractProblem, tryFetchWithTimeout } from "@/lib/api/fetch";
 import { env } from "@/lib/env";
+import { isOneOf } from "@/lib/one-of";
 import { type Ceiling, admitProject } from "@/lib/server/admit";
 import { pathAndQuery, requestUrl } from "@/lib/server/path";
 import { COMMENT_MAX, SCORE_CATEGORIES_MAX, SCORE_CATEGORY_MAX } from "@/lib/scores";
-import { FILTER_VALUE_MAX, SCORE_NAME_MAX } from "@/lib/traces";
+import { FILTER_VALUE_MAX, SCORE_NAME_MAX, STORED_ID_FILTERS } from "@/lib/traces";
 import { ScoreType } from "@/lib/types/enums";
 import { TraceIdSchema } from "@/lib/types/traces";
 
-// A trace's deletion, an end user's erasure and a member's scores: each through
-// its lane in telemetry, which holds the role each takes and checks every
-// value. What this checks is the shape the browser sent.
+// A trace's deletion, an end user's erasure, an id looked up as it is stored
+// and a member's scores: each through its lane in telemetry, which holds the
+// role each takes and checks every value. What this checks is the shape the
+// browser sent.
 
 /** Deletions a person asks for in a minute: each one a mark the span store
  *  queues, so a hand's pace and no loop's. */
@@ -83,6 +85,10 @@ export async function deleteTraceAction(projectId: string, traceId: string): Pro
   redirect(pathAndQuery(here));
 }
 
+/** An id as an application sends one, 1 to `max` characters: counted as
+ *  ingest counts them, not in UTF-16's units. */
+const idAsSent = (max: number) => z.string().refine((id) => id.length > 0 && [...id].length <= max);
+
 const ErasedSchema = z.object({ traces: z.number().int().nonnegative() });
 
 export type ErasureResult = ActionResult<{ traces: number }>;
@@ -90,12 +96,9 @@ export type ErasureResult = ActionResult<{ traces: number }>;
 /** One end user erased by the id the project's SDK sent, every trace it is
  *  on deleted: how many went. The id goes in the body, never a URL. */
 export async function eraseEndUserAction(projectId: string, userId: unknown): Promise<ErasureResult> {
-  // Characters, as ingest counts them, not UTF-16's units.
-  const parsed = z
-    .string()
-    .refine((id) => id.length > 0 && [...id].length <= 128)
-    .safeParse(userId);
-  if (!parsed.success) return refused("An end user's id is 1 to 128 characters.");
+  const max = FILTER_VALUE_MAX.user;
+  const parsed = idAsSent(max).safeParse(userId);
+  if (!parsed.success) return refused(`An end user's id is 1 to ${max} characters.`);
   const sent = await call(
     "POST",
     "/users/erase",
@@ -108,6 +111,29 @@ export async function eraseEndUserAction(projectId: string, userId: unknown): Pr
   const erased = ErasedSchema.safeParse(await sent.res.json().catch(() => null));
   if (!erased.success) return refused("Unexpected response from telemetry.");
   return { ok: true, traces: erased.data.traces };
+}
+
+/** Ids a person looks up in a minute: typed by hand, one at a time. */
+const LOOKUPS: Ceiling = { call: "traces:stored-id", limit: 30 };
+
+const StoredSchema = z.object({ stored_id: z.string().min(1) });
+
+export type StoredIdResult = ActionResult<{ storedId: string }>;
+
+/** An end user's id, or a session's, as the project stores it, from the id
+ *  its application sent: what a list's filter takes. The id goes in the body,
+ *  never a URL, and as typed, since ingest hashed it byte for byte. */
+export async function storedIdAction(projectId: string, filter: unknown, id: unknown): Promise<StoredIdResult> {
+  if (!isOneOf(STORED_ID_FILTERS, filter)) return refused("No such id.");
+  const max = FILTER_VALUE_MAX[filter];
+  const parsed = idAsSent(max).safeParse(id);
+  if (!parsed.success) return refused(`An id is 1 to ${max} characters.`);
+  const body = filter === "user" ? { user_id: parsed.data } : { session_id: parsed.data };
+  const sent = await call("POST", "/stored-id", projectId, body, LOOKUPS);
+  if (!sent.ok) return sent;
+  const stored = StoredSchema.safeParse(await sent.res.json().catch(() => null));
+  if (!stored.success) return refused("Unexpected response from telemetry.");
+  return { ok: true, storedId: stored.data.stored_id };
 }
 
 /** A person's scores a minute, given and taken back. */

@@ -109,7 +109,10 @@ describe("ObjectivesPage", () => {
   it("says when there is none, and when where they stand could not be read", async () => {
     mockAlerts = [];
     const { unmount } = await page();
-    expect(screen.getByText("No objective yet.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Set a reliability target for your agent" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New objective" })).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
     unmount();
     mockAlerts = [BURN];
     mockStandings = null;

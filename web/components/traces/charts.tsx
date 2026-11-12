@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ComponentProps } from "react";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
+import { useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 
 import {
   ChartContainer,
@@ -18,21 +18,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { TraceHistogram } from "@/lib/server/entities/traces";
+import { openPeek } from "@/lib/peek";
+import type { Trace, TraceHistogram } from "@/lib/server/entities/traces";
 import { formatScoreValue } from "@/lib/scores";
 import {
   FAULT_LABEL,
+  STATUS_LABEL,
   formatCacheShare,
   formatCost,
   formatCount,
   formatDuration,
   formatOutputSpeed,
+  shortId,
   tokenBreakdown,
   type ChangeMark,
   type TokenBar,
+  type TokenCounts,
   type OutputSpeedBar,
 } from "@/lib/traces";
-import { SpanFault } from "@/lib/types/enums";
+import { SpanFault, type SpanStatus } from "@/lib/types/enums";
 import { useInBrowser } from "@/lib/in-browser";
 import { isOneOf } from "@/lib/one-of";
 import { cn } from "@/lib/utils";
@@ -389,10 +393,11 @@ export function TraceHistogramStrip({
   );
 }
 
-// The charts in the table's place, two by two: the window's traces by how they
-// ended, their tokens, how long they ran and how soon their first model call
-// began to answer — the median and the slowest twentieth — and, where the
-// list is narrowed to a score, that score's mean, each a bar of the same width.
+// Every chart at once, two by two, as an agent's page draws its traces: by how
+// they ended, their tokens, how long they ran and how soon their first model
+// call began to answer — the median and the slowest twentieth — and, where
+// the read is narrowed to a score, that score's mean, each a bar of the same
+// width.
 export function TraceCharts({
   histogram,
   marks,
@@ -405,16 +410,12 @@ export function TraceCharts({
   return (
     <div className="grid gap-page lg:grid-cols-2">
       {drawn(histogram).map((metric) => (
-        <div
+        <ChartCard
           key={metric}
-          role="region"
-          className="grid gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border"
-          aria-label={METRIC_LABEL[metric]}
+          label={METRIC_LABEL[metric]}
+          title={metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
+          note={metric === "faults" ? "Traces containing each fault; categories can overlap." : undefined}
         >
-          <h2 className="text-base font-medium">
-            {metric === "score" ? `The mean ${histogram.score} score` : METRIC_LABEL[metric]}
-          </h2>
-          {metric === "faults" && <p className="text-muted-foreground">Traces containing each fault; categories can overlap.</p>}
           {metric === "tokens" ? (
             <TokenChart
               bars={histogram.bars}
@@ -441,7 +442,7 @@ export function TraceCharts({
               legend={metric !== "cost"}
             />
           )}
-        </div>
+        </ChartCard>
       ))}
     </div>
   );
@@ -663,6 +664,263 @@ export function TokenChart({
       ) : (
         <div className={className} aria-hidden="true" />
       )}
+    </div>
+  );
+}
+
+/** One trace of a session, as its charts read it. */
+export type SessionTrace = Pick<
+  Trace,
+  | "trace_id"
+  | "started_at"
+  | "ended"
+  | "status"
+  | "duration_ms"
+  | "spend"
+  | "time_to_first_token_ms"
+  | keyof TokenCounts
+>;
+
+/** How a trace stands on a session's duration chart: how it ended, or still
+ *  running until its agent's own span arrives. */
+type TraceState = SpanStatus | "running";
+const TRACE_STATES: readonly TraceState[] = ["ok", "error", "cancelled", "running"];
+const stateOf = (trace: Pick<Trace, "ended" | "status">): TraceState => (trace.ended ? trace.status : "running");
+const stateLabel = (state: TraceState) => (state === "running" ? "Running" : STATUS_LABEL[state]);
+
+/** A state's swatch, in the legend and the tooltip. A trace still running is
+ *  hollow and dashed, as its bar is: a green of its own beside the failures'
+ *  red would be one colour to a reader who tells neither apart. */
+function StateSwatch({ state }: { state: TraceState }) {
+  return state === "running" ? (
+    <span className="size-2.5 shrink-0 rounded-xs border border-dashed border-muted-foreground" aria-hidden="true" />
+  ) : (
+    <span className="size-2.5 shrink-0 rounded-xs" style={{ background: TRACES[state]?.color }} aria-hidden="true" />
+  );
+}
+
+const SESSION_DURATION: ChartConfig = { duration: { label: "Duration" } };
+const SESSION_COST: ChartConfig = { spent: { label: "So far", color: "var(--foreground)" } };
+const SESSION_FIRST_TOKEN: ChartConfig = {
+  first_token: { label: "Time to first token", color: "var(--foreground)" },
+};
+const SESSION_CHART = "aspect-auto h-56 w-full";
+
+// A session's own charts, a step a trace in the order they started, each as
+// wide as the next: how long it ran and how it ended, its tokens as five, what
+// the session had cost once it ended, and how soon its first model call began
+// to answer. Steps rather than the clock's time, so the idle hours between
+// two traces take no room; the axis names when each started. A click on a
+// trace's step opens it in the page's peek, as its row below does.
+export function SessionCharts({ traces }: { traces: readonly SessionTrace[] }) {
+  const inBrowser = useInBrowser();
+  // What the session had cost once each trace ended, in their order.
+  const totals: number[] = [];
+  for (const trace of traces) totals.push((totals.at(-1) ?? 0) + trace.spend);
+  const steps = traces.map((trace, i) => ({
+    id: trace.trace_id,
+    at: trace.started_at,
+    state: stateOf(trace),
+    duration: trace.duration_ms,
+    ...tokenBreakdown([trace]),
+    cost: trace.spend,
+    spent: totals[i] ?? 0,
+    first_token: trace.time_to_first_token_ms,
+  }));
+  const byId = new Map(steps.map((step) => [step.id, step]));
+  const [first, last] = [steps.at(0), steps.at(-1)];
+  // A tick names its trace's hour while they all started on one day, else its day and hour.
+  const oneDay = first && last && new Date(first.at).toDateString() === new Date(last.at).toDateString();
+  // A click or a tap opens the trace whose band it landed in, read off the
+  // plot's own box: the step recharts holds hovered is one tap behind on a
+  // touch screen.
+  const open = (event: MouseEvent<HTMLDivElement>) => {
+    const plot = event.currentTarget.querySelector(".recharts-cartesian-grid")?.getBoundingClientRect();
+    // Within the plot alone: its legend and its axes open nothing.
+    if (!plot || plot.width <= 0 || event.clientY < plot.top || event.clientY > plot.bottom) return;
+    const step = steps[Math.floor(((event.clientX - plot.left) / plot.width) * steps.length)];
+    if (step) openPeek(step.id);
+  };
+  const frame = { data: steps, margin: { left: 0, right: 8, top: 4 } };
+  const grid = <CartesianGrid vertical={false} />;
+  // Bands on the line charts too, so a trace's dot stands over its bar in the
+  // chart above, and the first and last are clear of the plot's edges.
+  const axis = (
+    <XAxis
+      dataKey="id"
+      scale="band"
+      tickLine={false}
+      axisLine={false}
+      tickMargin={6}
+      minTickGap={24}
+      tickFormatter={(id: string) => {
+        const step = byId.get(id);
+        if (!step) return "";
+        return oneDay ? tickLabel(step.at, 1) : barLabel(step.at, 0);
+      }}
+    />
+  );
+  // A step's tooltip is headed by when its trace started, and the trace's id.
+  const tooltip = (formatter: NonNullable<ComponentProps<typeof ChartTooltipContent>["formatter"]>, bars = false) => (
+    <ChartTooltip
+      cursor={bars ? { fillOpacity: 0.5 } : true}
+      content={
+        <ChartTooltipContent
+          labelFormatter={(_, payload) => {
+            const step = byId.get(payload?.[0]?.payload?.id);
+            return step ? `${barLabel(step.at, 0)} · ${shortId(step.id)}` : null;
+          }}
+          formatter={formatter}
+        />
+      }
+    />
+  );
+  const row = (swatch: ReactNode, label: string, value: string) => (
+    <div className="flex w-full items-center gap-2">
+      {swatch}
+      <span className="text-muted-foreground">{label}</span>
+      <span className="ml-auto tabular-nums">{value}</span>
+    </div>
+  );
+  const dot = <span className="size-2.5 shrink-0 rounded-xs bg-foreground" aria-hidden="true" />;
+  const drawn = (chart: ReactNode) => (inBrowser ? chart : <div className={SESSION_CHART} aria-hidden="true" />);
+
+  return (
+    <div className="grid gap-page lg:grid-cols-2">
+      <ChartCard title="Duration" note="How long each trace ran, and how it stands.">
+        {/* As tall with its legend as the charts beside it, whose legends recharts draws inside them. */}
+        <div className="flex h-56 flex-col gap-gutter">
+          {inBrowser ? (
+            <ChartContainer
+              config={SESSION_DURATION}
+              className="aspect-auto min-h-0 w-full flex-1 cursor-pointer"
+              onClick={open}
+            >
+              <BarChart {...frame}>
+                {grid}
+                {axis}
+                <YAxis width="auto" tickLine={false} axisLine={false} tickFormatter={formatDuration} />
+                {tooltip(function Row(raw, _name, item) {
+                  const step = byId.get(item.payload?.id);
+                  if (!step || typeof raw !== "number") return null;
+                  return row(<StateSwatch state={step.state} />, stateLabel(step.state), formatDuration(raw));
+                }, true)}
+                <Bar dataKey="duration" radius={2}>
+                  {steps.map((step) =>
+                    step.state === "running" ? (
+                      <Cell key={step.id} fill="transparent" stroke="var(--muted-foreground)" strokeDasharray="3 2" />
+                    ) : (
+                      <Cell key={step.id} fill={TRACES[step.state]?.color} />
+                    ),
+                  )}
+                </Bar>
+              </BarChart>
+            </ChartContainer>
+          ) : (
+            <div className="flex-1" aria-hidden="true" />
+          )}
+          <ul className="flex shrink-0 flex-wrap items-center justify-center gap-4 text-xs" aria-label="How its traces stand">
+            {TRACE_STATES.filter((state) => steps.some((step) => step.state === state)).map((state) => (
+              <li key={state} className="flex items-center gap-1.5">
+                <StateSwatch state={state} />
+                {stateLabel(state)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </ChartCard>
+      <ChartCard title="Tokens" note="Each trace's model calls' tokens.">
+        {drawn(
+          <ChartContainer config={TOKEN_SEGMENTS} className={cn(SESSION_CHART, "cursor-pointer")} onClick={open}>
+            <BarChart {...frame}>
+              {grid}
+              {axis}
+              <YAxis width="auto" tickLine={false} axisLine={false} allowDecimals={false} tickFormatter={formatCount} />
+              {tooltip(tooltipRow(TOKEN_SEGMENTS, formatCount), true)}
+              <ChartLegend content={<ChartLegendContent />} />
+              {Object.keys(TOKEN_SEGMENTS).map((segment) => (
+                <Bar key={segment} dataKey={segment} stackId="tokens" fill={`var(--color-${segment})`} />
+              ))}
+            </BarChart>
+          </ChartContainer>,
+        )}
+      </ChartCard>
+      <ChartCard title="Cost so far" note="What the session had cost as each trace ended.">
+        {drawn(
+          <ChartContainer config={SESSION_COST} className={cn(SESSION_CHART, "cursor-pointer")} onClick={open}>
+            <LineChart {...frame}>
+              {grid}
+              {axis}
+              <YAxis width="auto" tickLine={false} axisLine={false} tickFormatter={formatCost} />
+              {tooltip(function Rows(raw, _name, item) {
+                const step = byId.get(item.payload?.id);
+                if (!step || typeof raw !== "number") return null;
+                return (
+                  <div className="grid w-full gap-1.5">
+                    {row(dot, "This trace", formatCost(step.cost))}
+                    {row(dot, "So far", formatCost(raw))}
+                  </div>
+                );
+              })}
+              <Line dataKey="spent" type="stepAfter" stroke="var(--color-spent)" strokeWidth={1.5} dot={{ r: 2 }} />
+            </LineChart>
+          </ChartContainer>,
+        )}
+      </ChartCard>
+      <ChartCard
+        title="Time to first token"
+        note={
+          steps.some((step) => step.first_token !== null)
+            ? "How soon each trace's first model call began to answer."
+            : "No trace of the session reported its time to first token."
+        }
+      >
+        {drawn(
+          <ChartContainer
+            config={SESSION_FIRST_TOKEN}
+            className={cn(SESSION_CHART, "cursor-pointer")}
+            onClick={open}
+          >
+            <LineChart {...frame}>
+              {grid}
+              {axis}
+              <YAxis width="auto" tickLine={false} axisLine={false} tickFormatter={formatDuration} />
+              {tooltip(tooltipRow(SESSION_FIRST_TOKEN, formatDuration))}
+              {/* Dots, so a trace between two that reported none is still drawn. */}
+              <Line
+                dataKey="first_token"
+                type="linear"
+                stroke="var(--color-first_token)"
+                strokeWidth={1.5}
+                dot={{ r: 2 }}
+                connectNulls={false}
+              />
+            </LineChart>
+          </ChartContainer>,
+        )}
+      </ChartCard>
+    </div>
+  );
+}
+
+/** One chart of a page's set, under its heading; named by `label` where its
+ *  heading says more than its name. */
+function ChartCard({
+  title,
+  label = title,
+  note,
+  children,
+}: {
+  title: string;
+  label?: string;
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div role="region" className="grid gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border" aria-label={label}>
+      <h2 className="text-base font-medium">{title}</h2>
+      {note && <p className="text-muted-foreground">{note}</p>}
+      {children}
     </div>
   );
 }

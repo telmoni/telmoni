@@ -98,6 +98,8 @@ describe("buildConsoleNav", () => {
     expect(project?.items.map((i) => i.title)).toEqual([
       "Agents",
       "Traces",
+      "Sessions",
+      "Users",
       "Alerts",
       "Objectives",
       "Spend",
@@ -112,6 +114,8 @@ describe("buildConsoleNav", () => {
     expect(project?.items.map((i) => i.url)).toEqual([
       "/acme/web",
       "/acme/web/traces",
+      "/acme/web/sessions",
+      "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/objectives",
       "/acme/web/dashboards",
@@ -197,6 +201,14 @@ describe("buildConsoleNav", () => {
         .map((i) => i.url);
 
     expect(active("/acme/web")).toEqual(["/acme/web"]);
+    // An agent's own page stands under the Agents row, whose path is the project's.
+    expect(active("/acme/web/agents")).toEqual(["/acme/web"]);
+    expect(active("/acme/web/agents-archive"), "a sibling of /agents").toEqual([]);
+    expect(active("/acme/web/sessions")).toEqual(["/acme/web/sessions"]);
+    // A session's own page, and an end user's, each stand under their list's row.
+    expect(active("/acme/web/sessions/9f86d081")).toEqual(["/acme/web/sessions"]);
+    expect(active("/acme/web/users")).toEqual(["/acme/web/users"]);
+    expect(active("/acme/web/users/2c26b46b")).toEqual(["/acme/web/users"]);
     expect(active("/acme/web/api-keys")).toEqual(["/acme/web/api-keys"]);
     expect(active("/acme/web/api-keys/abc")).toEqual(["/acme/web/api-keys"]);
     expect(active("/acme/web/connectors")).toEqual(["/acme/web/connectors"]);
@@ -220,6 +232,8 @@ describe("buildConsoleNav", () => {
     expect(project).toEqual([
       "/acme/web",
       "/acme/web/traces",
+      "/acme/web/sessions",
+      "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/objectives",
       "/acme/web/dashboards",
@@ -252,7 +266,7 @@ describe("the blocks of a run", () => {
   it("parts a project's housekeeping from its product rows, and nothing else", () => {
     const [project] = buildConsoleNav("/acme/web/api-keys");
     expect(navBlocks(project?.items ?? []).map((b) => b.map((i) => i.title))).toEqual([
-      ["Agents", "Traces", "Alerts", "Objectives", "Spend"],
+      ["Agents", "Traces", "Sessions", "Users", "Alerts", "Objectives", "Spend"],
       ["API keys", "Connectors", "Members", "Audit log", "Notifications", "Settings"],
     ]);
     const [organization] = buildConsoleNav("/acme/settings");
@@ -301,6 +315,8 @@ describe("the whole destination set", () => {
     ).toEqual([
       "/acme/web",
       "/acme/web/traces",
+      "/acme/web/sessions",
+      "/acme/web/users",
       "/acme/web/alerts",
       "/acme/web/objectives",
       "/acme/web/dashboards",

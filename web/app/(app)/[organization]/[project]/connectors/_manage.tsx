@@ -141,7 +141,7 @@ export function ConnectionActions({
       <ConfirmDialog
         trigger={
           <Button
-            variant="destructive"
+            variant="destructiveOutline"
             size="sm"
             disabled={pending}
             aria-label={`Disconnect ${label}`}

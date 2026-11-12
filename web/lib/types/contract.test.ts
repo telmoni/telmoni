@@ -45,12 +45,14 @@ import {
   ScoreSource,
   ScoreTarget,
   ScoreType,
+  SessionSort,
   Severity,
   SortDirection,
   SpanKind,
   SpanFault,
   SpanStatus,
   TraceSort,
+  UserSort,
 } from "./enums";
 import { AGENT_MESSAGE_MAX, AGENT_STREAM_TIMEOUT_MS } from "./agent";
 import { AUDIT_EXPORT_KEPT_DAYS } from "./audit-export";
@@ -138,12 +140,14 @@ const CONSOLE: Record<string, Record<string, string>> = {
   ScoreSource,
   ScoreTarget,
   ScoreType,
+  SessionSort,
   Severity,
   SortDirection,
   SpanKind,
   SpanStatus,
   SpanFault,
   TraceSort,
+  UserSort,
 };
 
 describe("wire contract", () => {

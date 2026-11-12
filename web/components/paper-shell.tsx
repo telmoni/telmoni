@@ -93,14 +93,14 @@ export function PaperShell({
       href={statusLink.href}
       target="_blank"
       rel="noreferrer"
-      className="group inline-flex items-center gap-1 font-mono text-sm text-muted-foreground transition-colors hover:text-foreground"
+      className="group inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
     >
       <StatusLabel label={statusLink.label} services={statusLink.services} />
       <ArrowUpRight className="size-icon opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none" aria-hidden="true" />
     </a>
   ) : null;
   const language = (
-    <label className="group flex items-center gap-gutter font-mono text-sm text-muted-foreground">
+    <label className="group flex items-center gap-gutter text-sm text-muted-foreground">
       <select aria-label="Language" defaultValue="en" className="min-w-0 appearance-none bg-transparent text-foreground" title="English is currently the only available language">
         <option value="en">English</option>
       </select>
@@ -127,14 +127,14 @@ export function PaperShell({
           </div>
           <div className="min-h-0 flex-1">
           <div data-rail-primary className="sticky top-22 z-10 flex flex-col bg-background pb-4 transition-[opacity,translate,visibility] duration-300 ease-out group-data-[footer-visible=true]/rail:invisible group-data-[footer-visible=true]/rail:-translate-y-gutter group-data-[footer-visible=true]/rail:opacity-0 motion-reduce:transition-none">
-            <nav aria-label="Primary" className="flex flex-col gap-gutter font-mono text-sm">
+            <nav aria-label="Primary" className="flex flex-col gap-gutter text-sm">
               {primary.map((link) => (
                 <RailLink key={link.href} link={link} />
               ))}
               {signedIn ? (
                 <>
                 <RailLink link={{ label: "Console", href: "/console" }} />
-                <SignOutButton variant="ghost" className="h-auto justify-start p-0 font-mono text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground" />
+                <SignOutButton variant="ghost" className="h-auto justify-start p-0 text-sm font-normal text-muted-foreground hover:bg-transparent hover:text-foreground" />
                 </>
               ) : (
                 <>
@@ -148,7 +148,7 @@ export function PaperShell({
 
           <div data-rail-footer className="flex flex-col gap-gutter pt-gutter transition-[opacity,translate,visibility] duration-300 ease-out group-data-[footer-visible=false]/rail:invisible group-data-[footer-visible=false]/rail:translate-y-gutter group-data-[footer-visible=false]/rail:opacity-0 motion-reduce:transition-none">
             {metaLinks.length > 0 && (
-              <nav aria-label="Secondary" className="flex flex-col gap-gutter font-mono text-sm">
+              <nav aria-label="Secondary" className="flex flex-col gap-gutter text-sm">
                 {metaLinks.map((link) => (
                   <RailLink key={link.href} link={link} />
                 ))}
@@ -194,7 +194,7 @@ export function PaperShell({
 
           <footer className={cn("flex flex-col gap-gutter py-8 lg:hidden", INSET)}>
             {metaLinks.length > 0 && (
-              <nav aria-label="Footer" className="flex flex-col gap-gutter font-mono text-sm">
+              <nav aria-label="Footer" className="flex flex-col gap-gutter text-sm">
                 {metaLinks.map((link) => (
                   <RailLink key={link.href} link={link} />
                 ))}

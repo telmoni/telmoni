@@ -286,7 +286,7 @@ function DeliveryStatusBadge({
 }) {
   if (status === "delivered") {
     return (
-      <Badge variant="outline">
+      <Badge variant="positive">
         Delivered
       </Badge>
     );
@@ -299,7 +299,7 @@ function DeliveryStatusBadge({
     );
   }
   return (
-    <Badge variant="secondary">
+    <Badge variant={attempted ? "warning" : "secondary"}>
       {attempted ? "Retrying" : "Queued"}
     </Badge>
   );

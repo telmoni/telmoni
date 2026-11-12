@@ -45,6 +45,8 @@ import { subscribeNever } from "@/lib/in-browser";
 import { windowReaching } from "@/lib/list-query";
 import type { Incident } from "@/lib/server/entities/alerts";
 import type { TraceDetail, TraceSpan, TraceSpend } from "@/lib/server/entities/traces";
+import { sessionHref } from "@/lib/sessions";
+import { userHref } from "@/lib/users";
 import {
   OPEN_ALL_UP_TO,
   branchesFrom,
@@ -72,7 +74,6 @@ import {
   tokenBreakdown,
   shortId,
   spanMillis,
-  sessionTracesHref,
   tracesHref,
 } from "@/lib/traces";
 import { type ContentMode, SpanKind, SpanStatus } from "@/lib/types/enums";
@@ -175,16 +176,16 @@ export const TraceMeta = memo(function TraceMeta({
       )}
       {root.session_id && (
         <MetaLink
-          href={sessionTracesHref(organization, slug, root.session_id, reaching)}
-          title={`The traces of session ${root.session_id}, in order`}
+          href={sessionHref(organization, slug, root.session_id, reaching)}
+          title={`Open session ${root.session_id}`}
         >
-          session
+          session {shortId(root.session_id)}
         </MetaLink>
       )}
       {root.user_id && (
         <MetaLink
-          href={tracesHref(organization, slug, { user: [root.user_id], days: reaching })}
-          title={`Every trace of user ${root.user_id}`}
+          href={userHref(organization, slug, root.user_id, reaching)}
+          title={`Open user ${root.user_id}`}
         >
           user {shortId(root.user_id)}
         </MetaLink>
@@ -550,7 +551,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** A field whose value narrows a list to it. */
+/** A field whose value is a link: a list narrowed to it, or its own page. */
 function FilterField({ label, href, children }: { label: string; href: string; children: ReactNode }) {
   return (
     <Field label={label}>
@@ -803,18 +804,12 @@ function SpanDetail({
                     <Field label="Output speed">{formatOutputSpeed(span.output_speed)}</Field>
                   )}
                   {agent && span.user_id && (
-                    <FilterField
-                      label="User"
-                      href={tracesHref(organization, slug, { user: [span.user_id], days: reaching })}
-                    >
+                    <FilterField label="User" href={userHref(organization, slug, span.user_id, reaching)}>
                       {span.user_id}
                     </FilterField>
                   )}
                   {agent && span.session_id && (
-                    <FilterField
-                      label="Session"
-                      href={sessionTracesHref(organization, slug, span.session_id, reaching)}
-                    >
+                    <FilterField label="Session" href={sessionHref(organization, slug, span.session_id, reaching)}>
                       {span.session_id}
                     </FilterField>
                   )}

@@ -4,19 +4,20 @@ import { DEFAULT_COLUMNS } from "@/lib/traces";
 
 import { DEFAULT_PREFS, readPrefs } from "./trace-prefs";
 
-describe("what a browser kept of the trace list's look", () => {
-  // An older build's keys — the sessions' and users' columns, a layout — are
-  // passed over.
-  it("reads every choice, the columns in the list's order", () => {
+describe("what a browser kept of the lists' look", () => {
+  // An older build's keys — a refresh, a layout — are passed over, and a
+  // column a list does not have with them.
+  it("reads every choice, each list's columns in its own order", () => {
     expect(
       readPrefs(
         JSON.stringify({
           columns: ["duration", "started", "models"],
-          sessionColumns: ["last_seen", "user"],
-          userColumns: [],
+          sessionColumns: ["user", "steps", "last_seen"],
+          userColumns: ["tokens", "scores", "sessions"],
           density: "compact",
           refresh: 60,
           filters: false,
+          moreFilters: true,
           filtersWidth: 240,
           peekFull: true,
           peekWidth: 720,
@@ -25,8 +26,11 @@ describe("what a browser kept of the trace list's look", () => {
       ),
     ).toEqual({
       columns: ["started", "duration", "models"],
+      sessionColumns: ["last_seen", "user"],
+      userColumns: ["sessions", "tokens"],
       density: "compact",
       filters: false,
+      moreFilters: true,
       peekFull: true,
       peekWidth: 720,
     });
@@ -41,7 +45,7 @@ describe("what a browser kept of the trace list's look", () => {
         JSON.stringify({
           columns: ["price", 7, "agent"],
           sessionColumns: "user",
-          userColumns: ["user", "tokens"],
+          userColumns: { sessions: true },
           density: "airy",
           refresh: 45,
           filters: "yes",

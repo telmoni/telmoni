@@ -1,8 +1,9 @@
 //! `GET /internal/v1/telemetry/agent-versions` — one agent's releases, its
-//! models or one prompt's versions as its Agents page sets them side by
-//! side ([`crate::versions`]), in one environment, over the Agents page's
-//! days held to what the plan and the project keep. The agent is a
-//! parameter, never a path segment: a name is any text, `..` among it.
+//! models or one prompt's versions as the Agents page and its own set them
+//! side by side ([`crate::versions`]), in one environment, over the days
+//! asked, the Agents page's where none are, held to what the plan and the
+//! project keep. The agent is a parameter, never a path segment: a name is
+//! any text, `..` among it.
 
 use std::sync::Arc;
 
@@ -10,14 +11,13 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use serde::Serialize;
 
-use telmoni_shared::db::tenant_session::project_scope;
 use telmoni_shared::extract::{Json, Query};
-use telmoni_shared::{ChangeKind, ProjectId, TelmoniError};
+use telmoni_shared::{ChangeKind, TelmoniError};
 
 use crate::AppState;
 use crate::contract::{AGENT_MAX, ATTRIBUTE_VALUE_MAX, ENVIRONMENT_MAX};
-use crate::handler::agents::AGENTS_DAYS;
-use crate::handler::traces::{read_failed, reader, window_prices};
+use crate::handler::agents::{AGENTS_DAYS, named, once, window_days};
+use crate::handler::traces::{parse_days_or, read_failed, reader, window_prices};
 use crate::store::Projects;
 use crate::traces::TraceFilter;
 use crate::versions::{self, By, Choice, Of, Version};
@@ -55,41 +55,20 @@ struct Asked {
     /// None where the query names none; the one with no name is named empty.
     environment: Option<String>,
     prompt: Option<String>,
+    days: u16,
 }
 
-/// `given`, once: a parameter the lane takes a single value of.
-fn once(name: &str, slot: &mut Option<String>, given: String) -> Result<(), TelmoniError> {
-    if slot.is_some() {
-        return Err(TelmoniError::BadRequest(format!(
-            "{name} is given more than once"
-        )));
-    }
-    *slot = Some(given);
-    Ok(())
-}
-
-/// A name of 1 to `max` characters, as it was sent: a name the answer
-/// offered is asked for whole, its spaces among it.
-fn named(name: &str, given: &str, max: usize) -> Result<(), TelmoniError> {
-    if (1..=max).contains(&given.chars().count()) {
-        Ok(())
-    } else {
-        Err(TelmoniError::BadRequest(format!(
-            "{name} is 1 to {max} characters"
-        )))
-    }
-}
-
-/// The query read: one `agent`, and at most one `by`, `environment` and
-/// `prompt`.
+/// The query read: one `agent`, and at most one `by`, `environment`,
+/// `prompt` and `days`.
 fn asked(pairs: Vec<(String, String)>) -> Result<Asked, TelmoniError> {
-    let (mut agent, mut by, mut environment, mut prompt) = (None, None, None, None);
+    let (mut agent, mut by, mut environment, mut prompt, mut days) = (None, None, None, None, None);
     for (name, value) in pairs {
         match name.as_str() {
             "agent" => once("agent", &mut agent, value)?,
             "by" => once("by", &mut by, value)?,
             "environment" => once("environment", &mut environment, value)?,
             "prompt" => once("prompt", &mut prompt, value)?,
+            "days" => once("days", &mut days, value)?,
             _ => {
                 return Err(TelmoniError::BadRequest(
                     "the lane takes no parameter by that name".into(),
@@ -132,19 +111,7 @@ fn asked(pairs: Vec<(String, String)>) -> Result<Asked, TelmoniError> {
         by,
         environment,
         prompt,
-    })
-}
-
-/// The days the rows read: the Agents page's, held to the plan's and to the
-/// project's own retention, since neither store keeps a span past either.
-async fn window_days(state: &AppState, project_id: &ProjectId) -> Result<u16, TelmoniError> {
-    let visible = crate::capacity::visible_days(state, project_id, AGENTS_DAYS).await;
-    let mut tx = project_scope(&state.db, project_id).await?;
-    let kept = crate::db::retention_days(&mut tx, project_id).await?;
-    tx.commit().await?;
-    Ok(match kept.map(u16::try_from) {
-        Some(Ok(kept)) => visible.min(kept),
-        _ => visible,
+        days: parse_days_or(days.as_deref(), AGENTS_DAYS)?,
     })
 }
 
@@ -156,7 +123,7 @@ pub async fn get_versions(
 ) -> Result<Json<Versions>, TelmoniError> {
     let reader = reader(&state, &headers).await?;
     let asked = asked(pairs)?;
-    let days = window_days(&state, &reader.project_id).await?;
+    let days = window_days(&state, &reader.project_id, asked.days).await?;
     let projects = Projects::one(reader.project_id.clone());
     let filter = TraceFilter {
         days,
@@ -244,6 +211,10 @@ mod tests {
             assert_eq!(read.agent, agent);
             assert_eq!(read.by, By::Release, "releases where none is asked");
             assert_eq!((read.environment, read.prompt), (None, None));
+            assert_eq!(
+                read.days, AGENTS_DAYS,
+                "the Agents page's where none are asked"
+            );
         }
     }
 
@@ -307,7 +278,16 @@ mod tests {
     }
 
     #[test]
+    fn the_window_is_one_count_of_days_within_what_a_list_reads() {
+        let days = |given: &str| asked(pairs(&[("agent", "a"), ("days", given)]));
+        assert_eq!(days("30").expect("a month").days, 30);
+        assert!(days("0").is_err());
+        assert!(days("361").is_err());
+        assert!(refused(&[("agent", "a"), ("days", "7"), ("days", "30")]));
+    }
+
+    #[test]
     fn a_parameter_the_lane_does_not_take_is_refused() {
-        assert!(refused(&[("agent", "a"), ("days", "7")]));
+        assert!(refused(&[("agent", "a"), ("limit", "7")]));
     }
 }

@@ -45,9 +45,16 @@ export const VersionsSchema = z.object({
 });
 export type Versions = z.infer<typeof VersionsSchema>;
 
-/** What a read of an agent's versions asks: an environment or a prompt left
- *  out is the server's to choose, and an empty environment the one with no name. */
-export type VersionsAsk = { agent: string; by: VersionsBy; environment?: string; prompt?: string };
+/** What a read of an agent's versions asks: an environment, a prompt or the
+ *  days left out are the server's to choose, and an empty environment the one
+ *  with no name. */
+export type VersionsAsk = {
+  agent: string;
+  by: VersionsBy;
+  environment?: string;
+  prompt?: string;
+  days?: number;
+};
 
 /** `ask` as a query: the agent a parameter, never a path, since a name is any
  *  text, `..` among it. */
@@ -55,6 +62,7 @@ export function versionsQuery(ask: VersionsAsk): URLSearchParams {
   const params = new URLSearchParams({ agent: ask.agent, by: ask.by });
   if (ask.environment !== undefined) params.set("environment", ask.environment);
   if (ask.prompt !== undefined) params.set("prompt", ask.prompt);
+  if (ask.days !== undefined) params.set("days", String(ask.days));
   return params;
 }
 

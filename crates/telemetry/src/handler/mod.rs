@@ -19,6 +19,8 @@ pub mod prices;
 pub mod privacy;
 pub mod rules;
 pub mod scores;
+pub mod sessions;
+pub mod stored_id;
 pub mod traces;
 pub mod usage;
 pub mod users;

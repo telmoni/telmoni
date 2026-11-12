@@ -87,7 +87,7 @@ export function DeleteAccountForm({
 
       {flow.step.step === "ask" ? (
         <div>
-          <Button variant="destructive" disabled={flow.sending} onClick={flow.sendCode}>
+          <Button variant="destructiveOutline" disabled={flow.sending} onClick={flow.sendCode}>
             {flow.sending ? "Sending…" : "Send confirmation code"}
           </Button>
         </div>

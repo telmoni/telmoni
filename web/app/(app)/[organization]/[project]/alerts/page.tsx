@@ -407,7 +407,7 @@ function AlertCard({
                     )}
                     {link.muted && (
                       <>
-                        <Badge variant="secondary">
+                        <Badge variant="warning">
                           Muted after five failed deliveries
                         </Badge>
                         <HearAgain

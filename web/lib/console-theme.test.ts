@@ -76,18 +76,25 @@ const CHROME = [
 }));
 
 describe("the console chrome's hover fill", () => {
-  // The premise of the shared token. If the rail ever gets a background of its
-  // own, the header and the rail stop standing on the same colour and one fill
-  // for both stops being the right answer — so this is the assumption to break
-  // loudly rather than the styling to quietly keep.
-  it("is one colour because the rail and the header are one background", () => {
-    const light = block(".theme-console");
-    expect(light, "the rail no longer inherits the page background").toMatch(
-      /--sidebar:\s*var\(--background\)/,
-    );
-    expect(block(".dark .theme-console")).toMatch(
-      /--sidebar:\s*var\(--background\)/,
-    );
+  // The premise of the shared token. The rail stands a step under the page the
+  // header is on, so the shell reads in layers, and one fill serves both only
+  // while it stands outside the pair: darker than either in light, lighter
+  // than either in dark. A fill between them, or on one, is the assumption to
+  // break loudly rather than the styling to quietly keep.
+  it("is one colour, clear of both the rail and the page the header stands on", () => {
+    for (const selector of [".theme-console", ".dark .theme-console"]) {
+      const scope = block(selector);
+      const lightness = (token: string) =>
+        Number(new RegExp(`--${token}:\\s*oklch\\(\\s*([\\d.]+)`).exec(scope)?.[1]);
+      const page = lightness("background");
+      const rail = lightness("sidebar");
+      const fill = lightness("sidebar-accent");
+      expect(rail, `${selector}: the rail is no step under the page`).toBeLessThan(page);
+      expect(
+        (fill - page) * (fill - rail),
+        `${selector}: the fill sits between the rail and the page, or on one of them`,
+      ).toBeGreaterThan(0);
+    }
   });
 
   it("is the one thing every chrome control reaches for", () => {

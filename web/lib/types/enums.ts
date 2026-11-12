@@ -103,6 +103,31 @@ export const TraceSort = {
 } as const;
 export type TraceSort = typeof TraceSort[keyof typeof TraceSort];
 
+/** Wire vocabulary of the Rust `SessionSort`: a column of the sessions list, named in the URL. */
+export const SessionSort = {
+  LastSeen:     "last_seen",
+  FirstSeen:    "first_seen",
+  Traces:       "traces",
+  FailedTraces: "failed_traces",
+  Tokens:       "tokens",
+  Spend:        "spend",
+  Duration:     "duration",
+} as const;
+export type SessionSort = typeof SessionSort[keyof typeof SessionSort];
+
+/** Wire vocabulary of the Rust `UserSort`: a column of the users list, named in the URL. */
+export const UserSort = {
+  LastSeen:     "last_seen",
+  FirstSeen:    "first_seen",
+  Sessions:     "sessions",
+  Traces:       "traces",
+  FailedTraces: "failed_traces",
+  Tokens:       "tokens",
+  Spend:        "spend",
+  Duration:     "duration",
+} as const;
+export type UserSort = typeof UserSort[keyof typeof UserSort];
+
 /** Wire vocabulary of the Rust `ScoreType`: what a score's value is. */
 export const ScoreType = {
   Number:   "number",

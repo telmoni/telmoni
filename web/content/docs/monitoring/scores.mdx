@@ -1,6 +1,6 @@
 ---
 title: "Scores"
-description: "Scores on a trace, a span or a session: from your code, through an SDK, OpenTelemetry's evaluation event or the API, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace and in the trace list's Scores column."
+description: "Scores on a trace, a span or a session: from your code, through an SDK, OpenTelemetry's evaluation event or the API, or from a member on a trace's page; each a number, a yes or no, or categories, shown on the trace and in the Scores column of the trace list and the sessions list."
 ---
 
 A **score** judges a trace, one of its spans or a session: a name, 1 to 64
@@ -64,6 +64,14 @@ it; nor does one given once the organization holds the content its plan does.
   value; a trace passes where any score of the name falls within them. Narrowed
   to a score, the list's charts add its mean over the window, each bar the
   scores given in it on the traces the list admits.
+- **The sessions list**: the **Scores** column, on in the default columns,
+  gives each session's own scores by name, drawn as a trace's are. **Score**
+  in its filters lists a session by a score of its own or of one of its
+  traces ([Sessions](/docs/monitoring/sessions#filters)). A session's own
+  scores stand on [its page](/docs/monitoring/sessions#a-sessions-page) too.
+- **The users list**: **Score** in its filters lists a user by a score on one
+  of their traces or given to one of their sessions
+  ([Users](/docs/monitoring/users#filters)); a user has no score of their own.
 - **An alert**: a [score alert](/docs/monitoring/alerts#making-an-alert)
   watches a score's average, a percentile, its highest or how many over a
   window, or its change from the window before, so a drop opens an incident.

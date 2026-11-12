@@ -21,14 +21,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { storedIdAction } from "@/app/(app)/[organization]/[project]/traces/actions";
 import type { Facet, Facets, ListQuery } from "@/lib/server/entities/traces";
 import {
   FILTERS,
   FILTER_LABEL,
   FAULT_LABEL,
+  PRIMARY_FILTERS,
   ROW_NOUN,
+  SCORE_FILTER_HINT,
   SCORE_NAME_MAX,
   STATUS_LABEL,
+  STORED_ID_FILTERS,
   TYPED_FILTERS,
   activeFilters,
   fits,
@@ -40,10 +44,11 @@ import {
   without,
   type FilterKey,
   type ListName,
-  type TraceUi,
+  type StoredIdFilter,
 } from "@/lib/traces";
 import { isOneOf } from "@/lib/one-of";
 import { SpanFault, SpanStatus } from "@/lib/types/enums";
+import { useToastAction } from "@/lib/use-action";
 import { setTracePrefs, useTracePrefs } from "@/lib/use-trace-prefs";
 import { cn } from "@/lib/utils";
 import { decimalTyped } from "@/lib/typed-number";
@@ -66,9 +71,9 @@ type Props = {
   list: ListName;
   organization: string;
   slug: string;
+  /** The project an id typed in is looked up in. */
+  projectId: string;
   query: ListQuery<string>;
-  /** The trace list's own state, which its links carry. */
-  ui?: TraceUi;
   /** Each filter's values and how many of the list's rows carry each, or
    *  `null` where they could not be read. */
   facets: Facets | null;
@@ -76,15 +81,16 @@ type Props = {
 
 // The filters beside a list: each the values the window's traces carry, with
 // how many of the list's rows carry each under every other filter, ticked to
-// narrow the list. Ids can be typed in as well, since the fifty a facet names
-// are rarely the one a person is after.
-export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }: Props) {
-  const { filters: shown } = useTracePrefs();
+// narrow the list. It opens on the few most narrowing starts from, the rest
+// behind More. Ids can be typed in as well, since the fifty a facet names are
+// rarely the one a person is after.
+export function FacetsPanel({ list, organization, slug, projectId, query, facets }: Props) {
+  const { filters: shown, moreFilters } = useTracePrefs();
   const [search, setSearch] = useState("");
   const { go, pending } = useListNavigation();
   const panel = useRef<HTMLElement>(null);
   const { width, edge } = useFiltersWidth(panel);
-  const href = (next: ListQuery<string>) => listPageHref(list, organization, slug, next, ui);
+  const href = (next: ListQuery<string>) => listPageHref(list, organization, slug, next);
   // Hidden, the panel leaves its button where its heading stood, so it opens
   // again from there.
   if (!shown) {
@@ -97,11 +103,15 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
 
   const ticked = activeFilters(query).length;
   const needle = search.trim().toLowerCase();
+  // A search reads every filter; else those the panel opens with, every one
+  // once More is opened, and any in force, so it can be cleared where it was set.
+  const every = moreFilters || needle !== "";
   const sections = FILTERS.filter((filter) => {
-    if (!needle) return true;
+    if (!needle) return every || PRIMARY_FILTERS.includes(filter) || (query[filter]?.length ?? 0) > 0;
     if (FILTER_LABEL[filter].toLowerCase().includes(needle)) return true;
     return facets?.[filter].values.some((v) => v.value.toLowerCase().includes(needle)) ?? false;
   });
+  const scored = needle ? "score".includes(needle) : every || query.score !== undefined;
 
   // As wide as the main sidebar's links until dragged (`w-filters`, `globals.css`),
   // and never past half the row, so the list keeps its room.
@@ -166,20 +176,34 @@ export function FacetsPanel({ list, organization, slug, query, ui = {}, facets }
               filter={filter}
               facet={facets[filter]}
               rows={ROW_NOUN[list][1]}
+              projectId={projectId}
               ticked={query[filter] ?? []}
               clearHref={href(without(query, filter))}
               onToggle={(value) => go(href(toggled(query, filter, value)))}
             />
           ))
         )}
-        {(!needle || "score".includes(needle)) && (
+        {scored && (
           <ScoreSection
             // Drawn afresh as the URL's score changes: a clear, a step back, a view.
             key={`${query.score ?? ""}/${query.score_min ?? ""}/${query.score_max ?? ""}`}
+            list={list}
             query={query}
             clearHref={href(without(query, "score"))}
             onScore={(score) => go(href({ ...query, ...score, page: undefined }))}
           />
+        )}
+        {!needle && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="justify-start text-muted-foreground"
+            aria-expanded={moreFilters}
+            onClick={() => setTracePrefs({ moreFilters: !moreFilters })}
+          >
+            <ChevronRightIcon className={cn("transition-transform", moreFilters && "rotate-90")} aria-hidden="true" />
+            {moreFilters ? "Fewer filters" : "More filters"}
+          </Button>
         )}
       </div>
       {/* Last in the panel, so Tab reaches it after the filters, between them and the list. */}
@@ -216,6 +240,7 @@ function FacetSection({
   filter,
   facet,
   rows,
+  projectId,
   ticked,
   clearHref,
   onToggle,
@@ -224,12 +249,15 @@ function FacetSection({
   facet: Facet;
   /** What the list's rows are, as the counts beside the values count them. */
   rows: string;
+  projectId: string;
   ticked: readonly string[];
   clearHref: string;
   onToggle: (value: string) => void;
 }) {
   const label = FILTER_LABEL[filter];
   const typed = TYPED_FILTERS.includes(filter);
+  // An id is stored hashed, so one is typed as the application sent it.
+  const stored = isOneOf(STORED_ID_FILTERS, filter) ? filter : null;
   // Open only where there is activity: a value ticked, or values among the
   // window's traces to pick from, but never an id's fifty alone. Open and
   // empty, a section only says so, and pushes the ones that hold something
@@ -303,12 +331,14 @@ function FacetSection({
               Select
             </ToggleGroupItem>
             <ToggleGroupItem value="text" className="flex-1">
-              Text
+              {stored ? "Your id" : "Text"}
             </ToggleGroupItem>
           </ToggleGroup>
         )}
-        {mode === "text" ? (
-          <TypedValue filter={filter} label={label} onAdd={onToggle} />
+        {mode === "text" && stored ? (
+          <StoredId filter={stored} label={label} projectId={projectId} ticked={ticked} onAdd={onToggle} />
+        ) : mode === "text" ? (
+          <TypedTag onAdd={onToggle} />
         ) : values.length === 0 ? (
           <p className="px-gutter text-xs text-muted-foreground">
             No {label.toLowerCase()} among the window&rsquo;s traces.
@@ -350,7 +380,7 @@ function FacetSection({
         {facet.more && mode === "select" && (
           <p className="px-gutter text-xs text-muted-foreground">
             The {FACET_VALUES_MAX} with the most {rows}
-            {typed ? "; type one in to find another" : ""}.
+            {stored ? "; find another by your own id" : typed ? "; type one in to find another" : ""}.
           </p>
         )}
       </CollapsibleContent>
@@ -361,10 +391,12 @@ function FacetSection({
 /** A score's name and the range its value falls within, the list narrowed to
  *  the rows carrying one, as `?score=`, `score_min` and `score_max` narrow it. */
 function ScoreSection({
+  list,
   query,
   clearHref,
   onScore,
 }: {
+  list: ListName;
   query: ListQuery<string>;
   clearHref: string;
   onScore: (score: { score: string; score_min?: number; score_max?: number }) => void;
@@ -457,10 +489,7 @@ function ScoreSection({
               className="text-xs"
             />
           </div>
-          <p className="text-xs text-muted-foreground">
-            Rows with a score of this name, any of its scores within the range given; a yes is 1
-            and a no 0.
-          </p>
+          <p className="text-xs text-muted-foreground">{SCORE_FILTER_HINT[list]}</p>
           <Button type="submit" variant="outline" disabled={!taken}>
             Apply
           </Button>
@@ -470,23 +499,73 @@ function ScoreSection({
   );
 }
 
-/** An id typed in — or a tag, as `key:value` — added to the filter as the
- *  list is narrowed to it. */
-function TypedValue({
+/** A user's or a session's id typed as the application sent it: the server
+ *  answers what it is stored as, and the list is narrowed to that. Sent as
+ *  typed, since ingest hashed it byte for byte; in the action's body, never
+ *  the URL. */
+function StoredId({
   filter,
   label,
+  projectId,
+  ticked,
   onAdd,
 }: {
-  filter: FilterKey;
+  filter: StoredIdFilter;
   label: string;
+  projectId: string;
+  ticked: readonly string[];
   onAdd: (value: string) => void;
 }) {
+  const { pending, run } = useToastAction();
+  const [value, setValue] = useState("");
+  const asked = `The ${label.toLowerCase()}'s id, as your app sends it`;
+  const taken = value !== "" && fits(filter, value);
+  return (
+    <form
+      className="grid gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!taken || pending) return;
+        run(
+          () => storedIdAction(projectId, filter, value),
+          ({ storedId }) => {
+            setValue("");
+            // Ticked already, it stays ticked: adding it again would untick it.
+            if (!ticked.includes(storedId)) onAdd(storedId);
+          },
+        );
+      }}
+    >
+      <div className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          disabled={pending}
+          // Short enough to read whole in the panel at its own width.
+          placeholder="The id your app sends"
+          aria-label={asked}
+          autoComplete="off"
+          spellCheck={false}
+          className="text-xs"
+        />
+        <Button type="submit" variant="outline" disabled={!taken || pending}>
+          Find
+        </Button>
+      </div>
+      <p className="px-gutter text-xs text-muted-foreground">
+        Hashed as it is stored, then matched: no page shows the id itself.
+      </p>
+    </form>
+  );
+}
+
+/** A tag typed in, as `key:value`, added to the filter as the list is
+ *  narrowed to it. */
+function TypedTag({ onAdd }: { onAdd: (value: string) => void }) {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
-  const tag = filter === "tag";
-  const asked = tag ? "A tag, as key:value" : `A ${label.toLowerCase()}'s id`;
-  const taken =
-    trimmed !== "" && (filter === "status" || fits(filter, trimmed)) && (!tag || isTagPair(trimmed));
+  const asked = "A tag, as key:value";
+  const taken = fits("tag", trimmed) && isTagPair(trimmed);
   return (
     <form
       className="flex gap-2"

@@ -1,11 +1,15 @@
 ---
 title: "Traces"
-description: "A project's Traces page: every trace of its agents as a row, newest first, narrowed by any of its values, sorted, grouped by session or user, paged, drawn over the window and downloaded, and each trace opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
+description: "A project's Traces page: every trace of its agents as a row, newest first, narrowed by any of its values, a user or a session found by the id your app sends, sorted, paged, drawn over the window and downloaded, and each trace opened beside the list or on a page of its own, its spans as a tree beside the one you choose — metadata, and where the project keeps content, every message and tool call in full."
 ---
 
 A **trace** is one execution of an agent: the agent's own span and every span
 recorded inside it, found by its id, 32 hex digits. A project's **Traces** page
-(`/traces`) lists them; each
+(`/traces`) lists them, and is where one is searched for; an
+[agent's own page](/docs/workspace/organizations-and-projects#an-agents-page)
+charts its traces, [Sessions](/docs/monitoring/sessions) sums the traces
+that share a session, and [Users](/docs/monitoring/users) those that were for
+one user. Each trace
 opens beside the list, and has a page of its own. Both show its metadata —
 timings, statuses, counts, model and tool names — and, on a project whose
 [content mode](/docs/workspace/organizations-and-projects#a-projects-content-mode)
@@ -29,25 +33,24 @@ row each, fifty to a page:
 | Trace | The first eight characters of the trace's id; opens it beside the list, as a click anywhere else on the row does. Under it, a failed trace's error class (`error.type`); its message is content, shown where the trace opens |
 | Started | When the trace's first span started, in your time zone |
 | Agent | The trace's agent (`telmoni.agent`) |
-| User | The end user the trace was for (`user.id`), as stored: hashed under the project's own key |
-| Session | The session the trace belongs to (`gen_ai.conversation.id`), as stored: hashed under the project's own key |
 | Status | **OK**, **Error** or **Cancelled** once the agent's own span has arrived; **Running** until it has. Beside any but **Error**, how many of the trace's spans failed: a trace can recover from a failed call |
 | Steps | How many steps the trace took; hover for its model calls, tool calls and retrievals |
 | Tokens | Its model calls' input and output tokens, summed; hover for the split |
+| Spend | What its model calls cost: each as it reported, else its tokens at the project's own price or the price table's, the trace's own and never scaled by a sample rate ([What a call cost](/docs/api/ingest#what-a-call-cost)) |
 | Duration | From its first span's start to its last span's end |
 | Scores | The trace's own [scores](/docs/monitoring/scores) by name: a number's mean, a yes or no's share of yeses, a category's values |
 
-**Columns** shows or hides each of these, and more beside them: when the
+**Columns** shows or hides each of these, and more beside them: the end user
+the trace was for (**User**, `user.id`) and the session it belongs to
+(**Session**, `gen_ai.conversation.id`), each as stored, hashed under the
+project's own key, and each opening its own page; when the
 trace's last span ended, the deployment its spans were sent from
 (**Environment**: `production`, `staging`) and its release (**Release**: a
 version or a commit), each once where a trace crossed services deployed apart,
 the class of the error it ended on (**Error**: `TimeoutError`,
 `RateLimitError` — never its message), its model calls, tool calls,
 retrievals, errors and spans, its input, output and cached tokens, how soon the first of its
-model calls that said began to answer (**Time to first token**), what its
-model calls cost (**Spend**: each as it reported, else its tokens at the
-project's own price or the price table's, the trace's own and never scaled by
-a sample rate; [What a call cost](/docs/api/ingest#what-a-call-cost)), the
+model calls that said began to answer (**Time to first token**), the
 models and tools its calls used, and its [tags](#tags), each `key:value`
 (**Tags**).
 The counts and the tokens are each a group that opens under its heading,
@@ -59,22 +62,32 @@ your browser rather than in the page's link.
 
 ### Filters
 
-The **Filters** panel beside the list names each agent, status, model, tool,
-user, session, environment, release, tag, prompt and prompt version among the
-window's traces, with how many traces carry it — counted under every other filter,
-so a value beside a ticked one says what ticking it would add. Tick values to
+The **Filters** panel beside the list names each agent, status, fault, model,
+tool, user, session, environment, release, tag, prompt and prompt version
+among the window's traces, with how many traces carry it — counted under every
+other filter, so a value beside a ticked one says what ticking it would add.
+It opens on the five most narrowing starts from — agent, status, fault, model
+and environment — and **More filters** shows the rest, with the
+[score](/docs/monitoring/scores) filter; a filter in force always shows, and
+**Search filters** reads them all. Your browser keeps which you left it on.
+Tick values to
 narrow the list: the values of one filter add to each other, and filters
 narrow together. The panel names fifty values of each at most, the most traces
-first; a session's or a user's id can be typed in as well (**Text**), as it is
-stored: the hashed id the Session or User column shows; and so can a tag, as
+first. A user or a session is found by the id your application sends
+(**Your id**): type it as your app sends it, and the list is narrowed to the
+traces that carry it. The id is sent to the server to be hashed as it is
+stored, never placed in the page's link, and never kept; the link holds the
+hash, as the User and Session columns show it. A tag can be typed in too
+(**Text**), as
 `key:value`. A trace carries an environment, a release, a tag, a prompt or a
 prompt version where any of its spans does: the deployment is the resource's
 `deployment.environment.name` and `service.version`, a tag each
 `telmoni.tag.<key>` with its value, a prompt a span's `gen_ai.prompt.name`,
 and a prompt version, as `name:version`, its `gen_ai.prompt.version` beside
 that name, so a version is matched under its prompt and never alone. Click an
-agent, a user, a session, a model, a tool, an
-environment or a release in a row to narrow the list to it alone. The filters
+agent, a model, a tool, an
+environment or a release in a row to narrow the list to it alone; a user or a
+session in a row opens [its own page](#sessions-and-users). The filters
 in force stand above the rows: clear one with its ×, or all of them at once.
 The button beside the panel's heading hides it, and opens it again. Drag the
 edge between the panel and the list to give the filters more room, or less,
@@ -83,8 +96,8 @@ come back, until the page is reloaded; a double click puts them back at their
 own width. The edge takes the keyboard too: the arrow keys move it, Home and End
 take it to its narrowest and widest, and Enter puts it back.
 
-**Errors**, **Slow** and **Tokens** beside it are ready-made: the traces with
-failed spans, the longest traces first, or the traces that used the most tokens
+**Errors**, **Slow** and **Tokens** beside it are ready-made: the traces that
+ended in error, the longest traces first, or the traces that used the most tokens
 first. Click one again to take it off.
 
 ### Sessions and users
@@ -102,18 +115,22 @@ id built from an email or an account number; a project admin erases a user by
 the id your app sends, on the project's **Settings** page
 ([Data deletion](/docs/workspace/data-deletion#deleting-a-trace-or-an-end-user)).
 
-**Group by**, beside **Table** and **Chart**, lays the list out by session or
-by user: each heads its own traces, with how many of them the page holds, and
-the traces that named none stand under a head that says so. Grouping sorts the
-list by session or by user, so sorting by another column ungroups it. A
-session's head opens its traces in the order they started, as the session on a
-trace's first line does, and a user's head opens every trace of theirs.
+The project's [Sessions](/docs/monitoring/sessions) page lists its sessions
+and its [Users](/docs/monitoring/users) page its users, each summed over all
+of their traces. A session has
+[a page of its own](/docs/monitoring/sessions#a-sessions-page), with its own
+charts and its traces in the order they started, and so has
+[a user](/docs/monitoring/users#a-users-page), with their traces charted over
+the window and their sessions. A session's id or a user's opens that page
+wherever it stands: in a row here, on a trace's first line, or in the other
+list. To narrow this list to one instead, tick it under **Filters**, or find
+it by the id your app sends.
 
 ### Sort, pages and the window
 
 **Sort** by clicking a column's heading; every column sorts but Trace, Ended,
-Environment, Release, Error, Spans, Cache read, Cache write, Models and
-Tools. A second click turns it round. Names sort in the alphabet's order, and
+Environment, Release, Error, Retrievals, Spans, Cache read, Cache write,
+Models, Tools and Scores. A second click turns it round. Names sort in the alphabet's order, and
 the newest, the longest and the most come first on the others. The **Tags**
 heading sorts by a tag: **Sort by tag** lists the keys the window's traces
 carry, and picking one orders the traces by their value of it, A to Z, picking
@@ -130,8 +147,9 @@ shorter one reads. Above the rows, its traces stand as bars by when they started
 they ended, or their tokens, or what they cost (**Cost**, each trace's own
 spend), or the median and 95th percentile of their durations or of their
 times to first token, as the menu above the bars picks — each bar an hour, a
-few hours, a day or a week, starting on your own clock. **Chart** shows the
-charts in the table's place, two to a row.
+few hours, a day or a week, starting on your own clock. An
+[agent's own page](/docs/workspace/organizations-and-projects#an-agents-page)
+draws them all at once for that agent, two to a row.
 
 **Output speed**, beside time to first token, shows each model's median and
 5th percentile in output tokens/s after its first token. Select one model;
@@ -179,7 +197,8 @@ A change is the first trace of an agent to carry a release, a model or a
 prompt's version its traces had not carried in the 30 days before, or the
 first call of a tool or retrieval source in 30 days: a deploy, a prompt
 edited, a model a provider moved to under the name you call, or a new tool. Each
-is drawn as a line on the bar it fell in, above the list and on **Chart**, one
+is drawn as a line on the bar it fell in, above the list and on its agent's
+own page, one
 line a bar naming every change in it: the agent, what changed and to what, and
 the environment. The lines stand for the agents and environments the list is
 narrowed to, or for every one where it is narrowed to none; the other filters
@@ -187,7 +206,8 @@ leave them, since a change explains the bars whatever else is ticked.
 
 Telmoni finds a change within two minutes of its trace's spans landing, and
 another exporter's once its trace lands. A line shows when the list is next
-read — **Show**, **Refresh** or a new filter — not as the change is found.
+read — as it draws itself again, on **Refresh** or with a new filter — not as
+the change is found.
 Past 500 changes in the window, the newest 500 are drawn, and the page says so.
 
 - **Each environment is its own:** a release staging took first is a change
@@ -212,9 +232,10 @@ Past 500 changes in the window, the newest 500 are drawn, and the page says so.
   next day. A project keeps up to 1,000 tool changes a UTC day, learned names
   included, and separately 1,000 across releases, models and prompt versions.
 
-Each change is also a line of its agent's row on the
+A release or a first tool call is also a line of its agent's card on the
 [Agents page](/docs/workspace/organizations-and-projects#a-projects-agents),
-opening the trace that first carried it, and a row of
+opening the trace that first carried it, where the models and prompt versions
+its traces carried are listed instead; every change is a row of
 [`GET /v1/changes`](/docs/api/reference#get-v1changes). An incident names
 those of the 24 hours
 [before it opened](/docs/monitoring/alerts#what-changed-before-it).
@@ -264,8 +285,9 @@ Its first line sums the trace: its status, when it started, how long it ran, its
 model calls' tokens — hover for the split — what it spent so far, as an
 alert on a trace's cost reads it ([what a call cost](/docs/api/ingest#what-a-call-cost)),
 with how many of the models it called no price covers, named on hover, its
-session, a link to its traces in the order they started, its user, a link to
-the traces that share it, its tags, and each incident whose
+session, a link to [that session's page](/docs/monitoring/sessions#a-sessions-page),
+its user, a link to [that user's page](/docs/monitoring/users#a-users-page),
+its tags, and each incident whose
 notices showed the trace, among the last twenty each keeps, a link to it on the
 project's [Alerts](/docs/monitoring/alerts#from-a-trace) page.
 
@@ -290,7 +312,7 @@ tokens, input, output, cached and reasoning, its cache share, the cost it report
 it reported one, when it started and ended to the
 millisecond, how long it ran and how soon its answer began, when it was
 received, and its ids. The agent's own span adds the
-trace's steps, calls, retrievals and tokens, its user, session and tags, and its sample
+trace's steps, calls, retrievals and tokens, its user and session, each a link to its own page, its tags, and its sample
 rate where a plan [kept one trace in ten](/docs/api/ingest#what-is-dropped-at-the-door). **Attributes** lists what else was kept with the
 span under its own name, and **Raw** shows either as it was stored. The
 trace holds its first 5,000 spans, fewer where their names, tags and

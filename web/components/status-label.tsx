@@ -1,18 +1,18 @@
 import type { ServiceState } from "@/lib/footer";
-import { cn } from "@/lib/utils";
+import { StatusIndicator } from "@/components/status-badge";
 
-/** A footer link's label, or, for a status page that names its services, a
- *  bar for each, green or red, and what they come to: Normal or Disrupted. */
+/** Service health stays named alongside its indicators. */
 export function StatusLabel({ label, services }: { label: string; services?: readonly ServiceState[] }) {
   if (!services?.length) return <>{label}</>;
   const down = services.filter((service) => service.state === "disrupted").map((service) => service.name);
   return (
     <>
-      <span aria-hidden="true" className="mr-1.5 inline-flex h-icon gap-0.5 align-middle">
+      <span aria-hidden="true" className="mr-1.5 inline-flex h-icon items-center gap-1.5 align-middle">
         {services.map((service) => (
-          <span
+          <StatusIndicator
             key={service.name}
-            className={cn("w-1 rounded-xs", service.state === "normal" ? "bg-brand-positive" : "bg-brand-negative")}
+            live={service.state === "disrupted"}
+            className={service.state === "normal" ? "bg-brand-positive" : "bg-brand-negative"}
           />
         ))}
       </span>

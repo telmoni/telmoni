@@ -32,7 +32,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          fontFamily: "var(--font-mono)",
+          fontFamily: "var(--font-sans)",
           fontSize: "var(--text-sm)",
           "--normal-bg": "var(--accent)",
           "--normal-text": "var(--accent-foreground)",

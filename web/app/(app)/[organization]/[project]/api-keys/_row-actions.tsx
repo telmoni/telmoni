@@ -60,7 +60,7 @@ export function TokenRowActions({
       <ConfirmDialog
         trigger={
           <Button
-            variant="destructive"
+            variant="destructiveOutline"
             size="sm"
             disabled={pending}
             aria-label={`Revoke ${name}`}

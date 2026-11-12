@@ -63,6 +63,7 @@ import { FieldInventorySchema } from "./field-inventory";
 import { LimitsSchema } from "./limits";
 import { FeedSchema } from "./notification-feed";
 import { DoorScrubSchema, PrivacyPostureSchema } from "./privacy";
+import { SessionListSchema } from "./sessions";
 import {
   DashboardViewListSchema,
   FacetsSchema,
@@ -70,6 +71,7 @@ import {
   TraceHistogramSchema,
   TraceListSchema,
 } from "./traces";
+import { UserListSchema } from "./users";
 
 // A turn's stream, each frame read as the agent panel's parser reads it.
 const TurnFramesSchema = z.array(
@@ -143,8 +145,10 @@ const READERS: Record<string, z.ZodType> = {
   "telemetry/privacy.json": PrivacyPostureSchema,
   "telemetry/door-scrub.json": DoorScrubSchema,
   "telemetry/rollups.json": RollupsSchema,
+  "telemetry/sessions.json": SessionListSchema,
   "telemetry/trace.json": TraceDetailSchema,
   "telemetry/traces.json": TraceListSchema,
+  "telemetry/users.json": UserListSchema,
 };
 
 // Readers that take every field as optional, so a key renamed would read as

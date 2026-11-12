@@ -405,6 +405,46 @@ describe("RealtimeListener - spans:ingested", () => {
     }
   });
 
+  it.each([
+    "/acme/web/agents",
+    "/acme/web/sessions",
+    "/acme/web/sessions/9f86d081884c7d659a2feaa0c55ad015",
+    "/acme/web/users",
+    "/acme/web/users/2c26b46b68ffc68ff99b453c1d304134",
+    "/acme/web/dashboards",
+  ])(
+    "draws %s as any trace lands, held as the Agents page is",
+    (pathname) => {
+      vi.useFakeTimers();
+      try {
+        mockPathname = pathname;
+        render(<RealtimeListener liveHoldMs={100} />);
+        nudge("project_1", ["trace_1"]);
+        nudge("project_1", ["trace_2"]);
+        expect(mockRefresh).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(100);
+        expect(mockRefresh).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("leaves a list's download alone: a route, not a page", () => {
+    for (const pathname of ["/acme/web/traces/export", "/acme/web/sessions/export", "/acme/web/users/export"]) {
+      mockPathname = pathname;
+      const { unmount } = render(<RealtimeListener />);
+      MockEventSource.instances.at(-1)!.emit("spans:ingested", {
+        organizationId: "org_1",
+        projectId: "project_1",
+        traces: ["trace_1"],
+        more: false,
+      });
+      unmount();
+    }
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
   it("leaves a page of another project, and a page reading no spans, alone", () => {
     mockPathname = "/acme/web/traces";
     render(<RealtimeListener />);
@@ -477,6 +517,32 @@ describe("RealtimeListener - spans:ingested", () => {
       vi.useRealTimers();
     }
   });
+
+  // A session's page, a user's and an agent's hold a peek open too.
+  it.each(["/acme/web/sessions/9f86d081", "/acme/web/users/2c26b46b", "/acme/web/agents"])(
+    "tells the peek open over %s when its own trace lands, and draws the page as any does",
+    (pathname) => {
+      vi.useFakeTimers();
+      const landed = vi.fn();
+      window.addEventListener(PEEK_NUDGED, landed);
+      try {
+        window.history.replaceState(null, "", `${pathname}?peek=trace_7`);
+        mockPathname = pathname;
+        render(<RealtimeListener liveHoldMs={100} />);
+        nudge("project_1", ["trace_1"]);
+        expect(landed).not.toHaveBeenCalled();
+        expect(mockRefresh).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(100);
+        nudge("project_1", ["trace_7"]);
+        expect(landed).toHaveBeenCalledTimes(1);
+        expect(mockRefresh).toHaveBeenCalledTimes(2);
+      } finally {
+        window.removeEventListener(PEEK_NUDGED, landed);
+        window.history.replaceState(null, "", "/");
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("leaves a download's route alone", () => {
     mockPathname = "/acme/web/traces/export";

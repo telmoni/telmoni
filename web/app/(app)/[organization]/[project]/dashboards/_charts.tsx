@@ -1,6 +1,7 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ArrowUp, ArrowDown, GripVertical, PanelsTopLeft } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 import {
@@ -13,9 +14,34 @@ import {
 } from "@/components/ui/chart";
 import { OutputSpeedChart, TokenChart } from "@/components/traces/charts";
 import type { TraceHistogram } from "@/lib/server/entities/traces";
-import type { Bar as DashboardBar } from "@/lib/dashboards";
+import { DEFAULT_SPEND_LAYOUT, SPEND_CHART_LABELS, readSpendLayout, type SpendLayout, type Bar as DashboardBar } from "@/lib/dashboards";
 import { useInBrowser } from "@/lib/in-browser";
 import { formatCost, formatCount, formatDuration, type TokenBar } from "@/lib/traces";
+import { listeners } from "@/lib/listeners";
+import { useUser } from "@/lib/store";
+import { ChartMeasure } from "@/lib/types/enums";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+
+const LAYOUT_KEY = "telmoni-spend-layout:";
+let cachedLayout: { key: string; stored: string | null; layout: SpendLayout } | null = null;
+function onLayoutStorage(event: StorageEvent) {
+  if (event.key === null || event.key.startsWith(LAYOUT_KEY)) layoutStore.emit();
+}
+const layoutStore = listeners({
+  first: () => window.addEventListener("storage", onLayoutStorage),
+  last: () => window.removeEventListener("storage", onLayoutStorage),
+});
+function savedLayout(key: string | null): SpendLayout {
+  if (!key) return DEFAULT_SPEND_LAYOUT;
+  let stored: string | null;
+  try { stored = localStorage.getItem(key); } catch { return DEFAULT_SPEND_LAYOUT; }
+  if (cachedLayout?.key === key && cachedLayout.stored === stored) return cachedLayout.layout;
+  const layout = readSpendLayout(stored);
+  cachedLayout = { key, stored, layout };
+  return layout;
+}
 
 /** One bar of time to first token, which only the spans keep. */
 export type FirstTokenBar = {
@@ -130,7 +156,7 @@ function Chart({
   );
 }
 
-/** The window's charts, two to a row. */
+/** Personal chart order, visibility and width; editing does not change the data. */
 export function DashboardCharts({
   bars,
   firstToken,
@@ -151,14 +177,44 @@ export function DashboardCharts({
 }) {
   const tokensId = useId();
   const speedId = useId();
+  const owner = useUser()?.id ?? null;
+  const storageKey = owner ? `${LAYOUT_KEY}${owner}` : null;
+  const saved = useSyncExternalStore(layoutStore.subscribe, () => savedLayout(storageKey), () => DEFAULT_SPEND_LAYOUT);
+  const [draft, setDraft] = useState<{ owner: string; layout: SpendLayout } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragged, setDragged] = useState<ChartMeasure | null>(null);
+  const editing = draft?.owner === owner && draft !== null;
+  const layout = editing ? draft.layout : saved;
+  function change(next: SpendLayout) {
+    if (owner) setDraft({ owner, layout: next });
+    setError(null);
+  }
+  function move(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || to >= layout.length) return;
+    const next = [...layout];
+    const [item] = next.splice(from, 1);
+    if (!item) return;
+    next.splice(to, 0, item);
+    change(next);
+  }
+  function save() {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(layout));
+      layoutStore.emit();
+      setDraft(null);
+      setError(null);
+    } catch {
+      setError("Your browser could not save this layout. Allow site storage, then try again.");
+    }
+  }
   const sum = (of: (bar: DashboardBar) => number) => bars.reduce((total, bar) => total + of(bar), 0);
   const last = <T,>(rows: readonly T[], of: (row: T) => number | null) =>
     rows.findLast((row) => of(row) !== null) ?? null;
   const lastly = (value: number | null | undefined) =>
     value == null ? "None read in the window." : `Latest 95th percentile ${formatDuration(value)}.`;
-  return (
-    <div className="grid gap-page lg:grid-cols-2">
-      <Chart
+  const charts: Record<ChartMeasure, ReactNode> = {
+    spend: <Chart
         title="Spend"
         summary={`${formatCost(sum((bar) => bar.spend))} over the window.`}
         config={SPEND}
@@ -166,8 +222,8 @@ export function DashboardCharts({
         hourly={hourly}
         format={formatCost}
         kind="bars"
-      />
-      <section
+      />,
+    tokens: <section
         aria-labelledby={tokensId}
         className="grid min-w-0 gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border"
       >
@@ -176,8 +232,8 @@ export function DashboardCharts({
         </h2>
         {/* Any window past a day draws by the UTC day, whatever its length. */}
         <TokenChart bars={tokenBars} days={hourly ? 1 : 2} timeZone="UTC" className="h-48" />
-      </section>
-      <Chart
+      </section>,
+    traces: <Chart
         title="Traces"
         summary={`${formatCount(sum((bar) => bar.ok + bar.failed))} traces, ${formatCount(
           sum((bar) => bar.failed),
@@ -187,8 +243,8 @@ export function DashboardCharts({
         hourly={hourly}
         format={formatCount}
         kind="stacked"
-      />
-      <Chart
+      />,
+    latency: <Chart
         title="Latency"
         summary={lastly(last(bars, (bar) => bar.p95)?.p95)}
         config={LATENCY}
@@ -196,8 +252,8 @@ export function DashboardCharts({
         hourly={hourly}
         format={formatDuration}
         kind="lines"
-      />
-      <Chart
+      />,
+    first_token: <Chart
         title="Time to first token"
         summary={lastly(last(firstToken, (bar) => bar.firstTokenP95)?.firstTokenP95)}
         config={FIRST_TOKEN}
@@ -205,8 +261,8 @@ export function DashboardCharts({
         hourly={firstTokenHourly}
         format={formatDuration}
         kind="lines"
-      />
-      <section
+      />,
+    output_speed: <section
         aria-labelledby={speedId}
         className="grid min-w-0 gap-gutter rounded-menu p-gutter ring-[0.5px] ring-border"
       >
@@ -230,7 +286,70 @@ export function DashboardCharts({
         ) : (
           <p className="text-muted-foreground">Output speed could not be read. Reload to try again.</p>
         )}
-      </section>
+      </section>,
+  };
+  return (
+    <div className="grid gap-gutter">
+      <div className="flex flex-wrap items-center justify-end gap-gutter">
+        {editing ? (
+          <>
+            <p className="mr-auto text-sm text-muted-foreground">Drag charts or use the arrows. Saved for you in this browser.</p>
+            <Button onClick={() => change(DEFAULT_SPEND_LAYOUT)}>Reset layout</Button>
+            <Button onClick={() => { setDraft(null); setError(null); }}>Cancel</Button>
+            <Button variant="filled" onClick={save}>Save layout</Button>
+          </>
+        ) : (
+          <Button disabled={!owner} onClick={() => { if (owner) setDraft({ owner, layout: saved }); setError(null); }}>
+            <PanelsTopLeft aria-hidden="true" /> Edit layout
+          </Button>
+        )}
+      </div>
+      {editing && error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {!editing && !layout.some((row) => row.visible) && (
+        <p className="text-sm text-muted-foreground">All charts are hidden. Use Edit layout to show them again.</p>
+      )}
+      <div className="grid items-start gap-page lg:grid-cols-2">
+        {layout.map((row, index) => (editing || row.visible) && (
+          <div
+            key={row.measure}
+            className={cn("grid min-w-0 gap-gutter", row.width === "full" && "lg:col-span-2", editing && "rounded-menu border border-dashed border-border p-gutter")}
+            onDragOver={(event) => { if (editing && dragged) event.preventDefault(); }}
+            onDrop={(event) => {
+              if (!editing || !dragged) return;
+              event.preventDefault();
+              move(layout.findIndex((item) => item.measure === dragged), index);
+              setDragged(null);
+            }}
+          >
+            {editing && (
+              <div className="flex flex-wrap items-center gap-gutter">
+                <Button
+                  size="icon"
+                  aria-label={`Drag ${SPEND_CHART_LABELS[row.measure]}`}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData("text/plain", row.measure);
+                    event.dataTransfer.effectAllowed = "move";
+                    setDragged(row.measure);
+                  }}
+                  onDragEnd={() => setDragged(null)}
+                  className="cursor-grab active:cursor-grabbing"
+                ><GripVertical aria-hidden="true" /></Button>
+                <Button size="icon" aria-label={`Move ${SPEND_CHART_LABELS[row.measure]} earlier`} disabled={index === 0} onClick={() => move(index, index - 1)}><ArrowUp aria-hidden="true" /></Button>
+                <Button size="icon" aria-label={`Move ${SPEND_CHART_LABELS[row.measure]} later`} disabled={index === layout.length - 1} onClick={() => move(index, index + 1)}><ArrowDown aria-hidden="true" /></Button>
+                <label className="flex items-center gap-gutter text-sm">
+                  <Checkbox checked={row.visible} onCheckedChange={(checked) => change(layout.map((item, at) => at === index ? { ...item, visible: checked === true } : item))} />
+                  Show {SPEND_CHART_LABELS[row.measure]}
+                </label>
+                <Button className="ml-auto" aria-label={`Make ${SPEND_CHART_LABELS[row.measure]} ${row.width === "half" ? "full" : "half"} width`} onClick={() => change(layout.map((item, at) => at === index ? { ...item, width: item.width === "half" ? "full" : "half" } : item))}>
+                  {row.width === "half" ? "Half width" : "Full width"}
+                </Button>
+              </div>
+            )}
+            {row.visible ? charts[row.measure] : <p className="text-sm text-muted-foreground">{SPEND_CHART_LABELS[row.measure]} is hidden.</p>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

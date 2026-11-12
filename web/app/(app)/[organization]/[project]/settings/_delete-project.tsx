@@ -35,7 +35,7 @@ export function DeleteProjectForm({
           open={open}
           onOpenChange={setOpen}
           trigger={
-            <Button variant="destructive" disabled={pending}>
+            <Button variant="destructiveOutline" disabled={pending}>
               {pending ? "Deleting…" : "Delete project"}
             </Button>
           }

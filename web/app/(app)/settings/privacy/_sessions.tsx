@@ -99,7 +99,7 @@ export function ActiveSessions({
       {others && (
         <div>
           <Button
-            variant="destructive"
+            variant="destructiveOutline"
             size="sm"
             disabled={pending && busyId === "others"}
             onClick={revokeOthers}
@@ -137,7 +137,7 @@ export function ActiveSessions({
                 <Td className="text-right whitespace-nowrap">
                   {isCurrent ? null : (
                     <Button
-                      variant="destructive"
+                      variant="destructiveOutline"
                       size="sm"
                       aria-label={`End session ${deviceLabel(session.userAgent)}`}
                       disabled={pending && busyId === session.id}

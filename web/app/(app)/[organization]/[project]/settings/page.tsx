@@ -166,7 +166,22 @@ export default async function SettingsPage({
           )}
         </Section>
 
-        <Section card title="Door scrubbers" description="For content from other OpenTelemetry distributions, before it is stored. SDK content keeps the developer's scrubber settings. Changes affect subsequent exports, not content already kept.">
+        <Section
+          card
+          title="Door scrubbers"
+          description={
+            <>
+              For content from other OpenTelemetry distributions, before it is stored. SDK content is
+              scrubbed in the agent&apos;s own process, before it is sent, by{" "}
+              <code className="font-mono">TELMONI_SCRUB_SECRETS</code> and{" "}
+              <code className="font-mono">TELMONI_SCRUB_PII</code> where the agent runs (
+              <Link href="/docs/api/sdks#scrubbing-secrets-and-personal-data" className="underline underline-offset-4">
+                SDK scrubbers
+              </Link>
+              ). Changes here affect subsequent exports, not content already kept.
+            </>
+          }
+        >
           {posture ? <DoorScrubForm key={JSON.stringify(posture.door_scrub)} projectId={project.id} policy={posture.door_scrub} disabled={!canEdit} /> :
             <p className="text-muted-foreground">Scrubbers could not be read. Reload to try again.</p>}
         </Section>

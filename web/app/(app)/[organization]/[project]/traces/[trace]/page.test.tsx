@@ -204,13 +204,14 @@ describe("TracePage", () => {
         .getAllByText("$0.84, 1 model unpriced")
         .some((el) => el.getAttribute("title") === "No price for openai ft:gpt-4o:acme"),
     ).toBe(true);
-    expect(screen.getByRole("link", { name: "session" })).toHaveAttribute(
+    // Its session and its user each open their own page, never a list narrowed to them.
+    expect(screen.getByRole("link", { name: "session conv-1" })).toHaveAttribute(
       "href",
-      "/acme/web/traces?session=conv-1&sort=started&dir=asc",
+      "/acme/web/sessions/conv-1",
     );
     expect(screen.getByRole("link", { name: "user 9f86d081" })).toHaveAttribute(
       "href",
-      "/acme/web/traces?user=9f86d081884c7d659a2feaa0c55ad015",
+      "/acme/web/users/9f86d081884c7d659a2feaa0c55ad015",
     );
 
     // The spans as they ran: the agent, its step, and the step's two calls.

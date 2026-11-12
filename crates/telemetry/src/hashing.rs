@@ -8,6 +8,7 @@
 //! ⚠ The key, not the hash, is what erasure deletes: with the row
 //! gone, no stored id can be matched against a list of guessed ones.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -105,20 +106,61 @@ pub async fn storage_for_project(
     state: &AppState,
     project_id: &ProjectId,
 ) -> Result<UserIdStorage, TelmoniError> {
-    if let Some(storage) = state.hashing_keys.get(project_id) {
+    if let Some(storage) = storage_where_keyed(state, project_id).await? {
         return Ok(storage);
     }
-    let aad = project_id.as_str().as_bytes();
+    let sealed = key_project(state, project_id, project_id.as_str().as_bytes()).await?;
+    opened(state, project_id, &sealed).await
+}
+
+/// How the project stores ids where it has stored one: none where it has no
+/// key yet, and none is made, so a lane that only reads writes nothing.
+///
+/// # Errors
+///
+/// Postgres or the key service did not answer, or the row's key will not open.
+pub async fn storage_where_keyed(
+    state: &AppState,
+    project_id: &ProjectId,
+) -> Result<Option<UserIdStorage>, TelmoniError> {
+    if let Some(storage) = state.hashing_keys.get(project_id) {
+        return Ok(Some(storage));
+    }
     let mut tx = project_scope(&state.db, project_id).await?;
     let read = db::hashing_key(&mut tx, project_id).await?;
     tx.commit().await?;
-    let sealed = match read {
-        Some(sealed) => sealed,
-        None => key_project(state, project_id, aad).await?,
-    };
-    let storage = UserIdStorage(Arc::new(open_key(state, &sealed, aad).await?));
+    match read {
+        Some(sealed) => opened(state, project_id, &sealed).await.map(Some),
+        None => Ok(None),
+    }
+}
+
+/// The project's key opened, and kept for the process.
+async fn opened(
+    state: &AppState,
+    project_id: &ProjectId,
+    sealed: &SealedHashingKey,
+) -> Result<UserIdStorage, TelmoniError> {
+    let aad = project_id.as_str().as_bytes();
+    let storage = UserIdStorage(Arc::new(open_key(state, sealed, aad).await?));
     state.hashing_keys.put(project_id.clone(), storage.clone());
     Ok(storage)
+}
+
+/// An id as an application sent it, read as ingest reads one before hashing
+/// it: its NULs dropped, 1 to `max` characters. `what` names it in the refusal.
+///
+/// # Errors
+///
+/// A 400 that names the id's kind and length, never the id.
+pub fn id_as_sent<'a>(raw: &'a str, what: &str, max: usize) -> Result<Cow<'a, str>, TelmoniError> {
+    let id = crate::ingest::span::without_nul(raw);
+    if id.is_empty() || id.chars().count() > max {
+        return Err(TelmoniError::BadRequest(format!(
+            "{what} is 1 to {max} characters, as its spans carry it"
+        )));
+    }
+    Ok(id)
 }
 
 /// Makes the project's hashing key, and its settings row where it has none.

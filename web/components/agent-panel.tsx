@@ -18,6 +18,7 @@ import { useAgentTurn } from "@/components/agent/use-agent-turn";
 import { useStickToEnd } from "@/components/agent/use-stick-to-end";
 import { PanelAction } from "@/components/side-panel";
 import { Button } from "@/components/ui/button";
+import { StatusIndicator } from "@/components/status-badge";
 import { agentReducer, initialAgentState } from "@/lib/agent/stream";
 import { type ActionResult, refused } from "@/lib/action-result";
 import { agentSuggestions } from "@/lib/agent/suggestions";
@@ -228,17 +229,19 @@ export function AgentPanel() {
   const title = (
     <>
       <span className="truncate">Telmoni Agent</span>
-      <span
+      <StatusIndicator
+        live={streaming}
         className={cn(
-          "inline-block size-2 shrink-0 rounded-full",
           agent.status === "enabled"
             ? "bg-brand-positive"
-            : agent.status === null
-              ? "bg-muted-foreground/40"
-              : "bg-muted-foreground",
+            : agent.status === "unavailable"
+              ? "bg-brand-negative"
+              : agent.status === null
+                ? "bg-muted-foreground/40"
+                : "bg-muted-foreground",
         )}
-        aria-hidden
       />
+      <span className="sr-only">{streaming ? "Responding" : agent.status === null ? "Status unknown" : agent.status}</span>
     </>
   );
 

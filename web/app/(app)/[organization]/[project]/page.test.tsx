@@ -19,7 +19,10 @@ let mockProject: { id: string; slug: string; name: string; role: string } | null
 vi.mock("@/lib/server/data", () => ({ fetchProjectBySlug: async () => mockProject }));
 
 let mockAgents: unknown;
-vi.mock("@/lib/server/entities/agents", () => ({ fetchAgents: async () => mockAgents }));
+let mockOlderAgents: unknown;
+vi.mock("@/lib/server/entities/agents", () => ({
+  fetchAgents: async (_project: string, _agent?: string, days?: number) => days ? mockOlderAgents ?? mockAgents : mockAgents,
+}));
 
 let mockAlerts: unknown;
 vi.mock("@/lib/server/entities/alerts", () => ({ fetchAlerts: async () => mockAlerts }));
@@ -42,12 +45,16 @@ const agent = (name: string, patch: Record<string, unknown> = {}) => ({
   agent: name,
   traces: 1,
   failed_traces: 0,
+  faults: {},
+  spend: 0.012,
   last_trace_id: "0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
   last_started_at: "2026-11-05T09:00:00Z",
   last_ended: true,
   last_status: "ok",
   last_spend: 0.012,
   usual_spend: 0.012,
+  models: [],
+  prompt_versions: [],
   ...patch,
 });
 
@@ -87,6 +94,7 @@ describe("a project's Agents page", () => {
   beforeEach(() => {
     mockProject = { id: "prj_1", slug: "web", name: "Web", role: "member" };
     mockAgents = agentsOk([]);
+    mockOlderAgents = null;
     mockAlerts = alertsOk([]);
   });
 
@@ -96,23 +104,17 @@ describe("a project's Agents page", () => {
     expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument();
   });
 
-  it("opens how to connect another agent in a tab of its own", async () => {
-    render(await AgentsPage({ params: PARAMS } as never));
-    const connect = screen.getByRole("link", { name: /Connect an agent/ });
-    expect(connect).toHaveAttribute("href", "/docs/getting-started/connect-an-agent");
-    expect(connect).toHaveAttribute("target", "_blank");
-  });
-
   // The first trace made the project's starter alerts, each over every agent.
   it("reads a project with one trace as watched", async () => {
     mockAgents = agentsOk([agent("support-bot")]);
     mockAlerts = alertsOk([alert("failing"), alert("looping"), alert("stalled")]);
     render(await AgentsPage({ params: PARAMS } as never));
 
-    const row = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    const row = screen.getByRole("link", { name: "support-bot" }).closest("li")!;
+    // Its name opens its own page, over the days this page read.
     expect(screen.getByRole("link", { name: "support-bot" })).toHaveAttribute(
       "href",
-      "/acme/web/traces?agent=support-bot",
+      "/acme/web/agents?agent=support-bot&days=14",
     );
     expect(within(row).getByText("OK")).toBeInTheDocument();
     expect(within(row).getByRole("link", { name: "3 alerts" })).toHaveAttribute("href", "/acme/web/alerts");
@@ -121,12 +123,12 @@ describe("a project's Agents page", () => {
     expect(screen.queryByText(/No agent has run/)).toBeNull();
   });
 
-  it("gives each agent's row a Versions button under the table's one panel, the name still its traces' link", async () => {
+  it("gives each agent's card a Versions button under the list's one panel, the name still its traces' link", async () => {
     mockAgents = agentsOk([agent("support-bot"), agent("..")]);
     render(await AgentsPage({ params: PARAMS } as never));
 
     for (const name of ["support-bot", ".."]) {
-      const row = screen.getByRole("link", { name }).closest("tr")!;
+      const row = screen.getByRole("link", { name }).closest("li")!;
       const opener = within(row).getByRole("button", { name: `Versions of ${name}` });
       const host = opener.closest("[data-testid='versions-host']");
       expect(host).toHaveAttribute("data-project", "prj_1");
@@ -141,49 +143,70 @@ describe("a project's Agents page", () => {
     ]);
     render(await AgentsPage({ params: PARAMS } as never));
 
-    const nightly = screen.getByRole("link", { name: "nightly-report" }).closest("tr")!;
+    const nightly = screen.getByRole("link", { name: "nightly-report" }).closest("li")!;
     expect(within(nightly).getByText("Running")).toBeInTheDocument();
     expect(within(nightly).getByText("No trace ended yet")).toBeInTheDocument();
     expect(within(nightly).getByRole("link", { name: "No alert yet" })).toHaveAttribute("href", "/acme/web/alerts");
 
-    const support = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    const support = screen.getByRole("link", { name: "support-bot" }).closest("li")!;
     expect(within(support).getByText("12")).toBeInTheDocument();
     expect(within(support).getByText("2 failed")).toBeInTheDocument();
     expect(within(support).getByText("$0.20")).toBeInTheDocument();
     expect(within(support).getByText("Usually $0.050")).toBeInTheDocument();
+    // Its last trace opens the trace's own page, never the trace list.
     expect(support.querySelector('time[datetime="2026-11-05T09:00:00Z"]')?.closest("a")).toHaveAttribute(
       "href",
-      "/acme/web/traces?agent=support-bot&peek=0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
+      "/acme/web/traces/0191a3b47c2e7d3f8e4a5b6c7d8e9f01",
     );
   });
 
-  it("puts each kind's newest change under its agent, including a tool's first call linked to its trace", async () => {
+  it("puts its newest release and first tool call under its agent, each linked to its trace", async () => {
     const release = "0192f3a17c2e7b4d9a61000000000001";
-    const model = "0192f3a17c2e7b4d9a61000000000002";
-    const prompt = "0192f3a17c2e7b4d9a61000000000003";
     const tool = "0192f3a17c2e7b4d9a61000000000005";
     // In the server's order, by the kinds' names: the page stands the release first.
     mockAgents = agentsOk(
       [agent("support-bot"), agent("nightly-report")],
       [
-        change("model", "gpt-4o-mini", model, { environment: "" }),
-        change("prompt", "3", prompt, { prompt: "triage" }),
         change("release", "1.4.2", release),
         change("tool", "delete_user", tool),
       ],
     );
     render(await AgentsPage({ params: PARAMS } as never));
 
-    const support = within(screen.getByRole("link", { name: "support-bot" }).closest("td")!);
-    expect(support.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["support-bot", "/acme/web/traces?agent=support-bot"],
-      ["release 1.4.2 in production", `/acme/web/traces?agent=support-bot&peek=${release}`],
-      ["model gpt-4o-mini", `/acme/web/traces?agent=support-bot&peek=${model}`],
-      ["prompt triage version 3 in production", `/acme/web/traces?agent=support-bot&peek=${prompt}`],
-      ["first call of delete_user in production", `/acme/web/traces?agent=support-bot&peek=${tool}`],
+    const support = within(screen.getByRole("link", { name: "support-bot" }).closest("li")!);
+    expect(
+      support.getAllByRole("link").slice(0, 3).map((link) => [link.textContent, link.getAttribute("href")]),
+    ).toEqual([
+      ["support-bot", "/acme/web/agents?agent=support-bot&days=14"],
+      ["release 1.4.2 in production", `/acme/web/traces/${release}`],
+      ["first call of delete_user in production", `/acme/web/traces/${tool}`],
     ]);
-    const nightly = within(screen.getByRole("link", { name: "nightly-report" }).closest("td")!);
-    expect(nightly.getAllByRole("link")).toHaveLength(1);
+    const nightly = within(screen.getByRole("link", { name: "nightly-report" }).closest("li")!);
+    expect(nightly.queryByRole("link", { name: /^(release|first call) / })).toBeNull();
+  });
+
+  // An agent may switch models and prompts or route between them: the lines name what it ran on, not one of each.
+  it("names the models and prompt versions an agent's traces carried, the two most used and the rest counted", async () => {
+    mockAgents = agentsOk([
+      agent("support-bot", {
+        models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+        prompt_versions: ["triage:4", "triage:3"],
+      }),
+      agent("nightly-report", { models: ["gpt-4o-mini"] }),
+      agent("cron", { models: [] }),
+    ]);
+    render(await AgentsPage({ params: PARAMS } as never));
+
+    const support = within(screen.getByRole("link", { name: "support-bot" }).closest("li")!);
+    expect(support.getByText("models claude-opus-5-5, claude-sonnet-5-5 +1")).toHaveAttribute(
+      "title",
+      "claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5",
+    );
+    expect(support.getByText("prompts triage:4, triage:3")).toBeInTheDocument();
+    const nightly = within(screen.getByRole("link", { name: "nightly-report" }).closest("li")!);
+    expect(nightly.getByText("model gpt-4o-mini")).toBeInTheDocument();
+    const cron = within(screen.getByRole("link", { name: "cron" }).closest("li")!);
+    expect(cron.queryByText(/^(models?|prompts?) /)).toBeNull();
   });
 
   // A capped day's last shown change may not be the agent's latest: its line says so.
@@ -208,26 +231,35 @@ describe("a project's Agents page", () => {
     render(await AgentsPage({ params: PARAMS } as never));
 
     expect(screen.getByText("1 incident is open on alerts over every agent.")).toBeInTheDocument();
-    const support = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    const support = screen.getByRole("link", { name: "support-bot" }).closest("li")!;
     expect(within(support).getByRole("link", { name: "2 alerts" })).toBeInTheDocument();
     expect(within(support).getByText("1 open incident")).toBeInTheDocument();
-    const nightly = screen.getByRole("link", { name: "nightly-report" }).closest("tr")!;
+    const nightly = screen.getByRole("link", { name: "nightly-report" }).closest("li")!;
     expect(within(nightly).getByRole("link", { name: "1 alert" })).toBeInTheDocument();
     expect(within(nightly).queryByText(/open incident/)).toBeNull();
   });
 
   it("says how to send a first trace where no agent has run", async () => {
     render(await AgentsPage({ params: PARAMS } as never));
+    expect(screen.getByRole("heading", { name: "Connect your first agent" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first agent");
+    expect(screen.getByText(/ask one for a key with Send spans/)).toBeInTheDocument();
+    expect(screen.queryByText(/No agent has run/)).toBeNull();
+    expect(screen.queryByRole("list", { name: "Agents" })).toBeNull();
+  });
+
+  it("keeps the quiet-window notice when an older agent exists", async () => {
+    mockOlderAgents = agentsOk([agent("support-bot")]);
+    render(await AgentsPage({ params: PARAMS } as never));
     expect(screen.getByText("No agent has run here in the last 14 days.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "API keys" })).toHaveAttribute("href", "/acme/web/api-keys");
-    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Connect your first agent" })).toBeNull();
   });
 
   it("draws the agents with nothing said of their alerts when those could not be read", async () => {
     mockAgents = agentsOk([agent("support-bot")]);
     mockAlerts = { kind: "unavailable" };
     render(await AgentsPage({ params: PARAMS } as never));
-    const row = screen.getByRole("link", { name: "support-bot" }).closest("tr")!;
+    const row = screen.getByRole("link", { name: "support-bot" }).closest("li")!;
     expect(within(row).getByText("—")).toBeInTheDocument();
   });
 

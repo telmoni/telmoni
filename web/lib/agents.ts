@@ -1,5 +1,12 @@
+import { listHref } from "@/lib/list-query";
 import type { Alert, Incident } from "@/lib/server/entities/alerts";
 import { IncidentStatus } from "@/lib/types/enums";
+
+/** An agent's own page over `days`, the page's own where none are named: the
+ *  agent a parameter, never a path, since a name is any text, `..` among it. */
+export function agentHref(organization: string, project: string, agent: string, days?: number): string {
+  return listHref(organization, project, "/agents", { agent, days });
+}
 
 /** The agents an alert is held to by its filter; none is every agent. */
 function heldTo(alert: Alert): readonly string[] {

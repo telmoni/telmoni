@@ -61,6 +61,15 @@ describe("GET /api/v1/agent-versions", () => {
     });
   });
 
+  it("sends on the days a page reads, and none where they are no count a list reads", async () => {
+    await read({ project: PROJECT, agent: "triage", by: "release", days: "30" });
+    expect(fetchVersions).toHaveBeenLastCalledWith(PROJECT, expect.objectContaining({ days: 30 }));
+    for (const days of ["0", "361", "7.5", "week"]) {
+      await read({ project: PROJECT, agent: "triage", by: "release", days });
+      expect(vi.mocked(fetchVersions).mock.lastCall?.[1].days, days).toBeUndefined();
+    }
+  });
+
   it("refuses a request with no sign-in before reading anything", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null as never);
     expect((await read({ project: PROJECT, agent: "triage", by: "release" })).status).toBe(401);

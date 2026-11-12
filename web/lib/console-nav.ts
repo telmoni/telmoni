@@ -3,10 +3,12 @@ import {
   Bell,
   BellRing,
   Bot,
+  Contact,
   Gauge,
   History,
   KeyRound,
   ListTree,
+  MessagesSquare,
   Plug,
   Settings,
   ShieldCheck,
@@ -179,6 +181,9 @@ interface GroupSpec {
   items: {
     title: string;
     path: string;
+    /** A path the row's pages also stand under, where its own is the rail's
+     *  root: an agent's page, under the Agents row. */
+    under?: string;
     icon: LucideIcon;
     flags?: readonly Flag[];
     block?: boolean;
@@ -200,8 +205,11 @@ const CORE_GROUPS: GroupSpec[] = [
     // What answers "are my agents OK?", then the project's own housekeeping a
     // block below. The pages keep their paths: Spend is the dashboards.
     items: [
-      { title: "Agents", path: "", icon: Bot, key: "o" },
+      { title: "Agents", path: "", under: "/agents", icon: Bot, key: "o" },
       { title: "Traces", path: "/traces", icon: ListTree, key: "t" },
+      { title: "Sessions", path: "/sessions", icon: MessagesSquare, key: "e" },
+      // End users, the people the agents worked for: Members, below, are the project's own.
+      { title: "Users", path: "/users", icon: Contact, key: "u" },
       { title: "Alerts", path: "/alerts", icon: BellRing, key: "a" },
       { title: "Objectives", path: "/objectives", icon: Target, key: "v" },
       { title: "Spend", path: "/dashboards", icon: Wallet, key: "s" },
@@ -293,6 +301,7 @@ export function buildConsoleNav(pathname: string, flags: FlagSet = {}): ConsoleN
         .filter((s) => !allOff(flags, s.flags ?? []))
         .map((s) => {
           const url = href(s.path);
+          const at = (page: string) => pathname === page || pathname.startsWith(`${page}/`);
           return {
             title: s.title,
             url,
@@ -301,8 +310,10 @@ export function buildConsoleNav(pathname: string, flags: FlagSet = {}): ConsoleN
             ...(s.key ? { key: s.key } : {}),
             isActive:
               s.path === ""
-                ? pathname === overview || pathname === `${overview}/`
-                : pathname === url || pathname.startsWith(`${url}/`),
+                ? pathname === overview ||
+                  pathname === `${overview}/` ||
+                  (s.under !== undefined && at(href(s.under)))
+                : at(url),
           };
         }),
     },

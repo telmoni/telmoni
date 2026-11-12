@@ -637,8 +637,9 @@ async fn seed(ch: &common::ClickHouse, p: &Projects) -> Seeded {
 }
 
 /// Each agent as its Agents page reads it: its traces, those that failed, the
-/// one that started last and what it cost, and the median of what its ended
-/// traces cost, the newest last trace first; another project's agent is not here.
+/// one that started last and what it cost, the median of what its ended traces
+/// cost and the models and prompt versions they carried, the newest last trace
+/// first; another project's agent is not here.
 #[sqlx::test]
 async fn the_agents_lane_reads_each_agents_last_trace_against_its_usual_cost(pool: PgPool) {
     let Some(ch) = clickhouse_or_skip(module_path!()).await else {
@@ -646,34 +647,78 @@ async fn the_agents_lane_reads_each_agents_last_trace_against_its_usual_cost(poo
     };
     let p = projects(&pool);
     let now = Utc::now().trunc_subsecs(6);
-    // A trace of `agent` started `minutes` ago, its one call costing `cost`;
-    // ended where it carries its own span, failed where `failed`.
-    let run =
-        |project: &ProjectId, agent: &str, minutes: i64, cost: f64, ended: bool, failed: bool| {
-            let id = Uuid::new_v4();
-            let started = now - Duration::minutes(minutes);
-            let call = SpanRow {
-                agent: agent.into(),
-                parent_span_id: format!("{:016x}", 1),
-                cost: Some(cost),
-                ..span_at(project, id, SpanKind::ModelCall, "chat", started, 500, 2)
-            };
-            let own = SpanRow {
-                agent: agent.into(),
-                status: if failed {
-                    SpanStatus::Error
-                } else {
-                    SpanStatus::Ok
-                },
-                ..span_at(project, id, SpanKind::Agent, agent, started, 1_000, 1)
-            };
-            (id, if ended { vec![own, call] } else { vec![call] })
+    // A trace of `agent` started `minutes` ago, its one call to `model` with
+    // `prompt` (`name:version`) costing `cost`; ended where it carries its own
+    // span, failed where `failed`.
+    let run = |project: &ProjectId,
+               agent: &str,
+               model: &str,
+               prompt: &str,
+               minutes: i64,
+               cost: f64,
+               ended: bool,
+               failed: bool| {
+        let id = Uuid::new_v4();
+        let started = now - Duration::minutes(minutes);
+        let call = SpanRow {
+            agent: agent.into(),
+            model: model.into(),
+            attributes: prompt
+                .split_once(':')
+                .map(|(name, version)| {
+                    vec![
+                        ("gen_ai.prompt.name".into(), name.into()),
+                        ("gen_ai.prompt.version".into(), version.into()),
+                    ]
+                })
+                .unwrap_or_default(),
+            parent_span_id: format!("{:016x}", 1),
+            cost: Some(cost),
+            ..span_at(project, id, SpanKind::ModelCall, "chat", started, 500, 2)
         };
-    let (_, first) = run(&p.ours, "support-bot", 30, 0.10, true, false);
-    let (_, failed) = run(&p.ours, "support-bot", 20, 0.30, true, true);
-    let (last, newest) = run(&p.ours, "support-bot", 10, 0.20, true, false);
-    let (running, open) = run(&p.ours, "nightly-report", 5, 0.05, false, false);
-    let (_, theirs) = run(&p.theirs, "zeta", 1, 9.0, true, false);
+        let own = SpanRow {
+            agent: agent.into(),
+            status: if failed {
+                SpanStatus::Error
+            } else {
+                SpanStatus::Ok
+            },
+            ..span_at(project, id, SpanKind::Agent, agent, started, 1_000, 1)
+        };
+        (id, if ended { vec![own, call] } else { vec![call] })
+    };
+    let (_, first) = run(
+        &p.ours,
+        "support-bot",
+        "model-b",
+        "triage:3",
+        30,
+        0.10,
+        true,
+        false,
+    );
+    let (_, failed) = run(
+        &p.ours,
+        "support-bot",
+        "model-a",
+        "triage:4",
+        20,
+        0.30,
+        true,
+        true,
+    );
+    let (last, newest) = run(
+        &p.ours,
+        "support-bot",
+        "model-a",
+        "triage:4",
+        10,
+        0.20,
+        true,
+        false,
+    );
+    let (running, open) = run(&p.ours, "nightly-report", "", "", 5, 0.05, false, false);
+    let (_, theirs) = run(&p.theirs, "zeta", "model-z", "", 1, 9.0, true, false);
     let rows: Vec<SpanRow> = [first, failed, newest, open, theirs].concat();
     ch.store.insert_spans(&rows).await.expect("the spans land");
 
@@ -699,6 +744,12 @@ async fn the_agents_lane_reads_each_agents_last_trace_against_its_usual_cost(poo
         Value::Null,
         "no trace of it has ended"
     );
+    assert_eq!(
+        nightly["models"],
+        serde_json::json!([]),
+        "a call naming no model"
+    );
+    assert_eq!(nightly["prompt_versions"], serde_json::json!([]));
     assert_eq!(support["agent"], "support-bot");
     assert_eq!(support["traces"], 3);
     assert_eq!(support["failed_traces"], 1);
@@ -710,6 +761,717 @@ async fn the_agents_lane_reads_each_agents_last_trace_against_its_usual_cost(poo
         support["usual_spend"], 0.2,
         "the median of 0.10, 0.30 and 0.20"
     );
+    assert_eq!(
+        support["models"],
+        serde_json::json!(["model-a", "model-b"]),
+        "the model more of its traces called first"
+    );
+    assert_eq!(
+        support["prompt_versions"],
+        serde_json::json!(["triage:4", "triage:3"]),
+        "the version more of its traces named first"
+    );
+    let spend = support["spend"].as_f64().expect("what its traces cost");
+    assert!((spend - 0.6).abs() < 1e-9, "0.10, 0.30 and 0.20: {spend}");
+    assert_eq!(support["faults"], serde_json::json!({}));
+
+    // One agent, by name, over the days asked: what its own page reads.
+    let one = p
+        .get("/internal/v1/telemetry/agents?agent=support-bot&days=30")
+        .await;
+    assert_eq!(one["days"], 30);
+    let named = one["agents"].as_array().expect("agents");
+    assert_eq!(named.len(), 1, "{one}");
+    assert_eq!(named[0]["agent"], "support-bot");
+    assert_eq!(named[0]["traces"], 3);
+    let none = p.get("/internal/v1/telemetry/agents?agent=zeta").await;
+    assert_eq!(
+        none["agents"],
+        serde_json::json!([]),
+        "another project's agent, asked for by name, is not here"
+    );
+    for refused in ["?agent=", "?days=0", "?agent=a&agent=b", "?limit=5"] {
+        let path = format!("/internal/v1/telemetry/agents{refused}");
+        let (status, _) = p.send(p.request(MEMBER, &p.ours, &path)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+    }
+}
+
+/// An agent's faults count its traces under each fault they carry, whether or
+/// not the trace ended in error.
+#[sqlx::test]
+async fn the_agents_lane_counts_an_agents_traces_by_fault(pool: PgPool) {
+    use telmoni_shared::SpanFault;
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+    let at = Utc::now() - Duration::minutes(1);
+    let fault = |trace, n, class| SpanRow {
+        fault: Some(class),
+        ..span_at(&p.ours, trace, SpanKind::ModelCall, "chat", at, 20, n)
+    };
+    ch.store
+        .insert_spans(&[
+            span_at(&p.ours, a, SpanKind::Agent, "agent", at, 100, 1),
+            fault(a, 2, SpanFault::RateLimited),
+            fault(a, 3, SpanFault::RateLimited),
+            fault(a, 4, SpanFault::Timeout),
+            span_at(&p.ours, b, SpanKind::Agent, "agent", at, 100, 5),
+            fault(b, 6, SpanFault::RateLimited),
+        ])
+        .await
+        .expect("kept");
+    let answer = p.get("/internal/v1/telemetry/agents").await;
+    assert_eq!(answer["agents"][0]["traces"], 2);
+    assert_eq!(
+        answer["agents"][0]["failed_traces"], 0,
+        "a retried call's fault fails no trace"
+    );
+    assert_eq!(
+        answer["agents"][0]["faults"],
+        serde_json::json!({ "rate_limited": 2, "timeout": 1 }),
+        "a trace once under each fault it carries"
+    );
+}
+
+/// ⚠ A session is its traces in the window summed whole, admitted by any one
+/// the filters admit: the last heard from first, a trace that named no
+/// session in none, one received before the window in no sum, and another
+/// project's not here. A score given to the session admits it as one on a
+/// trace of it does, and is answered as its own. Its facets count sessions,
+/// and its download is the list's rows.
+#[sqlx::test]
+async fn the_sessions_lane_sums_each_session_whole_and_admits_it_by_any_trace(pool: PgPool) {
+    const SESSIONS: &str = "/internal/v1/telemetry/sessions";
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let now = Utc::now().trunc_subsecs(6);
+    // A trace of `agent` in `session`, started `minutes` ago and a second
+    // long, its one call costing `cost`; its span ids from `n`.
+    let turn = |project: &ProjectId,
+                session: &str,
+                agent: &str,
+                minutes: i64,
+                cost: f64,
+                failed: bool,
+                n: u64| {
+        let id = Uuid::new_v4();
+        let started = now - Duration::minutes(minutes);
+        let own = SpanRow {
+            agent: agent.into(),
+            session_id: session.into(),
+            user_id: if session.is_empty() {
+                String::new()
+            } else {
+                format!("user-of-{session}")
+            },
+            status: if failed {
+                SpanStatus::Error
+            } else {
+                SpanStatus::Ok
+            },
+            tags: vec![("repo".into(), "telmoni".into())],
+            ..span_at(project, id, SpanKind::Agent, agent, started, 1_000, n)
+        };
+        let call = SpanRow {
+            agent: agent.into(),
+            session_id: session.into(),
+            parent_span_id: format!("{n:016x}"),
+            model: "model-a".into(),
+            input_tokens: 100,
+            output_tokens: 20,
+            cost: Some(cost),
+            ..span_at(
+                project,
+                id,
+                SpanKind::ModelCall,
+                "chat",
+                started,
+                500,
+                n + 1,
+            )
+        };
+        vec![own, call]
+    };
+    // A failed trace of `s-long` received before the week the reads are over.
+    let before: Vec<SpanRow> = turn(&p.ours, "s-long", "support-bot", 8 * 24 * 60, 4.0, true, 13)
+        .into_iter()
+        .map(|row| SpanRow {
+            received_at: now - Duration::days(8),
+            ..row
+        })
+        .collect();
+    let rows: Vec<SpanRow> = [
+        turn(&p.ours, "s-long", "support-bot", 30, 0.25, false, 1),
+        turn(&p.ours, "s-long", "support-bot", 20, 0.5, true, 3),
+        turn(&p.ours, "s-long", "triage", 10, 0.125, false, 5),
+        turn(&p.ours, "s-short", "support-bot", 5, 0.0625, false, 7),
+        turn(&p.ours, "", "support-bot", 1, 9.0, false, 9),
+        turn(&p.theirs, "s-theirs", "zeta", 1, 9.0, false, 11),
+        before,
+    ]
+    .concat();
+    ch.store.insert_spans(&rows).await.expect("the spans land");
+
+    let list = p.get(SESSIONS).await;
+    assert_eq!(list["days"], 7);
+    assert_eq!(
+        list["total"], 2,
+        "a trace that named no session, and another project's, are in none: {list}"
+    );
+    assert_eq!(list["sort"], "last_seen");
+    assert_eq!(list["dir"], "desc");
+    let sessions = list["sessions"].as_array().expect("sessions");
+    assert_eq!(
+        sessions[0]["session_id"], "s-short",
+        "the one last heard from first"
+    );
+    let long = &sessions[1];
+    assert_eq!(long["session_id"], "s-long");
+    assert_eq!(long["user_id"], "user-of-s-long");
+    assert_eq!(long["agents"], serde_json::json!(["support-bot", "triage"]));
+    assert_eq!(long["traces"], 3);
+    assert_eq!(long["failed_traces"], 1);
+    assert_eq!(long["input_tokens"], 300);
+    assert_eq!(long["output_tokens"], 60);
+    assert_eq!(long["spend"], 0.875);
+    assert_eq!(
+        long["duration_ms"], 3_000,
+        "its traces' own time, never the minutes between them"
+    );
+    assert_eq!(long["last_ended"], true);
+    assert_eq!(
+        long["last_status"], "ok",
+        "its last trace's, not the failed one before it"
+    );
+    assert_eq!(long["tags"], serde_json::json!(["repo:telmoni"]));
+    let at = |field: &str| {
+        long[field]
+            .as_str()
+            .and_then(|text| text.parse::<DateTime<Utc>>().ok())
+            .expect("a time")
+    };
+    assert_eq!(at("first_seen"), now - Duration::minutes(30));
+    assert_eq!(
+        at("last_seen"),
+        now - Duration::minutes(10) + Duration::seconds(1)
+    );
+    // ⚠ The window bounds the sums: the trace received before the week is in
+    // none of those above, and in a month's.
+    let month = p.get(&format!("{SESSIONS}?days=30&sort=traces")).await;
+    assert_eq!(month["sessions"][0]["session_id"], "s-long");
+    assert_eq!(month["sessions"][0]["traces"], 4);
+    assert_eq!(month["sessions"][0]["failed_traces"], 2);
+    assert_eq!(month["sessions"][0]["spend"], 4.875);
+
+    for query in ["?status=error", "?agent=triage"] {
+        let narrowed = p.get(&format!("{SESSIONS}{query}")).await;
+        assert_eq!(narrowed["total"], 1, "{query}: {narrowed}");
+        assert_eq!(narrowed["sessions"][0]["session_id"], "s-long", "{query}");
+        assert_eq!(
+            narrowed["sessions"][0]["traces"], 3,
+            "{query}: admitted by one trace, summed over all"
+        );
+    }
+    let none = p.get(&format!("{SESSIONS}?agent=zeta")).await;
+    assert_eq!(none["total"], 0, "another project's agent admits none");
+
+    // A number the application gave a trace, or a session where it names no
+    // trace.
+    let score = |project: &ProjectId, trace: &str, session: &str, name: &str, value: f64| {
+        telmoni_telemetry::scores::ScoreRow {
+            project_id: project.clone(),
+            received_at: now,
+            score_id: Uuid::new_v4(),
+            target: if trace.is_empty() {
+                telmoni_shared::ScoreTarget::Session
+            } else {
+                telmoni_shared::ScoreTarget::Trace
+            },
+            trace_id: trace.into(),
+            span_id: String::new(),
+            session_id: session.into(),
+            name: name.into(),
+            data_type: telmoni_shared::ScoreType::Number,
+            value,
+            categories: Vec::new(),
+            range_min: None,
+            range_max: None,
+            source: telmoni_shared::ScoreSource::Sdk,
+            scorer: String::new(),
+            scorer_version: String::new(),
+            is_deleted: 0,
+        }
+    };
+    // ⚠ A score admits a session as any filter does: by the one trace that
+    // carries it, the session still summed over all three.
+    let scored = score(&p.ours, &rows[0].trace_id, "", "helpful", 0.9);
+    ch.store
+        .insert_scores_once(&[scored], &Uuid::new_v4().to_string())
+        .await
+        .expect("the score lands");
+    let helpful = p
+        .get(&format!("{SESSIONS}?score=helpful&score_min=0.5"))
+        .await;
+    assert_eq!(helpful["total"], 1, "{helpful}");
+    assert_eq!(helpful["sessions"][0]["session_id"], "s-long");
+    assert_eq!(helpful["sessions"][0]["traces"], 3);
+    assert_eq!(helpful["sessions"][0]["spend"], 0.875);
+    let unhelpful = p
+        .get(&format!("{SESSIONS}?score=helpful&score_max=0.5"))
+        .await;
+    assert_eq!(unhelpful["total"], 0, "no trace carries one so low");
+    assert_eq!(
+        values(
+            &p.get(&format!("{SESSIONS}/facets?score=helpful")).await,
+            "agent"
+        ),
+        owned(&[("support-bot", 1)]),
+        "the facets count the sessions a scored trace admits"
+    );
+
+    // ⚠ A score given to the session itself admits it too, through any trace
+    // of it the other filters admit, and is answered as the session's own;
+    // another project's of the same session admits none.
+    let given = [
+        score(&p.ours, "", "s-short", "resolved", 1.0),
+        score(&p.ours, "", "s-long", "csat", 2.0),
+        score(&p.theirs, "", "s-short", "csat", 2.0),
+    ];
+    ch.store
+        .insert_scores_once(&given, &Uuid::new_v4().to_string())
+        .await
+        .expect("the sessions' scores land");
+    let resolved = p.get(&format!("{SESSIONS}?score=resolved")).await;
+    assert_eq!(resolved["total"], 1, "{resolved}");
+    assert_eq!(resolved["sessions"][0]["session_id"], "s-short");
+    let rated = p.get(&format!("{SESSIONS}?score=csat&agent=triage")).await;
+    assert_eq!(rated["total"], 1, "{rated}");
+    assert_eq!(rated["sessions"][0]["session_id"], "s-long");
+    assert_eq!(
+        rated["sessions"][0]["traces"], 3,
+        "admitted by its own score through its one triage trace, summed whole"
+    );
+    for query in ["?score=resolved&agent=triage", "?score=csat&score_min=3"] {
+        let none = p.get(&format!("{SESSIONS}{query}")).await;
+        assert_eq!(none["total"], 0, "{query}: {none}");
+    }
+    assert_eq!(
+        values(
+            &p.get(&format!("{SESSIONS}/facets?score=csat")).await,
+            "agent"
+        ),
+        owned(&[("support-bot", 1), ("triage", 1)]),
+        "a session its own score admits counts under every trace of it"
+    );
+    let listed = p.get(SESSIONS).await;
+    assert_eq!(
+        listed["scores"],
+        serde_json::json!({
+            "s-long": [{ "name": "csat", "data_type": "number", "mean": 2.0, "count": 1 }],
+            "s-short": [{ "name": "resolved", "data_type": "number", "mean": 1.0, "count": 1 }],
+        }),
+        "each session's own scores, never its traces'"
+    );
+
+    let costly = p.get(&format!("{SESSIONS}?sort=spend&limit=1")).await;
+    assert_eq!(costly["sessions"][0]["session_id"], "s-long");
+    assert_eq!(costly["total"], 2);
+    assert_eq!(costly["more"], true);
+    let next = p
+        .get(&format!("{SESSIONS}?sort=spend&limit=1&page=2"))
+        .await;
+    assert_eq!(next["sessions"][0]["session_id"], "s-short");
+    assert_eq!(next["more"], false);
+    let oldest = p.get(&format!("{SESSIONS}?sort=first_seen")).await;
+    assert_eq!(
+        oldest["sessions"][0]["session_id"], "s-long",
+        "the earliest started first"
+    );
+    // Every sort runs both ways against the store, not as a literal alone.
+    for (sort, first) in [
+        ("last_seen", "s-short"),
+        ("first_seen", "s-short"),
+        ("traces", "s-long"),
+        ("failed_traces", "s-long"),
+        ("tokens", "s-long"),
+        ("spend", "s-long"),
+        ("duration", "s-long"),
+    ] {
+        let last = if first == "s-long" {
+            "s-short"
+        } else {
+            "s-long"
+        };
+        for (dir, leads) in [("desc", first), ("asc", last)] {
+            let sorted = p.get(&format!("{SESSIONS}?sort={sort}&dir={dir}")).await;
+            assert_eq!(sorted["sessions"][0]["session_id"], leads, "{sort} {dir}");
+            assert_eq!(sorted["dir"], dir, "{sort}");
+        }
+    }
+
+    let facets = p.get(&format!("{SESSIONS}/facets")).await;
+    assert_eq!(
+        values(&facets, "agent"),
+        owned(&[("support-bot", 2), ("triage", 1)]),
+        "sessions holding a trace of each, never traces"
+    );
+    assert_eq!(values(&facets, "status"), owned(&[("ok", 2), ("error", 1)]));
+
+    let download = p
+        .app
+        .clone()
+        .oneshot(p.request(MEMBER, &p.ours, &format!("{SESSIONS}/export?sort=spend")))
+        .await
+        .expect("the router answers");
+    assert_eq!(download.status(), StatusCode::OK);
+    let bytes = download
+        .into_body()
+        .collect()
+        .await
+        .expect("a body")
+        .to_bytes();
+    let csv = String::from_utf8(bytes.to_vec()).expect("csv");
+    let mut lines = csv.trim_start_matches('\u{feff}').lines();
+    assert_eq!(
+        lines.next(),
+        Some(
+            "session_id,user_id,agents,traces,failed_traces,input_tokens,output_tokens,spend,\
+             duration_ms,first_seen,last_seen,last_ended,last_status,tags"
+        )
+    );
+    assert!(
+        lines
+            .next()
+            .is_some_and(|row| row.starts_with("s-long,user-of-s-long,support-bot; triage,3,1,")),
+        "{csv}"
+    );
+
+    let (status, refused) = p
+        .send(p.request(MEMBER, &p.ours, &format!("{SESSIONS}?sort=tag:repo")))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "no tag sorts the list");
+    assert_eq!(
+        refused["detail"],
+        "sort is one of last_seen, first_seen, traces, failed_traces, tokens, spend, duration"
+    );
+    for lane in ["", "/facets", "/export"] {
+        let (status, _) = p
+            .send(p.request(STRANGER, &p.ours, &format!("{SESSIONS}{lane}")))
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "{lane}: nobody outside the project reads its sessions"
+        );
+    }
+}
+
+/// ⚠ An end user is their traces in the window summed whole, admitted by any
+/// one the filters admit: the last heard from first, their sessions counted
+/// once each, a trace that named no user in none, one received before the
+/// window in no sum, and another project's not here. A score on a trace of
+/// theirs, or given to a session of theirs, admits them. The facets count
+/// users, and the download is the list's rows.
+#[sqlx::test]
+async fn the_users_lane_sums_each_user_whole_and_admits_them_by_any_trace(pool: PgPool) {
+    const USERS: &str = "/internal/v1/telemetry/users";
+    let Some(ch) = clickhouse_or_skip(module_path!()).await else {
+        return;
+    };
+    let p = projects(&pool);
+    let now = Utc::now().trunc_subsecs(6);
+    // A trace of `agent` for `user` in `session`, started `minutes` ago and a
+    // second long, its one call costing `cost`; its span ids from `n`.
+    let turn = |project: &ProjectId,
+                user: &str,
+                session: &str,
+                agent: &str,
+                minutes: i64,
+                cost: f64,
+                failed: bool,
+                n: u64| {
+        let id = Uuid::new_v4();
+        let started = now - Duration::minutes(minutes);
+        let own = SpanRow {
+            agent: agent.into(),
+            user_id: user.into(),
+            session_id: session.into(),
+            status: if failed {
+                SpanStatus::Error
+            } else {
+                SpanStatus::Ok
+            },
+            tags: vec![("repo".into(), "telmoni".into())],
+            ..span_at(project, id, SpanKind::Agent, agent, started, 1_000, n)
+        };
+        let call = SpanRow {
+            agent: agent.into(),
+            parent_span_id: format!("{n:016x}"),
+            model: "model-a".into(),
+            input_tokens: 100,
+            output_tokens: 20,
+            cost: Some(cost),
+            ..span_at(
+                project,
+                id,
+                SpanKind::ModelCall,
+                "chat",
+                started,
+                500,
+                n + 1,
+            )
+        };
+        vec![own, call]
+    };
+    // A failed trace of `u-busy` received before the week the reads are over.
+    let before: Vec<SpanRow> = turn(
+        &p.ours,
+        "u-busy",
+        "s-old",
+        "support-bot",
+        8 * 24 * 60,
+        4.0,
+        true,
+        13,
+    )
+    .into_iter()
+    .map(|row| SpanRow {
+        received_at: now - Duration::days(8),
+        ..row
+    })
+    .collect();
+    let rows: Vec<SpanRow> = [
+        turn(&p.ours, "u-busy", "s-1", "support-bot", 30, 0.25, false, 1),
+        turn(&p.ours, "u-busy", "s-1", "support-bot", 20, 0.5, true, 3),
+        turn(&p.ours, "u-busy", "s-2", "triage", 10, 0.125, false, 5),
+        turn(&p.ours, "u-busy", "", "triage", 8, 0.125, false, 15),
+        turn(&p.ours, "u-once", "", "support-bot", 5, 0.0625, false, 7),
+        turn(&p.ours, "", "s-1", "support-bot", 1, 9.0, false, 9),
+        turn(&p.theirs, "u-theirs", "s-9", "zeta", 1, 9.0, false, 11),
+        before,
+    ]
+    .concat();
+    ch.store.insert_spans(&rows).await.expect("the spans land");
+
+    let list = p.get(USERS).await;
+    assert_eq!(list["days"], 7);
+    assert_eq!(
+        list["total"], 2,
+        "a trace that named no user, and another project's, are in none: {list}"
+    );
+    assert_eq!(list["sort"], "last_seen");
+    assert_eq!(list["dir"], "desc");
+    let users = list["users"].as_array().expect("users");
+    assert_eq!(
+        users[0]["user_id"], "u-once",
+        "the one last heard from first"
+    );
+    assert_eq!(users[0]["sessions"], 0, "their one trace named no session");
+    let busy = &users[1];
+    assert_eq!(busy["user_id"], "u-busy");
+    assert_eq!(
+        busy["sessions"], 2,
+        "each session once, the trace that named none in neither"
+    );
+    assert_eq!(busy["agents"], serde_json::json!(["support-bot", "triage"]));
+    assert_eq!(busy["traces"], 4);
+    assert_eq!(busy["failed_traces"], 1);
+    assert_eq!(busy["input_tokens"], 400);
+    assert_eq!(busy["output_tokens"], 80);
+    assert_eq!(busy["spend"], 1.0);
+    assert_eq!(
+        busy["duration_ms"], 4_000,
+        "their traces' own time, never the minutes between them"
+    );
+    assert_eq!(busy["last_ended"], true);
+    assert_eq!(
+        busy["last_status"], "ok",
+        "their last trace's, not the failed one before it"
+    );
+    assert_eq!(busy["tags"], serde_json::json!(["repo:telmoni"]));
+    let at = |field: &str| {
+        busy[field]
+            .as_str()
+            .and_then(|text| text.parse::<DateTime<Utc>>().ok())
+            .expect("a time")
+    };
+    assert_eq!(at("first_seen"), now - Duration::minutes(30));
+    assert_eq!(
+        at("last_seen"),
+        now - Duration::minutes(8) + Duration::seconds(1)
+    );
+    // ⚠ The window bounds the sums: the trace received before the week is in
+    // none of those above, and in a month's, its session with it.
+    let month = p.get(&format!("{USERS}?days=30&sort=traces")).await;
+    assert_eq!(month["users"][0]["user_id"], "u-busy");
+    assert_eq!(month["users"][0]["traces"], 5);
+    assert_eq!(month["users"][0]["sessions"], 3);
+    assert_eq!(month["users"][0]["failed_traces"], 2);
+    assert_eq!(month["users"][0]["spend"], 5.0);
+
+    for query in ["?status=error", "?session=s-2", "?user=u-busy"] {
+        let narrowed = p.get(&format!("{USERS}{query}")).await;
+        assert_eq!(narrowed["total"], 1, "{query}: {narrowed}");
+        assert_eq!(narrowed["users"][0]["user_id"], "u-busy", "{query}");
+        assert_eq!(
+            narrowed["users"][0]["traces"], 4,
+            "{query}: admitted by one trace, summed over all"
+        );
+    }
+    let none = p.get(&format!("{USERS}?agent=zeta")).await;
+    assert_eq!(none["total"], 0, "another project's agent admits none");
+
+    let score =
+        |trace: &str, session: &str, name: &str, value: f64| telmoni_telemetry::scores::ScoreRow {
+            project_id: p.ours.clone(),
+            received_at: now,
+            score_id: Uuid::new_v4(),
+            target: if trace.is_empty() {
+                telmoni_shared::ScoreTarget::Session
+            } else {
+                telmoni_shared::ScoreTarget::Trace
+            },
+            trace_id: trace.into(),
+            span_id: String::new(),
+            session_id: session.into(),
+            name: name.into(),
+            data_type: telmoni_shared::ScoreType::Number,
+            value,
+            categories: Vec::new(),
+            range_min: None,
+            range_max: None,
+            source: telmoni_shared::ScoreSource::Sdk,
+            scorer: String::new(),
+            scorer_version: String::new(),
+            is_deleted: 0,
+        };
+    // ⚠ A score admits a user by the one trace that carries it, or by a
+    // session of theirs it was given to, the user still summed whole.
+    let u_once_trace = rows
+        .iter()
+        .find(|row| row.user_id == "u-once")
+        .map(|row| row.trace_id.clone())
+        .expect("their trace");
+    let given = [
+        score(&u_once_trace, "", "helpful", 0.9),
+        score("", "s-2", "csat", 2.0),
+    ];
+    ch.store
+        .insert_scores_once(&given, &Uuid::new_v4().to_string())
+        .await
+        .expect("the scores land");
+    let helpful = p.get(&format!("{USERS}?score=helpful&score_min=0.5")).await;
+    assert_eq!(helpful["total"], 1, "{helpful}");
+    assert_eq!(helpful["users"][0]["user_id"], "u-once");
+    let rated = p.get(&format!("{USERS}?score=csat")).await;
+    assert_eq!(rated["total"], 1, "{rated}");
+    assert_eq!(rated["users"][0]["user_id"], "u-busy");
+    assert_eq!(
+        rated["users"][0]["traces"], 4,
+        "admitted through the one trace of the scored session, summed whole"
+    );
+    assert_eq!(
+        values(&p.get(&format!("{USERS}/facets?score=csat")).await, "agent"),
+        owned(&[("triage", 1)]),
+        "the facets count the users a scored session admits"
+    );
+
+    let costly = p.get(&format!("{USERS}?sort=spend&limit=1")).await;
+    assert_eq!(costly["users"][0]["user_id"], "u-busy");
+    assert_eq!(costly["total"], 2);
+    assert_eq!(costly["more"], true);
+    let next = p.get(&format!("{USERS}?sort=spend&limit=1&page=2")).await;
+    assert_eq!(next["users"][0]["user_id"], "u-once");
+    assert_eq!(next["more"], false);
+    // Every sort runs both ways against the store, not as a literal alone.
+    for (sort, first) in [
+        ("last_seen", "u-once"),
+        ("first_seen", "u-once"),
+        ("sessions", "u-busy"),
+        ("traces", "u-busy"),
+        ("failed_traces", "u-busy"),
+        ("tokens", "u-busy"),
+        ("spend", "u-busy"),
+        ("duration", "u-busy"),
+    ] {
+        let last = if first == "u-busy" {
+            "u-once"
+        } else {
+            "u-busy"
+        };
+        for (dir, leads) in [("desc", first), ("asc", last)] {
+            let sorted = p.get(&format!("{USERS}?sort={sort}&dir={dir}")).await;
+            assert_eq!(sorted["users"][0]["user_id"], leads, "{sort} {dir}");
+            assert_eq!(sorted["dir"], dir, "{sort}");
+        }
+    }
+    let oldest = p.get(&format!("{USERS}?sort=first_seen")).await;
+    assert_eq!(
+        oldest["users"][0]["user_id"], "u-busy",
+        "the earliest started first"
+    );
+
+    let facets = p.get(&format!("{USERS}/facets")).await;
+    assert_eq!(
+        values(&facets, "agent"),
+        owned(&[("support-bot", 2), ("triage", 1)]),
+        "users holding a trace of each, never traces"
+    );
+    assert_eq!(values(&facets, "status"), owned(&[("ok", 2), ("error", 1)]));
+
+    let download = p
+        .app
+        .clone()
+        .oneshot(p.request(MEMBER, &p.ours, &format!("{USERS}/export?sort=spend")))
+        .await
+        .expect("the router answers");
+    assert_eq!(download.status(), StatusCode::OK);
+    let bytes = download
+        .into_body()
+        .collect()
+        .await
+        .expect("a body")
+        .to_bytes();
+    let csv = String::from_utf8(bytes.to_vec()).expect("csv");
+    let mut lines = csv.trim_start_matches('\u{feff}').lines();
+    assert_eq!(
+        lines.next(),
+        Some(
+            "user_id,sessions,agents,traces,failed_traces,input_tokens,output_tokens,spend,\
+             duration_ms,first_seen,last_seen,last_ended,last_status,tags"
+        )
+    );
+    assert!(
+        lines
+            .next()
+            .is_some_and(|row| row.starts_with("u-busy,2,support-bot; triage,4,1,")),
+        "{csv}"
+    );
+
+    let (status, refused) = p
+        .send(p.request(MEMBER, &p.ours, &format!("{USERS}?sort=tag:repo")))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "no tag sorts the list");
+    assert_eq!(
+        refused["detail"],
+        "sort is one of last_seen, first_seen, sessions, traces, failed_traces, tokens, spend, \
+         duration"
+    );
+    for lane in ["", "/facets", "/export"] {
+        let (status, _) = p
+            .send(p.request(STRANGER, &p.ours, &format!("{USERS}{lane}")))
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "{lane}: nobody outside the project reads its users"
+        );
+    }
 }
 
 /// A trace's retrievals are counted beside its tool calls, neither in the other.

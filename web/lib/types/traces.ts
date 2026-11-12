@@ -109,6 +109,19 @@ export const ScoreSummarySchema = z.object({
 });
 export type ScoreSummary = z.infer<typeof ScoreSummarySchema>;
 
+/** Each of a list's rows' own scores by name, keyed by the row's id: what a
+ *  list sends beside its rows. */
+export const RowScoresSchema = z.record(z.string(), z.array(ScoreSummarySchema)).default({});
+
+/** `rows`, each with its own scores out of the map sent beside them. */
+export function withScores<R>(
+  rows: readonly R[],
+  scores: Readonly<Record<string, ScoreSummary[]>>,
+  id: (row: R) => string,
+): (R & { scores: ScoreSummary[] })[] {
+  return rows.map((row) => ({ ...row, scores: scores[id(row)] ?? [] }));
+}
+
 /** A trace's id as the path and the lanes take it: OpenTelemetry's, 32
  *  lowercase hex digits, never all zeros. */
 export const TraceIdSchema = z.string().regex(/^(?!0{32}$)[0-9a-f]{32}$/);

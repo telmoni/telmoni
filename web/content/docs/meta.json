@@ -2,7 +2,6 @@
   "pages": [
     "index",
     "getting-started",
-    "self-host",
     "workspace",
     "monitoring",
     "integrations",
@@ -10,6 +9,7 @@
     "errors",
     "settings",
     "...",
+    "self-host",
     "contributing"
   ]
 }

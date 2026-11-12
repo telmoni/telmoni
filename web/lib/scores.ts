@@ -41,6 +41,11 @@ export function scoreWords(score: ScoreSummary): string {
   }
 }
 
+/** A row's scores in one line, as its cell says them on hover; nothing where it has none. */
+export function scoresLine(scores: readonly ScoreSummary[]): string | undefined {
+  return scores.map((score) => `${score.name}: ${scoreWords(score)}`).join(", ") || undefined;
+}
+
 /** What a summary's badge says on hover: how many scores it holds. */
 export function scoreTitle(score: ScoreSummary): string {
   const of = score.count === 1 ? "1 score" : `${score.count} scores`;

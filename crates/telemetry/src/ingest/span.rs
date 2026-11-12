@@ -781,7 +781,7 @@ fn json_of(value: &Value) -> serde_json::Value {
 
 /// `text` without a NUL: Postgres's `text` and `jsonb` refuse one, and a
 /// held span's row is `jsonb`.
-fn without_nul(text: &str) -> Cow<'_, str> {
+pub(crate) fn without_nul(text: &str) -> Cow<'_, str> {
     if text.contains('\0') {
         Cow::Owned(text.replace('\0', ""))
     } else {

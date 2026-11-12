@@ -39,7 +39,7 @@ interface DocsMenuSection {
 const DOCS_SECTIONS = [
   {
     id: "docs",
-    label: "DOCS",
+    label: "Docs",
     href: "/docs",
     match: (p: string) =>
       p === "/docs" ||
@@ -78,7 +78,7 @@ const DOCS_SECTIONS = [
   },
   {
     id: "self-host",
-    label: "SELF-HOST",
+    label: "Self-host",
     href: "/docs/self-host/overview",
     match: (p: string) => p.startsWith("/docs/self-host") || p.startsWith("/docs/contributing"),
   },
@@ -100,7 +100,7 @@ function DocsTreeLink({
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex items-baseline gap-2 py-1 font-mono text-sm transition-colors",
+        "group flex items-baseline gap-2 py-1 text-sm transition-colors",
         active ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
       )}
     >
@@ -135,7 +135,7 @@ function DocsTreeNodes({
           return (
             <p
               key={`sep-${i}`}
-              className="pt-6 pb-1.5 font-mono text-xs uppercase tracking-wider text-muted-foreground/70"
+              className="pt-6 pb-1.5 text-xs uppercase tracking-wider text-muted-foreground/70"
             >
               {node.name}
             </p>
@@ -145,7 +145,7 @@ function DocsTreeNodes({
           return (
             <div key={node.$id ?? `folder-${i}`} className="flex flex-col">
               {node.name && (
-                <p className="pt-6 pb-1.5 font-mono text-xs uppercase tracking-wider text-muted-foreground/70">
+                <p className="pt-6 pb-1.5 text-xs uppercase tracking-wider text-muted-foreground/70">
                   {node.name}
                 </p>
               )}
@@ -247,7 +247,7 @@ export function DocsShell({
               type="button"
               aria-expanded={mobileMenuOpen}
               onClick={() => setMobileMenuOpen((v) => !v)}
-              className="inline-flex h-control shrink-0 cursor-pointer items-center whitespace-nowrap rounded-md bg-muted font-mono text-sm font-medium uppercase tracking-wider text-foreground transition-colors hover:bg-muted/80"
+              className="inline-flex h-control shrink-0 cursor-pointer items-center whitespace-nowrap rounded-md bg-muted text-sm font-medium text-foreground transition-colors hover:bg-muted/80"
             >
               <span className="px-2">{activeSection.label}</span>
               <span className="flex h-full items-center border-l border-background px-1.5 text-muted-foreground">
@@ -262,7 +262,7 @@ export function DocsShell({
           <button
             type="button"
             onClick={() => setOpenSearch(true)}
-            className="inline-flex h-control cursor-pointer items-center rounded-md bg-muted/80 px-gutter font-mono text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="inline-flex h-control cursor-pointer items-center rounded-md bg-muted/80 px-gutter text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             Search
           </button>
@@ -278,8 +278,8 @@ export function DocsShell({
                 onNavigate={() => setMobileMenuOpen(false)}
               />
             </nav>
-            <div className="flex flex-col gap-2 pt-4 font-mono text-sm">
-              <p className="pb-1 font-mono text-xs uppercase tracking-wider text-muted-foreground/70">
+            <div className="flex flex-col gap-2 pt-4 text-sm">
+              <p className="pb-1 text-xs uppercase tracking-wider text-muted-foreground/70">
                 SITE
               </p>
               {primaryLinks.map((link) => (
@@ -315,7 +315,7 @@ export function DocsShell({
           aria-label="Documentation navigation"
           className="sticky top-0 hidden h-svh w-52 shrink-0 flex-col lg:flex"
         >
-          <div className="flex items-center gap-2.5 pt-8 pb-4 pl-8 pr-4">
+          <div className="flex items-start gap-2.5 pt-8 pb-4 pl-8 pr-4">
             <Link
               href="/"
               aria-label={PRODUCT_NAME}
@@ -327,7 +327,7 @@ export function DocsShell({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="inline-flex h-control shrink-0 cursor-pointer items-center whitespace-nowrap rounded-md bg-muted font-mono text-sm font-medium uppercase tracking-wider text-foreground transition-colors hover:bg-muted/80"
+                  className="inline-flex h-6 shrink-0 cursor-pointer items-center whitespace-nowrap rounded-md bg-muted text-sm font-medium text-foreground transition-colors hover:bg-muted/80"
                 >
                   <span className="px-2">{activeSection.label}</span>
                   <span className="flex h-full items-center border-l border-background px-1.5 text-muted-foreground">
@@ -341,14 +341,14 @@ export function DocsShell({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="min-w-40">
                 {DOCS_SECTIONS.map((sec) => (
-                  <DropdownMenuItem key={sec.id} asChild className="justify-between gap-6 uppercase tracking-wider">
+                  <DropdownMenuItem key={sec.id} asChild className="justify-between gap-6">
                     <Link href={sec.href}>
                       <span>{sec.label}</span>
                       {sec.id === activeSection.id && <ChevronRight aria-hidden="true" />}
                     </Link>
                   </DropdownMenuItem>
                 ))}
-                <DropdownMenuItem asChild className="uppercase tracking-wider">
+                <DropdownMenuItem asChild>
                   {signedIn ? <Link href={consoleHref}>Console</Link> : <a href={consoleHref}>Console</a>}
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -444,7 +444,7 @@ function DocsRightRail({
         {/* Table of Contents */}
         {toc.length > 0 && (
           <div className="mt-8 flex flex-col">
-            <p className="mb-3 font-mono text-sm text-muted-foreground">Contents</p>
+            <p className="mb-3 text-sm text-muted-foreground">Contents</p>
             <nav aria-label="Table of contents" className="flex flex-col text-sm">
               {toc.map((item) => {
                 const id = item.url.replace(/^#/, "");
@@ -496,7 +496,7 @@ export function DocsPageView({
             {description && <p className={LEAD}>{description}</p>}
           </PaperHero>
           <div className={cn("pb-12 lg:pb-16", INSET)}>
-            <div className={cn("prose max-w-none [&_h2]:border-none [&_h2]:text-base [&_h2]:font-medium [&_h2]:tracking-normal [&_h3]:border-none [&_h3]:text-sm [&_h3]:font-medium [&_h4]:text-sm [&_h4]:font-medium [&_a:not([data-card])]:font-normal [&_a:not([data-card])]:text-foreground [&_a:not([data-card])]:underline-offset-4 [&_a:not([data-card]):hover]:no-underline [&_a:not([data-card]):hover]:opacity-100 [&_:not(pre)>code]:border-none [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:font-normal [&_:not(pre)>code]:before:content-none [&_:not(pre)>code]:after:content-none", BODY)}>
+            <div className={cn("prose max-w-none [&_h2]:border-none [&_h2]:text-base [&_h2]:font-medium [&_h2]:tracking-normal [&_h3]:border-none [&_h3]:text-sm [&_h3]:font-medium [&_h4]:text-sm [&_h4]:font-medium [&_a:not([data-card])]:font-normal [&_a:not([data-card])]:text-link [&_a:not([data-card])]:underline-offset-4 [&_a:not([data-card]):hover]:no-underline [&_a:not([data-card]):hover]:opacity-100 [&_:not(pre)>code]:border-none [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:font-normal [&_:not(pre)>code]:before:content-none [&_:not(pre)>code]:after:content-none", BODY)}>
               {children}
             </div>
 

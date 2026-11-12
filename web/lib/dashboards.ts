@@ -1,11 +1,45 @@
 import type { RollupPoint } from "@/lib/server/entities/dashboards";
 import type { TokenBar, TokenCounts } from "@/lib/traces";
+import { z } from "zod";
+import { ChartMeasure } from "@/lib/types/enums";
 
 // What the Spend page draws of the project's hourly totals: a bar an hour or
 // a day for each chart.
 
 /** The most charts one dashboard draws, as the server takes them. */
 export const DASHBOARD_CHARTS_MAX = 12;
+
+export const SPEND_CHART_LABELS: Record<ChartMeasure, string> = {
+  spend: "Spend",
+  tokens: "Tokens",
+  traces: "Traces",
+  latency: "Latency",
+  first_token: "Time to first token",
+  output_speed: "Output speed",
+};
+
+const LayoutSchema = z.array(z.object({
+  measure: z.enum(ChartMeasure),
+  width: z.enum(["half", "full"]),
+  visible: z.boolean(),
+})).length(Object.values(ChartMeasure).length).refine(
+  (rows) => new Set(rows.map((row) => row.measure)).size === rows.length,
+);
+export type SpendLayout = z.infer<typeof LayoutSchema>;
+export const DEFAULT_SPEND_LAYOUT: SpendLayout = Object.values(ChartMeasure).map((measure) => ({
+  measure, width: "half", visible: true,
+}));
+
+/** Invalid or incomplete stored layouts use the current complete chart set. */
+export function readSpendLayout(stored: string | null): SpendLayout {
+  if (!stored) return DEFAULT_SPEND_LAYOUT;
+  try {
+    const result = LayoutSchema.safeParse(JSON.parse(stored));
+    return result.success ? result.data : DEFAULT_SPEND_LAYOUT;
+  } catch {
+    return DEFAULT_SPEND_LAYOUT;
+  }
+}
 
 /** The most values a split read from the spans names before the rest are
  *  summed as one, as the server reads them. */

@@ -471,8 +471,13 @@ pub(crate) fn check_days(days: u16) -> Result<u16, TelmoniError> {
 /// `days` as a URL carries it, the default when absent; every page over the
 /// spans reads its window so.
 pub(crate) fn parse_days(text: Option<&str>) -> Result<u16, TelmoniError> {
+    parse_days_or(text, traces::DEFAULT_DAYS)
+}
+
+/// `days` as a URL carries it, `absent` where it names none.
+pub(crate) fn parse_days_or(text: Option<&str>, absent: u16) -> Result<u16, TelmoniError> {
     match given(text) {
-        None => Ok(traces::DEFAULT_DAYS),
+        None => Ok(absent),
         Some(given) => check_days(given.parse().unwrap_or(0)),
     }
 }
@@ -1143,11 +1148,10 @@ pub(crate) async fn export_rows<L: Listing>(
     state: &AppState,
     headers: &HeaderMap,
     pairs: Vec<(String, String)>,
-    reading: Reading,
 ) -> Result<(Vec<L::Row>, Format, Reader), TelmoniError> {
     let reader = reader(state, headers).await?;
     let projects = Projects::one(reader.project_id.clone());
-    let query = TraceQuery::read(pairs, reading)?;
+    let query = TraceQuery::read(pairs, Reading::Export)?;
     let filter = filter_of(state, &reader.project_id, &query, true).await?;
     let (sort, dir) = query.sort_for::<L>()?;
     let format = parse_format(query.format.as_deref())?;
@@ -1186,7 +1190,7 @@ pub async fn list_traces(
 pub struct ScoredTraceList {
     #[serde(flatten)]
     pub list: TraceList,
-    pub scores: std::collections::BTreeMap<String, Vec<crate::scores::Summary>>,
+    pub scores: crate::scores::Summaries,
 }
 
 /// A page of the project's traces, as the console's lane and `/v1` answer it.
@@ -1282,8 +1286,7 @@ pub async fn export_traces(
     headers: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Response, TelmoniError> {
-    let (rows, format, reader) =
-        export_rows::<Traces>(&state, &headers, pairs, Reading::Export).await?;
+    let (rows, format, reader) = export_rows::<Traces>(&state, &headers, pairs).await?;
     // One read of every trace's content, filed once; a download that cannot
     // open it fails rather than leaving it out unsaid.
     let traces: Vec<String> = rows.iter().map(|row| row.trace_id.clone()).collect();

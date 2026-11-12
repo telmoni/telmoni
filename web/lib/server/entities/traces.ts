@@ -7,11 +7,12 @@ import { ChartMeasure, MetricsGroup, SortDirection, SpanFault, TraceSort } from 
 
 import {
   FILTER_KEYS,
-  ScoreSummarySchema,
+  RowScoresSchema,
   TagSortSchema,
   TraceDetailSchema,
   TraceSchema,
   filtersIn,
+  withScores,
   type FilterKey,
   type ListFilters,
   type TagSort,
@@ -52,11 +53,11 @@ export const TraceListSchema = z
     sort: TraceSortSchema,
     dir: z.enum(SortDirection),
     /** Each trace's own scores by name, keyed by its id: put on it. */
-    scores: z.record(z.string(), z.array(ScoreSummarySchema)).default({}),
+    scores: RowScoresSchema,
   })
   .transform(({ scores, ...list }) => ({
     ...list,
-    traces: list.traces.map((trace) => ({ ...trace, scores: scores[trace.trace_id] ?? [] })),
+    traces: withScores(list.traces, scores, (trace) => trace.trace_id),
   }));
 export type TraceList = z.infer<typeof TraceListSchema>;
 
@@ -310,6 +311,12 @@ export async function readDownload(
   return readBytes(fetcher, ...request, { 400: "refused" }, DOWNLOAD_TIMEOUT_MS);
 }
 
+/** A download's query: the list's filters, window and sort, and the shape
+ *  asked for. */
+export function downloadQuery(query: ListQuery<string>, format: DownloadFormat): string {
+  return queryString({ ...filtersOf(query), sort: query.sort, dir: query.dir, format });
+}
+
 /** The list as a file: every trace the filters admit, sorted as the page is,
  *  up to the server's cap. */
 export async function traceDownload(
@@ -317,13 +324,7 @@ export async function traceDownload(
   query: TraceQuery,
   format: DownloadFormat,
 ): Promise<DownloadAccess> {
-  const lane = queryString({
-    ...filtersOf(query),
-    sort: query.sort,
-    dir: query.dir,
-    format,
-  });
-  return readDownload("traceDownload", projectId, `/traces/export${lane}`);
+  return readDownload("traceDownload", projectId, `/traces/export${downloadQuery(query, format)}`);
 }
 
 /** One trace's spans, by its id, and its content where `content` asks, which

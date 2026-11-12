@@ -1,16 +1,14 @@
+import { ListTree } from "lucide-react";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
-import { CopyBox } from "@/components/plaintext-token-dialog";
-import { FirstRun, FirstRunStep, Listening } from "@/components/first-run";
-import { NoticeCard } from "@/components/notice-card";
-import { Button } from "@/components/ui/button";
+import { TraceFirstRun } from "@/components/first-run";
 import { ServiceUnavailable } from "@/components/service-unavailable";
-import { TraceCharts, TraceHistogramStrip } from "@/components/traces/charts";
+import { TraceHistogramStrip } from "@/components/traces/charts";
 import { ListPage } from "@/components/traces/list-page";
 import { TracePeek } from "@/components/traces/peek";
 import { TraceTable } from "@/components/traces/table";
-import { TraceToolbar } from "@/components/traces/toolbar";
+import { ListToolbar } from "@/components/traces/toolbar";
 import { UtcOffsetCookie } from "@/components/traces/utc-offset";
 import { administers } from "@/lib/roles";
 import {
@@ -22,27 +20,24 @@ import { fetchChanges } from "@/lib/server/entities/changes";
 import { projectPage } from "@/lib/server/project-page";
 import { fetchContentMode } from "@/lib/server/entities/content-mode";
 import { projectPath } from "@/lib/slug";
-import { AGENT_PROMPT } from "@/lib/first-run";
 import { MAX_DAYS } from "@/lib/list-query";
-import { DEFAULT_ROWS, activeFilters, marksOn, parseTraceQuery, parseTraceUi } from "@/lib/traces";
+import { DEFAULT_ROWS, activeFilters, marksOn, parseTraceQuery } from "@/lib/traces";
 import { UTC_OFFSET_COOKIE, parseUtcOffset } from "@/lib/utc-offset";
 
 export const metadata = { title: "Traces" };
 
-// The trace list: a toolbar, the filters beside the list, the traces over the
-// window above a page of rows, and the way through the pages below. A row
-// per trace of this project's agents in a window of days, every column a sort
-// and most a filter, all of it carried in the URL so a link holds the view.
-// Every pixel is rendered from metadata: the server sums each trace's spans
-// and never reads a prompt.
+// The trace list, where a trace is searched for: a toolbar, the filters
+// beside the list, the traces over the window above a page of rows, and the
+// way through the pages below. A row per trace of this project's agents in a
+// window of days, every column a sort and most a filter, all of it carried in
+// the URL so a link holds the view. Every pixel is rendered from metadata:
+// the server sums each trace's spans and never reads a prompt.
 export default async function TracesPage({
   params,
   searchParams,
 }: PageProps<"/[organization]/[project]/traces">) {
   const { organization, project: slug } = await params;
-  const given = await searchParams;
-  const query = parseTraceQuery(given);
-  const ui = parseTraceUi(given);
+  const query = parseTraceQuery(await searchParams);
   const utcOffset = parseUtcOffset((await cookies()).get(UTC_OFFSET_COOKIE)?.value);
   const resolved = await projectPage(slug);
   if (resolved.kind === "unavailable") return <ServiceUnavailable />;
@@ -84,77 +79,29 @@ export default async function TracesPage({
       <ListPage
         list="traces"
         title="Traces"
-        info="Every trace of this project's agents, newest first, with its steps, model and tool calls. Click a value to narrow the list to it, a heading to sort by it."
+        info="Every trace of this project's agents, newest first, with its steps, model and tool calls. Click a value to narrow the list to it, a user or a session to open its own page, a heading to sort by it. An agent's own page charts its traces, as a session's and a user's chart theirs."
+        icon={ListTree}
         organization={organization}
         slug={slug}
+        projectId={project.id}
         gate={gate}
         query={query}
-        ui={ui}
         access={access}
         facets={facets.kind === "ok" ? facets.facets : null}
         rows={(list) => list.traces.length}
         toolbar={(list, days) => (
-          <TraceToolbar
+          <ListToolbar
+            list="traces"
             days={days}
             organization={organization}
             slug={slug}
             query={query}
-            ui={ui}
             total={list.total}
           />
         )}
         firstRun={
           firstRun ? (
-            <FirstRun
-              status={<Listening>Listening for this project&rsquo;s first trace</Listening>}
-              title="Send your first trace"
-              lead="Three steps, a few minutes. The first trace lists here by itself as it lands, with no reload."
-            >
-              <FirstRunStep
-                n={1}
-                title="Mint an API key"
-                note={
-                  canMint
-                    ? "One with Send spans comes with a first trace to paste, for each SDK."
-                    : "The project's owners and admins mint its keys; ask one for a key with Send spans."
-                }
-              >
-                {canMint && (
-                  <div className="flex flex-wrap gap-gutter">
-                    <Button asChild size="sm">
-                      <Link href={`${base}/api-keys`}>Mint a key</Link>
-                    </Button>
-                  </div>
-                )}
-              </FirstRunStep>
-              <FirstRunStep
-                n={2}
-                title="Have your coding agent add tracing"
-                note="Paste this into Claude Code, Antigravity or another coding agent working in your application."
-              >
-                <CopyBox value={AGENT_PROMPT} label="the prompt" />
-                <p className="text-sm text-muted-foreground">
-                  Or by hand: an{" "}
-                  <Link href="/docs/api/sdks" className="underline underline-offset-4">
-                    SDK
-                  </Link>
-                  , a{" "}
-                  <Link href="/docs/api/frameworks" className="underline underline-offset-4">
-                    framework you already use
-                  </Link>{" "}
-                  or any OpenTelemetry exporter, and the{" "}
-                  <Link href="/docs/api/coding-agents" className="underline underline-offset-4">
-                    plugin
-                  </Link>{" "}
-                  for your coding agent&rsquo;s own sessions.
-                </p>
-              </FirstRunStep>
-              <FirstRunStep
-                n={3}
-                title="Run your agent"
-                note="Each trace lists here within a minute of ending, with its steps, model calls, tokens and spend."
-              />
-            </FirstRun>
+            <TraceFirstRun base={base} canMint={canMint} kind="traces" />
           ) : undefined
         }
         nothingYet={(days) => (
@@ -179,19 +126,6 @@ export default async function TracesPage({
             {days === 1 ? "day" : "days"} are shown.
           </>
         )}
-        // The charts in place of the table, when the page asks for them.
-        instead={
-          ui.display === "chart" ? (
-            histogram.kind === "ok" ? (
-              <>
-                <TraceCharts histogram={histogram.histogram} marks={marks} models={models} />
-                {unmarked}
-              </>
-            ) : (
-              <NoticeCard title="The charts could not be read." body="Try again in a moment." />
-            )
-          ) : undefined
-        }
         table={(list) => (
           <>
             {histogram.kind === "ok" && (
@@ -204,7 +138,6 @@ export default async function TracesPage({
               organization={organization}
               slug={slug}
               query={query}
-              ui={ui}
               traces={list.traces}
               knownTags={knownTags}
             />

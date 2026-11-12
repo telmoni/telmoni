@@ -1,0 +1,111 @@
+---
+title: "Sessions"
+description: "A project's Sessions page: every session its agents' traces belonged to as a row, the one last heard from first, each summed over all of its traces — its agents, its traces and those that failed, how long they ran, their tokens and what they cost, beside its own scores — narrowed by the trace list's filters, sorted, paged and downloaded, and each opened on a page of its own, with its own charts and its traces in the order they ran."
+---
+
+A **session** is the traces that share the session id the application gave
+them: a chat, a thread, a support ticket worked over several traces, or one
+sitting of a coding agent, each turn a trace. An application names it when it
+opens a trace — `session_id` in the [SDKs](/docs/api/sdks),
+`gen_ai.conversation.id` on the span — and a
+[coding-agent plugin](/docs/api/coding-agents) names each of its sessions
+itself ([Sessions and users](/docs/monitoring/traces#sessions-and-users)). A
+trace that names none belongs to none.
+
+A project's **Sessions** page (`/sessions`) lists them. Where
+[Traces](/docs/monitoring/traces) answers for one execution, this page answers
+for the whole of a session: how many traces it took, how long they ran and
+what they cost together. Anyone on the project reads it, and nothing on it is
+a message: the figures are summed from the traces' metadata.
+
+## The list
+
+Every session with a trace in the last seven days, the one last heard from
+first, one row each, fifty to a page:
+
+| Column | What it is |
+|---|---|
+| Session | The first eight characters of the session's id as stored: hashed under the project's own key, so no page shows the id your app sent. It opens [the session's own page](#a-sessions-page), as a click anywhere else on the row does |
+| Agent | The agents whose traces the session holds |
+| Last trace | When its last trace in the window ended, and how the trace that started last stands: **OK**, **Error** or **Cancelled**, or **Running** until that trace's own span has arrived |
+| Traces | How many traces it holds in the window, those still running among them |
+| Duration | How long its traces ran, summed: never the time between them |
+| Tokens | Its traces' input and output tokens, summed; hover for the split |
+| Spend | What its traces' model calls cost, each priced as **Traces** prices it |
+| Scores | The session's own [scores](/docs/monitoring/scores) by name, those given to the session itself: a number's mean where there are several, a yes or no's share of yeses, and a category's values. A trace's scores are on **Traces** |
+| Tags | Its traces' [tags](/docs/monitoring/traces#tags), each `key:value` once |
+
+**Columns** shows or hides each of these, and three more: how many of its
+traces ended in error (**Failed**), when its first trace in the window started
+(**Started**), and the end user it was with (**User**), as stored, which
+opens [the user's own page](/docs/monitoring/users#a-users-page). Your
+columns are kept in your browser, as the trace list's are.
+
+A session is summed over the window: its traces from before it are no part of
+its row, so a longer window shows a long session whole.
+
+## Filters
+
+The **Filters** panel is the trace list's, with the same filters, each value
+counted in sessions: how many hold a trace that carries it. A session is
+listed where **any one** of its traces passes every filter in force, and its
+figures stay those of **all** its traces in the window. So **Status: Error**
+lists the sessions in which a trace ended in error, each with its whole count
+and cost, never the failed traces' alone. The
+[score](/docs/monitoring/scores) filter works the same way, by a score given
+to one of the session's traces or their spans, and by one given to the
+session itself: its own score lists a session wherever one of its traces
+passes the other filters.
+
+A session or a user is found by the id your application sends
+(**Your id**), as on [Traces](/docs/monitoring/traces#filters). Click an
+agent or a tag in a row to narrow the list to it.
+
+**Errors**, **Slow** and **Tokens** beside the window are ready-made: the
+sessions holding a trace that ended in error, those whose traces ran longest
+first, or those that used the most tokens first.
+
+## Sort, pages and the window
+
+**Sort** by clicking a heading: **Last trace**, **Traces**, **Failed**,
+**Duration**, **Tokens**, **Spend** or **Started**. A second click turns it
+round. The latest and the most come first, but **Started**, which opens on the
+earliest.
+
+**Rows per page** is 25, 50 or 100; beside it, the total the filters admit.
+**The window**, beside the page's title, is the last day, week, 30 or 90 days.
+Every filter, the sort, the window and the page are in the page's URL, so a
+link holds the view you were looking at.
+
+The list draws itself again as the project's traces land, while it is in view:
+at once for the first, and once more for whatever arrives in the next 30
+seconds. **Refresh** reads it now.
+
+## Downloading the list
+
+**Download** writes the list as a file, CSV for a spreadsheet or JSON: every
+session its filters admit, sorted as it is, up to the first 10,000. A row
+holds the session's and the user's id as stored and what the list sums of it,
+its agents, traces, tokens, spend, times and tags, and no content.
+
+## A session's page
+
+A session's id opens its own page wherever it stands: in a row here, on
+**Traces** or on a [user's page](/docs/monitoring/users#a-users-page), over
+that page's window; and on a trace's first line, over a window that reaches
+back to the trace.
+
+| Part | What it shows |
+|---|---|
+| Last trace | When its last trace ended and how it stands; **Open it** opens it beside the page |
+| All traces | Its traces over the window, and how many ended in error, with their share |
+| Ran for | How long its traces ran, summed, and the time from its first trace's start to its last one's end |
+| Spend | What its traces cost, priced as **Traces** prices them, and their tokens in and out |
+| User, agents, tags and scores | The user it was with, opening [the user's own page](/docs/monitoring/users#a-users-page); its agents, each opening [the agent's own page](/docs/workspace/organizations-and-projects#an-agents-page); its traces' tags, each opening **Sessions** narrowed to it; and the session's own scores |
+| Over the session | Four charts, a step a trace in the order they started, each step as wide as the next whatever time passed between two traces: **Duration**, how long each ran, a failed one in red, a cancelled one pale and one still running hollow; **Tokens**, each trace's input, cached, output and reasoning tokens; **Cost so far**, what the session had cost as each trace ended; and **Time to first token**. Hover a step for its trace's figures, and click it to open the trace |
+| Traces | Its traces in the order they started, each opening beside the page as a row of **Traces** does |
+
+One page reads a session's first 500 traces in the window: a longer one says
+so, and leads to all of them on **Traces**. A session with no trace in the
+window says so, and leaves the window to widen. The page draws itself again
+as the project's traces land.

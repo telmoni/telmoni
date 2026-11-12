@@ -9,14 +9,16 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        filled: "border border-primary bg-primary text-primary-foreground hover:bg-primary/90",
+        filled: "border border-action bg-action text-action-foreground hover:bg-action/90",
+        destructiveOutline:
+          "border border-destructive/40 text-destructive hover:border-destructive",
         destructive:
           "border border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 dark:border-destructive-fill dark:bg-destructive-fill dark:hover:bg-destructive-fill/90",
         outline:
           "border border-border hover:border-foreground/40",
         ghost:
           "hover:bg-accent hover:text-accent-foreground",
-        link: "text-foreground underline underline-offset-4 hover:no-underline",
+        link: "text-link underline underline-offset-4 hover:no-underline",
       },
       // The shared control height keeps actions aligned with fields and links.
       size: {

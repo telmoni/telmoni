@@ -27,9 +27,11 @@ const RETRY_MS = 30_000;
 // A roster or an audit log: a project's, or the organization's own.
 const ROSTER_PAGES = /^\/[^/]+(?:\/[^/]+)?\/(members|audit-log)$/;
 
-// A page reading a project's spans: its agents, or its traces, the list or
-// one of them. A trace's page names its trace, which a nudge is compared with.
-const SPAN_PAGES = /^\/[^/]+\/[^/]+(\/traces(?:\/([^/]+))?)?$/;
+// Span readers refresh on ingest: a project's Agents, an agent's page and
+// Spend; the sessions and users lists, each with a page of one but not its
+// download; and the trace list, where a trace's own page matches its id too.
+const SPAN_PAGES =
+  /^\/[^/]+\/[^/]+(?:\/(?:agents|dashboards|(?:sessions|users)(?:\/(?!export$)[^/]+)?)|(\/traces(?:\/([^/]+))?))?$/;
 
 function payload<K extends RealtimeEventType>(
   e: MessageEvent,
@@ -232,16 +234,18 @@ export function RealtimeListener({
         const page = SPAN_PAGES.exec(standing().pathname);
         if (!page) return;
         const [, traces, one] = page;
-        // The Agents page: an agent's row moves only as its own traces land.
+        // A download's route, not a page.
+        if (one === "export") return;
+        const peeked = one ? null : new URLSearchParams(window.location.search).get(PEEK_PARAM);
+        // A trace's peek for its own trace, on whichever page holds it open.
+        if (peeked && (data.more || data.traces.includes(peeked))) peekLive.nudge();
+        // The Agents page, an agent's, the sessions list or the users list, a
+        // session's page or a user's: each sums the window's traces, so any
+        // that land may move it.
         if (!traces) {
           live.nudge();
           return;
         }
-        // A download's route, not a page.
-        if (one === "export") return;
-        const peeked = one ? null : new URLSearchParams(window.location.search).get(PEEK_PARAM);
-        // A trace's peek for its own trace.
-        if (peeked && (data.more || data.traces.includes(peeked))) peekLive.nudge();
         if (one && !data.more && !data.traces.includes(one)) return;
         live.nudge();
       });

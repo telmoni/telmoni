@@ -1,3 +1,4 @@
+import { SquareStack } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import { CreateProjectAction } from "@/components/create-project";
@@ -59,6 +60,7 @@ export default async function OrganizationProjectsPage() {
             <NoticeCard title="The projects could not be loaded." body="Try again in a moment." />
           ) : projects.length === 0 ? (
             <NoticeCard
+              icon={SquareStack}
               title="No projects yet."
               body={
                 isAdmin

@@ -6,12 +6,15 @@ import { LocalTime } from "@/components/local-time";
 import { TraceStatusBadge } from "@/components/trace-status-badge";
 import { Badge } from "@/components/ui/badge";
 import type { Trace, TraceQuery } from "@/lib/server/entities/traces";
-import { scoreTitle, scoreWords } from "@/lib/scores";
+import { scoreTitle, scoreWords, scoresLine } from "@/lib/scores";
 import type { ScoreSummary } from "@/lib/types/traces";
-import { formatCost, formatCount, formatDuration, type ColumnSpec, type FilterKey } from "@/lib/traces";
+import { formatCost, formatCount, formatDuration, shortId, type ColumnSpec, type FilterKey } from "@/lib/traces";
 import { TraceColumn } from "@/lib/types/traces";
 
 // One trace's cells, as the trace list draws them (`table.tsx`).
+
+/** Where a row's stored ids lead: an end user's own page, and a session's. */
+export type IdPages = { user: (id: string) => string; session: (id: string) => string };
 
 /** A cell's look: a number stands right in figures of one width, an id is
  *  cut short where it runs long. */
@@ -65,19 +68,21 @@ export function titleOf(column: ColumnSpec, trace: Trace): string | undefined {
     case TraceColumn.Tags:
       return trace.tags.join(", ") || undefined;
     case TraceColumn.Scores:
-      return trace.scores.map((score) => `${score.name}: ${scoreWords(score)}`).join(", ") || undefined;
+      return scoresLine(trace.scores);
     default:
       return undefined;
   }
 }
 
 /** A cell, as its column reads the trace. A value that is a filter is a link
- *  to `narrowedTo` where the page offers one, and plain text otherwise. */
+ *  to `narrowedTo` where the page offers one, and plain text otherwise; its
+ *  user and its session each open their own page, which `pages` names. */
 export function cellOf(
   column: ColumnSpec,
   trace: Trace,
   query: TraceQuery,
   narrowedTo: ((filter: FilterKey, value: string) => string) | null,
+  pages: IdPages,
 ): ReactNode {
   const link = (filter: FilterKey, value: string) =>
     narrowedTo ? (
@@ -93,9 +98,9 @@ export function cellOf(
     case TraceColumn.Agent:
       return link("agent", trace.agent);
     case TraceColumn.User:
-      return link("user", trace.user_id);
+      return <IdLink id={trace.user_id} href={pages.user(trace.user_id)} />;
     case TraceColumn.Session:
-      return link("session", trace.session_id);
+      return <IdLink id={trace.session_id} href={pages.session(trace.session_id)} />;
     case TraceColumn.Status:
       return <TraceStatusBadge trace={trace} />;
     case TraceColumn.ErrorType:
@@ -235,8 +240,20 @@ function Plain({ value }: { value: string }) {
   return <span>{value}</span>;
 }
 
+/** An id stored as a hash, an end user's or a session's, cut short: a link to
+ *  its own page, the whole id behind the cell's title; a dash where the row
+ *  has none. */
+export function IdLink({ id, href }: { id: string; href: string }) {
+  if (!id) return <span className="text-muted-foreground">—</span>;
+  return (
+    <Link href={href} className="underline-offset-4 hover:underline">
+      {shortId(id)}
+    </Link>
+  );
+}
+
 /** A cell whose value is a filter: a link that narrows the list to it, plain
- *  once the list is narrowed to it alone, a dash when the trace sent none. */
+ *  once the list is narrowed to it alone, a dash when the row has none. */
 function FilterLink({
   value,
   current,
@@ -256,9 +273,9 @@ function FilterLink({
   );
 }
 
-/** A cell of several values — a trace's models, its tools — each a filter
- *  where the page offers one. */
-function Values({
+/** A cell of several values — a trace's models, its tools, a session's
+ *  agents — each a filter where the page offers one. */
+export function Values({
   values,
   current,
   href,

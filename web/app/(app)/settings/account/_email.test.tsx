@@ -42,6 +42,7 @@ const CURRENT = "k@example.test";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
   requestEmailChangeAction.mockImplementation(async (email: string) => ({
     ok: true,
     email,
@@ -239,10 +240,14 @@ describe("ChangeEmail — spending the codes", () => {
   });
 
   it("lets them ask again without starting over, and clears the dead codes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     mount("password");
     await reachCodeStep();
     await type("email-code-new", "222222");
-    await press(/resend codes/i);
+    // Not inside the wait between two codes, which the button counts down.
+    expect(screen.getByRole("button", { name: "Resend codes in 30s" })).toBeDisabled();
+    act(() => { vi.advanceTimersByTime(30_000); });
+    await press(/^resend codes$/i);
 
     expect(requestEmailChangeAction).toHaveBeenCalledTimes(2);
     expect(requestEmailChangeAction).toHaveBeenLastCalledWith(

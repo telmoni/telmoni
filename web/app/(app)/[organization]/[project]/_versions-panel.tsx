@@ -33,9 +33,10 @@ import {
 } from "@/lib/versions";
 
 // An agent's versions side by side, in the console's side panel beside the
-// Agents page: its releases, its models or one prompt's versions, a row each
-// of the traces that carried it, each number over its change from the version
-// first seen before it. Read once opened, and again as a tab or a picker moves.
+// Agents page and on the agent's own: its releases, its models or one
+// prompt's versions, a row each of the traces that carried it, each number
+// over its change from the version first seen before it. Read once drawn,
+// and again as a tab or a picker moves.
 
 const readVersions = (url: string, signal: AbortSignal) => readRoute(url, VersionsSchema, { signal });
 
@@ -219,22 +220,11 @@ function Failed({ read, retry }: { read: Exclude<RouteRead<unknown>, { kind: "ok
 
 const lastDays = (days: number) => (days === 1 ? "the last day" : `the last ${days} days`);
 
-function VersionsPanel({
-  projectId,
-  agent,
-  days,
-  onClose,
-  returnFocus,
-}: {
-  projectId: string;
-  agent: string;
-  days: number;
-  onClose: () => void;
-  returnFocus: () => HTMLElement | null;
-}) {
-  const titleId = useId();
+/** An agent's versions over `days`, as both of their places draw them: what
+ *  is picked, the read it asks for, the days that read answered, and the
+ *  pickers and rows that come of it. */
+function useVersions(projectId: string, agent: string, days: number) {
   const id = useId();
-  const panel = useRef<HTMLDivElement>(null);
   const [by, setBy] = useState<VersionsBy>(ChangeKind.Release);
   // Left to the server until one is picked: the busiest, and its most named prompt.
   const [environment, setEnvironment] = useState<string | undefined>(undefined);
@@ -250,6 +240,7 @@ function VersionsPanel({
     by,
     environment,
     prompt: by === ChangeKind.Prompt ? prompt : undefined,
+    days,
   });
   const key = `${attempt} ${url}`;
   useEffect(
@@ -298,6 +289,86 @@ function VersionsPanel({
     );
   }
 
+  return {
+    span,
+    busy: read === null,
+    view: (
+      <>
+        <div className="flex flex-wrap items-center gap-gutter">
+          <Tabs value={by} onValueChange={(next) => isOneOf(VERSIONS_BY, next) && setBy(next)}>
+            <TabsList aria-label="What its traces are split by">
+              {VERSIONS_BY.map((each) => (
+                <TabsTrigger key={each} value={each}>
+                  {BY_LABEL[each].tab}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+          {environments.length > 1 && (
+            // By its place in the list: the environment with no name is an
+            // empty word, which a select's item cannot be.
+            <EnumSelect
+              id={`${id}-environment`}
+              ariaLabel="Environment"
+              className="w-auto max-w-64"
+              value={String(Math.max(0, environments.findIndex((each) => each.value === shownEnvironment)))}
+              options={environments.map((_, at) => String(at))}
+              label={(at) => environmentLabel(environments[Number(at)]?.value ?? "")}
+              onChange={(at) => {
+                setEnvironment(environments[Number(at)]?.value);
+                // Each environment's traces name their own prompts.
+                setPrompt(undefined);
+              }}
+            />
+          )}
+          {prompts.length > 0 && shownPrompt !== null && (
+            <EnumSelect
+              id={`${id}-prompt`}
+              ariaLabel="Prompt"
+              className="w-auto max-w-64"
+              value={shownPrompt}
+              options={
+                prompts.some((each) => each.value === shownPrompt)
+                  ? prompts.map((each) => each.value)
+                  : [shownPrompt, ...prompts.map((each) => each.value)]
+              }
+              label={(name) => name}
+              onChange={setPrompt}
+            />
+          )}
+        </div>
+        {body}
+      </>
+    ),
+  };
+}
+
+/** An agent's versions on its own page, over the page's days. */
+export function AgentVersions({ projectId, agent, days }: { projectId: string; agent: string; days: number }) {
+  const { busy, view } = useVersions(projectId, agent, days);
+  return (
+    <div className="grid gap-gutter" aria-busy={busy}>
+      {view}
+    </div>
+  );
+}
+
+function VersionsPanel({
+  projectId,
+  agent,
+  days,
+  onClose,
+  returnFocus,
+}: {
+  projectId: string;
+  agent: string;
+  days: number;
+  onClose: () => void;
+  returnFocus: () => HTMLElement | null;
+}) {
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const { span, busy, view } = useVersions(projectId, agent, days);
   return (
     <SidePanel panel={panel} titleId={titleId} onClose={onClose} returnFocus={returnFocus}>
       <SidePanelHeader icon={GitCompareArrows} titleId={titleId} title={agent} onClose={onClose}>
@@ -306,51 +377,8 @@ function VersionsPanel({
         </p>
       </SidePanelHeader>
       <SidePanelBody>
-        <div className="grid gap-gutter py-gutter" aria-busy={read === null}>
-          <div className="flex flex-wrap items-center gap-gutter">
-            <Tabs value={by} onValueChange={(next) => isOneOf(VERSIONS_BY, next) && setBy(next)}>
-              <TabsList aria-label="What its traces are split by">
-                {VERSIONS_BY.map((each) => (
-                  <TabsTrigger key={each} value={each}>
-                    {BY_LABEL[each].tab}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            {environments.length > 1 && (
-              // By its place in the list: the environment with no name is an
-              // empty word, which a select's item cannot be.
-              <EnumSelect
-                id={`${id}-environment`}
-                ariaLabel="Environment"
-                className="w-auto max-w-64"
-                value={String(Math.max(0, environments.findIndex((each) => each.value === shownEnvironment)))}
-                options={environments.map((_, at) => String(at))}
-                label={(at) => environmentLabel(environments[Number(at)]?.value ?? "")}
-                onChange={(at) => {
-                  setEnvironment(environments[Number(at)]?.value);
-                  // Each environment's traces name their own prompts.
-                  setPrompt(undefined);
-                }}
-              />
-            )}
-            {prompts.length > 0 && shownPrompt !== null && (
-              <EnumSelect
-                id={`${id}-prompt`}
-                ariaLabel="Prompt"
-                className="w-auto max-w-64"
-                value={shownPrompt}
-                options={
-                  prompts.some((each) => each.value === shownPrompt)
-                    ? prompts.map((each) => each.value)
-                    : [shownPrompt, ...prompts.map((each) => each.value)]
-                }
-                label={(name) => name}
-                onChange={setPrompt}
-              />
-            )}
-          </div>
-          {body}
+        <div className="grid gap-gutter py-gutter" aria-busy={busy}>
+          {view}
         </div>
       </SidePanelBody>
     </SidePanel>

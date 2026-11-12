@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { commentsOf, formatScoreValue, isSpanId, scoreTitle, scoreWords } from "./scores";
+import { commentsOf, formatScoreValue, isSpanId, scoreTitle, scoreWords, scoresLine } from "./scores";
 
 const summary = (over: Partial<Parameters<typeof scoreWords>[0]>) => ({
   name: "helpful",
@@ -28,6 +28,13 @@ describe("scoreWords", () => {
     expect(scoreTitle(summary({ count: 3 }))).toBe("helpful: the mean of 3 scores");
     expect(scoreTitle(summary({}))).toBe("helpful: 1 score");
     expect(formatScoreValue(-0.5)).toBe("-0.50");
+  });
+
+  it("says a row's scores in one line, and nothing of a row with none", () => {
+    expect(scoresLine([summary({}), summary({ name: "resolved", data_type: "boolean", mean: 1 })])).toBe(
+      "helpful: 0.75, resolved: yes",
+    );
+    expect(scoresLine([])).toBeUndefined();
   });
 });
 

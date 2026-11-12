@@ -1112,9 +1112,11 @@ async fn the_lanes_answer_the_newest_first_narrowed_and_held_to_the_project(pool
     assert_eq!(full["changes"].as_array().map(Vec::len), Some(500));
 }
 
-/// The Agents page reads each listed agent's newest change of each kind.
+/// The Agents page reads each listed agent's newest release and first tool
+/// call; a model's change or a prompt's is none of them, its row naming the
+/// models and prompt versions its traces carried instead.
 #[sqlx::test]
-async fn the_agents_page_reads_each_agents_newest_change_of_each_kind(pool: PgPool) {
+async fn the_agents_page_reads_each_agents_newest_release_and_tool(pool: PgPool) {
     let Some(w) = watched(&pool, module_path!()).await else {
         return;
     };
@@ -1164,6 +1166,16 @@ async fn the_agents_page_reads_each_agents_newest_change_of_each_kind(pool: PgPo
     kept(
         &pool,
         &w.project,
+        AGENT,
+        ("tool", None, "delete_user"),
+        ago(3),
+        ago(3),
+        "shown",
+    )
+    .await;
+    kept(
+        &pool,
+        &w.project,
         "unlisted",
         ("release", None, "0.1"),
         ago(1),
@@ -1173,5 +1185,5 @@ async fn the_agents_page_reads_each_agents_newest_change_of_each_kind(pool: PgPo
     .await;
     let (status, agents) = ask(&lanes(&w), &w, "/agents", None).await;
     assert_eq!(status, StatusCode::OK, "{agents}");
-    assert_eq!(values(&agents), ["gpt-5", "1.1"]);
+    assert_eq!(values(&agents), ["1.1", "delete_user"]);
 }

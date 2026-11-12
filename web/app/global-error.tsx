@@ -1,7 +1,7 @@
 "use client";
 
 import { PRODUCT_NAME } from "@/lib/site";
-import { geistMono } from "@/lib/fonts";
+import { geistMono, inter } from "@/lib/fonts";
 import { SettingsBoot } from "@/components/settings-boot";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ export default function GlobalError({
   retry: () => void;
 }) {
   return (
-    <html lang="en" className={geistMono.variable} suppressHydrationWarning>
+    <html lang="en" className={`${geistMono.variable} ${inter.variable}`} suppressHydrationWarning>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <title>{`Something went wrong · ${PRODUCT_NAME}`}</title>

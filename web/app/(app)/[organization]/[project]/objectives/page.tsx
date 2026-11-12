@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AccessDenied } from "@/components/access-denied";
 import { DataTable, THead, Td, Th } from "@/components/data-table";
+import { FirstRun, FirstRunStep } from "@/components/first-run";
 import { NoticeCard } from "@/components/notice-card";
 import { PageHeader } from "@/components/page-header";
 import { ServiceUnavailable } from "@/components/service-unavailable";
@@ -67,15 +68,39 @@ export default async function ObjectivesPage({ params }: PageProps<"/[organizati
         title="Objectives"
         headingId={OBJECTIVES_HEADING}
         info="Each promises a share of one agent's traces succeed, or end inside a time, over its days. The traces that miss it spend its error budget; it pages when its last hour spends the budget 14.4× as fast as it lasts, and warns at 6× over its last six hours. Each counts as one of the plan's alerts, and its incidents stand under it on the Alerts page."
-        action={<NewObjective projectId={project.id} connections={connections} history={history} />}
+        action={objectives.length > 0 ? <NewObjective projectId={project.id} connections={connections} history={history} /> : undefined}
       />
       <div className="grid gap-page">
         <section className="grid gap-gutter">
         {objectives.length === 0 ? (
-          <NoticeCard
-            title="No objective yet."
-            body="Promise a share of an agent's traces succeed, or end inside a time, and be paged within the hour when they miss it fast enough to spend the budget early."
-          />
+          <FirstRun
+            title="Set a reliability target for your agent"
+            lead="Choose what good looks like. See how much room your agent has left for failures or slow traces."
+          >
+            <FirstRunStep
+              n={1}
+              title="Choose an agent and a target"
+              note="Promise a share of its traces will succeed, or finish within a time limit, over a window of days."
+            >
+              <div className="flex flex-wrap gap-gutter">
+                <NewObjective projectId={project.id} connections={connections} history={history} />
+              </div>
+            </FirstRunStep>
+            <FirstRunStep
+              n={2}
+              title="Watch its error budget"
+              note="Once created, your objective appears here. Traces that miss the target spend its budget; fast burn opens an incident."
+            />
+            <FirstRunStep
+              n={3}
+              title="Choose where incidents reach you"
+              note="Incidents appear in your feed. Owners and admins connect Slack or a webhook; select a connector on your objective to notify your team too."
+            >
+              <Link href={`${projectPath(organization, slug)}/connectors`} className="w-fit text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">
+                View connectors
+              </Link>
+            </FirstRunStep>
+          </FirstRun>
         ) : (
           <>
             {standings === null && (

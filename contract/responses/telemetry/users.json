@@ -1,0 +1,51 @@
+{
+  "days": 7,
+  "dir": "desc",
+  "limit": 50,
+  "more": false,
+  "page": 1,
+  "sort": "last_seen",
+  "total": 2,
+  "users": [
+    {
+      "agents": [
+        "support",
+        "triage"
+      ],
+      "duration_ms": 71900,
+      "failed_traces": 1,
+      "first_seen": "2027-01-15T08:00:00Z",
+      "input_tokens": 6015,
+      "last_ended": false,
+      "last_seen": "2027-01-15T08:15:00Z",
+      "last_status": "ok",
+      "output_tokens": 1840,
+      "sessions": 2,
+      "spend": 0.164,
+      "tags": [
+        "branch:main",
+        "repo:telmoni"
+      ],
+      "traces": 6,
+      "user_id": "2c26b46b68ffc68ff99b453c1d304134"
+    },
+    {
+      "agents": [
+        "nightly-report"
+      ],
+      "duration_ms": 310,
+      "failed_traces": 1,
+      "first_seen": "2027-01-15T08:01:00Z",
+      "input_tokens": 0,
+      "last_ended": true,
+      "last_seen": "2027-01-15T08:01:01Z",
+      "last_status": "error",
+      "output_tokens": 0,
+      "sessions": 0,
+      "spend": 0.0,
+      "tags": [],
+      "traces": 1,
+      "user_id": "486ea46224d1bb4fb680f34f7c9ad96a"
+    }
+  ]
+}

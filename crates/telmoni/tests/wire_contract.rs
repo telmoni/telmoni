@@ -24,8 +24,8 @@ use telmoni_shared::{
     ApiKeyScope, ChangeKind, ChartMeasure, ContentMode, Flag, IncidentStatus, MetricsGroup,
     MissingData, MonitorCause, MonitorState, NotificationKind, OrganizationRole,
     OrganizationStatus, Role, RuleAggregation, RuleBaseline, RuleLevel, RuleMeasure, RuleOperator,
-    RuleWindow, ScoreSource, ScoreTarget, ScoreType, Severity, SortDirection, SpanFault, SpanKind,
-    SpanStatus, TelmoniResourceKind, TraceSort, slug,
+    RuleWindow, ScoreSource, ScoreTarget, ScoreType, SessionSort, Severity, SortDirection,
+    SpanFault, SpanKind, SpanStatus, TelmoniResourceKind, TraceSort, UserSort, slug,
 };
 use telmoni_telemetry::content::FILE_ID_PREFIX;
 use telmoni_telemetry::contract::{CONTENT, NAME_MAX as SPAN_NAME_MAX, UTC_OFFSET_RANGE};
@@ -94,6 +94,8 @@ fn generated_contract() -> Value {
             "SpanStatus": wire::<SpanStatus>(),
             "SpanFault": wire::<SpanFault>(),
             "TraceSort": wire::<TraceSort>(),
+            "SessionSort": wire::<SessionSort>(),
+            "UserSort": wire::<UserSort>(),
             "SortDirection": wire::<SortDirection>(),
             "ContentMode": wire::<ContentMode>(),
             "ApiKeyScope": wire::<ApiKeyScope>(),

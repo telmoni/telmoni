@@ -40,7 +40,7 @@ export function ConsoleHeader({
     >
       <div
         className={cn(
-          "group/brand relative flex shrink-0 items-center gap-gutter px-page md:border-r md:border-sidebar-border",
+          "group/brand relative flex shrink-0 items-center gap-gutter px-page md:border-r md:border-sidebar-border md:bg-sidebar",
           collapsed
             ? "md:w-sidebar-collapsed md:cursor-expand"
             : "md:w-sidebar",

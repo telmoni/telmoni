@@ -28,6 +28,7 @@ pub mod rule_window;
 pub mod score_source;
 pub mod score_target;
 pub mod score_type;
+pub mod session_sort;
 pub mod severity;
 pub mod sort_direction;
 pub mod span_fault;
@@ -35,6 +36,7 @@ pub mod span_kind;
 pub mod span_status;
 pub mod tenant_id;
 pub mod trace_sort;
+pub mod user_sort;
 pub mod wire_enum;
 
 pub use api_key_scope::ApiKeyScope;
@@ -68,6 +70,7 @@ pub use rule_window::RuleWindow;
 pub use score_source::ScoreSource;
 pub use score_target::ScoreTarget;
 pub use score_type::ScoreType;
+pub use session_sort::SessionSort;
 pub use severity::Severity;
 pub use sort_direction::SortDirection;
 pub use span_fault::SpanFault;
@@ -78,4 +81,5 @@ pub use tenant_id::{
     SESSION_ID_PREFIX, SessionId, SessionIdError, UserId, UserIdError,
 };
 pub use trace_sort::TraceSort;
+pub use user_sort::UserSort;
 pub use wire_enum::WireEnum;

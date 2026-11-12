@@ -20,7 +20,7 @@ export function DeleteTrace({ projectId, traceId }: { projectId: string; traceId
       open={open}
       onOpenChange={setOpen}
       trigger={
-        <Button variant="destructive" disabled={pending}>
+        <Button variant="destructiveOutline" disabled={pending}>
           {pending ? "Deleting…" : "Delete"}
         </Button>
       }

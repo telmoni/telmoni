@@ -79,7 +79,7 @@ export function AlertActions({
       <ConfirmDialog
         trigger={
           <Button
-            variant="destructive"
+            variant="destructiveOutline"
             size="sm"
             disabled={pending}
             aria-label={`Delete ${alert.name}`}

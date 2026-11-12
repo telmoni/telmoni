@@ -89,7 +89,7 @@ export function PageAction({
   const hint = primary && !disabled && letterKeys
     ? <Kbd
         aria-hidden="true"
-        className="size-5 shrink-0 p-0 in-data-[variant=filled]:bg-primary-foreground/15 in-data-[variant=filled]:text-primary-foreground"
+        className="size-5 shrink-0 p-0 in-data-[variant=filled]:bg-action-foreground/15 in-data-[variant=filled]:text-action-foreground"
       ><span className="trim-cap">{PAGE_ACTION_KEY.toUpperCase()}</span></Kbd>
     : null;
   const content = props.asChild && isValidElement<{ children?: ReactNode }>(children)

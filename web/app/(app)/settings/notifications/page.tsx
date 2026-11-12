@@ -1,3 +1,4 @@
+import { Bell } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { NoticeCard } from "@/components/notice-card";
 import { ServiceUnavailable } from "@/components/service-unavailable";
@@ -35,6 +36,7 @@ export default async function AccountNotificationsPage() {
         {nothing && (
           <NoticeCard
             data-testid="notifications-empty"
+            icon={Bell}
             title="No notifications."
             body="Invitations to join an organization or a project, offers to take one over, and projects you were added to show up here."
           />

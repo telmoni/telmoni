@@ -19,6 +19,7 @@ export function PageHeader({
   toolbar,
   backHref,
   backLabel,
+  visitHref,
 }: {
   title?: string;
   /** Names the title's heading, which then takes the focus a control on the
@@ -34,14 +35,19 @@ export function PageHeader({
    *  a page of one trace or one session, back to its list. Both or none. */
   backHref?: string;
   backLabel?: string;
+  /** Where a visit to the page is filed, where its path alone does not name
+   *  it: an agent's page, which a parameter names. `null` files none, for a
+   *  page that found nothing to show. */
+  visitHref?: string | null;
 }) {
   const pathname = usePathname();
   const owner = useUser()?.id;
+  const visited = visitHref === undefined ? pathname : visitHref;
   useEffect(() => {
     // Not the tab's title, which is each page's `metadata` alone: written here
     // as well, it was one more change after Next's own.
-    if (title && owner) recordVisit(owner, { href: pathname, label: title });
-  }, [title, pathname, owner]);
+    if (title && owner && visited !== null) recordVisit(owner, { href: visited, label: title });
+  }, [title, visited, owner]);
 
   // A page that came after its loading state finds the focus where the
   // console shell parked it, on the main region, as no heading stood there
@@ -64,7 +70,7 @@ export function PageHeader({
             ref={heading}
             id={headingId}
             tabIndex={-1}
-            className="min-w-0 truncate text-base font-medium outline-none"
+            className="min-w-0 truncate text-xl font-medium outline-none"
           >
             {title}
           </h1>

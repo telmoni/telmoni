@@ -11,7 +11,7 @@ use telmoni_shared::test_util::pin_contract;
 use telmoni_shared::{
     ChangeKind, ChartMeasure, ContentMode, IncidentStatus, MetricsGroup, MissingData, MonitorCause,
     OrganizationId, ProjectId, RuleAggregation, RuleLevel, RuleMeasure, RuleOperator, RuleWindow,
-    Severity, SortDirection, SpanKind, SpanStatus, TraceSort,
+    SessionSort, Severity, SortDirection, SpanKind, SpanStatus, TraceSort, UserSort,
 };
 use telmoni_telemetry::changes::Change;
 use telmoni_telemetry::contract::{InventoryRow, Needs, ReadOn};
@@ -23,17 +23,21 @@ use telmoni_telemetry::handler::incidents::{IncidentAnswer, IncidentList};
 use telmoni_telemetry::handler::mutes::MuteList;
 use telmoni_telemetry::handler::privacy::{DoorScrub, Posture, Retention, Sent};
 use telmoni_telemetry::handler::rules::{Alert, AlertLink, AlertList};
+use telmoni_telemetry::handler::sessions::SessionList;
 use telmoni_telemetry::handler::traces::{
     FacetValue, FacetValues, Facets, SpanFields, TraceDetail, TraceHistogram, TraceList, TraceSpan,
     TraceSpend, UnpricedModel,
 };
+use telmoni_telemetry::handler::users::UserList;
 use telmoni_telemetry::handler::versions::Versions;
 use telmoni_telemetry::handler::views::{DashboardChart, DashboardOptions, View, ViewList};
 use telmoni_telemetry::rules::db::PausedBy;
 use telmoni_telemetry::rules::incidents::IncidentRow;
 use telmoni_telemetry::rules::mutes::MuteRow;
 use telmoni_telemetry::rules::{Definition, Hours, Link, RuleFilters};
+use telmoni_telemetry::sessions::SessionRow;
 use telmoni_telemetry::traces::{Bar, ListSort, TraceRow};
+use telmoni_telemetry::users::UserRow;
 use telmoni_telemetry::versions::{Choice, ScoreMean, Version};
 
 /// A trace's agent span's turn, as content keeps it: the person's message and
@@ -202,9 +206,125 @@ fn the_changes_answer_as_the_console_reads() {
     );
 }
 
+/// The sessions list's page: one session still going, its last trace not
+/// ended, scored itself, and one that named no user and ended in error.
+#[test]
+fn the_session_list_answers_as_the_console_reads() {
+    pin(
+        "sessions",
+        &SessionList {
+            sessions: vec![
+                SessionRow {
+                    session_id: "9f86d081884c7d659a2feaa0c55ad015".into(),
+                    user_id: "2c26b46b68ffc68ff99b453c1d304134".into(),
+                    agents: vec!["support".into(), "triage".into()],
+                    traces: 4,
+                    failed_traces: 1,
+                    input_tokens: 4_210,
+                    output_tokens: 1_302,
+                    spend: 0.118,
+                    duration_ms: 52_400,
+                    first_seen: at(0),
+                    last_seen: at(900),
+                    last_ended: false,
+                    last_status: SpanStatus::Ok,
+                    tags: vec!["branch:main".into(), "repo:telmoni".into()],
+                },
+                SessionRow {
+                    session_id: "fcde2b2edba56bf408601fb721fe9b5c".into(),
+                    user_id: String::new(),
+                    agents: vec!["nightly-report".into()],
+                    traces: 1,
+                    failed_traces: 1,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    spend: 0.0,
+                    duration_ms: 310,
+                    first_seen: at(60),
+                    last_seen: at(61),
+                    last_ended: true,
+                    last_status: SpanStatus::Error,
+                    tags: vec![],
+                },
+            ],
+            days: 7,
+            limit: 50,
+            page: 1,
+            total: 2,
+            more: false,
+            sort: ListSort::Column(SessionSort::LastSeen),
+            dir: SortDirection::Desc,
+            scores: [(
+                "9f86d081884c7d659a2feaa0c55ad015".to_owned(),
+                vec![telmoni_telemetry::scores::Summary {
+                    name: "resolved".into(),
+                    data_type: telmoni_shared::ScoreType::Boolean,
+                    mean: Some(1.0),
+                    count: 1,
+                    categories: Vec::new(),
+                }],
+            )]
+            .into(),
+        },
+    );
+}
+
+/// The users list's page: one end user still being served, over two sessions
+/// and two agents, and one whose only trace named no session and failed.
+#[test]
+fn the_user_list_answers_as_the_console_reads() {
+    pin(
+        "users",
+        &UserList {
+            users: vec![
+                UserRow {
+                    user_id: "2c26b46b68ffc68ff99b453c1d304134".into(),
+                    sessions: 2,
+                    agents: vec!["support".into(), "triage".into()],
+                    traces: 6,
+                    failed_traces: 1,
+                    input_tokens: 6_015,
+                    output_tokens: 1_840,
+                    spend: 0.164,
+                    duration_ms: 71_900,
+                    first_seen: at(0),
+                    last_seen: at(900),
+                    last_ended: false,
+                    last_status: SpanStatus::Ok,
+                    tags: vec!["branch:main".into(), "repo:telmoni".into()],
+                },
+                UserRow {
+                    user_id: "486ea46224d1bb4fb680f34f7c9ad96a".into(),
+                    sessions: 0,
+                    agents: vec!["nightly-report".into()],
+                    traces: 1,
+                    failed_traces: 1,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    spend: 0.0,
+                    duration_ms: 310,
+                    first_seen: at(60),
+                    last_seen: at(61),
+                    last_ended: true,
+                    last_status: SpanStatus::Error,
+                    tags: vec![],
+                },
+            ],
+            days: 7,
+            limit: 50,
+            page: 1,
+            total: 2,
+            more: false,
+            sort: ListSort::Column(UserSort::LastSeen),
+            dir: SortDirection::Desc,
+        },
+    );
+}
+
 /// The Agents page's rows: one agent whose last trace ended and was priced,
-/// with its newest change of each kind, and one still on its first trace,
-/// with no usual cost yet.
+/// on two models and prompt versions, with its faults, its newest release and
+/// first tool call, and one still on its first trace, with no usual cost or
+/// model call yet.
 #[test]
 fn the_agents_answer_as_the_console_reads() {
     pin(
@@ -216,26 +336,37 @@ fn the_agents_answer_as_the_console_reads() {
                     agent: "support".into(),
                     traces: 12,
                     failed_traces: 1,
+                    faults: vec![("rate_limited".into(), 3), ("timeout".into(), 1)],
+                    spend: 0.41,
                     last_trace_id: TRACE.into(),
                     last_started_at: at(0),
                     last_ended: true,
                     last_status: SpanStatus::Ok,
                     last_spend: 0.042,
                     usual_spend: Some(0.031),
+                    models: vec!["gpt-4o-mini-2024-07-18".into(), "gpt-4o-2024-08-06".into()],
+                    prompt_versions: vec!["support-reply:3".into(), "support-reply:2".into()],
                 },
                 AgentRow {
                     agent: "nightly-report".into(),
                     traces: 1,
                     failed_traces: 0,
+                    faults: vec![],
+                    spend: 0.0,
                     last_trace_id: "0192f3a17c2e7b4d9a613c5e8f0d2b2c".into(),
                     last_started_at: at(60),
                     last_ended: false,
                     last_status: SpanStatus::Ok,
                     last_spend: 0.0,
                     usual_spend: None,
+                    models: vec![],
+                    prompt_versions: vec![],
                 },
             ],
-            changes: changes(),
+            changes: changes()
+                .into_iter()
+                .filter(|change| matches!(change.kind, ChangeKind::Release | ChangeKind::Tool))
+                .collect(),
         },
     );
 }

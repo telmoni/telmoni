@@ -1,3 +1,4 @@
+import { SquareStack } from "lucide-react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -153,7 +154,7 @@ export default async function DataSheetPage() {
 
         <Section headingId="sheet-projects" title="Each project">
           {projects.length === 0 ? (
-            <NoticeCard title="No projects yet." body="Each project this organization makes appears here." />
+            <NoticeCard icon={SquareStack} title="No projects yet." body="Each project this organization makes appears here." />
           ) : (
             projects.map(({ project, mode, posture, changes }) => (
               <Card key={project.id} className="grid gap-gutter break-inside-avoid">

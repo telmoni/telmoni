@@ -8,7 +8,7 @@ import { SettingsBoot } from "@/components/settings-boot";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { env } from "@/lib/env";
-import { geistMono } from "@/lib/fonts";
+import { geistMono, inter } from "@/lib/fonts";
 import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from "@/lib/site";
 
 // A function, not a constant: `metadataBase` is the deployment's origin, which
@@ -38,7 +38,7 @@ export default async function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={geistMono.variable}
+      className={`${geistMono.variable} ${inter.variable}`}
     >
       <head>
         {/* Before first paint, so a sharp console never renders rounded and

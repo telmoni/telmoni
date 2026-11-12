@@ -45,7 +45,7 @@ vi.mock("next/headers", () => ({
 import { tryFetchWithTimeout } from "@/lib/api/fetch";
 import { getServerSession } from "@/lib/server/session";
 
-import { deleteTraceAction, eraseEndUserAction } from "./actions";
+import { deleteTraceAction, eraseEndUserAction, storedIdAction } from "./actions";
 
 const fetchMock = vi.mocked(tryFetchWithTimeout);
 const PROJECT = "project_1";
@@ -119,5 +119,51 @@ describe("erasing an end user", () => {
       });
     }
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("looking up an id as it is stored", () => {
+  const STORED = "9f86d081884c7d659a2feaa0c55ad015";
+
+  it("posts the id in the body, as typed and by what it is, and answers what it is stored as", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ stored_id: STORED }), { status: 200 }));
+    expect(await storedIdAction(PROJECT, "user", " ada@example.com ")).toEqual({ ok: true, storedId: STORED });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://telemetry.test/internal/v1/telemetry/stored-id");
+    expect(init).toEqual(
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ user_id: " ada@example.com " }) }),
+    );
+    await storedIdAction(PROJECT, "session", "thread 42");
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ body: JSON.stringify({ session_id: "thread 42" }) }),
+    );
+  });
+
+  it("holds each id to its own length, in characters, and asks the lane about none other", async () => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ stored_id: STORED }), { status: 200 }));
+    expect((await storedIdAction(PROJECT, "user", "😀".repeat(128))).ok).toBe(true);
+    expect((await storedIdAction(PROJECT, "session", "s".repeat(200))).ok).toBe(true);
+    expect(await storedIdAction(PROJECT, "user", "u".repeat(129))).toEqual({
+      ok: false,
+      error: "An id is 1 to 128 characters.",
+    });
+    expect(await storedIdAction(PROJECT, "session", "")).toEqual({
+      ok: false,
+      error: "An id is 1 to 200 characters.",
+    });
+    for (const filter of ["agent", "tag", "", undefined]) {
+      expect(await storedIdAction(PROJECT, filter, "x"), String(filter)).toEqual({ ok: false, error: "No such id." });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("says why the lane refused, and refuses an answer that names no stored id", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 403 }));
+    expect(await storedIdAction(PROJECT, "user", "u-1")).toEqual({ ok: false, error: "a view by that name exists" });
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ stored_id: "" }), { status: 200 }));
+    expect(await storedIdAction(PROJECT, "user", "u-1")).toEqual({
+      ok: false,
+      error: "Unexpected response from telemetry.",
+    });
   });
 });

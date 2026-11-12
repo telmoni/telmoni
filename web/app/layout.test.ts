@@ -14,6 +14,7 @@ vi.mock("@/lib/env", () => ({
 // Next's font loader runs at build, where a test never is.
 vi.mock("next/font/google", () => ({
   Geist_Mono: () => ({ variable: "" }),
+  Inter: () => ({ variable: "" }),
 }));
 
 import { generateMetadata } from "./layout";

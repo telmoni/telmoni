@@ -43,7 +43,7 @@ export function EraseEndUserForm({ projectId }: { projectId: string }) {
         open={open}
         onOpenChange={setOpen}
         trigger={
-          <Button variant="destructive" disabled={pending || userId.length === 0}>
+          <Button variant="destructiveOutline" disabled={pending || userId.length === 0}>
             {pending ? "Erasing…" : "Erase"}
           </Button>
         }

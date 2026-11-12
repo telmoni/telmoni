@@ -25,7 +25,7 @@
 Telmoni is privacy-first, open-source monitoring for the AI agents you run: a Python service, a nightly batch, a LangGraph graph, a Claude Code session. Its SDKs and its Claude Code, Codex and Antigravity plugins record each **trace** of an agent, and the **steps**, **model calls**, **tool calls** and **retrievals** inside it, as OpenTelemetry spans; Telmoni alerts when a trace fails, stalls, loops, overspends or stops arriving, stops a trace at the caps you set, and shows you the trace that did it. Only metadata is kept unless you choose otherwise: prompts and completions come off a span before it leaves your process, and ingest drops any that arrive anyway, until a project's owner turns its content on and your code asks for it, when it is kept sealed under the project's own key. It is one Rust binary and a Next.js console on PostgreSQL, ClickHouse and Redis, self-hosted with Docker Compose or Helm.
 
 > [!NOTE]
-> Telmoni hasn't launched yet and isn't at 1.0, and it's built in the open: until it is, expect it to change every month, sometimes incompatibly. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the telemetry on them: the SDKs and the Claude Code, Codex and Antigravity plugins, ingest, the console's traces, grouped by session or user, with each agent's changes of release, model and prompt version marked, dashboards, alerts, a cost alert among them, and objectives, each project's open incidents on its Agents page, the cost a call reports, scores, content an owner chooses to keep, and the SDKs' guard, which stops a trace at the caps on its steps and spend you set. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what is built, and [Known gaps](ARCHITECTURE.md#known-gaps) what isn't right yet.
+> Telmoni hasn't launched yet and isn't at 1.0, and it's built in the open: until it is, expect it to change every month, sometimes incompatibly. Running today: organizations and roles, API keys, the audit log, notifications, the console agent, and the telemetry on them: the SDKs and the Claude Code, Codex and Antigravity plugins, ingest, the console's traces, summed by session and by agent, with each agent's changes of release, model and prompt version marked, dashboards, alerts, a cost alert among them, and objectives, each project's open incidents on its Agents page, the cost a call reports, scores, content an owner chooses to keep, and the SDKs' guard, which stops a trace at the caps on its steps and spend you set. [Where it goes next](ARCHITECTURE.md#where-it-goes-next) lists what is built, and [Known gaps](ARCHITECTURE.md#known-gaps) what isn't right yet.
 
 ## Features
 
@@ -95,7 +95,7 @@ TypeScript, Go and Rust work the same way; the [SDK docs](https://github.com/tel
 
 ### 4. See it in the console
 
-The project's **Traces** page shows the trace with its model call, tokens and timings. **Group by** lays its traces out by the `session_id` or the `user_id` a trace is given.
+The project's **Traces** page shows the trace with its model call, tokens and timings. Its agent's own page, from **Agents**, charts the agent's traces, **Sessions** sums the traces that share the `session_id` a trace is given, and **Users** those that share its `user_id`.
 
 ## Self-hosting
 

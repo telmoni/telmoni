@@ -29,7 +29,6 @@ vi.mock("@/components/traces/charts", () => ({
   TraceHistogramStrip: ({ marks }: { marks: unknown }) => (
     <div data-testid="histogram" data-marks={JSON.stringify(marks)} />
   ),
-  TraceCharts: ({ marks }: { marks: unknown }) => <div data-testid="charts" data-marks={JSON.stringify(marks)} />,
 }));
 
 vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({}));
@@ -247,14 +246,10 @@ describe("TracesPage", () => {
       "href",
       "/acme/web/traces?agent=nightly-report",
     );
-    expect(table.getByRole("link", { name: USER })).toHaveAttribute(
-      "href",
-      `/acme/web/traces?user=${USER}`,
-    );
-    expect(table.getByRole("link", { name: "conv-1" })).toHaveAttribute(
-      "href",
-      "/acme/web/traces?session=conv-1",
-    );
+    // An id stored as a hash is a column to ask for, never one the list opens on.
+    expect(table.queryByRole("link", { name: USER })).toBeNull();
+    expect(table.queryByRole("link", { name: "conv-1" })).toBeNull();
+    expect(table.getByRole("columnheader", { name: /Spend/ })).toBeInTheDocument();
     expect(table.getByText("OK")).toBeInTheDocument();
     // A trace whose agent's span has not arrived is running, whatever its spans say.
     expect(table.getByText("Running")).toBeInTheDocument();
@@ -265,17 +260,38 @@ describe("TracesPage", () => {
     expect(table.getByText("1,500")).toBeInTheDocument();
     expect(table.getByText("2 s")).toBeInTheDocument();
     expect(table.getByText("500 ms")).toBeInTheDocument();
-    // Columns past the first nine are offered, not shown; the count holds the
+    // Columns past the first eight are offered, not shown; the count holds the
     // trace's id, which always shows.
     expect(table.queryByRole("columnheader", { name: /Model calls/ })).toBeNull();
     expect(table.getByRole("columnheader", { name: /Scores/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("10/28");
-    // The window, the refresh and the columns stand on the title's row.
+    expect(screen.getByRole("button", { name: /Columns/ })).toHaveTextContent("9/28");
+    // The window, the refresh and the columns stand on the title's row, and
+    // nothing that turns the list into another: no grouping, no charts in its place.
     const header = within(screen.getByTestId("page-header"));
     expect(header.getByRole("combobox", { name: "Window" })).toHaveTextContent("Last 7 days");
     expect(header.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
     expect(header.getByRole("button", { name: /Columns/ })).toBeInTheDocument();
+    expect(header.getAllByRole("combobox")).toHaveLength(1);
+    expect(header.queryByRole("tab")).toBeNull();
     expect(screen.getByTestId("histogram")).toBeInTheDocument();
+  });
+
+  it("shows a trace's user and session where a person asks for them, each opening its own page over the list's window", async () => {
+    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ columns: ["user", "session"] }));
+    const { unmount } = render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    const table = within(screen.getByRole("table"));
+    // The id cut short, the whole of it behind the cell's title.
+    const user = table.getByRole("link", { name: USER.slice(0, 8) });
+    expect(user).toHaveAttribute("href", `/acme/web/users/${USER}`);
+    expect(user.closest("td")).toHaveAttribute("title", USER);
+    expect(table.getByRole("link", { name: "conv-1" })).toHaveAttribute("href", "/acme/web/sessions/conv-1");
+    unmount();
+
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ days: "30" }) }));
+    expect(within(screen.getByRole("table")).getByRole("link", { name: "conv-1" })).toHaveAttribute(
+      "href",
+      "/acme/web/sessions/conv-1?days=30",
+    );
   });
 
   // The class is metadata, so drawing it files no read; its message is the peek's.
@@ -309,9 +325,9 @@ describe("TracesPage", () => {
     expect(document.activeElement).toBe(link);
   });
 
-  // Grouped by session, each session heads its own traces and opens them in
-  // order; a trace that named none is under a head that says so.
-  it("groups the traces by session, each head opening the session's traces in order", async () => {
+  // A session's traces are summed on the Sessions page: sorted by session
+  // here, they are the list's own rows under no heading.
+  it("sorts by session as by any column, under no heading of its own", async () => {
     const TRACE_C = { ...TRACE_A, trace_id: "9c8d7e6f000040008000000000000003" };
     mockTraces = list({ traces: [TRACE_B, TRACE_A, TRACE_C], sort: "session", dir: "asc" });
     render(
@@ -320,16 +336,9 @@ describe("TracesPage", () => {
         searchParams: Promise.resolve({ sort: "session", dir: "asc", days: "30" }),
       }),
     );
-    const heads = screen.getAllByRole("rowheader");
-    expect(heads.map((head) => head.textContent)).toEqual([
-      "Session: none1 trace on this page",
-      "Session: conv-12 traces on this page",
-    ]);
-    expect(within(heads[1]!).getByRole("link", { name: "conv-1" })).toHaveAttribute(
-      "href",
-      "/acme/web/traces?session=conv-1&sort=started&dir=asc&days=30",
-    );
-    expect(screen.getByRole("combobox", { name: "Group by" })).toHaveTextContent("By session");
+    expect(fetchTraces).toHaveBeenCalledWith(PROJECT, { sort: "session", dir: "asc", days: 30, limit: 50 });
+    expect(screen.queryAllByRole("rowheader")).toHaveLength(0);
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(4);
   });
 
   // In Chrome a scroll into view moves where the page's first Tab starts, past the skip link.
@@ -431,8 +440,8 @@ describe("TracesPage", () => {
     expect(fetchTraces).toHaveBeenCalledWith(PROJECT, expect.objectContaining({ days: 360, limit: 1 }));
     expect(screen.getByRole("heading", { name: "Send your first trace" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Listening for this project’s first trace");
-    expect(screen.getByText(/telmoni\.com\/docs\/api\/sdks/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "SDK" })).toHaveAttribute("href", "/docs/api/sdks");
+    expect(screen.getByText(/web\/content\/docs\/api\/sdks\.mdx/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Set up tracing manually" })).toHaveAttribute("href", "/docs/getting-started/connect-an-agent");
     expect(screen.queryByText("Nothing to show yet.")).toBeNull();
     expect(screen.queryByTestId("histogram")).toBeNull();
   });
@@ -463,22 +472,14 @@ describe("TracesPage", () => {
     );
   });
 
-  it("says a quiet window has nothing to chart, rather than drawing empty charts", async () => {
-    fetchTraces.mockImplementation(async (_id, query) =>
-      (query as { days?: number }).days === 360 ? list({ total: 1 }) : list({ traces: [], total: 0 }),
-    );
-    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
-    expect(screen.getByText("Nothing to show yet.")).toBeInTheDocument();
-    expect(screen.queryByTestId("charts")).toBeNull();
-  });
-
-  it("shows the charts in the table's place, and draws the bars on the reader's clock", async () => {
+  // A link kept from when the list drew charts in its table's place opens the list.
+  it("draws the strip's bars on the reader's clock, above the table whatever an old link asks", async () => {
     mockOffset = "330";
     render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
+    expect(fetchTraces).toHaveBeenCalledWith(PROJECT, { limit: 50 });
     expect(fetchTraceHistogram).toHaveBeenCalledWith(PROJECT, {}, 330);
-    expect(screen.getByTestId("charts")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("tab", { name: /Chart/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("histogram")).toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
   });
 
   // A change explains the bars whatever else narrows them.
@@ -522,29 +523,24 @@ describe("TracesPage", () => {
     expect(screen.queryByText(/older ones are not/)).toBeNull();
   });
 
-  it("draws the charts without marks where the changes could not be read, as the list stands without its facets", async () => {
+  it("draws the strip without marks where the changes could not be read, as the list stands without its facets", async () => {
     mockHistogram = {
       kind: "ok",
       histogram: { days: 7, bucket_seconds: 10800, utc_offset: 0, bars: [{ at: "2026-10-11T00:00:00Z" }] },
     };
     mockChanges = { kind: "unavailable" };
-    const { unmount } = render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
     expect(fetchChanges).toHaveBeenCalledWith(PROJECT, undefined, [], []);
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(JSON.parse(screen.getByTestId("histogram").dataset.marks ?? "null")).toEqual([]);
-    unmount();
-    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
-    expect(JSON.parse(screen.getByTestId("charts").dataset.marks ?? "null")).toEqual([]);
   });
 
   it("says the window's older changes are not marked where it held more than were read", async () => {
     mockChanges = { kind: "ok", value: { days: 7, more: true, changes: [] } };
-    const note = /^Only the window.s newest changes are marked; its older ones are not\.$/;
-    const { unmount } = render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
-    expect(screen.getByText(note)).toBeInTheDocument();
-    unmount();
-    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({ display: "chart" }) }));
-    expect(screen.getByText(note)).toBeInTheDocument();
+    render(await TracesPage({ params: PARAMS, searchParams: Promise.resolve({}) }));
+    expect(
+      screen.getByText(/^Only the window.s newest changes are marked; its older ones are not\.$/),
+    ).toBeInTheDocument();
   });
 
   it("shows each trace's tags as chips in the Tags column, each narrowing the list to it", async () => {

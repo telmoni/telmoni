@@ -286,7 +286,7 @@ function eventsSummary(kinds: Connection["event_kinds"]): string {
 function ConnectionBadge({ status }: { status: Connection["status"] }) {
   if (status === "active") {
     return (
-      <Badge variant="outline">
+      <Badge variant="positive">
         Connected
       </Badge>
     );

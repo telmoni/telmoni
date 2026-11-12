@@ -53,10 +53,9 @@ pub const EXPORT_MAX: u32 = 10_000;
 pub struct TraceFilter {
     /// The traces' agents.
     pub agents: Vec<String>,
-    /// Their end users, as stored: hashed, unless the project keeps them
-    /// plain.
+    /// Their end users, as stored: hashed.
     pub user_ids: Vec<String>,
-    /// Their sessions, by id.
+    /// Their sessions, as stored: hashed.
     pub session_ids: Vec<String>,
     /// How they ended.
     pub statuses: Vec<SpanStatus>,
@@ -427,17 +426,81 @@ macro_rules! trace_sums {
     };
 }
 
-/// The project's spans in the window: what every read sums.
-macro_rules! window {
+/// The project's spans in the window of days.
+macro_rules! spans_in_window {
     () => {
         concat!(
             "FROM telemetry.spans ",
             "WHERE project_id IN {projects:Array(String)} ",
-            "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) ",
-            // A trace carrying a score of that name, within its bounds, on itself or a span.
-            "AND ({score:String} = '' OR trace_id IN (SELECT trace_id FROM telemetry.scores FINAL ",
+            "AND received_at >= now64(6) - toIntervalDay({days:UInt16}) "
+        )
+    };
+}
+
+/// The scores of the name asked for, within its bounds, whatever each was
+/// given to: what a score filter reads.
+macro_rules! scores_asked {
+    () => {
+        concat!(
+            "FROM telemetry.scores FINAL ",
             "WHERE project_id IN {projects:Array(String)} AND name = {score:String} ",
-            "AND value >= {score_min:Float64} AND value <= {score_max:Float64})) "
+            "AND value >= {score_min:Float64} AND value <= {score_max:Float64}"
+        )
+    };
+}
+
+/// Whether a trace carries a score of the name asked for, within its bounds,
+/// on itself or a span: every trace does where none is asked for.
+macro_rules! scored {
+    () => {
+        concat!(
+            "({score:String} = '' OR trace_id IN (SELECT trace_id ",
+            $crate::traces::scores_asked!(),
+            "))"
+        )
+    };
+}
+
+/// The window's spans of the traces the score asked for admits: what every
+/// read of traces sums.
+macro_rules! window {
+    () => {
+        concat!(
+            $crate::traces::spans_in_window!(),
+            "AND ",
+            $crate::traces::scored!(),
+            " "
+        )
+    };
+}
+
+/// Whether the trace's sums pass every filter at once.
+macro_rules! admits_all {
+    () => {
+        concat!(
+            $crate::traces::admits!(agent),
+            " AND ",
+            $crate::traces::admits!(user),
+            " AND ",
+            $crate::traces::admits!(session),
+            " AND ",
+            $crate::traces::admits!(status),
+            " AND ",
+            $crate::traces::admits!(fault),
+            " AND ",
+            $crate::traces::admits!(model),
+            " AND ",
+            $crate::traces::admits!(tool),
+            " AND ",
+            $crate::traces::admits!(environment),
+            " AND ",
+            $crate::traces::admits!(release),
+            " AND ",
+            $crate::traces::admits!(tag),
+            " AND ",
+            $crate::traces::admits!(prompt),
+            " AND ",
+            $crate::traces::admits!(prompt_version)
         )
     };
 }
@@ -454,38 +517,29 @@ macro_rules! traces {
             window!(),
             "GROUP BY trace_id ",
             "HAVING ",
-            admits!(agent),
-            " AND ",
-            admits!(user),
-            " AND ",
-            admits!(session),
-            " AND ",
-            admits!(status),
-            " AND ",
-            admits!(fault),
-            " AND ",
-            admits!(model),
-            " AND ",
-            admits!(tool),
-            " AND ",
-            admits!(environment),
-            " AND ",
-            admits!(release),
-            " AND ",
-            admits!(tag),
-            " AND ",
-            admits!(prompt),
-            " AND ",
-            admits!(prompt_version)
+            $crate::traces::admits_all!()
         )
     };
 }
 
+/// How many of the traces folded together carry each fault, a trace under
+/// every one of its own.
+macro_rules! traces_by_fault {
+    () => {
+        "sumMap(mapFromArrays(trace_faults, arrayMap(x -> toUInt64(1), trace_faults)))"
+    };
+}
+
 pub(crate) use admits;
+pub(crate) use admits_all;
+pub(crate) use scored;
+pub(crate) use scores_asked;
+pub(crate) use spans_in_window;
 pub(crate) use trace_carries;
 pub(crate) use trace_status;
 pub(crate) use trace_sums;
 pub(crate) use traces;
+pub(crate) use traces_by_fault;
 pub(crate) use window;
 
 /// The list's SQL with one `ORDER BY`, so every (column, direction) is a
@@ -585,7 +639,8 @@ const HISTOGRAM_SQL: &str = concat!(
     "* {bucket:Int64} - {shift:Int64} AS at_ms, ",
     "countIf(trace_status = 'ok') AS ok, countIf(trace_status = 'error') AS error, ",
     "countIf(trace_status = 'cancelled') AS cancelled, ",
-    "sumMap(mapFromArrays(trace_faults, arrayMap(x -> toUInt64(1), trace_faults))) AS faults, ",
+    traces_by_fault!(),
+    " AS faults, ",
     "sum(tokens) AS token_total, ",
     "sum(spent) AS spend_total, ",
     "quantile(0.5)(duration_ms) AS duration_p50_ms, ",
@@ -598,14 +653,14 @@ const HISTOGRAM_SQL: &str = concat!(
 );
 
 /// A list's facets: each value of each facet, and how many of the list's
-/// rows (`$count`, of those `$holds` keeps) carry it among the traces every
-/// OTHER filter admits — so a value beside a ticked one
+/// rows (`$count`, of those `$holds` keeps) carry it among the traces of
+/// `$from`'s spans every OTHER filter admits — so a value beside a ticked one
 /// still counts what ticking it would add. Every trace is summed once, its
 /// matches kept as flags, then spread to a row per value it carries; the
 /// ticked values first, so none past the first fifty is lost, then the most
 /// rows, one more than [`FACET_VALUES_MAX`] each to say there were more.
 macro_rules! facets_sql {
-    ($count:literal, $holds:literal) => {
+    ($count:literal, $from:expr, $holds:expr) => {
         concat!(
             "SELECT tupleElement(facet_value, 1) AS facet, tupleElement(facet_value, 2) AS value, ",
             $count,
@@ -637,7 +692,7 @@ macro_rules! facets_sql {
             "(1 - m_agent) + (1 - m_user) + (1 - m_session) + (1 - m_status) + (1 - m_model) ",
             "+ (1 - m_tool) + (1 - m_environment) + (1 - m_release) + (1 - m_tag) ",
             "+ (1 - m_prompt) + (1 - m_prompt_version) + (1 - m_fault) AS misses ",
-            $crate::traces::window!(),
+            $from,
             "GROUP BY trace_id) ",
             "ARRAY JOIN arrayConcat(",
             "[tuple('agent', CAST(trace_agent AS String), toUInt8(misses + m_agent = 1))], ",
@@ -675,8 +730,10 @@ macro_rules! facets_sql {
     };
 }
 
+pub(crate) use facets_sql;
+
 /// The trace list's facets, each counting the traces that carry a value.
-const FACETS_SQL: &str = facets_sql!("count()", "");
+const FACETS_SQL: &str = facets_sql!("count()", window!(), "");
 
 /// A trace's spans whole, in the order they started — of two that started
 /// together, the one that ended later, which holds the other — up to the one

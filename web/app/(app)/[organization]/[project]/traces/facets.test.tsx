@@ -1,21 +1,37 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/acme/web/traces",
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  unstable_rethrow: () => {},
 }));
-const { go } = vi.hoisted(() => ({ go: vi.fn() }));
+const { go, storedIdAction } = vi.hoisted(() => ({ go: vi.fn(), storedIdAction: vi.fn() }));
 vi.mock("@/components/traces/navigate", () => ({
   useListNavigation: () => ({ go, pending: false }),
 }));
+vi.mock("@/app/(app)/[organization]/[project]/traces/actions", () => ({ storedIdAction }));
 
 import { FacetsPanel } from "@/components/traces/facets";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FILTERS_WIDTH_DEFAULT, FILTERS_WIDTH_MAX, FILTERS_WIDTH_STEP } from "@/lib/panel-width";
+import type { Facets, ListQuery } from "@/lib/server/entities/traces";
 import { TRACE_PREFS_KEY } from "@/lib/trace-prefs";
+import { FILTERS, FILTER_LABEL, PRIMARY_FILTERS, type ListName } from "@/lib/traces";
+
+/** Every filter with one value among the window's traces. */
+const FACETS = {
+  days: 7,
+  ...Object.fromEntries(FILTERS.map((filter) => [filter, { values: [{ value: `${filter}-1`, count: 3 }], more: false }])),
+} as Facets;
+
+/** The sections the panel draws, by their headings, a ticked one's count beside its name. */
+const sections = () =>
+  FILTERS.filter(
+    (filter) => screen.queryByRole("button", { name: new RegExp(`^${FILTER_LABEL[filter]}(\\s*\\d+)?$`) }) !== null,
+  );
 
 /** The filters dragged 80px wider than their own width. */
 const DRAGGED = FILTERS_WIDTH_DEFAULT + 80;
@@ -34,10 +50,17 @@ class FakePointerEvent extends MouseEvent {
   }
 }
 
-function panel() {
+function panel(query: ListQuery<string> = {}, facets: Facets | null = null, list: ListName = "traces") {
   return render(
     <TooltipProvider>
-      <FacetsPanel list="traces" organization="acme" slug="web" query={{}} facets={null} />
+      <FacetsPanel
+        list={list}
+        organization="acme"
+        slug="web"
+        projectId="project_1"
+        query={query}
+        facets={facets}
+      />
     </TooltipProvider>,
   );
 }
@@ -134,7 +157,7 @@ describe("the filters' edge", () => {
     const { TooltipProvider: Provider } = await import("@/components/ui/tooltip");
     render(
       <Provider>
-        <Reloaded list="traces" organization="acme" slug="web" query={{}} facets={null} />
+        <Reloaded list="traces" organization="acme" slug="web" projectId="project_1" query={{}} facets={null} />
       </Provider>,
     );
     expect(screen.getByRole("complementary", { name: "Filters" }).style.getPropertyValue("--filters-width")).toBe("");
@@ -157,6 +180,7 @@ describe("the score filter", () => {
 
   it("narrows the list to a score's name within the range given", () => {
     panel();
+    fireEvent.click(screen.getByRole("button", { name: "More filters" }));
     fireEvent.click(screen.getByRole("button", { name: "Score" }));
     const apply = screen.getByRole("button", { name: "Apply" });
     expect(apply).toBeDisabled();
@@ -173,5 +197,123 @@ describe("the score filter", () => {
       "0.8",
       "1",
     ]);
+  });
+
+  it("says whose score counts on each list: a session's own, or one of its traces'", () => {
+    const traces = panel({ score: "csat" });
+    expect(screen.getByText(/^Rows with a score of this name/)).toBeInTheDocument();
+    traces.unmount();
+    panel({ score: "csat" }, null, "sessions");
+    expect(
+      screen.getByText(/^Sessions with a score of this name, their own or one of their traces'/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("the filters the panel opens with", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(TRACE_PREFS_KEY);
+  });
+
+  it("shows the few most narrowing starts from, and the rest once More is opened, as the browser keeps it", () => {
+    const first = panel({}, FACETS);
+    expect(sections()).toEqual(PRIMARY_FILTERS);
+    expect(screen.queryByRole("button", { name: "Score" })).toBeNull();
+    const more = screen.getByRole("button", { name: "More filters" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    expect(sections()).toEqual(FILTERS);
+    expect(screen.getByRole("button", { name: "Score" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fewer filters" })).toHaveAttribute("aria-expanded", "true");
+    first.unmount();
+
+    // The page opened again: the panel stands as it was left.
+    panel({}, FACETS);
+    expect(sections()).toEqual(FILTERS);
+    fireEvent.click(screen.getByRole("button", { name: "Fewer filters" }));
+    expect(sections()).toEqual(PRIMARY_FILTERS);
+  });
+
+  it("keeps a filter in force in view, so it is cleared where it was set", () => {
+    panel({ tool: ["search_docs"], score: "helpful" }, FACETS);
+    expect(sections()).toEqual([...PRIMARY_FILTERS.slice(0, 4), "tool", "environment"]);
+    expect(screen.getByRole("button", { name: /^Score\s*1$/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Clear the tool filter" })).toBeInTheDocument();
+  });
+
+  it("searches every filter, the ones behind More among them", () => {
+    panel({}, FACETS);
+    fireEvent.change(screen.getByLabelText("Search filters"), { target: { value: "prompt" } });
+    expect(sections()).toEqual(["prompt", "prompt_version"]);
+    expect(screen.queryByRole("button", { name: "More filters" })).toBeNull();
+  });
+});
+
+describe("an id typed as the application sends it", () => {
+  const STORED = "9f86d081884c7d659a2feaa0c55ad015";
+  const SENT = "ada@example.com";
+
+  beforeEach(() => {
+    window.localStorage.setItem(TRACE_PREFS_KEY, JSON.stringify({ moreFilters: true }));
+    go.mockClear();
+    storedIdAction.mockReset();
+  });
+
+  /** The user filter's box, opened on the id as sent. */
+  function typed(query: ListQuery<string> = {}) {
+    panel(query, FACETS);
+    // Open already where a user is ticked, its count beside its name.
+    if (!screen.queryByRole("radio", { name: "Your id" })) {
+      fireEvent.click(screen.getByRole("button", { name: /^User(\s*\d+)?$/ }));
+    }
+    fireEvent.click(screen.getByRole("radio", { name: "Your id" }));
+    const box = screen.getByLabelText("The user's id, as your app sends it");
+    fireEvent.change(box, { target: { value: SENT } });
+    return box;
+  }
+
+  it("is looked up as the project stores it, and the list narrowed to that, never to the id", async () => {
+    storedIdAction.mockResolvedValue({ ok: true, storedId: STORED });
+    const box = typed();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    });
+    expect(storedIdAction).toHaveBeenCalledTimes(1);
+    expect(storedIdAction).toHaveBeenCalledWith("project_1", "user", SENT);
+    expect(go).toHaveBeenCalledTimes(1);
+    const href = String(go.mock.calls[0]?.[0]);
+    expect(new URL(href, "https://x").searchParams.getAll("user")).toEqual([STORED]);
+    expect(decodeURIComponent(href)).not.toContain(SENT);
+    expect(box).toHaveValue("");
+  });
+
+  it("stays ticked where the stored id already narrows the list, and says a refusal without narrowing", async () => {
+    storedIdAction.mockResolvedValueOnce({ ok: true, storedId: STORED });
+    typed({ user: [STORED] });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    });
+    expect(go).not.toHaveBeenCalled();
+
+    storedIdAction.mockResolvedValueOnce({ ok: false, error: "Telemetry is unreachable. Try again." });
+    fireEvent.change(screen.getByLabelText("The user's id, as your app sends it"), { target: { value: SENT } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    });
+    expect(storedIdAction).toHaveBeenCalledTimes(2);
+    expect(go).not.toHaveBeenCalled();
+  });
+
+  it("types a tag as key:value, with no lookup", () => {
+    panel({}, FACETS);
+    fireEvent.click(screen.getByRole("button", { name: "Tag" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Text" }));
+    const add = screen.getByRole("button", { name: "Add" });
+    fireEvent.change(screen.getByLabelText("A tag, as key:value"), { target: { value: "repo" } });
+    expect(add).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("A tag, as key:value"), { target: { value: " repo:telmoni " } });
+    fireEvent.click(add);
+    expect(storedIdAction).not.toHaveBeenCalled();
+    expect(new URL(String(go.mock.calls[0]?.[0]), "https://x").searchParams.getAll("tag")).toEqual(["repo:telmoni"]);
   });
 });
